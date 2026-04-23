@@ -125,6 +125,95 @@ p, span, label {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
 }
 
+/* Dark Mode Adaptations */
+@media (prefers-color-scheme: dark) {
+    /* Sidebar background in dark mode */
+    .css-1d391kg, .css-1lcbmhc, [data-testid="stSidebar"] {
+        background: linear-gradient(to bottom, #2D2D2D, #1F1F1F) !important;
+        border-right: 1px solid #404040 !important;
+    }
+    
+    /* Sidebar text labels */
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span {
+        color: #E8E8E8 !important;
+    }
+    
+    /* File uploader text */
+    [data-testid="stSidebar"] .stFileUploader label {
+        color: #E8E8E8 !important;
+    }
+    
+    /* Upload area in dark mode */
+    [data-testid="stSidebar"] .stFileUploader {
+        background: linear-gradient(to bottom, #3A3A3A, #2D2D2D) !important;
+        border-color: #555555 !important;
+    }
+    
+    /* Upload area text */
+    [data-testid="stSidebar"] .stFileUploader p,
+    [data-testid="stSidebar"] .stFileUploader span,
+    [data-testid="stSidebar"] .stFileUploader small {
+        color: #CCCCCC !important;
+    }
+    
+    /* Small text in upload area */
+    [data-testid="stSidebar"] .stFileUploader [data-testid="stText"] {
+        color: #AAAAAA !important;
+    }
+    
+    /* Main content area in dark mode */
+    body, .stApp, [data-testid="stAppViewContainer"] {
+        background: linear-gradient(to bottom, #1F1F1F, #2D2D2D) !important;
+    }
+    
+    /* Main content text */
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+    .stApp p, .stApp span, .stApp label,
+    .stApp div:not(.sidebar-header):not(.sidebar-header h3) {
+        color: #E8E8E8 !important;
+    }
+    
+    /* Header title in dark mode */
+    .stApp h1 {
+        color: #FFFFFF !important;
+    }
+    
+    /* Subtitle text */
+    .stApp .subtitle, .stApp p {
+        color: #CCCCCC !important;
+    }
+    
+    /* Section dividers */
+    .section-divider {
+        background: linear-gradient(90deg, transparent, #555555, transparent) !important;
+    }
+    
+    /* Info boxes */
+    .stApp .stInfo {
+        background: linear-gradient(135deg, #2D4A3E, #1F3A2F) !important;
+        border-left-color: var(--deep-olive) !important;
+    }
+    
+    /* Dataframe/table in dark mode */
+    .stApp .stDataFrame, .stApp [data-testid="stDataFrame"] {
+        background: #2D2D2D !important;
+    }
+    
+    /* Table text */
+    .stApp .stDataFrame td, .stApp .stDataFrame th,
+    .stApp [data-testid="stDataFrame"] td, .stApp [data-testid="stDataFrame"] th {
+        color: #E8E8E8 !important;
+    }
+    
+    /* Invert logo to white in dark mode */
+    .stApp img {
+        filter: brightness(0) invert(1) !important;
+    }
+}
+
 /* Enhanced File Upload Area */
 .stFileUploader {
     background: linear-gradient(to bottom, var(--white), var(--off-white)) !important;
@@ -483,25 +572,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-<div class="content-centered-header">
-    <div class="logo-wrapper">
-    </div>
-    <div class="title-wrapper">
-        <h1>Stock That Matters</h1>
-        <p class="subtitle">Internal inventory and reorder planning</p>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# Simple header with logo on top right
+col_left, col_right = st.columns([5, 1])
 
-# Center the logo within the same container
-st.markdown("""
-<div style="text-align: center; margin-top: -3.5rem; margin-bottom: 0;">
-""", unsafe_allow_html=True)
-st.image("logo/StemWineCoLogo.png", width=140)
-st.markdown("""
-</div>
-""", unsafe_allow_html=True)
+with col_left:
+    st.markdown("""
+    <div style="padding-top: 2rem;">
+        <h1 style="margin: 0 0 0.3rem 0; color: var(--soft-black); font-family: 'Quicksand', sans-serif; font-size: 2.2rem; font-weight: 600; letter-spacing: -0.5px;">Stock That Matters</h1>
+        <p style="margin: 0; color: var(--charcoal); font-family: 'Quicksand', sans-serif; font-weight: 400; font-size: 1rem; letter-spacing: 0.1px; opacity: 0.9;">Internal inventory and reorder planning</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_right:
+    st.markdown("<div style='padding-top: 1.5rem;' class='logo-container'></div>", unsafe_allow_html=True)
+    st.image("logo/StemWineCoLogo.png", width=100)
 
 st.markdown("""
 <div class="section-divider"></div>
@@ -514,12 +598,18 @@ st.sidebar.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# File upload widgets
-rb6_file = st.sidebar.file_uploader("RB6 Inventory Report", type=['csv', 'xlsx'])
-sales_file = st.sidebar.file_uploader("Sales History Export", type=['csv', 'xlsx'])
-needs_file = st.sidebar.file_uploader("Wine Needs File", type=['csv', 'xlsx'])
+# MVP Phase 1 - RB6 + RADs only
+st.sidebar.markdown("""
+<div style="padding: 0.5rem; background: linear-gradient(135deg, var(--deep-olive), var(--muted-green)); border-radius: 8px; margin-bottom: 1rem;">
+    <p style="margin: 0; color: white; font-size: 0.85rem; text-align: center;">📋 Phase 1: RB6 + RADs Only</p>
+</div>
+""", unsafe_allow_html=True)
 
-if rb6_file and sales_file and needs_file:
+# File upload widgets - Phase 1: Only RB6 and RADs required
+rb6_file = st.sidebar.file_uploader("Velocity Report RB6", type=['csv', 'xlsx'])
+sales_file = st.sidebar.file_uploader("Sales History Vinosmith RADs File", type=['csv', 'xlsx'])
+
+if rb6_file and sales_file:
     try:
         # Read files
         if rb6_file.name.endswith('.csv'):
@@ -531,16 +621,94 @@ if rb6_file and sales_file and needs_file:
             sales_data = pd.read_csv(sales_file)
         else:
             sales_data = pd.read_excel(sales_file)
-            
-        if needs_file.name.endswith('.csv'):
-            needs_data = pd.read_csv(needs_file)
-        else:
-            needs_data = pd.read_excel(needs_file)
         
         st.success("Files loaded successfully!")
         
-        # Calculate recommendations
-        recommendations = calculate_reorder_recommendations(rb6_data, sales_data, needs_data)
+        # Import re at top level for normalization
+        import re
+        
+        # Helper function to normalize wine names into planning_sku
+        def normalize_wine_name(name: str) -> str:
+            """
+            Normalize wine name by removing vintage years and pack sizes.
+            Example: "Frog's Leap Cabernet Sauvignon 2022 12/750ml"
+            -> "Frog's Leap Cabernet Sauvignon"
+            
+            Rules:
+            - remove 4-digit vintage years (2021-2026)
+            - remove pack sizes (12/750ml, 6/750ml, 6/1.5L, 24/187ml)
+            - keep NV
+            - trim whitespace
+            """
+            if pd.isna(name):
+                return name
+            
+            name = str(name)
+            
+            # Remove pack sizes: patterns like 12/750ml, 6/1.5L, 24/187ml, etc.
+            name = re.sub(r'\d+/\d+(?:\.\d+)?[Ll][Mm]?|\d+/\d+\.\d+L|\d+[Ll][Mm]', '', name)
+            
+            # Remove 4-digit vintage years (2021-2026)
+            name = re.sub(r'\b20[2-9][0-9]\b', '', name)
+            
+            # Clean up extra whitespace
+            name = ' '.join(name.split())
+            
+            return name.strip()
+        
+        # --- RB6 PREPROCESSING ---
+        # Create planning_sku from "Name" column
+        if "Name" in rb6_data.columns:
+            rb6_data['planning_sku'] = rb6_data["Name"].apply(normalize_wine_name)
+        else:
+            st.error("RB6 file missing 'Name' column")
+            raise ValueError("RB6 file must contain 'Name' column")
+        
+        # Standardize product_code from "Code" column
+        if "Code" in rb6_data.columns:
+            rb6_data['product_code'] = rb6_data["Code"].astype(str).str.strip()
+        
+        # Map other required columns
+        column_mapping_rb6 = {
+            'true_available': 'Available Inventory',
+            'on_order': 'On Order',
+            'responsible_brand_manager': 'Wine: External ID (1)',
+            'unit_cost': 'FOB',
+            'is_core': 'Is Core',
+            'is_btg': 'Is BTG',
+            'unconfirmed_qty': 'Unconfirmed Line Item Qty'
+        }
+        
+        for new_col, original_col in column_mapping_rb6.items():
+            if original_col in rb6_data.columns:
+                rb6_data[new_col] = rb6_data[original_col]
+        
+        # --- SALES PREPROCESSING ---
+        # Create planning_sku from "Wine Name" column (NOT "Account Name")
+        if "Wine Name" in sales_data.columns:
+            sales_data['planning_sku'] = sales_data["Wine Name"].apply(normalize_wine_name)
+        else:
+            st.error("Sales file missing 'Wine Name' column")
+            raise ValueError("Sales file must contain 'Wine Name' column")
+        
+        # Standardize product_code from "Product Code" column
+        if "Product Code" in sales_data.columns:
+            sales_data['product_code'] = sales_data["Product Code"].astype(str).str.strip()
+        
+        # Map other required columns
+        column_mapping_sales = {
+            'quantity_sold': 'Quantity',
+            'date': 'Date (mm/dd/yyyy)',
+            'account_name': 'Account Name',
+            'pack_size': 'Pack Size'
+        }
+        
+        for new_col, original_col in column_mapping_sales.items():
+            if original_col in sales_data.columns:
+                sales_data[new_col] = sales_data[original_col]
+        
+        # Calculate recommendations - Phase 1: RB6 + RADs only
+        recommendations = calculate_reorder_recommendations(rb6_data, sales_data)
         
         # Display results with premium styling
         st.markdown("""
@@ -550,22 +718,33 @@ if rb6_file and sales_file and needs_file:
         </div>
         """, unsafe_allow_html=True)
         
-        # Display table
+        # Display table - Phase 1 columns
         display_columns = [
             'planning_sku',
-            'recommended_order_qty', 
-            'order_cost',
-            'responsible_brand_manager',
+            'product_code',
+            'brand_manager',
+            'is_btg',
+            'is_core',
             'true_available',
             'on_order',
+            'last_30_day_sales',
+            'daily_run_rate',
+            'weeks_on_hand',
+            'weeks_on_hand_with_on_order',
             'target_days',
+            'recommended_qty_raw',
+            'recommended_qty_rounded',
+            'fob',
+            'order_cost',
             'expected_days_on_hand_after_order'
         ]
         
-        st.dataframe(recommendations[display_columns], use_container_width=True)
+        # Only show columns that exist in the result
+        available_display_cols = [col for col in display_columns if col in recommendations.columns]
+        st.dataframe(recommendations[available_display_cols], use_container_width=True)
         
         # CSV export with premium styling
-        csv = recommendations[display_columns].to_csv(index=False)
+        csv = recommendations[available_display_cols].to_csv(index=False)
         st.markdown("""
         <div class="premium-card" style="text-align: center; margin-top: 2rem;">
             <p style="margin: 0 0 1rem 0; color: var(--charcoal); font-weight: 500; opacity: 0.8;">Export your reorder recommendations for further analysis</p>
@@ -582,9 +761,8 @@ if rb6_file and sales_file and needs_file:
         
     except Exception as e:
         st.error(f"Error processing files: {str(e)}")
-        st.write("Please check your file formats and column names.")
 else:
-    st.info("Please upload all three files to generate reorder recommendations.")
+    st.info("📋 **Phase 1**: Please upload both RB6 and RADs files to generate reorder recommendations.")
     
     # Premium file format information
     with st.expander("Expected File Formats"):
@@ -610,14 +788,10 @@ else:
         </ul>
         </div>
         
-        <div style="background: linear-gradient(to bottom, var(--white), var(--off-white)); padding: 1.5rem; border-radius: 12px; border: 1px solid var(--light-sand); box-shadow: var(--card-shadow);">
-        <strong style="color: var(--deep-olive); font-size: 1.05rem; display: block; margin-bottom: 0.75rem;">Wine Needs File</strong>
-        <ul style="margin: 0; padding-left: 1.5rem; color: var(--charcoal); line-height: 1.6;">
-            <li style="margin-bottom: 0.5rem;">planning_sku</li>
-            <li style="margin-bottom: 0.5rem;">target_days</li>
-            <li style="margin-bottom: 0.5rem;">responsible_brand_manager</li>
-            <li>unit_cost</li>
-        </ul>
+        </div>
+        
+        <div style="margin-top: 1rem; padding: 1rem; background: linear-gradient(to right, var(--light-sand), var(--sand)); border-radius: 8px; text-align: center;">
+            <p style="margin: 0; color: var(--charcoal); font-size: 0.9rem;">💡 <em>Wine Needs file coming in Phase 2</em></p>
         </div>
         </div>
         """, unsafe_allow_html=True)
