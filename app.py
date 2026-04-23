@@ -531,6 +531,43 @@ div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column"] > div 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--taupe) !important;
 }
+
+/* Analytics Table Card Container */
+.analytics-table-card {
+    background: linear-gradient(to bottom, var(--white), var(--off-white)) !important;
+    border: 1px solid var(--light-sand) !important;
+    border-radius: 16px !important;
+    padding: 1.5rem !important;
+    box-shadow: var(--card-shadow) !important;
+    margin: 1rem 0 2rem 0 !important;
+    overflow: hidden !important;
+}
+
+/* Ag-Grid Custom Styling */
+.ag-theme-streamlit {
+    --ag-background-color: var(--white) !important;
+    --ag-header-background-color: linear-gradient(to bottom, var(--deep-olive), var(--muted-green)) !important;
+    --ag-header-foreground-color: white !important;
+    --ag-foreground-color: var(--soft-black) !important;
+    --ag-row-hover-color: var(--warm-white) !important;
+    --ag-border-color: var(--light-sand) !important;
+    --ag-odd-row-background-color: var(--warm-white) !important;
+    --ag-even-row-background-color: var(--white) !important;
+    --ag-font-family: 'Quicksand', sans-serif !important;
+    --ag-font-size: 13px !important;
+    --ag-cell-horizontal-padding: 12px !important;
+    --ag-header-cell-horizontal-padding: 12px !important;
+    --ag-header-height: 48px !important;
+    --ag-row-height: 40px !important;
+}
+
+/* Dark mode table support */
+@media (prefers-color-scheme: dark) {
+    .analytics-table-card {
+        background: linear-gradient(to bottom, #2D2D2D, #1F1F1F) !important;
+        border-color: #3A3A3A !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -624,88 +661,81 @@ if rb6_file and sales_file:
         
         st.success("Files loaded successfully!")
         
-        # Import re at top level for normalization
-        import re
+        # Note: Normalization and preprocessing now handled in wine_calculator.py
         
-        # Helper function to normalize wine names into planning_sku
-        def normalize_wine_name(name: str) -> str:
-            """
-            Normalize wine name by removing vintage years and pack sizes.
-            Example: "Frog's Leap Cabernet Sauvignon 2022 12/750ml"
-            -> "Frog's Leap Cabernet Sauvignon"
+        # --- DEBUG OUTPUT (HIDDEN BY DEFAULT) ---
+        with st.expander("🔧 Debug: Data Validation (click to expand)", expanded=False):
+            st.markdown("""
+            <div style="margin: 1rem 0; padding: 1rem; background: linear-gradient(to right, #FFFCF8, #F5F0E8); border-radius: 8px; border-left: 4px solid #8B9A7B;">
+                <h4 style="margin: 0; color: #2C2C2C; font-size: 0.9rem;">Normalization Preview</h4>
+            </div>
+            """, unsafe_allow_html=True)
             
-            Rules:
-            - remove 4-digit vintage years (2021-2026)
-            - remove pack sizes (12/750ml, 6/750ml, 6/1.5L, 24/187ml)
-            - keep NV
-            - trim whitespace
-            """
-            if pd.isna(name):
-                return name
+            # Show 5 raw wine names from RB6 and their planning_sku results
+            st.write("**RB6 Name → planning_sku mapping (first 5):**")
+            if "Name" in rb6_data.columns:
+                from wine_calculator import normalize_planning_sku
+                rb6_data['planning_sku_preview'] = rb6_data["Name"].apply(normalize_planning_sku)
+                rb6_sample = rb6_data[["Name", 'planning_sku_preview']].head(5)
+                for idx, row in rb6_sample.iterrows():
+                    st.write(f"• \"{row['Name']}\" → \"{row['planning_sku_preview']}\"")
             
-            name = str(name)
+            # Show 5 raw wine names from RADs and their planning_sku results
+            st.write("**RADs Wine Name → planning_sku mapping (first 5):**")
+            if "Wine Name" in sales_data.columns:
+                sales_data['planning_sku_preview'] = sales_data["Wine Name"].apply(normalize_planning_sku)
+                rads_sample = sales_data[["Wine Name", 'planning_sku_preview']].head(5)
+                for idx, row in rads_sample.iterrows():
+                    st.write(f"• \"{row['Wine Name']}\" → \"{row['planning_sku_preview']}\"")
             
-            # Remove pack sizes: patterns like 12/750ml, 6/1.5L, 24/187ml, etc.
-            name = re.sub(r'\d+/\d+(?:\.\d+)?[Ll][Mm]?|\d+/\d+\.\d+L|\d+[Ll][Mm]', '', name)
+            # Total Quantity sum from RADs
+            if 'Quantity' in sales_data.columns:
+                total_quantity = sales_data['Quantity'].sum()
+                st.write(f"**Total Quantity from RADs:** {total_quantity:,.0f}")
             
-            # Remove 4-digit vintage years (2021-2026)
-            name = re.sub(r'\b20[2-9][0-9]\b', '', name)
+            # First 10 unique Pack Size values from RADs
+            if 'Pack Size' in sales_data.columns:
+                unique_pack_sizes = sales_data['Pack Size'].dropna().unique()[:10]
+                st.write(f"**First 10 unique Pack Sizes from RADs:** {list(unique_pack_sizes)}")
+        
+        # --- MERGE DIAGNOSTICS (HIDDEN BY DEFAULT) ---
+        with st.expander("🔧 Debug: Merge Quality (click to expand)", expanded=False):
+            st.markdown("""
+            <div style="margin: 1rem 0; padding: 1rem; background: linear-gradient(to right, #FFFCF8, #F5F0E8); border-radius: 8px; border-left: 4px solid #4A4A4A;">
+                <h4 style="margin: 0; color: #2C2C2C; font-size: 0.9rem;">RB6 + RADs Merge Quality (by planning_sku)</h4>
+            </div>
+            """, unsafe_allow_html=True)
             
-            # Clean up extra whitespace
-            name = ' '.join(name.split())
+            # Basic counts
+            total_rb6_rows = len(rb6_data)
+            total_rads_rows = len(sales_data)
             
-            return name.strip()
-        
-        # --- RB6 PREPROCESSING ---
-        # Create planning_sku from "Name" column
-        if "Name" in rb6_data.columns:
-            rb6_data['planning_sku'] = rb6_data["Name"].apply(normalize_wine_name)
-        else:
-            st.error("RB6 file missing 'Name' column")
-            raise ValueError("RB6 file must contain 'Name' column")
-        
-        # Standardize product_code from "Code" column
-        if "Code" in rb6_data.columns:
-            rb6_data['product_code'] = rb6_data["Code"].astype(str).str.strip()
-        
-        # Map other required columns
-        column_mapping_rb6 = {
-            'true_available': 'Available Inventory',
-            'on_order': 'On Order',
-            'responsible_brand_manager': 'Wine: External ID (1)',
-            'unit_cost': 'FOB',
-            'is_core': 'Is Core',
-            'is_btg': 'Is BTG',
-            'unconfirmed_qty': 'Unconfirmed Line Item Qty'
-        }
-        
-        for new_col, original_col in column_mapping_rb6.items():
-            if original_col in rb6_data.columns:
-                rb6_data[new_col] = rb6_data[original_col]
-        
-        # --- SALES PREPROCESSING ---
-        # Create planning_sku from "Wine Name" column (NOT "Account Name")
-        if "Wine Name" in sales_data.columns:
-            sales_data['planning_sku'] = sales_data["Wine Name"].apply(normalize_wine_name)
-        else:
-            st.error("Sales file missing 'Wine Name' column")
-            raise ValueError("Sales file must contain 'Wine Name' column")
-        
-        # Standardize product_code from "Product Code" column
-        if "Product Code" in sales_data.columns:
-            sales_data['product_code'] = sales_data["Product Code"].astype(str).str.strip()
-        
-        # Map other required columns
-        column_mapping_sales = {
-            'quantity_sold': 'Quantity',
-            'date': 'Date (mm/dd/yyyy)',
-            'account_name': 'Account Name',
-            'pack_size': 'Pack Size'
-        }
-        
-        for new_col, original_col in column_mapping_sales.items():
-            if original_col in sales_data.columns:
-                sales_data[new_col] = sales_data[original_col]
+            # Use normalized planning_sku for matching
+            from wine_calculator import normalize_planning_sku
+            if "Name" in rb6_data.columns:
+                rb6_data['planning_sku_norm'] = rb6_data["Name"].apply(normalize_planning_sku)
+            if "Wine Name" in sales_data.columns:
+                sales_data['planning_sku_norm'] = sales_data["Wine Name"].apply(normalize_planning_sku)
+            
+            unique_rb6_planning = rb6_data['planning_sku_norm'].nunique() if 'planning_sku_norm' in rb6_data.columns else 0
+            unique_rads_planning = sales_data['planning_sku_norm'].nunique() if 'planning_sku_norm' in sales_data.columns else 0
+            
+            st.write(f"**Total RB6 rows:** {total_rb6_rows}")
+            st.write(f"**Total RADs rows:** {total_rads_rows}")
+            st.write(f"**Unique RB6 planning_sku values:** {unique_rb6_planning}")
+            st.write(f"**Unique RADs planning_sku values:** {unique_rads_planning}")
+            
+            # Calculate matches
+            if 'planning_sku_norm' in rb6_data.columns and 'planning_sku_norm' in sales_data.columns:
+                rb6_planning_skus = set(rb6_data['planning_sku_norm'].dropna().unique())
+                rads_planning_skus = set(sales_data['planning_sku_norm'].dropna().unique())
+                
+                matched_by_planning = rb6_planning_skus & rads_planning_skus
+                matched_count = len(matched_by_planning)
+                unmatched_count = len(rb6_planning_skus - rads_planning_skus)
+                
+                st.write(f"**Matched by planning_sku:** {matched_count}")
+                st.write(f"**Unmatched:** {unmatched_count}")
         
         # Calculate recommendations - Phase 1: RB6 + RADs only
         recommendations = calculate_reorder_recommendations(rb6_data, sales_data)
@@ -718,9 +748,10 @@ if rb6_file and sales_file:
         </div>
         """, unsafe_allow_html=True)
         
-        # Display table - Phase 1 columns
+        # Display table - Full operational columns
         display_columns = [
             'planning_sku',
+            'Name',
             'product_code',
             'brand_manager',
             'is_btg',
@@ -728,23 +759,110 @@ if rb6_file and sales_file:
             'true_available',
             'on_order',
             'last_30_day_sales',
-            'daily_run_rate',
+            'next_60_days_ly_sales',
+            'weekly_velocity',
             'weeks_on_hand',
             'weeks_on_hand_with_on_order',
-            'target_days',
+            'fob',
             'recommended_qty_raw',
             'recommended_qty_rounded',
-            'fob',
             'order_cost',
-            'expected_days_on_hand_after_order'
+            'reorder_status'
         ]
         
         # Only show columns that exist in the result
         available_display_cols = [col for col in display_columns if col in recommendations.columns]
-        st.dataframe(recommendations[available_display_cols], use_container_width=True)
         
-        # CSV export with premium styling
-        csv = recommendations[available_display_cols].to_csv(index=False)
+        # Create raw_df: clean numeric data for backend logic and future agent use
+        # This preserves numeric types for calculations, queries, and AI agent interactions
+        raw_df = recommendations[available_display_cols].copy()
+        
+        # Create display_df: formatted for UI rendering only
+        # String formatting is applied here without affecting the underlying raw data
+        display_df = raw_df.copy()
+        
+        # Format bottle-based columns as whole numbers (0 decimals)
+        bottle_columns = [
+            'true_available', 'on_order', 'last_30_day_sales', 'next_60_days_ly_sales',
+            'recommended_qty_raw', 'recommended_qty_rounded'
+        ]
+        for col in bottle_columns:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].fillna(0).astype(int)
+        
+        # Format velocity columns to 2 decimals
+        velocity_columns = ['weekly_velocity', 'weeks_on_hand', 'weeks_on_hand_with_on_order', 'fob']
+        for col in velocity_columns:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
+        
+        # Format money columns with $ and commas, 2 decimals
+        if 'order_cost' in display_df.columns:
+            display_df['order_cost'] = display_df['order_cost'].apply(
+                lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00"
+            )
+        
+        # Display in styled card container
+        st.markdown("""
+        <div class="analytics-table-card">
+        """, unsafe_allow_html=True)
+        
+        # Render formatted display dataframe
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+        st.markdown("""
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # --- DEBUG CHECK: Final output rows ---
+        with st.expander("🔧 Debug: Final Output Check (click to expand)", expanded=False):
+            st.markdown("""
+            <div style="margin: 1rem 0; padding: 1rem; background: linear-gradient(to right, #FFFCF8, #F5F0E8); border-radius: 8px; border-left: 4px solid #6B8E6B;">
+                <h4 style="margin: 0; color: #2C2C2C; font-size: 0.9rem;">Final Output: Top 10 by Sales</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show 10 rows with key identity fields
+            st.write("**Top 10 rows (planning_sku, Name, product_code, last_30_day_sales):**")
+            debug_cols = ['planning_sku', 'Name', 'product_code', 'last_30_day_sales']
+            available_debug_cols = [c for c in debug_cols if c in raw_df.columns]
+            if available_debug_cols:
+                debug_df = raw_df[available_debug_cols].head(10)
+                st.dataframe(debug_df, hide_index=True)
+            else:
+                st.write("• Required columns not found in results")
+        
+        # --- SEASONAL REFERENCE DEBUG (HIDDEN BY DEFAULT) ---
+        with st.expander("🔧 Debug: Seasonal Reference (click to expand)", expanded=False):
+            st.markdown("""
+            <div style="margin: 1rem 0; padding: 1rem; background: linear-gradient(to right, #FFFCF8, #F5F0E8); border-radius: 8px; border-left: 4px solid #6B8E6B;">
+                <h4 style="margin: 0; color: #2C2C2C; font-size: 0.9rem;">Seasonal Reference (Next 60 Days LY)</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show date window used
+            from datetime import datetime, timedelta
+            today = datetime.now()
+            future_start = today
+            future_end = today + timedelta(days=60)
+            historical_start = future_start - timedelta(days=365)
+            historical_end = future_end - timedelta(days=365)
+            
+            st.write(f"**Future reference window:** {future_start.strftime('%Y-%m-%d')} to {future_end.strftime('%Y-%m-%d')}")
+            st.write(f"**Historical comparison window:** {historical_start.strftime('%Y-%m-%d')} to {historical_end.strftime('%Y-%m-%d')}")
+            
+            # Show 10 sample rows
+            st.write("**Sample rows:**")
+            if 'next_60_days_ly_sales' in raw_df.columns and 'weekly_velocity' in raw_df.columns:
+                sample_cols = ['planning_sku', 'weekly_velocity', 'next_60_days_ly_sales']
+                available_sample_cols = [c for c in sample_cols if c in raw_df.columns]
+                sample_df = raw_df[available_sample_cols].head(10)
+                st.dataframe(sample_df, hide_index=True)
+            else:
+                st.write("• Seasonal columns not found in results")
+        
+        # CSV export with premium styling - use raw_df for clean numeric export
+        csv = raw_df.to_csv(index=False)
         st.markdown("""
         <div class="premium-card" style="text-align: center; margin-top: 2rem;">
             <p style="margin: 0 0 1rem 0; color: var(--charcoal); font-weight: 500; opacity: 0.8;">Export your reorder recommendations for further analysis</p>
