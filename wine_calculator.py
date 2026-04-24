@@ -210,11 +210,37 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         pack_size = recommendations['Pack Size'] if 'Pack Size' in recommendations.columns else 12
     recommendations['pack_size'] = pack_size.fillna(12) if isinstance(pack_size, pd.Series) else 12
     
-    # Get FOB
-    fob = recommendations.get('FOB', 0)
-    if not isinstance(fob, pd.Series):
-        fob = recommendations['FOB'] if 'FOB' in recommendations.columns else 0
-    recommendations['fob'] = fob
+    # DEFENSIVE: Find FOB/cost column (may have various names)
+    possible_fob_cols = [
+        'fob',
+        'FOB',
+        'fob_x',
+        'fob_y',
+        'unit_cost',
+        'bottle_cost',
+        'cost',
+        'price',
+        'unit_price'
+    ]
+    
+    fob_col = None
+    for col in possible_fob_cols:
+        if col in recommendations.columns:
+            fob_col = col
+            print(f"DEBUG: Found FOB in column: {col}")
+            break
+    
+    if fob_col:
+        recommendations['fob'] = pd.to_numeric(recommendations[fob_col], errors='coerce').fillna(0)
+    else:
+        print(f"DEBUG: WARNING - No FOB/cost column found. Available columns: {[c for c in recommendations.columns if 'cost' in c.lower() or 'price' in c.lower() or 'fob' in c.lower()]}")
+        recommendations['fob'] = 0
+    
+    # DEBUG: Show FOB sample values
+    print("\nDEBUG: FOB Cost Sample (first 10 SKUs):")
+    fob_sample = recommendations[['planning_sku', 'name', 'fob']].head(10)
+    for idx, row in fob_sample.iterrows():
+        print(f"  SKU: {row['planning_sku'][:30]:<30} | FOB: ${row['fob']:.2f}")
     
     # --- STEP 7: CALCULATE VELOCITY METRICS ---
     # weekly_velocity = last_30_day_sales / 4.345 (weeks in 30 days)
@@ -278,6 +304,24 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     # Calculate order_cost = recommended_qty_rounded * FOB
     recommendations['order_cost'] = recommendations['recommended_qty_rounded'] * recommendations['fob']
     
+    # DEBUG: Show order cost calculation details
+    print("\nDEBUG: Order Cost Calculation (first 10 SKUs):")
+    debug_cols = ['planning_sku', 'name', 'fob', 'recommended_qty_rounded', 'order_cost']
+    debug_available = [c for c in debug_cols if c in recommendations.columns]
+    if debug_available:
+        cost_sample = recommendations[debug_available].head(10)
+        for idx, row in cost_sample.iterrows():
+            sku = row.get('planning_sku', 'N/A')[:30]
+            name = str(row.get('name', 'N/A'))[:30]
+            fob = row.get('fob', 0)
+            qty = row.get('recommended_qty_rounded', 0)
+            cost = row.get('order_cost', 0)
+            print(f"  SKU: {sku:<30} | Name: {name:<30} | FOB: ${fob:.2f} | Qty: {qty} | Cost: ${cost:.2f}")
+    
+    # Check for SKUs with missing/zero FOB
+    zero_fob_count = (recommendations['fob'] == 0).sum()
+    if zero_fob_count > 0:
+        print(f"\nDEBUG WARNING: {zero_fob_count}/{len(recommendations)} SKUs have FOB = 0")
     # --- STEP 8: ADD RB6 METADATA ---
     # Preserve key fields from the live RB6 row using normalized column names
     # Core identity fields

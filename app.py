@@ -722,6 +722,24 @@ def map_rb6_columns(df):
             col_map['on_order'] = col
             break
     
+    # Find FOB/cost column
+    for col in df.columns:
+        if col in ['fob', 'FOB', 'unit_cost', 'bottle_cost', 'cost']:
+            col_map['fob'] = col
+            break
+        elif 'fob' in col.lower():
+            col_map['fob'] = col
+            break
+        elif 'cost' in col.lower() and 'unit' in col.lower():
+            col_map['fob'] = col
+            break
+        elif 'bottle' in col.lower() and 'cost' in col.lower():
+            col_map['fob'] = col
+            break
+        elif 'price' in col.lower() and 'unit' in col.lower():
+            col_map['fob'] = col
+            break
+    
     # Find description/name column
     for col in df.columns:
         if col in ['name', 'description', 'wine_name']:
@@ -1200,16 +1218,14 @@ if rb6_file and sales_file:
             if 'available_inventory' in recommendations.columns:
                 ai_count = recommendations['available_inventory'].notna().sum()
                 st.sidebar.write(f"- available_inventory non-null: {ai_count}/{len(recommendations)}")
-        
-        # --- IMPORTER LOGISTICS INTEGRATION ---
-        if importers_loaded and recommendations is not None and len(recommendations) > 0:
-            # Use the standardized importer column already created during header detection
-            if 'importer' in rb6_data.columns:
-                # Create mapping from planning_sku to importer
-                from wine_calculator import normalize_planning_sku
-                rb6_data['planning_sku_norm'] = rb6_data['name'].apply(normalize_planning_sku)
-                
-                # Get the first occurrence of each planning_sku with its importer
+            
+            # Check FOB status
+            if 'fob' in recommendations.columns:
+                fob_nonzero = (recommendations['fob'] > 0).sum()
+                fob_zero = (recommendations['fob'] == 0).sum()
+                st.sidebar.write(f"- FOB > 0: {fob_nonzero}/{len(recommendations)}, FOB = 0: {fob_zero}/{len(recommendations)}")
+                if fob_zero > len(recommendations) * 0.5:  # More than 50% have zero FOB
+                    st.warning(f"⚠️ {fob_zero} SKUs have FOB = 0. Order costs cannot be calculated correctly.")
                 importer_map = rb6_data.drop_duplicates(subset=['planning_sku_norm'], keep='first')[[
                     'planning_sku_norm', 'importer'
                 ]].copy()
