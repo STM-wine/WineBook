@@ -57,6 +57,20 @@ def export_to_excel(
     # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
+    # Check for file collision and generate unique filename if needed
+    original_path = output_path
+    counter = 1
+    while output_path.exists():
+        stem = original_path.stem
+        suffix = original_path.suffix
+        # Check if stem already has a counter pattern
+        if re.search(r'\(\d+\)$', stem):
+            stem = re.sub(r'\(\d+\)$', f'({counter})', stem)
+        else:
+            stem = f"{stem} ({counter})"
+        output_path = original_path.parent / f"{stem}{suffix}"
+        counter += 1
+    
     # Load template
     wb = load_workbook(template_path)
     sheet = wb.active
@@ -70,56 +84,53 @@ def export_to_excel(
             for col in range(1, sheet.max_column + 1):
                 sheet.cell(row=row, column=col).value = None
     
-    # Column mapping based on template structure
-    # A: Item Number (blank)
-    # B: Description
-    # C: COGS Account (always 'GRW')
-    # D: COGS detail (from template, keep)
-    # E: Asset Account (from template, keep)
-    # F: Income Account (from template, keep)
-    # G: Purchase Order (invoice number)
-    # H: Quantity
-    # I: FOB Bottle
-    # J: FOB Case
-    # K: PK
-    # L: Frontline
-    # M: Ext Cost
-    # N: Ext Price
+    # Build column map from headers in row 1
+    header_map = {}
+    for col in range(1, sheet.max_column + 1):
+        header = sheet.cell(row=1, column=col).value
+        if header:
+            header_map[header.strip()] = col
     
     # Write data starting at row 2
     for idx, item in enumerate(items, start=2):
         # A: Item Number - leave blank
         sheet.cell(row=idx, column=1).value = None
         
-        # B: Description (use new formatted description)
+        # B: Item Description
         sheet.cell(row=idx, column=2).value = clean_string_for_excel(item.get('description', ''))
         
-        # C-N are formulas in template - we write VALUES only
-        # But we need to preserve the account structure, so we copy row 2's structure
+        # Map by exact header names
+        # GRW Order # (G) → invoice_number
+        if 'GRW Order #' in header_map:
+            sheet.cell(row=idx, column=header_map['GRW Order #']).value = invoice_number
         
-        # G: Purchase Order (invoice number)
-        sheet.cell(row=idx, column=7).value = invoice_number
+        # PK (H) → pack_size
+        if 'PK' in header_map:
+            sheet.cell(row=idx, column=header_map['PK']).value = item.get('pack_size', 1)
         
-        # H: Quantity (bottles)
-        sheet.cell(row=idx, column=8).value = item.get('quantity', 0)
+        # Quantity (I) → quantity
+        if 'Quantity' in header_map:
+            sheet.cell(row=idx, column=header_map['Quantity']).value = item.get('quantity', 0)
         
-        # I: FOB Bottle
-        sheet.cell(row=idx, column=9).value = item.get('fob_bottle', 0)
+        # FOB Btl (J) → fob_bottle
+        if 'FOB Btl' in header_map:
+            sheet.cell(row=idx, column=header_map['FOB Btl']).value = item.get('fob_bottle', 0)
         
-        # J: FOB Case - write as VALUE (not formula)
-        sheet.cell(row=idx, column=10).value = item.get('fob_case', 0)
+        # Frontline (K) → frontline
+        if 'Frontline' in header_map:
+            sheet.cell(row=idx, column=header_map['Frontline']).value = item.get('frontline', 0)
         
-        # K: PK (pack size)
-        sheet.cell(row=idx, column=11).value = item.get('pack_size', 1)
+        # Account (L) → frontline (same as Frontline)
+        if 'Account' in header_map:
+            sheet.cell(row=idx, column=header_map['Account']).value = item.get('frontline', 0)
         
-        # L: Frontline - write as VALUE (not formula)
-        sheet.cell(row=idx, column=12).value = item.get('frontline', 0)
+        # FOB Case (N) → fob_case
+        if 'FOB Case' in header_map:
+            sheet.cell(row=idx, column=header_map['FOB Case']).value = item.get('fob_case', 0)
         
-        # M: Ext Cost - write as VALUE (not formula)
-        sheet.cell(row=idx, column=13).value = item.get('ext_cost', 0)
-        
-        # N: Ext Price - write as VALUE (not formula)
-        sheet.cell(row=idx, column=14).value = item.get('ext_price', 0)
+        # Ext Cost (O) → ext_cost
+        if 'Ext Cost' in header_map:
+            sheet.cell(row=idx, column=header_map['Ext Cost']).value = item.get('ext_cost', 0)
     
     # Copy account structure from row 2 to all data rows
     # This preserves the COGS/Asset/Income account references
