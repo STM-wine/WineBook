@@ -70,12 +70,47 @@ def clean_description(description: str, sku_prefix: str) -> str:
     Clean and format wine description.
     
     Returns standardized format: [Full Wine Name] [Vintage] [Pack/Size]
+    
     Examples:
-        Chateau Haut Brion 1998 1/750ml
-        MacDonald Vineyards To-Kalon Cabernet 2022 3/750ml
+        Input: "0750- Gaja Barbaresco 2009 750mL" → Output: "Gaja Barbaresco 2009 1/750ml"
+        Input: "Chateau Haut Brion 1998 750mL" → Output: "Chateau Haut Brion 1998 1/750ml"
+        Input: "MacDonald Vineyards To-Kalon Cabernet 2022 750mL" → Output: "MacDonald Vineyards To-Kalon Cabernet 2022 3/750ml"
     """
     # Remove prefix code like "BDX:HTB:HAUT-"
     cleaned = re.sub(r'^[A-Z]{3}:[A-Z]{3,}:[A-Z]+-?\s*', '', description, flags=re.IGNORECASE)
+    
+    # Remove leading bottle-size codes like ":0750-", "0750-", "750-", "1500-", "0375-", "1.5L-"
+    # Handles optional leading punctuation (colon, semicolon, comma, dash)
+    cleaned = re.sub(r'^\s*[:;,–-]*\s*(?:0?375|0?750|1500|3000|1\.5L)\s*[-–—]\s*', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove PDF footer/header contamination
+    # Pattern: [Month] [day], [year] [time] AM/PM PDT Page X of Y
+    # Example: April 22, 2026 12:10:34 PM PDT Page 1 of 2
+    # Handle variations: Page 1 of2 (no space), different timezones
+    cleaned = re.sub(
+        r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+'
+        r'\d{1,2},?\s+\d{4}\s+\d{1,2}:\d{2}:\d{2}\s+(?:AM|PM)?\s*(?:PDT|PST|GMT|UTC)?\s*'
+        r'Page\s*\d+\s*of\s*\d+',
+        '',
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    
+    # Remove simpler page number patterns with various spacing
+    # Examples: Page 1 of 2, Page 1 of2, Page1 of 2
+    cleaned = re.sub(r'Page\s*\d+\s*of\s*\d+', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove standalone page numbers at end or middle
+    cleaned = re.sub(r'\bPage\s*\d+\b', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove company name that appears in headers
+    cleaned = re.sub(r'GRW\s*Wine\s*Collection,?\s*Inc\.?', '', cleaned, flags=re.IGNORECASE)
+    
+    # Remove Order # Date lines
+    cleaned = re.sub(r'Order\s*#\s*Date\s*S\d+\s+\d{1,2}/\d{1,2}/\d{4}', '', cleaned, flags=re.IGNORECASE)
+    
+    # Clean up any leftover double spaces
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     
     # Remove pack indicators (will re-add in correct format later)
     cleaned = re.sub(r'\s*PK\d+[-\s]*', ' ', cleaned, flags=re.IGNORECASE)
@@ -154,170 +189,275 @@ def format_item_description(
 
 
 def is_item_start(line: str) -> bool:
-    """Check if line starts a new item (begins with a number like '1 Sale', '2 Sale')."""
-    return bool(re.match(r'^\d+\s+Sale\s+[A-Z]{3}:', line.strip()))
+    """
+    Check if line starts a new item.
+    Matches patterns like:
+    - '1 Sale BDX:' (standard format)
+    - '17 BDX:' (page 2 continuation without 'Sale')
+    - '25 ITY:' (page 2 continuation without 'Sale')
+    """
+    line = line.strip()
+    # Standard format: "1 Sale BDX:"
+    if re.match(r'^\d+\s+Sale\s+[A-Z]{3}:', line):
+        return True
+    # Page 2 format without "Sale": "17 BDX:" (digits + space + 3-letter code + colon)
+    if re.match(r'^\d+\s+[A-Z]{3}:', line):
+        return True
+    return False
 
 
 def parse_item_block(block: str) -> Dict[str, Any]:
     """
-    Parse a multiline item block.
+    Parse a multiline item block with flexible format handling.
     
-    A block starts with 'N Sale BDX:...' and ends before the next 'N Sale'
+    Handles both formats:
+    - Inline: "12 Sale RHN:RAY:RAYA- Chateau Rayas... $price qty..."
+    - Wrapped: "12 Sale RHN:RAY:RAYA- Chateau Rayas... $price qty...\n0750-2001-F0L0C0 2001 750mL"
     """
     if not block:
         return None
     
-    # Clean and normalize the block
-    block = clean_text(block)
-    if not block:
-        return None
-    
-    # Check it starts with a valid item pattern
-    if not is_item_start(block):
-        return None
-    
-    # Extract SKU prefix
-    sku_prefix = extract_sku_prefix(block)
-    if not sku_prefix:
-        return None
-    
-    # Extract pack size
-    pack_size = extract_pack_size(block)
-    
-    # Extract vintage
-    vintage = extract_vintage(block)
-    
-    # Extract size
-    size = extract_size(block)
-    
-    # Extract unit price and ordered quantity
-    # Format: $price qty [size/pack] $total
-    price_match = re.search(r'\$([\d,]+\.\d{2})\s+(\d+)\s+(?:750|PK\d+|\d+-Pack)', block, re.IGNORECASE)
-    if not price_match:
-        return None
-    
-    price_str = price_match.group(1).replace(',', '')
-    unit_price = float(price_str)
-    ordered_qty = int(price_match.group(2))
-    
-    # Calculate bottle quantity
-    quantity = ordered_qty * pack_size
-    
-    # Extract raw description from the block
-    # Pattern: Sale PREFIX:CODE:DESC- wine_name year size...
-    # Get everything after 'Sale ' and before the unit price
-    desc_match = re.search(r'Sale\s+([A-Z]{3}:[A-Z:]+-[A-Za-z\s]+?)\s+\d{4}', block)
-    if desc_match:
-        raw_description = desc_match.group(1).rstrip()
-    else:
-        # Fallback: extract between Sale and first $
-        fallback = re.search(r'Sale\s+(.+?)\s+\$', block)
-        if fallback:
-            raw_description = fallback.group(1).rstrip()
+    try:
+        # Work with original block to preserve line structure
+        lines = block.strip().split('\n')
+        if not lines:
+            return None
+        
+        # Check first line starts with valid item pattern
+        first_line = lines[0].strip()
+        if not is_item_start(first_line):
+            return None
+        
+        # Extract item number from start of first line
+        item_match = re.match(r'^\s*(\d+)\s+Sale', first_line)
+        if not item_match:
+            return None
+        line_number = int(item_match.group(1))
+        
+        # Extract SKU prefix from after "Sale" - first 3-letter code
+        sku_match = re.search(r'Sale\s+([A-Z]{3}):', first_line)
+        sku_prefix = sku_match.group(1) if sku_match else ''
+        
+        # Extract all dollar amounts from the entire block
+        dollar_amounts = re.findall(r'\$([\d,]+\.\d{2})', block)
+        if len(dollar_amounts) < 1:
+            return None
+        
+        # First dollar amount is unit price, last is total
+        unit_price = float(dollar_amounts[0].replace(',', ''))
+        ext_cost = float(dollar_amounts[-1].replace(',', ''))
+        
+        # Extract quantity - the number between first price and bottle size or before last price
+        # Pattern: $price qty 750 or similar
+        qty_match = re.search(r'\$[\d,]+\.\d{2}\s+(\d+)\s+(?:750|375|1500|1\.5L|3000|PK\d|\d+-Pack)', block, re.IGNORECASE)
+        if not qty_match:
+            # Try alternative: number before bottle size marker
+            qty_match = re.search(r'\$[\d,]+\.\d{2}[^\n]*\n.*?(\d+)\s+(?:750|375|1500|1\.5L)m?L?', block, re.IGNORECASE | re.DOTALL)
+        ordered_qty = int(qty_match.group(1)) if qty_match else 1
+        
+        # Extract pack size (default 1 for single bottles)
+        pack_match = re.search(r'PK(\d+)|(\d+)-Pack', block, re.IGNORECASE)
+        pack_size = int(pack_match.group(1) or pack_match.group(2)) if pack_match else 1
+        
+        # Calculate total quantity
+        quantity = ordered_qty * pack_size
+        
+        # Extract vintage from code line (e.g., "0750-2001-F0L0C0")
+        vintage_match = re.search(r'\d{4}-(\d{4})-F0L0C0', block)
+        vintage = vintage_match.group(1) if vintage_match else extract_vintage(block)
+        
+        # Extract bottle size
+        size_match = re.search(r'(750|375|1500|3000|1\.5L)m?L?', block, re.IGNORECASE)
+        size = size_match.group(1) if size_match else '750'
+        
+        # Build description from first line (between Sale and first $)
+        desc_match = re.search(r'Sale\s+[A-Z]{3}:[A-Z:]+-\s*([^$]+)', first_line)
+        if desc_match:
+            raw_description = desc_match.group(1).strip()
         else:
-            raw_description = ""
+            # Fallback: everything after Sale prefix until $
+            desc_fallback = re.search(r'Sale\s+[A-Z]{3}:\S+\s+([^$]+)', first_line)
+            raw_description = desc_fallback.group(1).strip() if desc_fallback else ''
+        
+        # Clean up description: remove qty/price fragments
+        raw_description = re.sub(r'\$[\d,]+\.\d{2}', '', raw_description).strip()
+        raw_description = re.sub(r'\d+\s+(?:750|375|1500|3000|1\.5L)m?L?', '', raw_description, flags=re.IGNORECASE).strip()
+        
+        # If vintage is in code line but not in description, add it
+        # Convert vintage to string for comparison
+        vintage_str = str(vintage) if vintage else ''
+        if vintage_str and vintage_str not in raw_description:
+            raw_description = f"{raw_description} {vintage}"
+        
+        # Clean and format
+        clean_name = clean_description(raw_description, sku_prefix)
+        
+        # Format description
+        description = format_item_description(
+            wine_name=clean_name,
+            vintage=vintage,
+            pack_size=pack_size,
+            sku_prefix=sku_prefix,
+            bottle_size=size
+        )
+        
+        return {
+            'line_number': line_number,
+            'sku_prefix': sku_prefix,
+            'raw_description': raw_description,
+            'clean_description': clean_name,
+            'description': description,
+            'vintage': vintage,
+            'size': size,
+            'unit_price': unit_price,
+            'ordered_qty': ordered_qty,
+            'pack_size': pack_size,
+            'quantity': quantity,
+            'ext_cost': ext_cost,
+        }
     
-    # Also look for additional wine name parts in continuation lines (after internal codes)
-    # Examples: "Cabernet" for MacDonald, "Monfortino" for Conterno
-    # Pattern: look for text after internal code like "XXXX-YYYY-F0L0C0 "
-    continuation_match = re.search(r'\d{4}-F0L0C0\s+([A-Za-z]+(?:\s+\d{4})?)', block)
-    if continuation_match:
-        additional_text = continuation_match.group(1).strip()
-        # Only add if it's not just a vintage year
-        if additional_text and not re.match(r'^\d{4}$', additional_text):
-            # Check if this text is already in the name
-            if additional_text.lower() not in raw_description.lower():
-                raw_description = f"{raw_description} {additional_text}"
-    
-    # Also capture variety names like "Cabernet" that appear after internal codes
-    variety_match = re.search(r'F0L0C0\s+([A-Za-z]+)(?:\s+\d{4})?', block)
-    if variety_match:
-        variety = variety_match.group(1)
-        if variety.lower() not in raw_description.lower():
-            raw_description = f"{raw_description} {variety}"
-    
-    # Get base cleaned name
-    clean_name = clean_description(raw_description, sku_prefix)
-    
-    # Format full standardized description
-    description = format_item_description(
-        wine_name=clean_name,
-        vintage=vintage,
-        pack_size=pack_size,
-        sku_prefix=sku_prefix,
-        bottle_size=size
-    )
-    
-    return {
-        'sku_prefix': sku_prefix,
-        'raw_description': raw_description,
-        'clean_description': clean_name,
-        'description': description,
-        'vintage': vintage,
-        'size': size,
-        'unit_price': unit_price,
-        'ordered_qty': ordered_qty,
-        'pack_size': pack_size,
-        'quantity': quantity,
-    }
+    except Exception as e:
+        print(f"PARSE ITEM BLOCK ERROR: {e}")
+        print(f"BLOCK: {block[:200]}")
+        raise
 
 
-def parse_grw_pdf(pdf_path: str) -> List[Dict[str, Any]]:
+def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, Any]], int, Dict]:
     """
-    Parse a GRW invoice PDF and extract line items.
+    Parse a GRW invoice PDF and extract line items using block-based parsing.
+    
+    Handles multi-line wrapped items by splitting text into blocks using regex.
     
     Args:
         pdf_path: Path to the PDF file
+        debug: If True, return detailed debug info
         
     Returns:
-        List of line item dictionaries
+        Tuple of (items list, pages_parsed count, debug_info dict)
     """
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
     
     items = []
+    pages_parsed = 0
+    all_item_numbers = []
+    items_per_page = {}
+    unparsed_blocks = []
+    
+    # Strict footer markers
+    strict_footer_markers = [
+        'Total:', 'Subtotal:', 'Sales Tax:', 'Balance Due:', 
+        'Terms and Conditions:', 'Approval:', 'Grand Total:'
+    ]
+    
+    # Header markers
+    header_markers = ['Sales Order', 'GRW Wine Collection', 'Order # Date']
+    
+    # Pattern to find item starts: number + Sale + SKU code
+    # Examples: "12 Sale RHN:RAY:RAYA", "20 Sale USP:BEA:FRER"
+    item_start_pattern = r'^\s*(\d+)\s+Sale\s+[A-Z]{3}:[A-Z]{3,}:[A-Z]+'
     
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
+        pdf_page_count = len(pdf.pages)
+        
+        for page_num, page in enumerate(pdf.pages, 1):
             text = page.extract_text()
+            pages_parsed += 1
+            page_items = []
+            
             if not text:
+                items_per_page[page_num] = 0
                 continue
             
+            # Split text into lines for processing
             lines = text.split('\n')
-            current_block = []
             
-            for line in lines:
-                line = line.strip()
-                if not line:
+            # First pass: identify item boundaries and extract blocks
+            item_blocks = []
+            current_block_lines = []
+            current_block_start = None
+            
+            for line_idx, line in enumerate(lines):
+                line_stripped = line.strip()
+                if not line_stripped:
                     continue
                 
-                # Skip header/footer lines
-                if any(skip in line for skip in ['Sales Order', 'GRW Wine Collection', 'Order #', 'Subtotal:', 'Total:', 'Terms', 'Approval']):
+                # Check for footer markers - stop parsing this page
+                line_lower = line_stripped.lower()
+                if any(marker.lower() in line_lower for marker in strict_footer_markers):
+                    # Save current block if exists
+                    if current_block_lines:
+                        block_text = '\n'.join(current_block_lines)
+                        item_blocks.append((current_block_start, block_text))
+                        current_block_lines = []
+                        current_block_start = None
+                    break
+                
+                # Skip header lines
+                if any(skip in line_stripped for skip in header_markers):
                     continue
                 
                 # Check if this line starts a new item
-                if is_item_start(line):
-                    # Process previous block if exists
-                    if current_block:
-                        block_text = ' '.join(current_block)
-                        item = parse_item_block(block_text)
-                        if item:
-                            items.append(item)
+                if re.match(item_start_pattern, line_stripped):
+                    # Save previous block if exists
+                    if current_block_lines:
+                        block_text = '\n'.join(current_block_lines)
+                        item_blocks.append((current_block_start, block_text))
                     # Start new block
-                    current_block = [line]
-                elif current_block:
+                    current_block_lines = [line_stripped]
+                    current_block_start = line_idx
+                elif current_block_lines:
                     # Continue current block
-                    current_block.append(line)
+                    current_block_lines.append(line_stripped)
             
-            # Process final block
-            if current_block:
-                block_text = ' '.join(current_block)
+            # Don't forget the last block
+            if current_block_lines:
+                block_text = '\n'.join(current_block_lines)
+                item_blocks.append((current_block_start, block_text))
+            
+            # Second pass: parse each block
+            for block_start, block_text in item_blocks:
+                # Try to parse as item
                 item = parse_item_block(block_text)
                 if item:
                     items.append(item)
+                    page_items.append(item)
+                    all_item_numbers.append(item.get('line_number', 0))
+                else:
+                    # Save for debug
+                    unparsed_blocks.append(block_text[:200])  # First 200 chars
+            
+            items_per_page[page_num] = len(page_items)
     
-    return items
+    # Debug output for unparsed blocks
+    if unparsed_blocks:
+        print(f"⚠️ UNPARSED BLOCKS: {len(unparsed_blocks)}")
+        for i, block in enumerate(unparsed_blocks[:3]):  # Show first 3
+            print(f"UNPARSED BLOCK {i+1}:\n{block}\n")
+    
+    # Build debug info
+    debug_info = {
+        'pdf_page_count': pdf_page_count,
+        'pages_parsed': pages_parsed,
+        'items_per_page': items_per_page,
+        'total_items': len(items),
+        'item_numbers': sorted(all_item_numbers) if all_item_numbers else [],
+        'first_item_number': min(all_item_numbers) if all_item_numbers else None,
+        'last_item_number': max(all_item_numbers) if all_item_numbers else None,
+        'unparsed_blocks_count': len(unparsed_blocks),
+    }
+    
+    # Check for missing item numbers
+    if all_item_numbers:
+        expected = set(range(1, max(all_item_numbers) + 1))
+        actual = set(all_item_numbers)
+        missing = sorted(expected - actual)
+        debug_info['missing_item_numbers'] = missing
+    
+    if debug:
+        return items, pages_parsed, debug_info
+    return items, pages_parsed, {}
 
 
 if __name__ == '__main__':
