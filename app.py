@@ -1395,6 +1395,16 @@ if rb6_file and sales_file:
                 lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00"
             )
         
+        # Format vintage as plain year string (prevents Streamlit rendering 2024 as 2,024)
+        if 'vintage' in display_df.columns:
+            display_df['vintage'] = (
+                display_df['vintage']
+                .fillna('')
+                .astype(str)
+                .str.replace(',', '', regex=False)
+                .str.replace('.0', '', regex=False)
+            )
+        
         # --- VALIDATION: Check final output quality ---
         st.sidebar.markdown("---")
         st.sidebar.write("📋 **Final Output Validation:**")
