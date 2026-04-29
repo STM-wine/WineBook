@@ -11,7 +11,7 @@ from stem_order.supabase_repository import SupabaseRepository
 
 def main() -> None:
     repo = SupabaseRepository.from_env()
-    report_run, recommendations = repo.get_latest_recommendations(limit=1000)
+    report_run, recommendations = repo.get_latest_recommendations(limit=5000)
     if not report_run:
         print("No completed report runs found.")
         return
@@ -36,4 +36,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

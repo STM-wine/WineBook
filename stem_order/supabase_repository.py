@@ -176,19 +176,28 @@ class SupabaseRepository:
     def get_recommendations_for_run(
         self,
         report_run_id: str,
-        limit: int = 1000,
+        limit: int = 5000,
     ) -> list[dict[str, Any]]:
-        result = (
-            self.client.table("reorder_recommendations")
-            .select("*")
-            .eq("report_run_id", report_run_id)
-            .order("last_30_day_sales", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return result.data or []
+        rows: list[dict[str, Any]] = []
+        page_size = 1000
+        while len(rows) < limit:
+            start = len(rows)
+            end = min(start + page_size, limit) - 1
+            result = (
+                self.client.table("reorder_recommendations")
+                .select("*")
+                .eq("report_run_id", report_run_id)
+                .order("last_30_day_sales", desc=True)
+                .range(start, end)
+                .execute()
+            )
+            page = result.data or []
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+        return rows
 
-    def get_latest_recommendations(self, limit: int = 1000) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    def get_latest_recommendations(self, limit: int = 5000) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         for report_run in self.get_completed_report_runs(limit=25):
             recommendations = self.get_recommendations_for_run(report_run["id"], limit=limit)
             if recommendations:

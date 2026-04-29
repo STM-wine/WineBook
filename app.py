@@ -676,7 +676,7 @@ importers_data, importers_loaded, importers_warning = load_importers_csv(importe
 latest_repo = None
 try:
     latest_repo = SupabaseRepository.from_env()
-    latest_report_run, latest_recommendations = latest_repo.get_latest_recommendations(limit=1000)
+    latest_report_run, latest_recommendations = latest_repo.get_latest_recommendations(limit=5000)
 except Exception:
     latest_report_run, latest_recommendations = None, []
 
