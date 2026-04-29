@@ -89,7 +89,7 @@ streamlit run grw_converter_app.py --server.port 8502
 Project URL:
 
 ```text
-https://afefwnhchoqabcwjpwby.supabase.co
+https://hpnvlxvnzpojpfepcerl.supabase.co
 ```
 
 Apply migrations in numeric order from `supabase/migrations/`. See `docs/supabase_setup.md` for the full setup checklist.

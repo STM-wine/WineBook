@@ -104,7 +104,7 @@ When we are ready to connect the app to Supabase, create a Supabase project and 
 
 Use `.env.example` as the template. The service role key is only for trusted server-side workers and local migration/testing scripts.
 
-The current Supabase project URL is `https://afefwnhchoqabcwjpwby.supabase.co`.
+The current Supabase project URL is `https://hpnvlxvnzpojpfepcerl.supabase.co`.
 
 After the project exists:
 

@@ -2,7 +2,7 @@
 
 ## Project
 
-- Project URL: `https://afefwnhchoqabcwjpwby.supabase.co`
+- Project URL: `https://hpnvlxvnzpojpfepcerl.supabase.co`
 - GitHub repo: `https://github.com/STM-wine/WineBook`
 - Schema migrations:
   - `supabase/migrations/001_initial_ordering_schema.sql`
@@ -23,7 +23,7 @@ cp .env.example .env
 Fill in:
 
 ```bash
-SUPABASE_URL=https://afefwnhchoqabcwjpwby.supabase.co
+SUPABASE_URL=https://hpnvlxvnzpojpfepcerl.supabase.co
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ```
