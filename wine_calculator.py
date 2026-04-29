@@ -85,9 +85,6 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     # Rename planning_sku_norm to planning_sku for final output
     rb6_inventory['planning_sku'] = rb6_inventory['planning_sku_norm']
     
-    print(f"DEBUG: RB6 inventory frame created with {len(rb6_inventory)} unique SKUs")
-    print(f"DEBUG: RB6 available_inventory populated: {rb6_inventory['available_inventory'].notna().sum()}/{len(rb6_inventory)}")
-    
     # --- STEP 3: PARSE DATE COLUMN ---
     # Handle both standardized and original RADs date column names
     date_col = None
@@ -109,57 +106,73 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     
     today = datetime.now()
     
-    # Calculate last 30 day sales by planning_sku
+    qty_col = 'quantity' if 'quantity' in sales_data.columns else 'Quantity'
+
+    def aggregate_sales_since(days):
+        if date_col and sales_data[date_col].notna().any():
+            max_date = sales_data[date_col].max()
+            start_date = max_date - timedelta(days=days)
+            period_sales = sales_data[sales_data[date_col] >= start_date].copy()
+        else:
+            period_sales = sales_data.copy()
+        grouped = period_sales.groupby('planning_sku_norm').agg({qty_col: 'sum'}).reset_index()
+        grouped.columns = ['planning_sku_norm', f'last_{days}_day_sales']
+        return grouped
+
+    def aggregate_same_period_last_year(days):
+        column_name = f'next_{days}_day_forecast'
+        if not (date_col and sales_data[date_col].notna().any()):
+            return pd.DataFrame(columns=['planning_sku_norm', column_name])
+
+        future_start = today
+        future_end = today + timedelta(days=days)
+        historical_start = future_start - timedelta(days=365)
+        historical_end = future_end - timedelta(days=365)
+        period_sales = sales_data[
+            (sales_data[date_col] >= historical_start) &
+            (sales_data[date_col] <= historical_end)
+        ].copy()
+        grouped = period_sales.groupby('planning_sku_norm').agg({qty_col: 'sum'}).reset_index()
+        grouped.columns = ['planning_sku_norm', column_name]
+        return grouped
+
+    # Calculate trailing sales by planning_sku
     if date_col and sales_data[date_col].notna().any():
-        max_date = sales_data[date_col].max()
-        thirty_days_ago = max_date - timedelta(days=30)
-        recent_sales = sales_data[sales_data[date_col] >= thirty_days_ago].copy()
-        
-        # Use standardized 'quantity' column, fallback to 'Quantity'
-        qty_col = 'quantity' if 'quantity' in recent_sales.columns else 'Quantity'
-        sales_30d = recent_sales.groupby('planning_sku_norm').agg({
-            qty_col: 'sum'
-        }).reset_index()
-        sales_30d.columns = ['planning_sku_norm', 'last_30_day_sales']
+        sales_30d = aggregate_sales_since(30)
     else:
         # No date data - aggregate all sales
-        # Use standardized 'quantity' column, fallback to 'Quantity'
-        qty_col = 'quantity' if 'quantity' in sales_data.columns else 'Quantity'
         sales_30d = sales_data.groupby('planning_sku_norm').agg({
             qty_col: 'sum'
         }).reset_index()
         sales_30d.columns = ['planning_sku_norm', 'last_30_day_sales']
-    
-    # Calculate next 60 days last year sales by planning_sku
-    future_start = today
-    future_end = today + timedelta(days=60)
-    historical_start = future_start - timedelta(days=365)
-    historical_end = future_end - timedelta(days=365)
-    
-    if date_col and sales_data[date_col].notna().any():
-        ly_sales = sales_data[
-            (sales_data[date_col] >= historical_start) & 
-            (sales_data[date_col] <= historical_end)
-        ].copy()
-        
-        # Use standardized 'quantity' column, fallback to 'Quantity'
-        qty_col = 'quantity' if 'quantity' in ly_sales.columns else 'Quantity'
-        sales_60d_ly = ly_sales.groupby('planning_sku_norm').agg({
-            qty_col: 'sum'
-        }).reset_index()
-        sales_60d_ly.columns = ['planning_sku_norm', 'next_60_days_ly_sales']
-    else:
-        sales_60d_ly = pd.DataFrame(columns=['planning_sku_norm', 'next_60_days_ly_sales'])
+
+    sales_60d = aggregate_sales_since(60)
+    sales_90d = aggregate_sales_since(90)
+    forecast_30d = aggregate_same_period_last_year(30)
+    forecast_60d = aggregate_same_period_last_year(60)
+    forecast_90d = aggregate_same_period_last_year(90)
     
     # --- STEP 5: MERGE RB6 WITH AGGREGATED SALES ---
     # RB6 inventory is the base table - merge sales onto it (left join)
     # This preserves all RB6 inventory fields
     recommendations = rb6_inventory.merge(sales_30d, on='planning_sku_norm', how='left')
-    recommendations = recommendations.merge(sales_60d_ly, on='planning_sku_norm', how='left')
+    recommendations = recommendations.merge(sales_60d, on='planning_sku_norm', how='left')
+    recommendations = recommendations.merge(sales_90d, on='planning_sku_norm', how='left')
+    recommendations = recommendations.merge(forecast_30d, on='planning_sku_norm', how='left')
+    recommendations = recommendations.merge(forecast_60d, on='planning_sku_norm', how='left')
+    recommendations = recommendations.merge(forecast_90d, on='planning_sku_norm', how='left')
     
     # Fill missing sales with 0
     recommendations['last_30_day_sales'] = recommendations['last_30_day_sales'].fillna(0)
-    recommendations['next_60_days_ly_sales'] = recommendations['next_60_days_ly_sales'].fillna(0)
+    for col in [
+        'last_60_day_sales',
+        'last_90_day_sales',
+        'next_30_day_forecast',
+        'next_60_day_forecast',
+        'next_90_day_forecast',
+    ]:
+        recommendations[col] = recommendations[col].fillna(0)
+    recommendations['next_60_days_ly_sales'] = recommendations['next_60_day_forecast']
     
     # --- STEP 6: CALCULATE INVENTORY FIELDS ---
     # available_inventory comes directly from RB6 - should be preserved after merge
@@ -176,11 +189,6 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
             ).fillna(0)
         )
     
-    # Validation: Check inventory pipeline
-    print("RB6 available_inventory populated:", rb6_inventory["available_inventory"].notna().sum(), "/", len(rb6_inventory))
-    print("Final true_available populated:", recommendations["true_available"].notna().sum(), "/", len(recommendations))
-    print(recommendations[["planning_sku", "name", "available_inventory", "true_available"]].head(20))
-    
     # DEFENSIVE: Find on_order column (may have _x or _y suffix after merge)
     possible_on_order_cols = [
         'on_order',
@@ -195,11 +203,9 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     for col in possible_on_order_cols:
         if col in recommendations.columns:
             on_order = recommendations[col]
-            print(f"DEBUG: Found on_order in column: {col}")
             break
     
     if on_order is None:
-        print(f"DEBUG: WARNING - No on_order column found, defaulting to 0")
         on_order = 0
     
     recommendations['on_order'] = on_order
@@ -227,20 +233,12 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     for col in possible_fob_cols:
         if col in recommendations.columns:
             fob_col = col
-            print(f"DEBUG: Found FOB in column: {col}")
             break
     
     if fob_col:
         recommendations['fob'] = pd.to_numeric(recommendations[fob_col], errors='coerce').fillna(0)
     else:
-        print(f"DEBUG: WARNING - No FOB/cost column found. Available columns: {[c for c in recommendations.columns if 'cost' in c.lower() or 'price' in c.lower() or 'fob' in c.lower()]}")
         recommendations['fob'] = 0
-    
-    # DEBUG: Show FOB sample values
-    print("\nDEBUG: FOB Cost Sample (first 10 SKUs):")
-    fob_sample = recommendations[['planning_sku', 'name', 'fob']].head(10)
-    for idx, row in fob_sample.iterrows():
-        print(f"  SKU: {row['planning_sku'][:30]:<30} | FOB: ${row['fob']:.2f}")
     
     # --- STEP 7: CALCULATE VELOCITY METRICS ---
     # weekly_velocity = last_30_day_sales / 4.345 (weeks in 30 days)
@@ -262,18 +260,29 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     )
     
     # Optional seasonal velocity reference
-    recommendations['seasonal_velocity_reference'] = recommendations['next_60_days_ly_sales'] / 8.6  # 8.6 weeks in 60 days
+    recommendations['seasonal_velocity_reference'] = recommendations['next_60_day_forecast'] / 8.6  # 8.6 weeks in 60 days
+    recommendations['avg_weekly_velocity_90d'] = recommendations['last_90_day_sales'] / 12.86
+    recommendations['velocity_trend_pct'] = np.where(
+        recommendations['avg_weekly_velocity_90d'] > 0,
+        ((recommendations['weekly_velocity'] - recommendations['avg_weekly_velocity_90d'])
+         / recommendations['avg_weekly_velocity_90d']) * 100,
+        None
+    )
     
     # --- STEP 7b: CALCULATE RECOMMENDED ORDER QUANTITIES ---
     # Calculate target_days based on Is BTG and Is Core flags
+    def row_has_truthy_flag(row, columns):
+        for col in columns:
+            val = str(row.get(col, 'No')).lower()
+            if 'yes' in val or 'true' in val or val == '1':
+                return True
+        return False
+
     def get_target_days(row):
-        btg_val = str(row.get('Is BTG', 'No')).lower()
-        core_val = str(row.get('Is Core', 'No')).lower()
-        
-        if 'yes' in btg_val or 'true' in btg_val or btg_val == '1':
-            return 60
-        elif 'yes' in core_val or 'true' in core_val or core_val == '1':
+        if row_has_truthy_flag(row, ['Is BTG', 'is_btg', 'is_btg_', 'btg', 'btg_flag']):
             return 45
+        elif row_has_truthy_flag(row, ['Is Core', 'is_core', 'is_core_', 'core', 'core_flag']):
+            return 30
         else:
             return 30
     
@@ -300,28 +309,13 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         lambda row: round_up_to_case(row['recommended_qty_raw'], row['pack_size']),
         axis=1
     )
+    recommendations['high_volume_rounding_required'] = recommendations['last_30_day_sales'] > 480
     
     # Calculate order_cost = recommended_qty_rounded * FOB
     recommendations['order_cost'] = recommendations['recommended_qty_rounded'] * recommendations['fob']
+    recommendations['recommendation_status'] = 'rejected'
+    recommendations['approved_qty'] = 0
     
-    # DEBUG: Show order cost calculation details
-    print("\nDEBUG: Order Cost Calculation (first 10 SKUs):")
-    debug_cols = ['planning_sku', 'name', 'fob', 'recommended_qty_rounded', 'order_cost']
-    debug_available = [c for c in debug_cols if c in recommendations.columns]
-    if debug_available:
-        cost_sample = recommendations[debug_available].head(10)
-        for idx, row in cost_sample.iterrows():
-            sku = row.get('planning_sku', 'N/A')[:30]
-            name = str(row.get('name', 'N/A'))[:30]
-            fob = row.get('fob', 0)
-            qty = row.get('recommended_qty_rounded', 0)
-            cost = row.get('order_cost', 0)
-            print(f"  SKU: {sku:<30} | Name: {name:<30} | FOB: ${fob:.2f} | Qty: {qty} | Cost: ${cost:.2f}")
-    
-    # Check for SKUs with missing/zero FOB
-    zero_fob_count = (recommendations['fob'] == 0).sum()
-    if zero_fob_count > 0:
-        print(f"\nDEBUG WARNING: {zero_fob_count}/{len(recommendations)} SKUs have FOB = 0")
     # --- STEP 8: ADD RB6 METADATA ---
     # Preserve key fields from the live RB6 row using normalized column names
     # Core identity fields
@@ -348,6 +342,13 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
             is_core_val = recommendations[col]
             break
     recommendations['is_core'] = is_core_val if is_core_val is not None else 'No'
+
+    def flag_to_bool(value):
+        val = str(value).lower()
+        return 'yes' in val or 'true' in val or val == '1'
+
+    recommendations['is_btg_bool'] = recommendations['is_btg'].apply(flag_to_bool)
+    recommendations['is_core_bool'] = recommendations['is_core'].apply(flag_to_bool)
     
     # Brand manager - try various possible column names
     brand_manager_val = None
@@ -402,6 +403,24 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         return "OK"
     
     recommendations['reorder_status'] = recommendations.apply(get_reorder_status, axis=1)
+
+    def get_risk_level(row):
+        weekly_velocity = row.get('weekly_velocity', 0)
+        target_days = row.get('target_days', 30)
+        available_plus_order = row.get('true_available', 0) + row.get('on_order', 0)
+        if weekly_velocity <= 0:
+            return 'No Sales'
+        target_qty = weekly_velocity * (target_days / 7)
+        if target_qty <= 0:
+            return 'Unknown'
+        coverage_ratio = available_plus_order / target_qty
+        if coverage_ratio < 0.5:
+            return 'High'
+        if coverage_ratio < 1:
+            return 'Medium'
+        return 'Low'
+
+    recommendations['risk_level'] = recommendations.apply(get_risk_level, axis=1)
     
     # --- STEP 10: SELECT FINAL COLUMNS ---
     # Comprehensive list of all fields to preserve
@@ -420,6 +439,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         'brand_manager',
         'is_btg',
         'is_core',
+        'is_btg_bool',
+        'is_core_bool',
         
         # Inventory
         'true_available',
@@ -429,6 +450,11 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         
         # Sales velocity (from RADs aggregation)
         'last_30_day_sales',
+        'last_60_day_sales',
+        'last_90_day_sales',
+        'next_30_day_forecast',
+        'next_60_day_forecast',
+        'next_90_day_forecast',
         'next_60_days_ly_sales',
         
         # Sales velocity (from RB6 if available)
@@ -439,6 +465,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         
         # Calculated metrics
         'weekly_velocity',
+        'velocity_trend_pct',
         'weeks_on_hand',
         'weeks_on_hand_with_on_order',
         
@@ -447,8 +474,12 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         'target_qty',
         'recommended_qty_raw',
         'recommended_qty_rounded',
+        'recommendation_status',
+        'approved_qty',
+        'high_volume_rounding_required',
         'order_cost',
         'reorder_status',
+        'risk_level',
         
         # Importer logistics (if available)
         'importer',
