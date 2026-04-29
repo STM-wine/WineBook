@@ -1,82 +1,89 @@
-# Stock That Matters - Current Status & Next Steps
+# Current Status & Next Steps
 
-## Where We Are
+## Current Status
 
-### Infrastructure
-- **Streamlit app runs locally** - Functional MVP with file upload and calculation logic
-- **Python 3.11 virtual environment** - Set up and active
-- **Requirements installed** - Streamlit, pandas, and dependencies
-- **openpyxl installed** - Excel file support enabled
+WineBook has moved beyond the original local MVP shape.
 
-### Application State
-- **Core functionality working** - File upload, data processing, reorder calculations
-- **Premium UI design** - Warm hospitality theme with Quicksand font
-- **Branding updated** - "Stock That Matters" title and logo integration
-- **Styling complete** - Custom CSS with boutique wine dashboard aesthetic
+- GitHub repo: `https://github.com/STM-wine/WineBook`
+- Ordering Dashboard runs locally in Streamlit.
+- Supabase project exists and is connected through local `.env`.
+- Numbered schema migrations live in `supabase/migrations/`.
+- RB6/RADs/importers parsing has been extracted into reusable modules.
+- Recommendations can be saved to Supabase report runs.
+- Dashboard reads the latest saved report run and supports supplier filtering, recommendation review, supplier summaries, location summaries, PO CSV export, and transitional supplier PO draft creation.
+- Recommendations now default to `rejected` / `approved_qty = 0`, matching the ownership opt-in approval model.
 
-### Current Issues
-- **UI/Header fixes still in progress** - Logo positioning and centering refinements needed
-- **Potential duplicate st.set_page_config calls** - Need to verify and clean up if present
-- **Unsupported st.image arguments** - May need to remove use_container_width parameter
+## Business Direction
 
-## Next Steps
+Use Stem's internal terminology:
 
-### Immediate (Priority: High)
-1. **Fix duplicate st.set_page_config calls** - Ensure only one call at top of file
-2. **Remove unsupported st.image arguments** - Clean up image parameters
-3. **Refine header/logo/title layout** - Perfect centering and spacing
-4. **Test logo display** - Ensure Stem Wine Company logo shows correctly
+- Vinosmith `Importer` = Stem `Supplier`
+- User-facing app copy should say `Supplier`.
+- Source compatibility code may still refer to `importer` where it is mapping Vinosmith fields.
 
-### Short-term (Priority: Medium)
-1. **Continue UI polish** - Finalize premium styling touches
-2. **Test with real data** - Upload actual RB6, sales, and needs files
-3. **Validate calculations** - Verify reorder recommendation logic
-4. **Improve error handling** - Better user feedback for file issues
+The product goal is a simple buyer workflow:
 
-### Medium-term (Priority: Low)
-1. **Add data validation** - Check file formats and required columns
-2. **Enhance table display** - Better formatting for large datasets
-3. **Add export options** - Multiple format support (CSV, Excel)
-4. **User guide** - Documentation for file preparation
+1. Daily source data is ingested automatically.
+2. Recommendations are already populated when a buyer logs in.
+3. Buyer filters by supplier, pickup location, or SKU.
+4. Buyer approves or edits quantities.
+5. WineBook creates supplier PO drafts.
+6. A human enters POs into QuickBooks initially.
+7. Later, approved POs sync directly to QuickBooks.
 
-## Technical Notes
+## Immediate Priorities
 
-### File Structure
-```
-stem-order-mvp/
-  app.py                 # Main Streamlit application
-  wine_calculator.py     # Business logic for calculations
-  requirements.txt       # Python dependencies
-  logo/
-    StemWineCoLogo.png   # Company logo
-  docs/
-    next_steps.md        # This file
-```
+1. Apply `004_buyer_recommendation_fields.sql` in Supabase before persisting the next report run.
+2. Rerun/persist the current RB6/RADs files so Supabase has the expanded buyer-facing fields.
+3. Add in-app approval controls for recommendation rows instead of only defaulting rows to rejected in the database.
+4. Persist approved quantities and status changes back to Supabase.
+5. Update PO draft creation to use approved lines/approved quantities instead of raw recommended quantities.
 
-### Key Features Implemented
-- File upload for 3 data sources (RB6, sales, needs)
-- Deterministic reorder calculation logic
-- Premium UI with warm color palette
-- CSV export functionality
-- Responsive design for laptop screens
+## Near-Term Product Work
 
-### Known Dependencies
-- streamlit==1.28.1
-- pandas==2.1.1
-- openpyxl (for Excel support)
+- Rename remaining user-facing `Importer` labels to `Supplier`.
+- Add explicit buyer workflow states: `rejected`, `approved`, `edited`, `deferred`.
+- Add a saved PO draft review screen.
+- Add pickup-location hierarchy:
+  - Pickup Location
+  - Supplier
+  - Producer
+- Add California truck optimization details:
+  - FTL progress
+  - bottles/cases needed to reach FTL
+  - estimated freight savings
+- Add trucking-cost-per-bottle support to `importers.csv` or a Supabase logistics table.
+- Add product/SKU pallet configuration table for future pallet-aware rounding.
 
-## Commands to Run
+## Data Roadmap
+
+Current transitional feeds:
+
+- RB6 inventory export
+- RADs sales history export
+- local `importers.csv`
+
+Next expected feed:
+
+- Additional Vinosmith report from Mark to validate/enhance product, placement, logistics, or producer data.
+
+Future durable source:
+
+- QuickBooks for product, vendor/supplier, inventory, and PO data.
+
+## Engineering Priorities
+
+- Keep Streamlit working while productizing.
+- Keep parser/calculation/persistence logic outside `app.py`.
+- Add tests around every business-rule change.
+- Treat `importers.csv`, `.env`, RB6/RADs exports, and PDFs as local data, not repo assets.
+- Keep GRW converter code stable and separate unless explicitly brought into scope.
+
+## Verification Commands
+
 ```bash
-# Activate environment
-cd /Users/markyaeger/Documents/stem-order-mvp
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the app
-streamlit run app.py
+source .venv/bin/activate
+python -m compileall app.py wine_calculator.py stem_order tests scripts
+python -m unittest discover -s tests
+python scripts/smoke_ordering_pipeline.py
 ```
-
----
-*Last updated: Current development session*

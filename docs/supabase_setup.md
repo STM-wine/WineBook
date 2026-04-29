@@ -3,6 +3,7 @@
 ## Project
 
 - Project URL: `https://afefwnhchoqabcwjpwby.supabase.co`
+- GitHub repo: `https://github.com/STM-wine/WineBook`
 - Schema migrations:
   - `supabase/migrations/001_initial_ordering_schema.sql`
   - `supabase/migrations/002_manual_recommendation_ingest.sql`
@@ -27,7 +28,7 @@ SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
-The anon key is safe for browser/client contexts. The service-role key bypasses row-level security and must only be used by trusted local scripts, backend workers, or server-side code.
+The anon key is safe for browser/client contexts. The service-role key bypasses row-level security and must only be used by trusted local scripts, backend workers, or server-side code. Do not put service-role keys in frontend/browser code.
 
 ## Apply Initial Schema
 
@@ -75,6 +76,17 @@ After migration, confirm these tables exist:
 - `purchase_order_drafts`
 - `purchase_order_lines`
 - `audit_events`
+
+## Current Persistence Shape
+
+The app currently writes report runs and recommendations from manual upload runs. This is transitional: RB6/RADs and `importers.csv` still provide the source data, while Supabase stores durable run history and PO draft data.
+
+New recommendation rows default to an opt-in approval model:
+
+- `recommendation_status = rejected`
+- `approved_qty = 0`
+
+The next app step is to add row-level approval/edit controls and persist buyer changes back to Supabase.
 
 `002_manual_recommendation_ingest.sql` should also add transitional recommendation fields:
 
