@@ -1,11 +1,13 @@
 import streamlit as st
 import os
 import traceback
+from html import escape
 from datetime import datetime, timedelta
 from stem_order.core import normalize_planning_sku
 from stem_order.dashboard import (
     APPROVAL_STATUSES,
     approval_editor_dataframe,
+    approval_metrics,
     approval_updates_from_editor,
     california_truck_summary,
     dashboard_metrics,
@@ -14,6 +16,7 @@ from stem_order.dashboard import (
     location_summary,
     po_export_dataframe,
     recommendations_to_dataframe,
+    risk_counts,
     supplier_summary,
 )
 from stem_order.ingest import load_importers_csv
@@ -27,6 +30,39 @@ def uploaded_file_size(uploaded_file):
     if hasattr(uploaded_file, "getbuffer"):
         return len(uploaded_file.getbuffer())
     return ""
+
+
+def format_money(value):
+    return f"${float(value or 0):,.0f}"
+
+
+def format_count(value):
+    return f"{int(value or 0):,}"
+
+
+def metric_card(label, value, note="", tone="ink"):
+    st.markdown(
+        f"""
+        <div class="stem-metric stem-metric-{tone}">
+            <span>{escape(label)}</span>
+            <strong>{escape(str(value))}</strong>
+            <small>{escape(note)}</small>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_label(title, subtitle=""):
+    st.markdown(
+        f"""
+        <div class="section-label">
+            <h3>{escape(title)}</h3>
+            <p>{escape(subtitle)}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # Set page configuration - must be first Streamlit command
@@ -598,6 +634,180 @@ div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column"] > div 
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+:root {
+    --stem-ink: #181716;
+    --stem-charcoal: #2F3130;
+    --stem-paper: #FBFAF7;
+    --stem-panel: #FFFFFF;
+    --stem-line: #E2DED7;
+    --stem-mist: #EEF3F1;
+    --stem-green: #466B58;
+    --stem-teal: #0F6B78;
+    --stem-wine: #7B2444;
+    --stem-gold: #B98535;
+    --stem-red: #B44B45;
+    --stem-shadow: 0 16px 40px rgba(24, 23, 22, 0.08);
+}
+
+.block-container {
+    max-width: 1500px !important;
+}
+
+.stem-hero {
+    display: flex;
+    justify-content: space-between;
+    gap: 2rem;
+    align-items: flex-end;
+    padding: 1.35rem 1.5rem;
+    margin: 1.25rem 0 1.2rem 0;
+    background:
+        linear-gradient(135deg, rgba(70, 107, 88, 0.12), rgba(15, 107, 120, 0.06) 48%, rgba(123, 36, 68, 0.09)),
+        var(--stem-panel);
+    border: 1px solid var(--stem-line);
+    border-radius: 8px;
+    box-shadow: var(--stem-shadow);
+}
+
+.stem-hero h2 {
+    margin: 0 0 0.35rem 0 !important;
+    color: var(--stem-ink) !important;
+    font-size: 1.45rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+}
+
+.stem-hero p {
+    margin: 0 !important;
+    color: var(--stem-charcoal) !important;
+    font-size: 0.95rem !important;
+}
+
+.run-badge {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.15rem;
+    padding: 0.65rem 0.8rem;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(70, 107, 88, 0.18);
+    border-radius: 8px;
+    color: var(--stem-charcoal);
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.run-badge strong {
+    color: var(--stem-green);
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.stem-metric {
+    min-height: 116px;
+    padding: 1rem 1rem 0.9rem;
+    background: var(--stem-panel);
+    border: 1px solid var(--stem-line);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(24, 23, 22, 0.06);
+}
+
+.stem-metric span {
+    display: block;
+    color: #62645F !important;
+    font-size: 0.77rem;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.stem-metric strong {
+    display: block;
+    margin-top: 0.45rem;
+    color: var(--stem-ink);
+    font-size: 1.85rem;
+    line-height: 1;
+    font-weight: 800;
+}
+
+.stem-metric small {
+    display: block;
+    margin-top: 0.55rem;
+    color: #6D706B;
+    font-size: 0.8rem;
+}
+
+.stem-metric-green { border-top: 4px solid var(--stem-green); }
+.stem-metric-teal { border-top: 4px solid var(--stem-teal); }
+.stem-metric-wine { border-top: 4px solid var(--stem-wine); }
+.stem-metric-gold { border-top: 4px solid var(--stem-gold); }
+.stem-metric-red { border-top: 4px solid var(--stem-red); }
+.stem-metric-ink { border-top: 4px solid var(--stem-ink); }
+
+.workflow-panel {
+    padding: 1rem;
+    margin: 1rem 0;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid var(--stem-line);
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(24, 23, 22, 0.06);
+}
+
+.section-label {
+    margin: 1.15rem 0 0.6rem;
+}
+
+.section-label h3 {
+    margin: 0 !important;
+    color: var(--stem-ink) !important;
+    font-size: 1.02rem !important;
+    font-weight: 800 !important;
+    letter-spacing: 0 !important;
+}
+
+.section-label p {
+    margin: 0.2rem 0 0 !important;
+    color: #686B66 !important;
+    font-size: 0.88rem !important;
+}
+
+div[data-testid="stTabs"] button {
+    border-radius: 8px 8px 0 0 !important;
+    font-weight: 700 !important;
+}
+
+div[data-testid="stTabs"] [aria-selected="true"] {
+    color: var(--stem-wine) !important;
+}
+
+div[data-testid="stDataFrame"],
+div[data-testid="stDataEditor"] {
+    border-radius: 8px !important;
+    border: 1px solid var(--stem-line) !important;
+    box-shadow: 0 10px 26px rgba(24, 23, 22, 0.05) !important;
+    overflow: hidden !important;
+}
+
+.stSelectbox, .stMultiSelect, .stTextInput {
+    margin-bottom: 0.15rem !important;
+}
+
+@media (max-width: 900px) {
+    .stem-hero {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .run-badge {
+        align-items: flex-start;
+        white-space: normal;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Centered header within main content area
 st.markdown("""
 <style>
@@ -686,26 +896,42 @@ except Exception:
 if latest_report_run:
     dashboard_df = recommendations_to_dataframe(latest_recommendations)
     metrics = dashboard_metrics(dashboard_df)
+    approvals = approval_metrics(dashboard_df)
     completed_at = latest_report_run.get("completed_at", "unknown")
+    run_date = latest_report_run.get("report_date") or "Latest"
 
-    st.markdown("""
-    <div class="premium-card">
-        <h2 style="margin: 0 0 0.5rem 0; color: var(--soft-black);">Ordering Dashboard</h2>
-        <p style="margin: 0; color: var(--charcoal); opacity: 0.8; font-size: 0.95rem;">Latest saved recommendation run</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="stem-hero">
+            <div>
+                <h2>Ordering Dashboard</h2>
+                <p>Morning recommendations are loaded. Review by supplier, approve quantities, then draft the PO.</p>
+            </div>
+            <div class="run-badge">
+                <strong>{escape(str(run_date))}</strong>
+                <span>Run {escape(str(latest_report_run["id"])[:8])} · {escape(str(completed_at))}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    metric_cols = st.columns(5)
-    metric_cols[0].metric("Urgent SKUs", f"{metrics.urgent_skus:,}")
-    metric_cols[1].metric("Low SKUs", f"{metrics.low_skus:,}")
-    metric_cols[2].metric("Recommended Qty", f"{metrics.recommended_bottles:,}")
-    metric_cols[3].metric("Est. Order Cost", f"${metrics.estimated_order_cost:,.0f}")
-    metric_cols[4].metric("Suppliers", f"{metrics.suppliers_with_orders:,}")
+    metric_cols = st.columns(6)
+    with metric_cols[0]:
+        metric_card("Urgent", format_count(metrics.urgent_skus), "SKUs need action", "red")
+    with metric_cols[1]:
+        metric_card("Low", format_count(metrics.low_skus), "Below target", "gold")
+    with metric_cols[2]:
+        metric_card("Recommended", format_count(metrics.recommended_bottles), "Bottles", "green")
+    with metric_cols[3]:
+        metric_card("Approved", format_count(approvals.approved_bottles), "Bottles ready for PO", "teal")
+    with metric_cols[4]:
+        metric_card("PO Value", format_money(approvals.approved_cost), f"{approvals.approved_lines:,} lines", "wine")
+    with metric_cols[5]:
+        metric_card("Suppliers", format_count(metrics.suppliers_with_orders), "With suggested orders", "ink")
 
-    st.caption(f"Run ID: {latest_report_run['id']} | Completed: {completed_at}")
-
-    st.markdown("### Supplier Focus")
-    filter_cols = st.columns([2, 2, 3, 1])
+    section_label("Supplier Focus", "Choose a supplier, narrow the buying set, then work the approval table.")
+    filter_cols = st.columns([2.2, 2, 3, 1.2])
     supplier_values = (
         dashboard_df["supplier_name"].dropna().unique()
         if "supplier_name" in dashboard_df.columns
@@ -730,21 +956,40 @@ if latest_report_run:
         search=search_query,
         only_order_qty=only_order_qty,
     )
+    filtered_approvals = approval_metrics(filtered_dashboard)
+    filtered_risks = risk_counts(filtered_dashboard)
 
-    tab_recs, tab_suppliers, tab_locations, tab_po = st.tabs(["Recommendations", "Suppliers", "Locations", "PO Draft"])
+    focus_cols = st.columns(5)
+    with focus_cols[0]:
+        metric_card("Visible Rows", format_count(len(filtered_dashboard)), "Current working set", "ink")
+    with focus_cols[1]:
+        metric_card("High Risk", format_count(filtered_risks["High"]), "Needs close review", "red")
+    with focus_cols[2]:
+        metric_card("Medium Risk", format_count(filtered_risks["Medium"]), "Watch list", "gold")
+    with focus_cols[3]:
+        metric_card("Approved Qty", format_count(filtered_approvals.approved_bottles), "In this filter", "teal")
+    with focus_cols[4]:
+        metric_card("Pending", format_count(filtered_approvals.pending_lines), "Rejected by default", "wine")
+
+    tab_recs, tab_suppliers, tab_locations, tab_po = st.tabs(
+        ["Order Review", "Supplier Board", "Freight", "PO Draft"]
+    )
     with tab_recs:
+        section_label("Recommended Buying Set", "Sorted by velocity so the fastest-moving SKUs rise to the top.")
         st.dataframe(
             format_dashboard_dataframe(filtered_dashboard),
             use_container_width=True,
             hide_index=True,
+            height=360,
         )
 
-        st.markdown("### Approval Workbench")
+        section_label("Approval Workbench", "Approve suggested quantities or edit the final bottle count before drafting a PO.")
         editor_df = approval_editor_dataframe(filtered_dashboard)
         edited_approvals = st.data_editor(
             editor_df,
             use_container_width=True,
             hide_index=True,
+            height=430,
             key=f"approval_editor_{latest_report_run['id']}_{selected_supplier}_{'-'.join(selected_statuses)}",
             column_config={
                 "id": None,
@@ -758,6 +1003,7 @@ if latest_report_run:
                     min_value=0,
                     step=1,
                     format="%d",
+                    help="Final bottle quantity to send into the PO draft.",
                 ),
             },
             disabled=[
@@ -785,6 +1031,7 @@ if latest_report_run:
         approval_cols[1].caption("Set Approval to approved/edited and enter Approved Qty before creating a PO draft.")
 
     with tab_suppliers:
+        section_label("Supplier Board", "Use this as the buyer's queue across all suppliers.")
         supplier_base = filter_recommendations(
             dashboard_df,
             supplier="All",
@@ -792,9 +1039,10 @@ if latest_report_run:
             search=search_query,
             only_order_qty=only_order_qty,
         )
-        st.dataframe(supplier_summary(supplier_base), use_container_width=True, hide_index=True)
+        st.dataframe(supplier_summary(supplier_base), use_container_width=True, hide_index=True, height=560)
 
     with tab_locations:
+        section_label("Freight View", "Roll up ordering pressure by pickup location and watch California truck economics.")
         location_base = filter_recommendations(
             dashboard_df,
             supplier="All",
@@ -804,24 +1052,32 @@ if latest_report_run:
         )
         truck = california_truck_summary(location_base)
         truck_cols = st.columns(3)
-        truck_cols[0].metric("CA Truck Progress", f"{truck['progress_pct']:.0f}%")
-        truck_cols[1].metric("Bottles to FTL", f"{truck['bottles_needed']:,}")
-        truck_cols[2].metric("Est. FTL Savings", f"${truck['estimated_savings']:,.0f}")
-        st.dataframe(location_summary(location_base), use_container_width=True, hide_index=True)
+        with truck_cols[0]:
+            metric_card("CA Truck", f"{truck['progress_pct']:.0f}%", "Progress toward FTL", "teal")
+        with truck_cols[1]:
+            metric_card("To Full Truck", format_count(truck["bottles_needed"]), "Bottles remaining", "gold")
+        with truck_cols[2]:
+            metric_card("FTL Savings", format_money(truck["estimated_savings"]), "At threshold", "green")
+        st.progress(min(float(truck["progress_pct"]) / 100, 1.0))
+        st.dataframe(location_summary(location_base), use_container_width=True, hide_index=True, height=460)
 
     with tab_po:
         if selected_supplier == "All":
             st.info("Select a supplier to preview a PO draft.")
         else:
+            section_label("PO Draft Preview", "Only approved or edited rows with approved quantities appear here.")
             po_df = po_export_dataframe(filtered_dashboard)
             po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0
             po_cost_col = "Estimated Cost" if "Estimated Cost" in po_df else "Recommended Cost"
             po_cost = float(po_df[po_cost_col].sum()) if po_cost_col in po_df else 0
             po_metric_cols = st.columns(3)
-            po_metric_cols[0].metric("PO Lines", f"{len(po_df):,}")
-            po_metric_cols[1].metric("PO Qty", f"{po_qty:,}")
-            po_metric_cols[2].metric("PO Est. Cost", f"${po_cost:,.0f}")
-            st.dataframe(po_df, use_container_width=True, hide_index=True)
+            with po_metric_cols[0]:
+                metric_card("PO Lines", format_count(len(po_df)), selected_supplier, "ink")
+            with po_metric_cols[1]:
+                metric_card("PO Qty", format_count(po_qty), "Approved bottles", "teal")
+            with po_metric_cols[2]:
+                metric_card("PO Est. Cost", format_money(po_cost), "Draft value", "wine")
+            st.dataframe(po_df, use_container_width=True, hide_index=True, height=460)
             st.download_button(
                 label="Download PO CSV",
                 data=po_df.to_csv(index=False),

@@ -19,6 +19,7 @@ from stem_order.ingest import (
 from stem_order.pipeline import format_display_dataframe, select_raw_output
 from stem_order.dashboard import (
     approval_editor_dataframe,
+    approval_metrics,
     approval_updates_from_editor,
     california_truck_summary,
     dashboard_metrics,
@@ -26,6 +27,7 @@ from stem_order.dashboard import (
     location_summary,
     po_export_dataframe,
     recommendations_to_dataframe,
+    risk_counts,
 )
 from stem_order.supabase_repository import SupabaseRepository
 
@@ -267,6 +269,42 @@ class DashboardTests(unittest.TestCase):
             updates,
             [{"id": "rec-1", "recommendation_status": "approved", "approved_qty": 12}],
         )
+
+    def test_approval_and_risk_metrics(self):
+        df = recommendations_to_dataframe(
+            [
+                {
+                    "supplier_name": "Supplier A",
+                    "recommendation_status": "approved",
+                    "approved_qty": 12,
+                    "fob": 10,
+                    "risk_level": "High",
+                },
+                {
+                    "supplier_name": "Supplier A",
+                    "recommendation_status": "edited",
+                    "approved_qty": 6,
+                    "fob": 8,
+                    "risk_level": "Medium",
+                },
+                {
+                    "supplier_name": "Supplier B",
+                    "recommendation_status": "rejected",
+                    "approved_qty": 0,
+                    "fob": 9,
+                    "risk_level": "Low",
+                },
+            ]
+        )
+
+        approvals = approval_metrics(df)
+        risks = risk_counts(df)
+
+        self.assertEqual(approvals.approved_lines, 2)
+        self.assertEqual(approvals.approved_bottles, 18)
+        self.assertEqual(approvals.approved_cost, 168)
+        self.assertEqual(approvals.pending_lines, 1)
+        self.assertEqual(risks, {"High": 1, "Medium": 1, "Low": 1})
 
     def test_location_and_truck_summaries(self):
         df = recommendations_to_dataframe(

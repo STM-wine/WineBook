@@ -56,6 +56,14 @@ class DashboardMetrics:
     suppliers_with_orders: int
 
 
+@dataclass
+class ApprovalMetrics:
+    approved_lines: int
+    approved_bottles: int
+    approved_cost: float
+    pending_lines: int
+
+
 def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(recommendations)
     if df.empty:
@@ -120,6 +128,45 @@ def dashboard_metrics(df: pd.DataFrame) -> DashboardMetrics:
         if "supplier_name" in order_df
         else 0,
     )
+
+
+def approval_metrics(df: pd.DataFrame) -> ApprovalMetrics:
+    if df.empty:
+        return ApprovalMetrics(0, 0, 0.0, 0)
+
+    if "recommendation_status" in df:
+        approved_status = df["recommendation_status"].isin(["approved", "edited"])
+    else:
+        approved_status = pd.Series([False] * len(df), index=df.index)
+    approved_qty = pd.to_numeric(df.get("approved_qty", 0), errors="coerce").fillna(0)
+    approved_df = df[approved_status & (approved_qty > 0)].copy()
+    if "approved_qty" in approved_df:
+        approved_df["approved_qty"] = pd.to_numeric(approved_df["approved_qty"], errors="coerce").fillna(0)
+
+    if "fob" in approved_df:
+        fob = pd.to_numeric(approved_df["fob"], errors="coerce")
+        approved_cost = float((fob.fillna(0) * approved_df.get("approved_qty", 0)).sum())
+    else:
+        approved_cost = float(approved_df.get("order_cost", pd.Series(dtype=float)).sum())
+
+    pending = int((df["recommendation_status"] == "rejected").sum()) if "recommendation_status" in df else 0
+    return ApprovalMetrics(
+        approved_lines=len(approved_df),
+        approved_bottles=int(approved_df.get("approved_qty", pd.Series(dtype=float)).sum()),
+        approved_cost=approved_cost,
+        pending_lines=pending,
+    )
+
+
+def risk_counts(df: pd.DataFrame) -> dict[str, int]:
+    if df.empty or "risk_level" not in df:
+        return {"High": 0, "Medium": 0, "Low": 0}
+    counts = df["risk_level"].fillna("").value_counts()
+    return {
+        "High": int(counts.get("High", 0)),
+        "Medium": int(counts.get("Medium", 0)),
+        "Low": int(counts.get("Low", 0)),
+    }
 
 
 def filter_recommendations(
@@ -373,7 +420,10 @@ def california_truck_summary(df: pd.DataFrame) -> dict:
 
 def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     available = [col for col in PO_COLUMNS if col in df.columns]
-    approved_status = df.get("recommendation_status", "").isin(["approved", "edited"])
+    if "recommendation_status" in df:
+        approved_status = df["recommendation_status"].isin(["approved", "edited"])
+    else:
+        approved_status = pd.Series([False] * len(df), index=df.index)
     approved_qty = pd.to_numeric(df.get("approved_qty", 0), errors="coerce").fillna(0)
     po_df = df[approved_status & (approved_qty > 0)][available].copy()
     if "approved_qty" in po_df.columns:
@@ -394,7 +444,9 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 __all__ = [
+    "ApprovalMetrics",
     "DashboardMetrics",
+    "approval_metrics",
     "dashboard_metrics",
     "filter_recommendations",
     "format_dashboard_dataframe",
@@ -405,5 +457,6 @@ __all__ = [
     "location_summary",
     "po_export_dataframe",
     "recommendations_to_dataframe",
+    "risk_counts",
     "supplier_summary",
 ]
