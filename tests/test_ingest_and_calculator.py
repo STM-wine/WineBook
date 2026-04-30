@@ -2,6 +2,12 @@ import unittest
 
 import pandas as pd
 
+from scripts.process_daily_vinosmith_email import (
+    AttachmentCandidate,
+    classify_attachments,
+    safe_filename,
+    storage_path,
+)
 from stem_order.core import calculate_reorder_recommendations, normalize_planning_sku
 from stem_order.ingest import (
     clean_importer_name,
@@ -273,6 +279,26 @@ class SupabaseRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["recommended_qty"], 12)
         self.assertEqual(payload["approved_qty"], 12)
         self.assertEqual(payload["fob"], 10.0)
+
+
+class DailyEmailIngestTests(unittest.TestCase):
+    def test_classify_attachments_uses_filename_keywords(self):
+        rb6, rads = classify_attachments(
+            [
+                AttachmentCandidate("inventory_velocity.xlsx", b"rb6", None, "m1", None),
+                AttachmentCandidate("vinosmith_rads.xlsx", b"rads", None, "m2", None),
+            ]
+        )
+
+        self.assertEqual(rb6.filename, "inventory_velocity.xlsx")
+        self.assertEqual(rads.filename, "vinosmith_rads.xlsx")
+
+    def test_storage_path_sanitizes_filename(self):
+        self.assertEqual(safe_filename("../Inventory:Velocity.xlsx"), "Inventory_Velocity.xlsx")
+        self.assertEqual(
+            storage_path(pd.Timestamp("2026-04-30").date(), "rb6_inventory", "../Inventory:Velocity.xlsx"),
+            "vinosmith/2026-04-30/rb6_inventory/Inventory_Velocity.xlsx",
+        )
 
 
 if __name__ == "__main__":

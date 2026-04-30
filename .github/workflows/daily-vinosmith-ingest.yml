@@ -1,0 +1,68 @@
+name: Daily Vinosmith Ingest
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Optional report date in YYYY-MM-DD"
+        required: false
+      force:
+        description: "Process even if today's scheduled run already completed"
+        required: false
+        default: "false"
+  schedule:
+    # GitHub cron runs in UTC. These windows cover 7am Mountain during both
+    # daylight and standard time; the script skips once a daily run exists.
+    - cron: "15,35 13,14 * * 1-5"
+
+jobs:
+  process-daily-reports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+      EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
+      EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      EMAIL_MAILBOX: ${{ secrets.EMAIL_MAILBOX }}
+      VINOSMITH_SENDER: ${{ secrets.VINOSMITH_SENDER }}
+      VINOSMITH_SUBJECT_KEYWORD: ${{ secrets.VINOSMITH_SUBJECT_KEYWORD }}
+      RB6_ATTACHMENT_KEYWORDS: ${{ vars.RB6_ATTACHMENT_KEYWORDS }}
+      RADS_ATTACHMENT_KEYWORDS: ${{ vars.RADS_ATTACHMENT_KEYWORDS }}
+      SUPABASE_SOURCE_BUCKET: source-files
+      IMPORTERS_CSV_BASE64: ${{ secrets.IMPORTERS_CSV_BASE64 }}
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore importer logistics file
+        run: |
+          if [ -n "$IMPORTERS_CSV_BASE64" ]; then
+            printf '%s' "$IMPORTERS_CSV_BASE64" | base64 -d > importers.csv
+          else
+            echo "IMPORTERS_CSV_BASE64 is not set; processing will continue without importer logistics."
+          fi
+
+      - name: Process Vinosmith email reports
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.report_date }}" ]; then
+            ARGS="$ARGS --report-date ${{ github.event.inputs.report_date }}"
+          fi
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force"
+          fi
+          python scripts/process_daily_vinosmith_email.py $ARGS

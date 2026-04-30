@@ -7,7 +7,8 @@ through the codebase.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -76,6 +77,8 @@ class SupabaseRepository:
         source_file_ids: list[str] | None = None,
         diagnostics: dict[str, Any] | None = None,
         created_by: str | None = None,
+        report_date: date | str | None = None,
+        source_channel: str | None = None,
     ) -> dict[str, Any]:
         payload = {
             "run_type": run_type,
@@ -84,6 +87,10 @@ class SupabaseRepository:
             "diagnostics": diagnostics or {},
             "created_by": created_by,
         }
+        if report_date is not None:
+            payload["report_date"] = report_date.isoformat() if isinstance(report_date, date) else report_date
+        if source_channel is not None:
+            payload["source_channel"] = source_channel
         return self._insert_one("report_runs", payload)
 
     def complete_report_run(
@@ -124,6 +131,79 @@ class SupabaseRepository:
 
         result = self.client.table("reorder_recommendations").insert(payloads).execute()
         return result.data or []
+
+    def completed_report_run_exists(self, run_type: str, report_date: date | str) -> bool:
+        report_date_value = report_date.isoformat() if isinstance(report_date, date) else report_date
+        result = (
+            self.client.table("report_runs")
+            .select("id")
+            .eq("run_type", run_type)
+            .eq("report_date", report_date_value)
+            .eq("status", "completed")
+            .limit(1)
+            .execute()
+        )
+        return bool(result.data)
+
+    def upload_source_file(
+        self,
+        bucket: str,
+        storage_path: str,
+        local_path: str | Path,
+        content_type: str | None = None,
+    ) -> None:
+        file_bytes = Path(local_path).read_bytes()
+        options = {"upsert": "true"}
+        if content_type:
+            options["content-type"] = content_type
+        self.client.storage.from_(bucket).upload(storage_path, file_bytes, options)
+
+    def create_source_file(
+        self,
+        source_type: str,
+        file_name: str,
+        storage_path: str | None = None,
+        content_type: str | None = None,
+        byte_size: int | None = None,
+        checksum: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        email_message_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "source_type": source_type,
+            "file_name": file_name,
+            "storage_path": storage_path,
+            "content_type": content_type,
+            "byte_size": byte_size,
+            "checksum": checksum,
+            "metadata": metadata or {},
+            "email_message_id": email_message_id,
+        }
+        return self._insert_one("source_files", payload)
+
+    def store_source_file(
+        self,
+        local_path: str | Path,
+        source_type: str,
+        bucket: str,
+        storage_path: str,
+        content_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        email_message_id: str | None = None,
+    ) -> dict[str, Any]:
+        local_path = Path(local_path)
+        checksum = hashlib.sha256(local_path.read_bytes()).hexdigest()
+        self.upload_source_file(bucket, storage_path, local_path, content_type=content_type)
+        return self.create_source_file(
+            source_type=source_type,
+            file_name=local_path.name,
+            storage_path=f"{bucket}/{storage_path}",
+            content_type=content_type,
+            byte_size=local_path.stat().st_size,
+            checksum=checksum,
+            metadata=metadata,
+            email_message_id=email_message_id,
+        )
 
     def create_purchase_order_draft(
         self,

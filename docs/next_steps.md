@@ -8,6 +8,7 @@ WineBook has moved beyond the original local MVP shape.
 - Ordering Dashboard runs locally in Streamlit.
 - Supabase project exists and is connected through local `.env`.
 - Numbered schema migrations live in `supabase/migrations/`.
+- Daily Vinosmith email automation has a GitHub Actions workflow and Python processing script.
 - RB6/RADs/importers parsing has been extracted into reusable modules.
 - Recommendations can be saved to Supabase report runs.
 - Dashboard reads the latest saved report run and supports supplier filtering, recommendation review, supplier summaries, location summaries, PO CSV export, and transitional supplier PO draft creation.
@@ -33,11 +34,12 @@ The product goal is a simple buyer workflow:
 
 ## Immediate Priorities
 
-1. Apply `004_buyer_recommendation_fields.sql` in Supabase before persisting the next report run.
-2. Rerun/persist the current RB6/RADs files so Supabase has the expanded buyer-facing fields.
-3. Add in-app approval controls for recommendation rows instead of only defaulting rows to rejected in the database.
-4. Persist approved quantities and status changes back to Supabase.
-5. Update PO draft creation to use approved lines/approved quantities instead of raw recommended quantities.
+1. Apply `005_daily_email_ingest.sql` in Supabase before the first automated run.
+2. Add GitHub Actions secrets for Supabase, mailbox access, and `IMPORTERS_CSV_BASE64`.
+3. Run the `Daily Vinosmith Ingest` workflow manually with `workflow_dispatch` to validate mailbox access.
+4. Add in-app approval controls for recommendation rows instead of only defaulting rows to rejected in the database.
+5. Persist approved quantities and status changes back to Supabase.
+6. Update PO draft creation to use approved lines/approved quantities instead of raw recommended quantities.
 
 ## Near-Term Product Work
 
@@ -74,6 +76,7 @@ Future durable source:
 ## Engineering Priorities
 
 - Keep Streamlit working while productizing.
+- Keep daily ingest runnable both from GitHub Actions and locally for debugging.
 - Keep parser/calculation/persistence logic outside `app.py`.
 - Add tests around every business-rule change.
 - Treat `importers.csv`, `.env`, RB6/RADs exports, and PDFs as local data, not repo assets.

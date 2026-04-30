@@ -28,6 +28,8 @@ Keep the GRW converter separate unless the business explicitly decides to merge 
 5. The app saves report runs and recommendation rows to Supabase when credentials are configured.
 6. Buyers open the dashboard, filter by supplier/status/product, review recommendations, and create supplier PO drafts.
 
+The remote automation path uses GitHub Actions to run `scripts/process_daily_vinosmith_email.py` on weekday mornings after Vinosmith emails the reports to `stm@stemwinecompany.com`. The workflow downloads the attachments, uploads raw source files to Supabase Storage, and creates a `scheduled_email` report run.
+
 `Importer` is Vinosmith terminology. In user-facing workflow and business language, use `Supplier`.
 
 ## Repo Structure
@@ -100,6 +102,7 @@ Useful local checks:
 python scripts/check_supabase_connection.py
 python scripts/show_latest_report_run.py
 python scripts/smoke_ordering_pipeline.py
+python scripts/process_daily_vinosmith_email.py --dry-run
 ```
 
 ## Ordering Logic

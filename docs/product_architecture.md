@@ -27,6 +27,7 @@ Terminology matters: Vinosmith calls the field `Importer`, but Stem's internal a
 - `wine_calculator.py`: existing calculation engine during migration.
 - `supabase/migrations/`: database schema for the future cloud app.
 - `scripts/`: local smoke checks against sample export files.
+- `.github/workflows/daily-vinosmith-ingest.yml`: scheduled GitHub Actions workflow for remote email ingestion.
 
 ## Supabase Responsibilities
 
@@ -36,6 +37,17 @@ Terminology matters: Vinosmith calls the field `Importer`, but Stem's internal a
 - Cron/Functions: lightweight orchestration and scheduled HTTP triggers.
 
 Heavy spreadsheet parsing and pandas calculation should remain in Python workers rather than Supabase Edge Functions.
+
+## Automation Strategy
+
+The first remote automation target is GitHub Actions rather than a local machine:
+
+1. Vinosmith emails RB6/inventory and RADs/sales reports to `stm@stemwinecompany.com`.
+2. GitHub Actions runs on a weekday morning schedule and can also be triggered manually.
+3. `scripts/process_daily_vinosmith_email.py` connects to the mailbox, downloads matching attachments, stores raw files in Supabase Storage, and runs the existing Python pipeline.
+4. The script writes a `scheduled_email` report run. It skips if a completed scheduled run already exists for that report date unless forced.
+
+This keeps the stack tight: GitHub for code and scheduling, Supabase for data/storage/auth, Python for spreadsheet processing.
 
 ## Current Ordering Rules
 
@@ -92,7 +104,8 @@ Future logistics work should add internal trucking cost per bottle, pallet confi
 6. Save supplier-specific PO drafts from current recommendations.
 7. Add buyer approval state so all recommendations default to rejected until explicitly approved.
 8. Add logistics rollups and truck optimization summaries.
-9. Add QuickBooks sync/export once the internal PO workflow is stable.
+9. Automate daily email ingestion with GitHub Actions.
+10. Add QuickBooks sync/export once the internal PO workflow is stable.
 
 ## Supabase Setup Inputs Needed
 

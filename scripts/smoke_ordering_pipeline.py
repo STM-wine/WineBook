@@ -13,14 +13,14 @@ sys.path.insert(0, str(ROOT))
 from stem_order.pipeline import build_ordering_pipeline
 
 
-RB6_FILE = ROOT / "RB6-87.xlsx"
-RADS_FILE = ROOT / "RADs_StemWineCompany_Bottles_Apr2025_Apr2026-4.xlsx"
+RB6_FILE = ROOT / "inventory_velocity.xlsx"
+RADS_FILE = ROOT / "vinosmith_rads.xlsx"
 IMPORTERS_FILE = ROOT / "importers.csv"
 
 
 def main() -> None:
     if not RB6_FILE.exists() or not RADS_FILE.exists():
-        raise SystemExit("Expected RB6-87.xlsx and RADs_StemWineCompany_Bottles_Apr2025_Apr2026-4.xlsx")
+        raise SystemExit("Expected inventory_velocity.xlsx and vinosmith_rads.xlsx")
 
     result = build_ordering_pipeline(RB6_FILE, RADS_FILE, IMPORTERS_FILE)
     recommendations = result.recommendations

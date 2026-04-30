@@ -9,6 +9,7 @@
   - `supabase/migrations/002_manual_recommendation_ingest.sql`
   - `supabase/migrations/003_manual_po_draft_ingest.sql`
   - `supabase/migrations/004_buyer_recommendation_fields.sql`
+  - `supabase/migrations/005_daily_email_ingest.sql`
 
 Do not commit database passwords, service-role keys, or `.env` files. If the database password has been shared outside a password manager, rotate it in Supabase before production use.
 
@@ -40,6 +41,7 @@ For the first pass, the simplest route is the Supabase dashboard:
 4. Paste and run the contents of `supabase/migrations/002_manual_recommendation_ingest.sql`.
 5. Paste and run the contents of `supabase/migrations/003_manual_po_draft_ingest.sql`.
 6. Paste and run the contents of `supabase/migrations/004_buyer_recommendation_fields.sql`.
+7. Paste and run the contents of `supabase/migrations/005_daily_email_ingest.sql`.
 
 After that, install dependencies and check the connection:
 
@@ -88,6 +90,43 @@ New recommendation rows default to an opt-in approval model:
 
 The next app step is to add row-level approval/edit controls and persist buyer changes back to Supabase.
 
+## Daily Email Automation
+
+GitHub Actions runs `.github/workflows/daily-vinosmith-ingest.yml` on weekday mornings. The workflow executes `scripts/process_daily_vinosmith_email.py`, which:
+
+1. Connects to the `stm@stemwinecompany.com` mailbox over IMAP.
+2. Finds the current day's Vinosmith report attachments.
+3. Uploads the raw files to the private Supabase Storage bucket `source-files`.
+4. Creates `source_files` rows.
+5. Runs the existing Python ordering pipeline.
+6. Saves a `scheduled_email` report run and recommendations.
+
+Required GitHub Actions secrets:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `EMAIL_HOST` (`imap.gmail.com` for Gmail/Google Workspace)
+- `EMAIL_PORT` (`993`)
+- `EMAIL_USERNAME`
+- `EMAIL_PASSWORD`
+- `EMAIL_MAILBOX` (`INBOX`)
+- `IMPORTERS_CSV_BASE64`
+
+Optional GitHub Actions secrets/variables:
+
+- `VINOSMITH_SENDER`
+- `VINOSMITH_SUBJECT_KEYWORD`
+- `RB6_ATTACHMENT_KEYWORDS`
+- `RADS_ATTACHMENT_KEYWORDS`
+
+To create `IMPORTERS_CSV_BASE64` locally:
+
+```bash
+base64 -i importers.csv | pbcopy
+```
+
+Paste the copied value into the GitHub secret. Keep the actual `importers.csv` out of the repo.
+
 `002_manual_recommendation_ingest.sql` should also add transitional recommendation fields:
 
 - `planning_sku`
@@ -114,3 +153,11 @@ The next app step is to add row-level approval/edit controls and persist buyer c
 - `pickup_location`
 - `trucking_cost_per_bottle`
 - `landed_cost`
+
+`005_daily_email_ingest.sql` should add daily automation support:
+
+- private Supabase Storage bucket `source-files`
+- `report_runs.report_date`
+- `report_runs.source_channel`
+- scheduled-run lookup index by report date/status
+- `source_files.email_message_id`
