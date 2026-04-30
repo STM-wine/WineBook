@@ -4,6 +4,9 @@ import traceback
 from datetime import datetime, timedelta
 from stem_order.core import normalize_planning_sku
 from stem_order.dashboard import (
+    APPROVAL_STATUSES,
+    approval_editor_dataframe,
+    approval_updates_from_editor,
     california_truck_summary,
     dashboard_metrics,
     filter_recommendations,
@@ -736,6 +739,51 @@ if latest_report_run:
             hide_index=True,
         )
 
+        st.markdown("### Approval Workbench")
+        editor_df = approval_editor_dataframe(filtered_dashboard)
+        edited_approvals = st.data_editor(
+            editor_df,
+            use_container_width=True,
+            hide_index=True,
+            key=f"approval_editor_{latest_report_run['id']}_{selected_supplier}_{'-'.join(selected_statuses)}",
+            column_config={
+                "id": None,
+                "Approval": st.column_config.SelectboxColumn(
+                    "Approval",
+                    options=APPROVAL_STATUSES,
+                    required=True,
+                ),
+                "Approved Qty": st.column_config.NumberColumn(
+                    "Approved Qty",
+                    min_value=0,
+                    step=1,
+                    format="%d",
+                ),
+            },
+            disabled=[
+                "Supplier",
+                "Wine",
+                "Code",
+                "Status",
+                "Risk",
+                "Recommended Qty",
+                "Est. Cost",
+            ],
+        )
+        approval_cols = st.columns([1, 3])
+        if approval_cols[0].button("Save Approvals", type="primary"):
+            updates = approval_updates_from_editor(filtered_dashboard, edited_approvals)
+            if not updates:
+                st.info("No approval changes to save.")
+            else:
+                try:
+                    latest_repo.update_recommendation_approvals(updates)
+                    st.success(f"Saved {len(updates):,} approval updates.")
+                    st.rerun()
+                except Exception as approval_error:
+                    st.error(f"Could not save approvals: {approval_error}")
+        approval_cols[1].caption("Set Approval to approved/edited and enter Approved Qty before creating a PO draft.")
+
     with tab_suppliers:
         supplier_base = filter_recommendations(
             dashboard_df,
@@ -767,7 +815,8 @@ if latest_report_run:
         else:
             po_df = po_export_dataframe(filtered_dashboard)
             po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0
-            po_cost = float(po_df["Estimated Cost"].sum()) if "Estimated Cost" in po_df else 0
+            po_cost_col = "Estimated Cost" if "Estimated Cost" in po_df else "Recommended Cost"
+            po_cost = float(po_df[po_cost_col].sum()) if po_cost_col in po_df else 0
             po_metric_cols = st.columns(3)
             po_metric_cols[0].metric("PO Lines", f"{len(po_df):,}")
             po_metric_cols[1].metric("PO Qty", f"{po_qty:,}")
@@ -780,7 +829,7 @@ if latest_report_run:
                 mime="text/csv",
             )
             if po_df.empty:
-                st.info("This supplier has no recommended order quantities in the current filter.")
+                st.info("This supplier has no approved order quantities in the current filter.")
             elif st.button("Create PO Draft", type="primary"):
                 try:
                     draft = latest_repo.create_purchase_order_draft(

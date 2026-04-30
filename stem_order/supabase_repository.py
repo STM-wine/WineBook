@@ -212,13 +212,17 @@ class SupabaseRepository:
         recommendations: pd.DataFrame,
         notes: str | None = None,
     ) -> dict[str, Any]:
-        if "recommended_qty_rounded" in recommendations:
-            qty = pd.to_numeric(recommendations["recommended_qty_rounded"], errors="coerce").fillna(0)
+        if "approved_qty" in recommendations:
+            qty = pd.to_numeric(recommendations["approved_qty"], errors="coerce").fillna(0)
         else:
             qty = pd.Series([0] * len(recommendations), index=recommendations.index)
-        order_rows = recommendations[qty > 0]
+        if "recommendation_status" in recommendations:
+            approved_status = recommendations["recommendation_status"].isin(["approved", "edited"])
+        else:
+            approved_status = pd.Series([False] * len(recommendations), index=recommendations.index)
+        order_rows = recommendations[approved_status & (qty > 0)]
         if order_rows.empty:
-            raise ValueError("Cannot create a PO draft with no recommended order quantities.")
+            raise ValueError("Cannot create a PO draft with no approved order quantities.")
 
         draft = self._insert_one(
             "purchase_order_drafts",
@@ -237,6 +241,35 @@ class SupabaseRepository:
         lines_result = self.client.table("purchase_order_lines").insert(line_payloads).execute()
         draft["lines"] = lines_result.data or []
         return draft
+
+    def update_recommendation_approval(
+        self,
+        recommendation_id: str,
+        recommendation_status: str,
+        approved_qty: int,
+    ) -> dict[str, Any]:
+        if recommendation_status not in {"rejected", "approved", "edited", "deferred"}:
+            raise ValueError(f"Unsupported recommendation status: {recommendation_status}")
+        if approved_qty < 0:
+            raise ValueError("approved_qty cannot be negative")
+        return self._update_one(
+            "reorder_recommendations",
+            recommendation_id,
+            {
+                "recommendation_status": recommendation_status,
+                "approved_qty": int(approved_qty),
+            },
+        )
+
+    def update_recommendation_approvals(self, updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            self.update_recommendation_approval(
+                update["id"],
+                update["recommendation_status"],
+                int(update.get("approved_qty") or 0),
+            )
+            for update in updates
+        ]
 
     def get_latest_completed_report_run(self, limit: int = 1) -> dict[str, Any] | None:
         runs = self.get_completed_report_runs(limit=limit)
@@ -346,6 +379,8 @@ class SupabaseRepository:
     def _purchase_order_line_payload(self, purchase_order_draft_id: str, row: dict[str, Any]) -> dict[str, Any]:
         diagnostics = row.get("diagnostics") if isinstance(row.get("diagnostics"), dict) else {}
         recommended_qty = int(clean_value(row.get("recommended_qty_rounded"), 0) or 0)
+        approved_qty = int(clean_value(row.get("approved_qty"), 0) or 0)
+        fob = clean_numeric(clean_value(row.get("fob"), clean_value(diagnostics.get("fob"))))
         return {
             "purchase_order_draft_id": purchase_order_draft_id,
             "recommendation_id": clean_value(row.get("id")),
@@ -353,9 +388,9 @@ class SupabaseRepository:
             "product_code": clean_value(row.get("product_code")),
             "planning_sku": clean_value(row.get("planning_sku")),
             "recommended_qty": recommended_qty,
-            "approved_qty": recommended_qty,
-            "fob": clean_value(diagnostics.get("fob")),
-            "line_cost": clean_value(row.get("order_cost"), 0),
+            "approved_qty": approved_qty,
+            "fob": fob,
+            "line_cost": fob * approved_qty if fob is not None else clean_value(row.get("order_cost"), 0),
         }
 
 
@@ -370,6 +405,16 @@ def clean_value(value, default=None):
     if isinstance(value, float) and math.isinf(value):
         return default
     return value
+
+
+def clean_numeric(value, default=None):
+    value = clean_value(value, default)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def bool_value(value) -> bool:

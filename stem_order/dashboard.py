@@ -31,9 +31,19 @@ PO_COLUMNS = [
     "product_name",
     "product_code",
     "planning_sku",
-    "recommended_qty_rounded",
+    "approved_qty",
+    "fob",
     "order_cost",
 ]
+
+APPROVAL_STATUSES = ["rejected", "approved", "edited", "deferred"]
+
+
+def _clean_int(value, default: int = 0) -> int:
+    parsed = pd.to_numeric(value, errors="coerce")
+    if pd.isna(parsed):
+        return default
+    return int(parsed)
 
 
 @dataclass
@@ -207,6 +217,78 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
+def approval_editor_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "id",
+        "supplier_name",
+        "product_name",
+        "product_code",
+        "reorder_status",
+        "risk_level",
+        "recommended_qty_rounded",
+        "recommendation_status",
+        "approved_qty",
+        "order_cost",
+    ]
+    available = [col for col in columns if col in df.columns]
+    editor = df[available].copy()
+
+    if "approved_qty" not in editor.columns:
+        editor["approved_qty"] = 0
+    if "recommendation_status" not in editor.columns:
+        editor["recommendation_status"] = "rejected"
+
+    for col in ["recommended_qty_rounded", "approved_qty"]:
+        if col in editor.columns:
+            editor[col] = pd.to_numeric(editor[col], errors="coerce").fillna(0).astype(int)
+
+    rename_map = {
+        "supplier_name": "Supplier",
+        "product_name": "Wine",
+        "product_code": "Code",
+        "reorder_status": "Status",
+        "risk_level": "Risk",
+        "recommended_qty_rounded": "Recommended Qty",
+        "recommendation_status": "Approval",
+        "approved_qty": "Approved Qty",
+        "order_cost": "Est. Cost",
+    }
+    return editor.rename(columns=rename_map)
+
+
+def approval_updates_from_editor(original: pd.DataFrame, edited: pd.DataFrame) -> list[dict]:
+    if original.empty or edited.empty or "id" not in original.columns or "id" not in edited.columns:
+        return []
+
+    original_by_id = original.set_index("id")
+    updates = []
+    for row in edited.to_dict(orient="records"):
+        recommendation_id = row.get("id")
+        if recommendation_id not in original_by_id.index:
+            continue
+
+        status = row.get("Approval", row.get("recommendation_status", "rejected"))
+        approved_qty = _clean_int(row.get("Approved Qty", row.get("approved_qty", 0)))
+        if status not in APPROVAL_STATUSES:
+            status = "rejected"
+        if approved_qty < 0:
+            approved_qty = 0
+
+        original_row = original_by_id.loc[recommendation_id]
+        original_status = original_row.get("recommendation_status", "rejected")
+        original_qty = _clean_int(original_row.get("approved_qty", 0))
+
+        if status != original_status or approved_qty != original_qty:
+            updates.append(
+                {
+                    "id": recommendation_id,
+                    "recommendation_status": status,
+                    "approved_qty": approved_qty,
+                }
+            )
+    return updates
+
+
 def supplier_summary(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["Supplier", "SKUs", "Urgent", "Recommended Qty", "Est. Cost"])
@@ -291,15 +373,22 @@ def california_truck_summary(df: pd.DataFrame) -> dict:
 
 def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     available = [col for col in PO_COLUMNS if col in df.columns]
-    po_df = df[df.get("recommended_qty_rounded", 0) > 0][available].copy()
+    approved_status = df.get("recommendation_status", "").isin(["approved", "edited"])
+    approved_qty = pd.to_numeric(df.get("approved_qty", 0), errors="coerce").fillna(0)
+    po_df = df[approved_status & (approved_qty > 0)][available].copy()
+    if "approved_qty" in po_df.columns:
+        po_df["approved_qty"] = pd.to_numeric(po_df["approved_qty"], errors="coerce").fillna(0).astype(int)
+    if "fob" in po_df.columns:
+        po_df["Estimated Cost"] = pd.to_numeric(po_df["fob"], errors="coerce").fillna(0) * po_df["approved_qty"]
+        po_df = po_df.drop(columns=["fob"])
     return po_df.rename(
         columns={
             "supplier_name": "Supplier",
             "product_name": "Wine",
             "product_code": "Code",
             "planning_sku": "Planning SKU",
-            "recommended_qty_rounded": "Quantity",
-            "order_cost": "Estimated Cost",
+            "approved_qty": "Quantity",
+            "order_cost": "Recommended Cost",
         }
     )
 
@@ -309,6 +398,9 @@ __all__ = [
     "dashboard_metrics",
     "filter_recommendations",
     "format_dashboard_dataframe",
+    "approval_editor_dataframe",
+    "approval_updates_from_editor",
+    "APPROVAL_STATUSES",
     "california_truck_summary",
     "location_summary",
     "po_export_dataframe",

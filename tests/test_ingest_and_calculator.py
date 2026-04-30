@@ -18,6 +18,8 @@ from stem_order.ingest import (
 )
 from stem_order.pipeline import format_display_dataframe, select_raw_output
 from stem_order.dashboard import (
+    approval_editor_dataframe,
+    approval_updates_from_editor,
     california_truck_summary,
     dashboard_metrics,
     filter_recommendations,
@@ -201,6 +203,7 @@ class DashboardTests(unittest.TestCase):
                     "planning_sku": "wine a",
                     "reorder_status": "URGENT",
                     "recommendation_status": "rejected",
+                    "approved_qty": 12,
                     "risk_level": "High",
                     "recommended_qty_rounded": 12,
                     "last_30_day_sales": 50,
@@ -215,6 +218,7 @@ class DashboardTests(unittest.TestCase):
                     "planning_sku": "wine b",
                     "reorder_status": "OK",
                     "recommendation_status": "rejected",
+                    "approved_qty": 0,
                     "risk_level": "Low",
                     "recommended_qty_rounded": 0,
                     "last_30_day_sales": 5,
@@ -227,12 +231,42 @@ class DashboardTests(unittest.TestCase):
 
         metrics = dashboard_metrics(df)
         filtered = filter_recommendations(df, supplier="Supplier A", statuses=["URGENT"])
-        po_df = po_export_dataframe(filtered)
+        approved = filtered.copy()
+        approved["recommendation_status"] = "approved"
+        po_df = po_export_dataframe(approved)
 
         self.assertEqual(metrics.urgent_skus, 1)
         self.assertEqual(metrics.recommended_bottles, 12)
         self.assertEqual(len(filtered), 1)
         self.assertEqual(po_df.loc[0, "Quantity"], 12)
+
+    def test_approval_editor_extracts_changed_rows(self):
+        original = recommendations_to_dataframe(
+            [
+                {
+                    "id": "rec-1",
+                    "supplier_name": "Supplier A",
+                    "product_name": "Wine A",
+                    "product_code": "A1",
+                    "reorder_status": "URGENT",
+                    "risk_level": "High",
+                    "recommended_qty_rounded": 12,
+                    "recommendation_status": "rejected",
+                    "approved_qty": 0,
+                    "order_cost": 120,
+                }
+            ]
+        )
+        edited = approval_editor_dataframe(original)
+        edited.loc[0, "Approval"] = "approved"
+        edited.loc[0, "Approved Qty"] = 12
+
+        updates = approval_updates_from_editor(original, edited)
+
+        self.assertEqual(
+            updates,
+            [{"id": "rec-1", "recommendation_status": "approved", "approved_qty": 12}],
+        )
 
     def test_location_and_truck_summaries(self):
         df = recommendations_to_dataframe(
@@ -267,7 +301,9 @@ class SupabaseRepositoryTests(unittest.TestCase):
                 "product_code": "A1",
                 "planning_sku": "wine a",
                 "recommended_qty_rounded": 12,
+                "approved_qty": 6,
                 "order_cost": 120.0,
+                "fob": "10.0",
                 "diagnostics": {"fob": 10.0},
             },
         )
@@ -277,8 +313,9 @@ class SupabaseRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["product_name"], "Wine A")
         self.assertEqual(payload["planning_sku"], "wine a")
         self.assertEqual(payload["recommended_qty"], 12)
-        self.assertEqual(payload["approved_qty"], 12)
+        self.assertEqual(payload["approved_qty"], 6)
         self.assertEqual(payload["fob"], 10.0)
+        self.assertEqual(payload["line_cost"], 60.0)
 
 
 class DailyEmailIngestTests(unittest.TestCase):
