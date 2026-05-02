@@ -5,6 +5,8 @@ A branded web interface for converting GRW invoice PDFs to Excel templates.
 """
 
 from dataclasses import dataclass
+import base64
+import hashlib
 import os
 import re
 import tempfile
@@ -32,7 +34,14 @@ st.set_page_config(
 )
 
 
-LOGO_PATH = Path(__file__).parent / "logo" / "StemWineCoLogo.png"
+LOGO_PATH = (
+    Path(__file__).parent
+    / "modules"
+    / "po_tools"
+    / "grw_invoice_converter"
+    / "logo"
+    / "GRW_converter_logo.png"
+)
 TEMPLATE_PATH = (
     Path(__file__).parent
     / "modules"
@@ -72,8 +81,12 @@ class ConversionFailure:
 
 
 def uploaded_file_key(uploaded_pdf) -> str:
-    size = getattr(uploaded_pdf, "size", None)
-    return f"{uploaded_pdf.name}:{size}"
+    uploaded_pdf.seek(0)
+    file_bytes = uploaded_pdf.getvalue()
+    file_digest = hashlib.sha256(file_bytes).hexdigest()[:16]
+    parser_path = Path(parse_grw_pdf.__code__.co_filename)
+    parser_mtime = int(parser_path.stat().st_mtime) if parser_path.exists() else 0
+    return f"{uploaded_pdf.name}:{file_digest}:{parser_mtime}"
 
 
 def safe_filename_token(value: str | None, fallback: str) -> str:
@@ -128,6 +141,13 @@ def build_optional_saasant_csv(
     _ = items
     _ = resolution
     return csv_filename, None
+
+
+def logo_data_uri(path: Path) -> str:
+    suffix = path.suffix.lower()
+    mime_type = "image/png" if suffix == ".png" else "image/jpeg"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def inject_styles() -> None:
@@ -216,63 +236,30 @@ def inject_styles() -> None:
             color: var(--grw-page-text);
         }
 
-        .hero-shell {
-            border: 1px solid var(--grw-card-border);
+        .grw-logo-wrapper {
+            display: flex;
+            justify-content: center;
+            margin: 0.25rem 0 1.5rem 0;
+        }
+
+        .grw-logo-card {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             background: var(--grw-card-shell);
-            border-radius: 28px;
-            padding: 1.4rem 1.5rem;
+            border: 1px solid var(--grw-card-border);
+            border-radius: 24px;
             box-shadow: var(--grw-shadow);
-            margin-bottom: 1.25rem;
-            color: var(--grw-text);
+            padding: 1rem 1.25rem;
+            min-width: 320px;
+            max-width: 420px;
         }
 
-        .grw-page-text {
-            color: var(--grw-page-text) !important;
-        }
-
-        .grw-page-muted {
-            color: var(--grw-page-muted) !important;
-        }
-
-        .grw-card-text {
-            color: var(--grw-text) !important;
-        }
-
-        .grw-card-muted {
-            color: var(--grw-muted) !important;
-        }
-
-        .grw-uploader-text,
-        .grw-status-text {
-            color: var(--grw-text) !important;
-        }
-
-        .hero-kicker {
-            display: inline-block;
-            color: var(--grw-logo-accent);
-            background: rgba(115, 128, 90, 0.12);
-            border: 1px solid rgba(115, 128, 90, 0.18);
-            padding: 0.3rem 0.7rem;
-            border-radius: 999px;
-            font-size: 0.82rem;
-            font-weight: 700;
-            letter-spacing: 0.02em;
-            text-transform: uppercase;
-        }
-
-        .hero-title {
-            color: var(--grw-text);
-            font-size: 2.5rem;
-            line-height: 1.02;
-            margin: 0.8rem 0 0.55rem 0;
-            font-weight: 700;
-        }
-
-        .hero-copy {
-            color: var(--grw-muted);
-            font-size: 1.05rem;
-            margin: 0;
-            max-width: 48rem;
+        .grw-logo-image {
+            width: min(100%, 300px);
+            height: auto;
+            display: block;
+            margin: 0 auto;
         }
 
         .grw-card,
@@ -452,12 +439,13 @@ def inject_styles() -> None:
         }
 
         .result-path {
-            background: rgba(89, 102, 63, 0.08);
-            border: 1px solid rgba(89, 102, 63, 0.14);
+            background: var(--grw-card-surface);
+            border: 1px solid var(--grw-card-border);
             border-radius: 18px;
             padding: 0.95rem 1rem;
             color: var(--grw-text) !important;
             font-weight: 600;
+            box-shadow: 0 10px 24px rgba(65, 53, 39, 0.05);
         }
 
         .status-note {
@@ -499,11 +487,6 @@ def inject_styles() -> None:
             display: none !important;
         }
 
-        @media (max-width: 900px) {
-            .hero-title {
-                font-size: 2rem;
-            }
-        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -584,17 +567,16 @@ def build_preview_dataframe(priced_items: list[dict]) -> pd.DataFrame:
 
 
 def render_hero() -> None:
+    if not LOGO_PATH.exists():
+        return
     st.markdown(
-        """
-        <div class="hero-shell grw-card">
-            <div class="hero-kicker">Stem Wine Company</div>
-            <div class="hero-title">GRW Invoice Converter</div>
-            <p class="hero-copy">
-                Turn GRW sales order PDFs into polished Stem-ready Excel templates with validated pricing,
-                clean item formatting, and a faster buyer workflow.
-            </p>
+        f'''
+        <div class="grw-logo-wrapper">
+            <div class="grw-logo-card">
+                <img class="grw-logo-image" src="{logo_data_uri(LOGO_PATH)}" alt="GRW Converter Logo" />
+            </div>
         </div>
-        """,
+        ''',
         unsafe_allow_html=True,
     )
 
@@ -767,7 +749,8 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
     try:
         status.text("Extracting line items")
         progress_bar.progress(30)
-        items, pages_parsed, debug_info = parse_grw_pdf(pdf_path, debug=True)
+        parser_debug = os.getenv("GRW_PDF_TRACE", "").strip() == "1"
+        items, pages_parsed, debug_info = parse_grw_pdf(pdf_path, debug=parser_debug)
 
         if not items:
             raise RuntimeError("No line items were found in the PDF. Please check the file format and try again.")

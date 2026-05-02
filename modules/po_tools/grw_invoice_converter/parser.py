@@ -5,6 +5,7 @@ Extracts structured line items from GRW invoice PDFs.
 """
 
 import re
+import os
 import pdfplumber
 from pathlib import Path
 from typing import List, Dict, Any
@@ -206,6 +207,70 @@ def is_item_start(line: str) -> bool:
     return False
 
 
+def extract_item_number_from_start(line: str) -> int | None:
+    """Extract the leading GRW item number when a line starts a new item."""
+    match = re.match(r'^\s*(\d+)\s+Sale\s+[A-Z]{3}:', line.strip())
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def is_description_continuation_line(line: str) -> bool:
+    """Return True when a wrapped PDF line should be appended to the current item description.
+
+    GRW PDFs sometimes wrap long Burgundy/Bordeaux descriptions onto the next text line.
+    Those wrapped lines should stay with the current item instead of being ignored or
+    misread as a new row. We exclude code/price metadata lines so the description stays
+    human-readable and duplicate validation compares the full wine name.
+    """
+    candidate = line.strip()
+    if not candidate:
+        return False
+    if is_item_start(candidate):
+        return False
+    if re.match(r'^\s*Order\s*#', candidate, re.IGNORECASE):
+        return False
+    if re.match(r'^\s*Page\s+\d+', candidate, re.IGNORECASE):
+        return False
+    return True
+
+
+def extract_description_fragment_from_line(line: str) -> str:
+    """Extract only the description-bearing portion of a wrapped continuation line.
+
+    Real GRW PDFs can wrap a long wine name onto the next line while also carrying
+    vintage, size, or even some repeated price/quantity fragments in that same line.
+    We keep the meaningful descriptive text and strip row metadata so the parser
+    preserves distinct wine names without weakening duplicate validation.
+    """
+    candidate = clean_text(line)
+    if not candidate or not is_description_continuation_line(candidate):
+        return ""
+
+    # If a GRW code prefix appears at the start of the wrapped line, strip only that
+    # prefix and keep any descriptive text that follows.
+    candidate = re.sub(
+        r'^\s*(?:0?375|0?750|1500|3000)-\d{4}-[A-Z0-9]+\b\s*',
+        '',
+        candidate,
+        flags=re.IGNORECASE,
+    )
+
+    # Remove remaining PDF row metadata/code fragments that are not part of the wine name.
+    candidate = re.sub(r'\b(?:0?375|0?750|1500|3000)-\d{4}-[A-Z0-9]+\b', ' ', candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r'\$[\d,]+\.\d{2}', ' ', candidate)
+    candidate = re.sub(r'\b\d+\s+(?=(?:750|375|1500|3000|1\.5L|PK\d|\d+-Pack)\b)', ' ', candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r'\b(?:PK\d+|\d+-Pack)\b', ' ', candidate, flags=re.IGNORECASE)
+    candidate = clean_text(candidate)
+
+    # Ignore lines that are now just bottle size or other non-description leftovers.
+    if not re.search(r'[A-Za-z]', candidate):
+        return ""
+    if re.fullmatch(r'(?:750mL|750ml|375mL|1500|3000|1\.5L)', candidate, flags=re.IGNORECASE):
+        return ""
+    return candidate
+
+
 def parse_item_block(block: str) -> Dict[str, Any]:
     """
     Parse a multiline item block with flexible format handling.
@@ -278,6 +343,14 @@ def parse_item_block(block: str) -> Dict[str, Any]:
             # Fallback: everything after Sale prefix until $
             desc_fallback = re.search(r'Sale\s+[A-Z]{3}:\S+\s+([^$]+)', first_line)
             raw_description = desc_fallback.group(1).strip() if desc_fallback else ''
+
+        continuation_lines = []
+        for line in lines[1:]:
+            fragment = extract_description_fragment_from_line(line)
+            if fragment:
+                continuation_lines.append(fragment)
+        if continuation_lines:
+            raw_description = clean_text(" ".join([raw_description, *continuation_lines]))
         
         # Clean up description: remove qty/price fragments
         raw_description = re.sub(r'\$[\d,]+\.\d{2}', '', raw_description).strip()
@@ -357,6 +430,7 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
     # Pattern to find item starts: number + Sale + SKU code
     # Examples: "12 Sale RHN:RAY:RAYA", "20 Sale USP:BEA:FRER"
     item_start_pattern = r'^\s*(\d+)\s+Sale\s+[A-Z]{3}:[A-Z]{3,}:[A-Z]+'
+    trace_lines = debug and os.getenv("GRW_PDF_TRACE", "").strip() == "1"
     
     with pdfplumber.open(pdf_path) as pdf:
         pdf_page_count = len(pdf.pages)
@@ -372,34 +446,68 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
             
             # Split text into lines for processing
             lines = text.split('\n')
+
+            if trace_lines:
+                print(f"GRW PAGE TRACE START page={page_num}")
+                for idx, raw_line in enumerate(lines, 1):
+                    print(f"PDF TEXT LINE {idx:03d}: {raw_line}")
+                print(f"GRW PAGE TRACE END page={page_num}")
             
             # First pass: identify item boundaries and extract blocks
             item_blocks = []
             current_block_lines = []
             current_block_start = None
+            current_block_item_number = None
+            traced_item_numbers = {5, 6, 7}
             
             for line_idx, line in enumerate(lines):
                 line_stripped = line.strip()
                 if not line_stripped:
+                    if trace_lines and current_block_item_number in {5, 6}:
+                        print(
+                            f"TRACE page={page_num} line={line_idx + 1:03d} "
+                            f"classified=ignored_blank current_item={current_block_item_number}"
+                        )
                     continue
                 
+                line_item_number = extract_item_number_from_start(line_stripped)
+                trace_current_context = trace_lines and (
+                    line_item_number in traced_item_numbers or current_block_item_number in {5, 6}
+                )
+
                 # Check for footer markers - stop parsing this page
                 line_lower = line_stripped.lower()
                 if any(marker.lower() in line_lower for marker in strict_footer_markers):
+                    if trace_current_context:
+                        print(
+                            f"TRACE page={page_num} line={line_idx + 1:03d} "
+                            f"classified=footer current_item={current_block_item_number} text={line_stripped}"
+                        )
                     # Save current block if exists
                     if current_block_lines:
                         block_text = '\n'.join(current_block_lines)
                         item_blocks.append((current_block_start, block_text))
                         current_block_lines = []
                         current_block_start = None
+                        current_block_item_number = None
                     break
                 
                 # Skip header lines
                 if any(skip in line_stripped for skip in header_markers):
+                    if trace_current_context:
+                        print(
+                            f"TRACE page={page_num} line={line_idx + 1:03d} "
+                            f"classified=header current_item={current_block_item_number} text={line_stripped}"
+                        )
                     continue
                 
                 # Check if this line starts a new item
                 if re.match(item_start_pattern, line_stripped):
+                    if trace_lines and line_item_number in traced_item_numbers:
+                        print(
+                            f"TRACE ITEM START page={page_num} line={line_idx + 1:03d} "
+                            f"item={line_item_number} text={line_stripped}"
+                        )
                     # Save previous block if exists
                     if current_block_lines:
                         block_text = '\n'.join(current_block_lines)
@@ -407,9 +515,25 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
                     # Start new block
                     current_block_lines = [line_stripped]
                     current_block_start = line_idx
+                    current_block_item_number = line_item_number
                 elif current_block_lines:
                     # Continue current block
                     current_block_lines.append(line_stripped)
+                    if trace_current_context:
+                        classification = (
+                            "continuation_candidate"
+                            if is_description_continuation_line(line_stripped)
+                            else "metadata_candidate"
+                        )
+                        print(
+                            f"TRACE page={page_num} line={line_idx + 1:03d} "
+                            f"classified={classification} current_item={current_block_item_number} text={line_stripped}"
+                        )
+                elif trace_current_context:
+                    print(
+                        f"TRACE page={page_num} line={line_idx + 1:03d} "
+                        f"classified=ignored_outside_block current_item={current_block_item_number} text={line_stripped}"
+                    )
             
             # Don't forget the last block
             if current_block_lines:
@@ -418,6 +542,12 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
             
             # Second pass: parse each block
             for block_start, block_text in item_blocks:
+                block_item_number = extract_item_number_from_start(block_text.split('\n', 1)[0])
+                if trace_lines and block_item_number in traced_item_numbers:
+                    print(
+                        f"TRACE BLOCK page={page_num} item={block_item_number} start_line={block_start + 1:03d}\n"
+                        f"{block_text}\nEND TRACE BLOCK"
+                    )
                 # Try to parse as item
                 item = parse_item_block(block_text)
                 if item:
@@ -431,7 +561,7 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
             items_per_page[page_num] = len(page_items)
     
     # Debug output for unparsed blocks
-    if unparsed_blocks:
+    if debug and unparsed_blocks:
         print(f"⚠️ UNPARSED BLOCKS: {len(unparsed_blocks)}")
         for i, block in enumerate(unparsed_blocks[:3]):  # Show first 3
             print(f"UNPARSED BLOCK {i+1}:\n{block}\n")
