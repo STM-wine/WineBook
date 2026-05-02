@@ -66,6 +66,7 @@ class ConversionSuccess:
     csv_filename: str | None
     csv_bytes: bytes | None
     priced_items: list[dict[str, Any]]
+    export_rows: list[dict[str, Any]]
     validation_result: dict[str, Any]
     preview_df: pd.DataFrame
     customer_name: str
@@ -84,9 +85,17 @@ def uploaded_file_key(uploaded_pdf) -> str:
     uploaded_pdf.seek(0)
     file_bytes = uploaded_pdf.getvalue()
     file_digest = hashlib.sha256(file_bytes).hexdigest()[:16]
-    parser_path = Path(parse_grw_pdf.__code__.co_filename)
-    parser_mtime = int(parser_path.stat().st_mtime) if parser_path.exists() else 0
-    return f"{uploaded_pdf.name}:{file_digest}:{parser_mtime}"
+    dependency_paths = [
+        Path(parse_grw_pdf.__code__.co_filename),
+        Path(write_to_updated_template.__code__.co_filename),
+        TEMPLATE_PATH,
+        Path(__file__),
+    ]
+    dependency_stamp = 0
+    for dependency_path in dependency_paths:
+        if dependency_path.exists():
+            dependency_stamp = max(dependency_stamp, int(dependency_path.stat().st_mtime))
+    return f"{uploaded_pdf.name}:{file_digest}:{dependency_stamp}"
 
 
 def safe_filename_token(value: str | None, fallback: str) -> str:
@@ -116,14 +125,14 @@ def allocate_download_filenames(resolution: FileResolution) -> tuple[str, str]:
 
 
 def build_excel_download_bytes(
-    items: list[dict[str, Any]],
+    export_rows: list[dict[str, Any]],
     resolution: FileResolution,
     excel_filename: str,
 ) -> tuple[str, bytes]:
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_output_path = Path(temp_dir) / excel_filename
         output_file = write_to_updated_template(
-            items=items,
+            items=export_rows,
             template_path=str(TEMPLATE_PATH),
             output_path=str(temp_output_path),
             invoice_number=resolution.invoice_number,
@@ -134,11 +143,11 @@ def build_excel_download_bytes(
 
 
 def build_optional_saasant_csv(
-    items: list[dict[str, Any]],
+    export_rows: list[dict[str, Any]],
     resolution: FileResolution,
     csv_filename: str,
 ) -> tuple[str | None, bytes | None]:
-    _ = items
+    _ = export_rows
     _ = resolution
     return csv_filename, None
 
@@ -546,21 +555,51 @@ def resolve_file_details(uploaded_pdf) -> FileResolution:
     )
 
 
-def build_preview_dataframe(priced_items: list[dict]) -> pd.DataFrame:
-    preview_data = []
+def build_export_rows(priced_items: list[dict], resolution: FileResolution) -> list[dict[str, Any]]:
+    export_rows = []
     for item in priced_items:
-        preview_data.append(
+        markup = 0.15 if item.get("sku_prefix") == "BDX" else 0.10
+        export_rows.append(
             {
+                "Item Number": "NEW",
+                "Item Description": item.get("description", ""),
                 "Description": item.get("description", ""),
+                "Supplier": item.get("supplier", ""),
+                "GRW Order #": resolution.invoice_number,
                 "SKU": item.get("sku_prefix", ""),
                 "PK": item.get("pack_size", 1),
+                "Quantity": item.get("quantity", 0),
                 "Qty": item.get("quantity", 0),
-                "FOB Bottle": f"${item.get('fob_bottle', 0):.2f}",
-                "FOB Case": f"${item.get('fob_case', 0):.2f}",
-                "Frontline": f"${item.get('frontline', 0)}",
-                "Ext Cost": f"${item.get('ext_cost', 0):.2f}",
-                "Ext Price": f"${item.get('ext_price', 0):.2f}",
-                "Markup": "15%" if item.get("sku_prefix") == "BDX" else "10%",
+                "FOB Btl": item.get("fob_bottle", 0),
+                "FOB Bottle": item.get("fob_bottle", 0),
+                "Frontline": item.get("frontline", 0),
+                "Account": resolution.customer_name,
+                "FOB Case": item.get("fob_case", 0),
+                "Ext Cost": item.get("ext_cost", 0),
+                "STM Markup %": markup,
+                "Markup": "15%" if markup == 0.15 else "10%",
+                "Ext Price": item.get("ext_price", 0),
+            }
+        )
+    return export_rows
+
+
+def build_preview_dataframe(export_rows: list[dict[str, Any]]) -> pd.DataFrame:
+    preview_data = []
+    for row in export_rows:
+        preview_data.append(
+            {
+                "Item Number": row.get("Item Number", "NEW"),
+                "Description": row.get("Item Description", ""),
+                "SKU": row.get("SKU", ""),
+                "PK": row.get("PK", 1),
+                "Qty": row.get("Qty", row.get("Quantity", 0)),
+                "FOB Bottle": f"${row.get('FOB Bottle', row.get('FOB Btl', 0)):.2f}",
+                "FOB Case": f"${row.get('FOB Case', 0):.2f}",
+                "Frontline": f"${row.get('Frontline', 0)}",
+                "Ext Cost": f"${row.get('Ext Cost', 0):.2f}",
+                "Ext Price": f"${row.get('Ext Price', 0):.2f}",
+                "Markup": row.get("Markup", ""),
             }
         )
     return pd.DataFrame(preview_data)
@@ -758,7 +797,8 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
         status.text("Calculating pricing")
         progress_bar.progress(55)
         priced_items = apply_pricing(items)
-        preview_df = build_preview_dataframe(priced_items)
+        export_rows = build_export_rows(priced_items, resolution)
+        preview_df = build_preview_dataframe(export_rows)
 
         status.text("Validating workbook data")
         progress_bar.progress(75)
@@ -770,8 +810,8 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
         status.text("Building download files")
         progress_bar.progress(96)
         excel_filename, csv_filename = allocate_download_filenames(resolution)
-        excel_filename, excel_bytes = build_excel_download_bytes(priced_items, resolution, excel_filename)
-        csv_filename, csv_bytes = build_optional_saasant_csv(priced_items, resolution, csv_filename)
+        excel_filename, excel_bytes = build_excel_download_bytes(export_rows, resolution, excel_filename)
+        csv_filename, csv_bytes = build_optional_saasant_csv(export_rows, resolution, csv_filename)
     finally:
         os.unlink(pdf_path)
 
@@ -784,6 +824,7 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
         csv_filename=csv_filename,
         csv_bytes=csv_bytes,
         priced_items=priced_items,
+        export_rows=export_rows,
         validation_result=validation_result,
         preview_df=preview_df,
         customer_name=resolution.customer_name,

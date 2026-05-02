@@ -57,11 +57,13 @@ def extract_vintage(description: str) -> int:
 def extract_size(description: str) -> str:
     """Extract bottle size, default to 750mL."""
     # Look for size patterns
-    size_match = re.search(r'(750mL|750ml|750 ML|375mL|1\.5L|1\.5L|3L|6L|Magnum|Double Magnum)', description, re.IGNORECASE)
+    size_match = re.search(r'(750mL|750ml|750 ML|375mL|1\.5L|3L|6L|Magnum|Double Magnum)', description, re.IGNORECASE)
     if size_match:
         size = size_match.group(1).lower()
         if size in ['750ml', '750 ml']:
             return '750mL'
+        if size == '1.5l':
+            return '1.5L'
         return size_match.group(1)
     return '750mL'
 
@@ -106,6 +108,13 @@ def clean_description(description: str, sku_prefix: str) -> str:
     
     # Remove company name that appears in headers
     cleaned = re.sub(r'GRW\s*Wine\s*Collection,?\s*Inc\.?', '', cleaned, flags=re.IGNORECASE)
+
+    # Remove GRW code fragments that can leak into wrapped descriptions.
+    cleaned = re.sub(r'\b[A-Z0-9]{2,}-\d{4}-F0L0C0?\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\b(?:0?375|0?750|1500|3000)-\d{4}-F0L0C0?\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'(?<![A-Z0-9])[-–—]*F0L0C0?\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*--+\s*', ' ', cleaned)
+    cleaned = re.sub(r'\s*[-–—]+\s*(?=\d{4}\b)', ' ', cleaned)
     
     # Remove Order # Date lines
     cleaned = re.sub(r'Order\s*#\s*Date\s*S\d+\s+\d{1,2}/\d{1,2}/\d{4}', '', cleaned, flags=re.IGNORECASE)
@@ -172,10 +181,22 @@ def format_item_description(
     # Normalize bottle size to lowercase ml format
     size_formatted = '750ml'
     if bottle_size:
-        size_num = re.search(r'(\d+)', bottle_size)
-        if size_num:
-            size_val = size_num.group(1)
-            size_formatted = f"{size_val}ml"
+        size_lower = bottle_size.lower()
+        if size_lower in {'750ml', '750 ml'}:
+            size_formatted = '750ml'
+        elif size_lower == '375ml':
+            size_formatted = '375ml'
+        elif size_lower == '1.5l':
+            size_formatted = '1500ml'
+        elif size_lower == '3l':
+            size_formatted = '3000ml'
+        elif size_lower == '6l':
+            size_formatted = '6000ml'
+        else:
+            size_num = re.search(r'(\d+)', bottle_size)
+            if size_num:
+                size_val = size_num.group(1)
+                size_formatted = f"{size_val}ml"
     
     # Format pack/size: PK/750ml
     pack_size_formatted = f"{pack_size}/{size_formatted}"
@@ -250,17 +271,20 @@ def extract_description_fragment_from_line(line: str) -> str:
     # If a GRW code prefix appears at the start of the wrapped line, strip only that
     # prefix and keep any descriptive text that follows.
     candidate = re.sub(
-        r'^\s*(?:0?375|0?750|1500|3000)-\d{4}-[A-Z0-9]+\b\s*',
+        r'^\s*(?:[A-Z0-9]{2,}|0?375|0?750|1500|3000)-\d{4}-F0L0C0?\b\s*',
         '',
         candidate,
         flags=re.IGNORECASE,
     )
 
     # Remove remaining PDF row metadata/code fragments that are not part of the wine name.
-    candidate = re.sub(r'\b(?:0?375|0?750|1500|3000)-\d{4}-[A-Z0-9]+\b', ' ', candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r'\b(?:[A-Z0-9]{2,}|0?375|0?750|1500|3000)-\d{4}-F0L0C0?\b', ' ', candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r'(?<![A-Z0-9])[-–—]*F0L0C0?\b', ' ', candidate, flags=re.IGNORECASE)
     candidate = re.sub(r'\$[\d,]+\.\d{2}', ' ', candidate)
     candidate = re.sub(r'\b\d+\s+(?=(?:750|375|1500|3000|1\.5L|PK\d|\d+-Pack)\b)', ' ', candidate, flags=re.IGNORECASE)
     candidate = re.sub(r'\b(?:PK\d+|\d+-Pack)\b', ' ', candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r'\s*--+\s*', ' ', candidate)
+    candidate = re.sub(r'\s*[-–—]+\s*(?=\d{4}\b)', ' ', candidate)
     candidate = clean_text(candidate)
 
     # Ignore lines that are now just bottle size or other non-description leftovers.

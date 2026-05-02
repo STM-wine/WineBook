@@ -1,7 +1,13 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
+from openpyxl import load_workbook
+
+from modules.po_tools.grw_invoice_converter.grw_converter import write_to_updated_template
 from modules.po_tools.grw_invoice_converter.parser import (
     extract_description_fragment_from_line,
+    format_item_description,
     parse_item_block,
 )
 from modules.po_tools.grw_invoice_converter.validator import validate_no_duplicate_skus
@@ -54,6 +60,118 @@ class GrwParserTests(unittest.TestCase):
 
         code_only = extract_description_fragment_from_line("0750-1996-F0L0C0")
         self.assertEqual(code_only, "")
+
+    def test_code_only_continuation_line_does_not_pollute_description(self):
+        block = (
+            "9 Sale BDX:CAN:GAFF- Canon La Gaffeliere OWC $300.00 1 PK12 $3,600.00\n"
+            "PK12-2005-F0L0C0"
+        )
+
+        item = parse_item_block(block)
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["clean_description"], "Canon La Gaffeliere OWC")
+        self.assertNotIn("F0L0C", item["description"])
+        self.assertEqual(item["description"], "Canon La Gaffeliere OWC 2005 12/750ml")
+
+    def test_code_fragments_are_removed_from_final_description(self):
+        canon_block = (
+            "9 Sale BDX:CAN:GAFF- Canon La Gaffeliere OWC -F0L0C0 $300.00 1 PK12 $3,600.00\n"
+            "PK12-2005-F0L0C0"
+        )
+        faiveley_block = (
+            "10 Sale BUR:FAI:MAZI- Faiveley Mazis Chambertin -F0L0C0 $250.00 1 750mL $250.00\n"
+            "0750-2005-F0L0C0"
+        )
+
+        canon_item = parse_item_block(canon_block)
+        faiveley_item = parse_item_block(faiveley_block)
+
+        self.assertIsNotNone(canon_item)
+        self.assertIsNotNone(faiveley_item)
+        self.assertEqual(canon_item["description"], "Canon La Gaffeliere OWC 2005 12/750ml")
+        self.assertEqual(faiveley_item["description"], "Faiveley Mazis Chambertin 2005 1/750ml")
+        self.assertNotIn("F0L0C", canon_item["description"])
+        self.assertNotIn("F0L0C", faiveley_item["description"])
+        self.assertNotIn("--", canon_item["description"])
+        self.assertNotIn("--", faiveley_item["description"])
+
+    def test_one_point_five_liter_size_formats_cleanly(self):
+        description = format_item_description(
+            wine_name="Pol Roger Brut",
+            vintage=2015,
+            pack_size=3,
+            sku_prefix="CHP",
+            bottle_size="1.5L",
+        )
+
+        self.assertEqual(description, "Pol Roger Brut 2015 3/1500ml")
+
+    def test_excel_export_defaults_item_number_column_to_new(self):
+        items = [
+            {
+                "Item Number": "NEW",
+                "Item Description": "Test Wine 2020 1/750ml",
+                "Description": "Test Wine 2020 1/750ml",
+                "PK": 1,
+                "Quantity": 1,
+                "FOB Btl": 10.0,
+                "frontline": 12,
+                "FOB Case": 10.0,
+                "Ext Cost": 10.0,
+                "Ext Price": 12.0,
+                "SKU": "BUR",
+                "STM Markup %": 0.10,
+            }
+        ]
+
+        with TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "test.xlsx"
+            workbook_path = write_to_updated_template(
+                items,
+                "modules/po_tools/grw_invoice_converter/templates/GRW_Template_Updated.xlsx",
+                str(output_path),
+                "S12345",
+                "Brix",
+            )
+            workbook = load_workbook(workbook_path)
+            sheet = workbook.active
+
+            self.assertEqual(sheet["A1"].value, "Item Number")
+            self.assertEqual(sheet["A2"].value, "NEW")
+
+    def test_excel_export_uses_finalized_item_description(self):
+        items = [
+            {
+                "Item Number": "NEW",
+                "Item Description": "Canon La Gaffeliere OWC 2005 12/750ml",
+                "description": "RAW DESCRIPTION SHOULD NOT WIN",
+                "PK": 12,
+                "Quantity": 12,
+                "FOB Btl": 25.0,
+                "Frontline": 30,
+                "FOB Case": 300.0,
+                "Ext Cost": 300.0,
+                "Ext Price": 360.0,
+                "SKU": "BDX",
+                "STM Markup %": 0.15,
+            }
+        ]
+
+        with TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "test.xlsx"
+            workbook_path = write_to_updated_template(
+                items,
+                "modules/po_tools/grw_invoice_converter/templates/GRW_Template_Updated.xlsx",
+                str(output_path),
+                "S60490",
+                "Brix",
+            )
+            workbook = load_workbook(workbook_path)
+            sheet = workbook.active
+
+            self.assertEqual(sheet["A2"].value, "NEW")
+            self.assertEqual(sheet["B2"].value, "Canon La Gaffeliere OWC 2005 12/750ml")
 
 
 if __name__ == "__main__":

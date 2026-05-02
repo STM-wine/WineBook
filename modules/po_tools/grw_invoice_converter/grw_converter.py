@@ -180,6 +180,10 @@ def write_to_updated_template(
         header = sheet.cell(row=1, column=col).value
         if header:
             header_map[header.strip()] = col
+
+    # The GRW workflow expects column A to remain the manual QuickBooks/Stem item number field.
+    # Preserve that contract even if a future template edit changes the header-mapping behavior.
+    item_number_col = header_map.get('Item Number', 1)
     
     # Detect footer/total section start
     # Look for markers: "Total", "Subtotal", "Balance Due", or empty separator row
@@ -254,58 +258,74 @@ def write_to_updated_template(
     written_count = 0
     for idx, item in enumerate(items):
         row = item_start_row + idx
+
+        item_number = item.get('Item Number', 'NEW')
+        item_description = item.get('Item Description', item.get('description', ''))
+        supplier = item.get('Supplier', item.get('supplier', ''))
+        grw_order_number = item.get('GRW Order #', invoice_number)
+        pack_size = item.get('PK', item.get('pack_size', 1))
+        quantity = item.get('Quantity', item.get('quantity', 0))
+        fob_bottle = item.get('FOB Btl', item.get('FOB Bottle', item.get('fob_bottle', 0)))
+        frontline = item.get('Frontline', item.get('frontline', 0))
+        account_name = item.get('Account', customer_name)
+        fob_case = item.get('FOB Case', item.get('fob_case', 0))
+        ext_cost = item.get('Ext Cost', item.get('ext_cost', 0))
+        markup_value = item.get('STM Markup %')
+        ext_price = item.get('Ext Price', item.get('ext_price', 0))
         
-        # Item Number - leave blank
-        if 'Item Number' in header_map:
-            sheet.cell(row=row, column=header_map['Item Number']).value = None
+        # Item Number - default to NEW until accounting maps a real QB/Stem item number
+        sheet.cell(row=row, column=item_number_col).value = item_number
         
         # Item Description
         if 'Item Description' in header_map:
-            sheet.cell(row=row, column=header_map['Item Description']).value = clean_string_for_excel(item.get('description', ''))
+            sheet.cell(row=row, column=header_map['Item Description']).value = clean_string_for_excel(item_description)
+
+        # Supplier
+        if 'Supplier' in header_map:
+            sheet.cell(row=row, column=header_map['Supplier']).value = clean_string_for_excel(supplier)
         
         # GRW Order #
         if 'GRW Order #' in header_map:
-            sheet.cell(row=row, column=header_map['GRW Order #']).value = invoice_number
+            sheet.cell(row=row, column=header_map['GRW Order #']).value = grw_order_number
         
         # PK (Pack Size)
         if 'PK' in header_map:
-            sheet.cell(row=row, column=header_map['PK']).value = item.get('pack_size', 1)
+            sheet.cell(row=row, column=header_map['PK']).value = pack_size
         
         # Quantity (bottles)
         if 'Quantity' in header_map:
-            sheet.cell(row=row, column=header_map['Quantity']).value = item.get('quantity', 0)
+            sheet.cell(row=row, column=header_map['Quantity']).value = quantity
         
         # FOB Btl - calculated value (no formula)
         if 'FOB Btl' in header_map:
-            sheet.cell(row=row, column=header_map['FOB Btl']).value = item.get('fob_bottle', 0)
+            sheet.cell(row=row, column=header_map['FOB Btl']).value = fob_bottle
         
         # Frontline - calculated value (no formula)
         if 'Frontline' in header_map:
-            sheet.cell(row=row, column=header_map['Frontline']).value = item.get('frontline', 0)
+            sheet.cell(row=row, column=header_map['Frontline']).value = frontline
         
         # Account - customer name
         if 'Account' in header_map:
-            sheet.cell(row=row, column=header_map['Account']).value = customer_name
+            sheet.cell(row=row, column=header_map['Account']).value = account_name
         
         # FOB Case - calculated value
         if 'FOB Case' in header_map:
-            sheet.cell(row=row, column=header_map['FOB Case']).value = item.get('fob_case', 0)
+            sheet.cell(row=row, column=header_map['FOB Case']).value = fob_case
         
         # Ext Cost - calculated value
         if 'Ext Cost' in header_map:
-            sheet.cell(row=row, column=header_map['Ext Cost']).value = item.get('ext_cost', 0)
+            sheet.cell(row=row, column=header_map['Ext Cost']).value = ext_cost
         
         # STM Markup % - based on SKU prefix (15% for BDX, 10% for others)
         if 'STM Markup %' in header_map:
-            sku_prefix = item.get('sku_prefix', '')
-            if sku_prefix == 'BDX':
-                sheet.cell(row=row, column=header_map['STM Markup %']).value = 0.15
-            else:
-                sheet.cell(row=row, column=header_map['STM Markup %']).value = 0.10
+            if markup_value is None:
+                sku_prefix = item.get('sku_prefix', item.get('SKU', ''))
+                markup_value = 0.15 if sku_prefix == 'BDX' else 0.10
+            sheet.cell(row=row, column=header_map['STM Markup %']).value = markup_value
         
         # Ext Price - calculated value
         if 'Ext Price' in header_map:
-            sheet.cell(row=row, column=header_map['Ext Price']).value = item.get('ext_price', 0)
+            sheet.cell(row=row, column=header_map['Ext Price']).value = ext_price
         
         written_count += 1
     
