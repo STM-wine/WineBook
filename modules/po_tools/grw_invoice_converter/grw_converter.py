@@ -412,9 +412,8 @@ def convert_grw_invoice(
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
     else:
-        # Default: ~/Documents/Stem/PO's/GRW/
-        output_dir = Path(os.path.expanduser("~")) / "Documents" / "Stem" / "PO's" / "GRW"
-        os.makedirs(str(output_dir), exist_ok=True)
+        output_dir = template_path.parent.parent / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
     
     output_filename = f"{customer_name} GRW {invoice_number}.xlsx"
     output_path = output_dir / output_filename
@@ -464,11 +463,12 @@ def convert_grw_invoice(
 
 if __name__ == '__main__':
     # Test conversion
-    pdf = '/Users/markyaeger/Documents/stem-order-mvp/modules/po_tools/grw_invoice_converter/test_data/S58672.pdf'
-    template = '/Users/markyaeger/Documents/stem-order-mvp/modules/po_tools/grw_invoice_converter/templates/GRW_Template_Updated.xlsx'
+    module_root = Path(__file__).resolve().parent
+    pdf = module_root / 'test_data' / 'S58672.pdf'
+    template = module_root / 'templates' / 'GRW_Template_Updated.xlsx'
     
     try:
-        output_file, result = convert_grw_invoice(pdf, template)
+        output_file, result = convert_grw_invoice(str(pdf), str(template))
         print(f"✓ Conversion successful!")
         print(f"  Output: {output_file}")
         print(f"  Lines: {result['line_count']}")

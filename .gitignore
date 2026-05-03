@@ -76,5 +76,7 @@ dmypy.json
 importers.csv
 
 # Local source exports from Mark/Vinosmith. Keep these out of the shared repo.
+*.xlsx
+*.csv
 /*.xlsx
 /*.pdf

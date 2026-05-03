@@ -4,6 +4,11 @@ from tempfile import TemporaryDirectory
 
 from openpyxl import load_workbook
 
+from grw_converter_app import (
+    FileResolution,
+    build_export_rows,
+    build_optional_saasant_csv,
+)
 from modules.po_tools.grw_invoice_converter.grw_converter import write_to_updated_template
 from modules.po_tools.grw_invoice_converter.parser import (
     extract_description_fragment_from_line,
@@ -172,6 +177,32 @@ class GrwParserTests(unittest.TestCase):
 
             self.assertEqual(sheet["A2"].value, "NEW")
             self.assertEqual(sheet["B2"].value, "Canon La Gaffeliere OWC 2005 12/750ml")
+
+    def test_export_rows_and_csv_share_same_clean_description(self):
+        priced_items = [
+            {
+                "description": "Canon La Gaffeliere OWC 2024 12/750ml",
+                "sku_prefix": "BDX",
+                "pack_size": 12,
+                "quantity": 12,
+                "fob_bottle": 25.0,
+                "frontline": 30,
+                "fob_case": 300.0,
+                "ext_cost": 300.0,
+                "ext_price": 360.0,
+            }
+        ]
+        resolution = FileResolution(customer_name="SNGC", invoice_number="S58725", used_fallback=False)
+
+        export_rows = build_export_rows(priced_items, resolution)
+        csv_filename, csv_bytes = build_optional_saasant_csv(export_rows, resolution, "SNGC_S58725_SAASANT.csv")
+
+        self.assertEqual(export_rows[0]["Item Number"], "NEW")
+        self.assertEqual(export_rows[0]["Item Description"], "Canon La Gaffeliere OWC 2024 12/750ml")
+        self.assertNotIn("F0L0C", export_rows[0]["Item Description"])
+        self.assertIn("Canon La Gaffeliere OWC 2024 12/750ml", csv_bytes.decode("utf-8"))
+        self.assertIn("NEW", csv_bytes.decode("utf-8"))
+        self.assertEqual(csv_filename, "SNGC_S58725_SAASANT.csv")
 
 
 if __name__ == "__main__":

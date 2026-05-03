@@ -254,8 +254,9 @@ if __name__ == '__main__':
         }
     ]
     
-    template = '/Users/markyaeger/Documents/stem-order-mvp/modules/po_tools/grw_invoice_converter/templates/GRW_Template.xlsx'
-    output = '/Users/markyaeger/Documents/stem-order-mvp/modules/po_tools/grw_invoice_converter/output/test_export.xlsx'
+    module_root = Path(__file__).resolve().parent
+    template = module_root / 'templates' / 'GRW_Template.xlsx'
+    output = module_root / 'output' / 'test_export.xlsx'
     
-    result = export_to_excel(test_items, template, output, 'S58672')
+    result = export_to_excel(test_items, str(template), str(output), 'S58672')
     print(f"Exported to: {result}")

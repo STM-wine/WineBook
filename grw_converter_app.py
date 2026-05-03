@@ -7,6 +7,7 @@ A branded web interface for converting GRW invoice PDFs to Excel templates.
 from dataclasses import dataclass
 import base64
 import hashlib
+import io
 import os
 import re
 import tempfile
@@ -79,6 +80,7 @@ class ConversionSuccess:
 class ConversionFailure:
     message: str
     traceback_text: str | None = None
+    debug_info: dict[str, Any] | None = None
 
 
 def uploaded_file_key(uploaded_pdf) -> str:
@@ -147,9 +149,30 @@ def build_optional_saasant_csv(
     resolution: FileResolution,
     csv_filename: str,
 ) -> tuple[str | None, bytes | None]:
-    _ = export_rows
     _ = resolution
-    return csv_filename, None
+    csv_columns = [
+        "Item Number",
+        "Item Description",
+        "GRW Order #",
+        "SKU",
+        "PK",
+        "Quantity",
+        "FOB Btl",
+        "Frontline",
+        "Account",
+        "FOB Case",
+        "Ext Cost",
+        "STM Markup %",
+        "Ext Price",
+    ]
+    csv_df = pd.DataFrame(export_rows)
+    csv_df = csv_df.reindex(columns=csv_columns).fillna("")
+    csv_df["STM Markup %"] = csv_df["STM Markup %"].map(
+        lambda value: f"{float(value):.0%}" if value not in ("", None) else ""
+    )
+    csv_buffer = io.StringIO()
+    csv_df.to_csv(csv_buffer, index=False)
+    return csv_filename, csv_buffer.getvalue().encode("utf-8")
 
 
 def logo_data_uri(path: Path) -> str:
@@ -186,14 +209,26 @@ def inject_styles() -> None:
             --grw-button-text: #ffffff;
             --grw-shadow: 0 20px 50px rgba(65, 53, 39, 0.10);
             --grw-logo-accent: #59663f;
-            --grw-uploader-bg: linear-gradient(180deg, rgba(58, 51, 44, 0.96), rgba(42, 36, 31, 0.98));
-            --grw-uploader-border: rgba(237, 230, 218, 0.30);
-            --grw-uploader-text: #f7f0e6;
-            --grw-uploader-muted: #e5d9c9;
-            --grw-uploader-icon: #f3eadc;
-            --grw-uploader-button-bg: rgba(255, 250, 243, 0.10);
-            --grw-uploader-button-border: rgba(247, 240, 230, 0.35);
-            --grw-uploader-button-text: #fff9f1;
+            --grw-uploader-bg: linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(244, 236, 226, 0.98));
+            --grw-uploader-border: rgba(103, 90, 71, 0.20);
+            --grw-uploader-text: #2f2a24;
+            --grw-uploader-muted: #64594d;
+            --grw-uploader-icon: #59663f;
+            --grw-uploader-button-bg: linear-gradient(135deg, #59663f 0%, #73805a 100%);
+            --grw-uploader-button-border: rgba(89, 102, 63, 0.32);
+            --grw-uploader-button-text: #ffffff;
+            --grw-heading-text: #2f2a24;
+            --grw-button-disabled-bg: rgba(89, 102, 63, 0.22);
+            --grw-button-disabled-text: rgba(255, 255, 255, 0.88);
+            --grw-button-disabled-border: rgba(89, 102, 63, 0.16);
+            --grw-file-chip-bg: linear-gradient(180deg, rgba(255, 250, 243, 0.99), rgba(244, 236, 226, 0.99));
+            --grw-file-chip-border: rgba(103, 90, 71, 0.18);
+            --grw-file-chip-text: #2f2a24;
+            --grw-file-chip-muted: #64594d;
+            --grw-header-bg: rgba(252, 248, 241, 0.78);
+            --grw-header-border: rgba(103, 90, 71, 0.18);
+            --grw-header-text: #2f2a24;
+            --grw-header-icon: #4e463d;
         }
 
         @media (prefers-color-scheme: dark) {
@@ -214,14 +249,26 @@ def inject_styles() -> None:
                 --grw-success-bg: rgba(89, 102, 63, 0.12);
                 --grw-success-text: #23432d;
                 --grw-shadow: 0 20px 50px rgba(0, 0, 0, 0.20);
-                --grw-uploader-bg: linear-gradient(180deg, rgba(57, 49, 43, 0.98), rgba(39, 33, 29, 0.99));
-                --grw-uploader-border: rgba(237, 230, 218, 0.26);
-                --grw-uploader-text: #f8efe3;
-                --grw-uploader-muted: #e8ddce;
-                --grw-uploader-icon: #f5ebdf;
-                --grw-uploader-button-bg: rgba(255, 250, 243, 0.12);
-                --grw-uploader-button-border: rgba(247, 240, 230, 0.34);
-                --grw-uploader-button-text: #fffaf3;
+                --grw-uploader-bg: linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(244, 236, 226, 0.98));
+                --grw-uploader-border: rgba(95, 82, 63, 0.24);
+                --grw-uploader-text: #2f2a24;
+                --grw-uploader-muted: #64594d;
+                --grw-uploader-icon: #59663f;
+                --grw-uploader-button-bg: linear-gradient(135deg, #59663f 0%, #73805a 100%);
+                --grw-uploader-button-border: rgba(89, 102, 63, 0.34);
+                --grw-uploader-button-text: #ffffff;
+                --grw-heading-text: #2f2a24;
+                --grw-button-disabled-bg: rgba(89, 102, 63, 0.24);
+                --grw-button-disabled-text: rgba(255, 255, 255, 0.88);
+                --grw-button-disabled-border: rgba(89, 102, 63, 0.18);
+                --grw-file-chip-bg: linear-gradient(180deg, rgba(255, 250, 243, 0.99), rgba(244, 236, 226, 0.99));
+                --grw-file-chip-border: rgba(95, 82, 63, 0.22);
+                --grw-file-chip-text: #2f2a24;
+                --grw-file-chip-muted: #64594d;
+                --grw-header-bg: rgba(38, 33, 29, 0.72);
+                --grw-header-border: rgba(237, 230, 218, 0.16);
+                --grw-header-text: #f6ecdf;
+                --grw-header-icon: #f0e6d8;
             }
         }
 
@@ -239,7 +286,7 @@ def inject_styles() -> None:
         }
 
         .block-container {
-            padding-top: 1.4rem;
+            padding-top: 4.85rem;
             padding-bottom: 3rem;
             max-width: 1280px;
             color: var(--grw-page-text);
@@ -248,7 +295,37 @@ def inject_styles() -> None:
         .grw-logo-wrapper {
             display: flex;
             justify-content: center;
-            margin: 0.25rem 0 1.5rem 0;
+            margin: 0.5rem 0 1.5rem 0;
+        }
+
+        [data-testid="stHeader"] {
+            background: var(--grw-header-bg) !important;
+            border-bottom: 1px solid var(--grw-header-border) !important;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        [data-testid="stHeader"] *,
+        [data-testid="stToolbar"] *,
+        [data-testid="stDecoration"] *,
+        [data-testid="stStatusWidget"] * {
+            color: var(--grw-header-text) !important;
+            fill: var(--grw-header-icon) !important;
+            stroke: var(--grw-header-icon) !important;
+        }
+
+        [data-testid="stToolbar"] button,
+        [data-testid="stHeader"] button,
+        [data-testid="stHeaderActionElements"] button {
+            color: var(--grw-header-text) !important;
+            background: rgba(255, 255, 255, 0.06) !important;
+            border-radius: 999px !important;
+        }
+
+        [data-testid="stToolbar"] button:hover,
+        [data-testid="stHeader"] button:hover,
+        [data-testid="stHeaderActionElements"] button:hover {
+            background: rgba(89, 102, 63, 0.12) !important;
         }
 
         .grw-logo-card {
@@ -368,8 +445,14 @@ def inject_styles() -> None:
             color: var(--grw-uploader-text) !important;
         }
 
-        [data-testid="stFileUploader"] label {
-            color: var(--grw-page-text) !important;
+        [data-testid="stFileUploader"] label,
+        [data-testid="stFileUploader"] > label,
+        [data-testid="stFileUploader"] [data-testid="stWidgetLabel"],
+        [data-testid="stFileUploader"] [data-testid="stWidgetLabel"] *,
+        [data-testid="stFileUploader"] div[data-testid="stMarkdownContainer"],
+        [data-testid="stFileUploader"] div[data-testid="stMarkdownContainer"] * {
+            color: var(--grw-heading-text) !important;
+            font-weight: 700 !important;
         }
 
         [data-testid="stFileUploaderDropzone"] {
@@ -377,6 +460,7 @@ def inject_styles() -> None:
             border: 1px dashed var(--grw-uploader-border) !important;
             border-radius: 22px !important;
             padding: 1rem !important;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
         }
 
         [data-testid="stFileUploaderDropzone"] *,
@@ -393,6 +477,36 @@ def inject_styles() -> None:
             color: var(--grw-uploader-muted) !important;
         }
 
+        [data-testid="stFileUploaderFile"],
+        [data-testid="stFileUploaderFile"] *,
+        [data-testid="stFileUploader"] small,
+        [data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"],
+        [data-testid="stFileUploaderDropzone"] section,
+        [data-testid="stFileUploaderDropzone"] section * {
+            color: var(--grw-uploader-text) !important;
+        }
+
+        [data-testid="stFileUploaderFile"] {
+            background: var(--grw-file-chip-bg) !important;
+            border: 1px solid var(--grw-file-chip-border) !important;
+            border-radius: 16px !important;
+            box-shadow: 0 8px 20px rgba(65, 53, 39, 0.08) !important;
+        }
+
+        [data-testid="stFileUploaderFile"] *,
+        [data-testid="stFileUploaderFileName"],
+        [data-testid="stFileUploaderFile"] small,
+        [data-testid="stFileUploaderFile"] span,
+        [data-testid="stFileUploaderFile"] div {
+            color: var(--grw-file-chip-text) !important;
+            fill: var(--grw-uploader-icon) !important;
+            stroke: var(--grw-uploader-icon) !important;
+        }
+
+        [data-testid="stFileUploaderFile"] small {
+            color: var(--grw-file-chip-muted) !important;
+        }
+
         [data-testid="stFileUploader"] svg,
         [data-testid="stFileUploaderDropzone"] svg {
             color: var(--grw-uploader-icon) !important;
@@ -403,6 +517,7 @@ def inject_styles() -> None:
             background: var(--grw-uploader-button-bg) !important;
             border: 1px solid var(--grw-uploader-button-border) !important;
             color: var(--grw-uploader-button-text) !important;
+            opacity: 1 !important;
         }
 
         [data-testid="stBaseButton-secondary"] * {
@@ -430,16 +545,32 @@ def inject_styles() -> None:
 
         .stButton > button, .stDownloadButton > button {
             border-radius: 999px;
-            border: none;
+            border: 1px solid rgba(89, 102, 63, 0.18);
             background: var(--grw-button-bg);
             color: var(--grw-button-text) !important;
             font-weight: 700;
             padding: 0.75rem 1.1rem;
             box-shadow: 0 10px 24px rgba(89, 102, 63, 0.22);
+            opacity: 1 !important;
         }
 
         .stButton > button:hover, .stDownloadButton > button:hover {
             background: var(--grw-button-bg-hover);
+        }
+
+        .stButton > button *, .stDownloadButton > button * {
+            color: var(--grw-button-text) !important;
+        }
+
+        .stButton > button:disabled,
+        .stDownloadButton > button:disabled,
+        [data-testid="stBaseButton-secondary"]:disabled {
+            background: var(--grw-button-disabled-bg) !important;
+            border: 1px solid var(--grw-button-disabled-border) !important;
+            color: var(--grw-button-disabled-text) !important;
+            opacity: 1 !important;
+            box-shadow: none !important;
+            cursor: not-allowed !important;
         }
 
         .dataframe {
@@ -464,6 +595,14 @@ def inject_styles() -> None:
             margin-top: 0.55rem;
         }
 
+        .version-note {
+            text-align: center;
+            color: var(--grw-muted) !important;
+            font-size: 0.92rem;
+            font-weight: 600;
+            margin: -0.25rem 0 1.1rem 0;
+        }
+
         .result-path * {
             color: var(--grw-text) !important;
         }
@@ -482,8 +621,12 @@ def inject_styles() -> None:
             color: var(--grw-text) !important;
         }
 
-        h1, h2, h3, h4 {
-            color: var(--grw-page-text);
+        h1, h2, h3, h4,
+        [data-testid="stMarkdownContainer"] h1,
+        [data-testid="stMarkdownContainer"] h2,
+        [data-testid="stMarkdownContainer"] h3,
+        [data-testid="stMarkdownContainer"] h4 {
+            color: var(--grw-heading-text);
         }
 
         p, li, label, span, div {
@@ -616,6 +759,13 @@ def render_hero() -> None:
             </div>
         </div>
         ''',
+        unsafe_allow_html=True,
+    )
+
+
+def render_version_note() -> None:
+    st.markdown(
+        '<div class="version-note">v0.1 – Internal Testing</div>',
         unsafe_allow_html=True,
     )
 
@@ -755,11 +905,6 @@ def render_success_state(result: ConversionSuccess) -> None:
             mime="text/csv",
             use_container_width=True,
         )
-    else:
-        st.markdown(
-            '<div class="status-note">SaasAnt / QuickBooks CSV export is not available in this build yet.</div>',
-            unsafe_allow_html=True,
-        )
 
     missing = result.debug_info.get("missing_item_numbers", [])
     if missing:
@@ -772,6 +917,23 @@ def render_success_state(result: ConversionSuccess) -> None:
         hide_index=True,
         height=600,
     )
+
+    with st.expander("Debug details", expanded=False):
+        st.json(
+            {
+                "pages_parsed": result.pages_parsed,
+                "debug_info": result.debug_info,
+                "export_row_count": len(result.export_rows),
+            }
+        )
+
+
+def build_failure_message(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        return f"Validation failed: {exc}"
+    if isinstance(exc, FileNotFoundError):
+        return "A required app file is missing. Please confirm the logo/template files are present in the repo."
+    return f"We couldn't process that PDF: {exc}"
 
 
 def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> ConversionSuccess:
@@ -789,7 +951,10 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
         status.text("Extracting line items")
         progress_bar.progress(30)
         parser_debug = os.getenv("GRW_PDF_TRACE", "").strip() == "1"
-        items, pages_parsed, debug_info = parse_grw_pdf(pdf_path, debug=parser_debug)
+        try:
+            items, pages_parsed, debug_info = parse_grw_pdf(pdf_path, debug=parser_debug)
+        except Exception as exc:
+            raise RuntimeError(f"Unable to read line items from this PDF. {exc}") from exc
 
         if not items:
             raise RuntimeError("No line items were found in the PDF. Please check the file format and try again.")
@@ -838,18 +1003,18 @@ def process_single_upload(uploaded_pdf, resolution: FileResolution) -> Conversio
     try:
         with st.spinner("Processing invoice..."):
             return convert_uploaded_pdf(uploaded_pdf, resolution)
-    except ValidationError as exc:
-        return ConversionFailure(message=f"Validation failed: {exc}")
     except Exception as exc:
         return ConversionFailure(
-            message=f"Unexpected error: {exc}",
+            message=build_failure_message(exc),
             traceback_text=traceback.format_exc(),
+            debug_info={"uploaded_file": uploaded_pdf.name, "resolution": resolution.__dict__},
         )
 
 
 def main() -> None:
     inject_styles()
     render_hero()
+    render_version_note()
     render_intro_panels()
     render_upload_panel()
 
@@ -863,7 +1028,13 @@ def main() -> None:
         render_empty_state()
         return
 
-    resolution = resolve_file_details(uploaded_pdf)
+    try:
+        resolution = resolve_file_details(uploaded_pdf)
+    except Exception as exc:
+        st.error(f"We couldn't inspect that PDF filename/details: {exc}")
+        with st.expander("Debug details", expanded=False):
+            st.code(traceback.format_exc())
+        return
     file_key = uploaded_file_key(uploaded_pdf)
 
     if resolution.used_fallback:
@@ -889,8 +1060,10 @@ def main() -> None:
     if isinstance(outcome, ConversionFailure):
         st.error(outcome.message)
         if outcome.traceback_text:
-            with st.expander("Technical traceback"):
+            with st.expander("Debug details", expanded=False):
                 st.code(outcome.traceback_text)
+                if outcome.debug_info:
+                    st.json(outcome.debug_info)
         return
 
     render_success_state(outcome)

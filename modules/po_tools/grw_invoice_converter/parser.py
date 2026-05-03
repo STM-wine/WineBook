@@ -616,8 +616,8 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
 
 if __name__ == '__main__':
     # Test parsing
-    pdf_path = '/Users/markyaeger/Documents/stem-order-mvp/modules/po_tools/grw_invoice_converter/test_data/S58672.pdf'
-    items = parse_grw_pdf(pdf_path)
+    pdf_path = Path(__file__).resolve().parent / 'test_data' / 'S58672.pdf'
+    items, _, _ = parse_grw_pdf(str(pdf_path))
     print(f"Parsed {len(items)} line items:")
     for i, item in enumerate(items, 1):
         print(f"\n{i}. {item['clean_description']}")
