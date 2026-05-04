@@ -242,6 +242,15 @@ class SupabaseRepository:
         draft["lines"] = lines_result.data or []
         return draft
 
+    def get_purchase_order_drafts_for_run(self, report_run_id: str) -> list[dict[str, Any]]:
+        result = (
+            self.client.table("purchase_order_drafts")
+            .select("*")
+            .eq("report_run_id", report_run_id)
+            .execute()
+        )
+        return result.data or []
+
     def update_recommendation_approval(
         self,
         recommendation_id: str,

@@ -37,6 +37,8 @@ PO_COLUMNS = [
 ]
 
 APPROVAL_STATUSES = ["rejected", "approved", "edited", "deferred"]
+APPROVED_STATUSES = ["approved", "edited"]
+IMPORTER_WORKFLOW_STATUSES = ["Not Started", "In Progress", "Approved", "PO Sent"]
 
 
 def _clean_int(value, default: int = 0) -> int:
@@ -86,6 +88,7 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "order_cost",
         "landed_cost",
         "trucking_cost_per_bottle",
+        "fob",
     ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -167,6 +170,85 @@ def risk_counts(df: pd.DataFrame) -> dict[str, int]:
         "Medium": int(counts.get("Medium", 0)),
         "Low": int(counts.get("Low", 0)),
     }
+
+
+def importer_workflow_status(df: pd.DataFrame, po_sent: bool = False) -> str:
+    if po_sent:
+        return "PO Sent"
+    if df.empty:
+        return "Not Started"
+
+    actionable = df[pd.to_numeric(df.get("recommended_qty_rounded", 0), errors="coerce").fillna(0) > 0]
+    if actionable.empty:
+        return "Not Started"
+
+    statuses = actionable.get("recommendation_status", pd.Series(["rejected"] * len(actionable), index=actionable.index))
+    approved_qty = pd.to_numeric(actionable.get("approved_qty", 0), errors="coerce").fillna(0)
+    approved_mask = statuses.isin(APPROVED_STATUSES) & (approved_qty > 0)
+
+    if bool(approved_mask.all()):
+        return "Approved"
+    if bool(approved_mask.any()) or bool((statuses != "rejected").any()):
+        return "In Progress"
+    return "Not Started"
+
+
+def importer_workbench_summary(df: pd.DataFrame, po_sent_suppliers: set[str] | None = None) -> pd.DataFrame:
+    columns = [
+        "Importer",
+        "Status",
+        "SKUs",
+        "Urgent",
+        "Suggested Qty",
+        "Suggested Value",
+        "Approved Qty",
+        "Approved Value",
+    ]
+    if df.empty or "supplier_name" not in df:
+        return pd.DataFrame(columns=columns)
+
+    po_sent_suppliers = po_sent_suppliers or set()
+    rows = []
+    for supplier, group in df.groupby("supplier_name", dropna=False):
+        supplier_name = "Unassigned" if pd.isna(supplier) or supplier == "" else supplier
+        suggested_qty = int(pd.to_numeric(group.get("recommended_qty_rounded", 0), errors="coerce").fillna(0).sum())
+        suggested_value = float(pd.to_numeric(group.get("order_cost", 0), errors="coerce").fillna(0).sum())
+        approved_qty = pd.to_numeric(group.get("approved_qty", 0), errors="coerce").fillna(0)
+        if "fob" in group:
+            approved_value = float((pd.to_numeric(group["fob"], errors="coerce").fillna(0) * approved_qty).sum())
+        else:
+            approved_value = 0.0
+        rows.append(
+            {
+                "Importer": supplier_name,
+                "Status": importer_workflow_status(group, supplier_name in po_sent_suppliers),
+                "SKUs": int(len(group)),
+                "Urgent": int((group.get("reorder_status", "") == "URGENT").sum()),
+                "Suggested Qty": suggested_qty,
+                "Suggested Value": suggested_value,
+                "Approved Qty": int(approved_qty.sum()),
+                "Approved Value": approved_value,
+            }
+        )
+
+    summary = pd.DataFrame(rows, columns=columns)
+    if summary.empty:
+        return summary
+    return summary.sort_values("Suggested Value", ascending=False).reset_index(drop=True)
+
+
+def importer_groups(df: pd.DataFrame, po_sent_suppliers: set[str] | None = None) -> list[dict]:
+    summary = importer_workbench_summary(df, po_sent_suppliers=po_sent_suppliers)
+    groups = []
+    for row in summary.to_dict(orient="records"):
+        importer = row["Importer"]
+        group = df[df["supplier_name"].fillna("").replace("", "Unassigned") == importer].copy()
+        if "order_cost" in group:
+            group = group.sort_values("order_cost", ascending=False)
+        elif "recommended_qty_rounded" in group:
+            group = group.sort_values("recommended_qty_rounded", ascending=False)
+        groups.append({"summary": row, "data": group})
+    return groups
 
 
 def filter_recommendations(
@@ -446,6 +528,7 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 __all__ = [
     "ApprovalMetrics",
     "DashboardMetrics",
+    "APPROVED_STATUSES",
     "approval_metrics",
     "dashboard_metrics",
     "filter_recommendations",
@@ -453,7 +536,11 @@ __all__ = [
     "approval_editor_dataframe",
     "approval_updates_from_editor",
     "APPROVAL_STATUSES",
+    "IMPORTER_WORKFLOW_STATUSES",
     "california_truck_summary",
+    "importer_groups",
+    "importer_workbench_summary",
+    "importer_workflow_status",
     "location_summary",
     "po_export_dataframe",
     "recommendations_to_dataframe",

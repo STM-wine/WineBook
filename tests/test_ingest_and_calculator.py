@@ -24,6 +24,9 @@ from stem_order.dashboard import (
     california_truck_summary,
     dashboard_metrics,
     filter_recommendations,
+    importer_groups,
+    importer_workbench_summary,
+    importer_workflow_status,
     location_summary,
     po_export_dataframe,
     recommendations_to_dataframe,
@@ -317,6 +320,51 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(approvals.approved_cost, 168)
         self.assertEqual(approvals.pending_lines, 1)
         self.assertEqual(risks, {"High": 1, "Medium": 1, "Low": 1})
+
+    def test_importer_workbench_groups_by_value_and_status(self):
+        df = recommendations_to_dataframe(
+            [
+                {
+                    "supplier_name": "Importer B",
+                    "product_name": "Wine B",
+                    "recommended_qty_rounded": 12,
+                    "recommendation_status": "rejected",
+                    "approved_qty": 0,
+                    "order_cost": 120,
+                    "fob": 10,
+                    "reorder_status": "URGENT",
+                },
+                {
+                    "supplier_name": "Importer A",
+                    "product_name": "Wine A",
+                    "recommended_qty_rounded": 24,
+                    "recommendation_status": "approved",
+                    "approved_qty": 24,
+                    "order_cost": 240,
+                    "fob": 10,
+                    "reorder_status": "LOW",
+                },
+                {
+                    "supplier_name": "Importer A",
+                    "product_name": "Wine C",
+                    "recommended_qty_rounded": 12,
+                    "recommendation_status": "edited",
+                    "approved_qty": 12,
+                    "order_cost": 120,
+                    "fob": 10,
+                    "reorder_status": "URGENT",
+                },
+            ]
+        )
+
+        summary = importer_workbench_summary(df)
+        groups = importer_groups(df)
+
+        self.assertEqual(summary.loc[0, "Importer"], "Importer A")
+        self.assertEqual(summary.loc[0, "Status"], "Approved")
+        self.assertEqual(summary.loc[1, "Status"], "Not Started")
+        self.assertEqual(importer_workflow_status(df[df["supplier_name"] == "Importer A"], po_sent=True), "PO Sent")
+        self.assertEqual(groups[0]["data"].iloc[0]["order_cost"], 240)
 
     def test_location_and_truck_summaries(self):
         df = recommendations_to_dataframe(
