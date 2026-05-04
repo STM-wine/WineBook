@@ -1311,9 +1311,15 @@ if latest_report_run:
 elif latest_repo:
     st.info("No saved recommendation run found yet. Upload RB6 and RADs files to create the first dashboard run.")
 
+show_manual_refresh = developer_mode or not latest_report_run
+
 # File upload widgets - Phase 1: Only RB6 and RADs required
-rb6_file = st.sidebar.file_uploader("Velocity Report RB6", type=['csv', 'xlsx'])
-sales_file = st.sidebar.file_uploader("Sales History Vinosmith RADs File", type=['csv', 'xlsx'])
+if show_manual_refresh:
+    rb6_file = st.sidebar.file_uploader("Velocity Report RB6", type=['csv', 'xlsx'])
+    sales_file = st.sidebar.file_uploader("Sales History Vinosmith RADs File", type=['csv', 'xlsx'])
+else:
+    rb6_file = None
+    sales_file = None
 
 # Store files in session state for re-run capability
 if rb6_file and sales_file:
@@ -1735,7 +1741,7 @@ if rb6_file and sales_file:
         st.error(f"Error processing files: {str(e)}")
         st.error("Full traceback:")
         st.code(traceback.format_exc())
-else:
+elif show_manual_refresh:
     st.info("📋 **Phase 1**: Please upload both RB6 and RADs files to generate reorder recommendations.")
 
     # Premium file format information
