@@ -75,6 +75,18 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(map_rads_columns(rads)["quantity"], "quantity")
         self.assertEqual(map_rads_columns(rads)["date"], "date_mm_dd_yyyy")
 
+    def test_rb6_on_order_prefers_true_on_order_header(self):
+        columns = [
+            "Name",
+            "Importer",
+            "Available Inventory",
+            'Estimated # of Intervals Supply Remaining with "On Order" Considered',
+            "On Order",
+        ]
+        rb6 = normalize_columns(pd.DataFrame(columns=columns))
+
+        self.assertEqual(map_rb6_columns(rb6)["on_order"], "on_order")
+
     def test_clean_importer_name_collapses_whitespace(self):
         self.assertEqual(clean_importer_name("  Barnard   Griffin "), "barnard griffin")
 

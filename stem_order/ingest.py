@@ -120,12 +120,33 @@ def map_rb6_columns(df: pd.DataFrame) -> dict[str, str]:
             break
 
     for col in df.columns:
-        if col in ["on_order", "onorder"]:
+        if col in ["on_order", "onorder", "qty_on_order", "quantity_on_order"]:
             col_map["on_order"] = col
             break
-        if "order" in col and "on" in col:
-            col_map["on_order"] = col
-            break
+
+    if "on_order" not in col_map:
+        for col in df.columns:
+            if col.startswith("on_order") or col.endswith("_on_order"):
+                col_map["on_order"] = col
+                break
+
+    if "on_order" not in col_map:
+        for col in df.columns:
+            if "on_order" in col and not any(
+                excluded in col
+                for excluded in ["considered", "remaining", "interval", "supply", "presold", "pre_sold"]
+            ):
+                col_map["on_order"] = col
+                break
+
+    if "on_order" not in col_map:
+        for col in df.columns:
+            if "order" in col and "on" in col and not any(
+                excluded in col
+                for excluded in ["considered", "remaining", "interval", "supply", "presold", "pre_sold"]
+            ):
+                col_map["on_order"] = col
+                break
 
     for col in df.columns:
         lowered = col.lower()
