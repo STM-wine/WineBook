@@ -21,6 +21,8 @@ from stem_order.dashboard import (
     approval_editor_dataframe,
     approval_metrics,
     approval_updates_from_editor,
+    buyer_updates_from_editor,
+    buyer_workbench_dataframe,
     california_truck_summary,
     dashboard_metrics,
     filter_recommendations,
@@ -29,6 +31,7 @@ from stem_order.dashboard import (
     importer_workflow_status,
     location_summary,
     po_export_dataframe,
+    recalculate_working_recommendation,
     recommendations_to_dataframe,
     risk_counts,
 )
@@ -284,6 +287,176 @@ class DashboardTests(unittest.TestCase):
             updates,
             [{"id": "rec-1", "recommendation_status": "approved", "approved_qty": 12}],
         )
+
+    def test_buyer_workbench_is_importer_scoped_and_decision_first(self):
+        original = recommendations_to_dataframe(
+            [
+                {
+                    "id": "rec-1",
+                    "supplier_name": "Importer A",
+                    "product_name": "Slower Wine",
+                    "is_core": True,
+                    "is_btg": False,
+                    "true_available": 6,
+                    "on_order": 6,
+                    "last_30_day_sales": 12,
+                    "last_60_day_sales": 24,
+                    "last_90_day_sales": 36,
+                    "last_365_day_sales": 144,
+                    "next_30_day_forecast": 8,
+                    "next_60_day_forecast": 16,
+                    "next_90_day_forecast": 24,
+                    "weekly_velocity": 3,
+                    "velocity_trend_pct": -10,
+                    "weeks_on_hand_with_on_order": 4,
+                    "recommended_qty_rounded": 12,
+                    "recommendation_status": "rejected",
+                    "approved_qty": 0,
+                    "order_cost": 120,
+                    "fob": 10,
+                    "pack_size": 12,
+                },
+                {
+                    "id": "rec-2",
+                    "supplier_name": "Importer A",
+                    "product_name": "Faster Wine",
+                    "is_core": False,
+                    "is_btg": True,
+                    "true_available": 0,
+                    "on_order": 0,
+                    "last_30_day_sales": 48,
+                    "last_60_day_sales": 96,
+                    "last_90_day_sales": 144,
+                    "last_365_day_sales": 576,
+                    "next_30_day_forecast": 40,
+                    "next_60_day_forecast": 80,
+                    "next_90_day_forecast": 120,
+                    "weekly_velocity": 12,
+                    "velocity_trend_pct": 15,
+                    "weeks_on_hand_with_on_order": 0,
+                    "recommended_qty_rounded": 48,
+                    "recommendation_status": "approved",
+                    "approved_qty": 48,
+                    "order_cost": 480,
+                    "fob": 10,
+                    "pack_size": 12,
+                },
+            ]
+        )
+
+        compact = buyer_workbench_dataframe(original)
+        expanded = buyer_workbench_dataframe(original, show_history=True, show_forecast=True)
+
+        self.assertNotIn("Supplier", compact.columns)
+        self.assertEqual(compact.loc[0, "Recommended Qty"], 48)
+        self.assertTrue(compact.loc[0, "Wine"].startswith("#1 Faster Wine"))
+        self.assertIn("🍷", compact.loc[0, "Wine"])
+        self.assertIn("⭐", compact.loc[1, "Wine"])
+        self.assertNotIn("60d Sales", compact.columns)
+        self.assertIn("60d Sales", expanded.columns)
+        self.assertIn("LY Next 90d Forecast", expanded.columns)
+        self.assertEqual(compact.loc[0, "Velocity Trend"], "+15%")
+        self.assertEqual(compact.loc[0, "Weeks w/ Recommended"], 4.0)
+
+    def test_buyer_workbench_recommended_qty_override_is_saved_when_approved(self):
+        original = recommendations_to_dataframe(
+            [
+                {
+                    "id": "rec-1",
+                    "product_name": "Wine A",
+                    "true_available": 6,
+                    "on_order": 6,
+                    "weekly_velocity": 3,
+                    "weeks_on_hand_with_on_order": 4,
+                    "recommended_qty_rounded": 12,
+                    "recommendation_status": "rejected",
+                    "approved_qty": 0,
+                    "order_cost": 120,
+                    "pack_size": 12,
+                }
+            ]
+        )
+        edited = buyer_workbench_dataframe(original)
+        edited.loc[0, "Approval"] = True
+        edited.loc[0, "Recommended Qty"] = 24
+
+        updates = buyer_updates_from_editor(original, edited)
+
+        self.assertEqual(
+            updates,
+            [{"id": "rec-1", "recommendation_status": "edited", "approved_qty": 24}],
+        )
+
+    def test_buyer_workbench_recommended_qty_can_change_after_approval(self):
+        original = recommendations_to_dataframe(
+            [
+                {
+                    "id": "rec-1",
+                    "product_name": "Wine A",
+                    "true_available": 6,
+                    "on_order": 6,
+                    "weekly_velocity": 3,
+                    "recommended_qty_rounded": 12,
+                    "recommendation_status": "edited",
+                    "approved_qty": 24,
+                    "order_cost": 120,
+                }
+            ]
+        )
+        edited = buyer_workbench_dataframe(original)
+        edited.loc[0, "Recommended Qty"] = 36
+
+        updates = buyer_updates_from_editor(original, edited)
+
+        self.assertEqual(
+            updates,
+            [{"id": "rec-1", "recommendation_status": "edited", "approved_qty": 36}],
+        )
+
+    def test_buyer_workbench_approval_keeps_recommended_qty_when_weeks_unchanged(self):
+        original = recommendations_to_dataframe(
+            [
+                {
+                    "id": "rec-1",
+                    "product_name": "Wine A",
+                    "true_available": 3005,
+                    "on_order": 0,
+                    "weekly_velocity": 823.9356,
+                    "weeks_on_hand_with_on_order": 3.65,
+                    "recommended_qty_rounded": 2292,
+                    "recommendation_status": "rejected",
+                    "approved_qty": 0,
+                    "order_cost": 120,
+                    "pack_size": 12,
+                }
+            ]
+        )
+        edited = buyer_workbench_dataframe(original)
+        edited.loc[0, "Approval"] = True
+
+        updates = buyer_updates_from_editor(original, edited)
+
+        self.assertEqual(
+            updates,
+            [{"id": "rec-1", "recommendation_status": "approved", "approved_qty": 2292}],
+        )
+
+    def test_recommended_weeks_recalculates_from_edited_quantity(self):
+        display = pd.DataFrame(
+            [
+                {
+                    "True Available": 10,
+                    "On Order": 5,
+                    "Recommended Qty": 30,
+                    "Weekly Velocity": 5,
+                    "Weeks w/ Recommended": 0,
+                }
+            ]
+        )
+
+        updated = recalculate_working_recommendation(display)
+
+        self.assertEqual(updated.loc[0, "Weeks w/ Recommended"], 9.0)
 
     def test_approval_and_risk_metrics(self):
         df = recommendations_to_dataframe(

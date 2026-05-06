@@ -5,10 +5,9 @@ from html import escape
 from datetime import datetime, timedelta
 from stem_order.core import normalize_planning_sku
 from stem_order.dashboard import (
-    APPROVAL_STATUSES,
-    approval_editor_dataframe,
     approval_metrics,
-    approval_updates_from_editor,
+    buyer_updates_from_editor,
+    buyer_workbench_dataframe,
     california_truck_summary,
     dashboard_metrics,
     filter_recommendations,
@@ -17,9 +16,12 @@ from stem_order.dashboard import (
     importer_workbench_summary,
     location_summary,
     po_export_dataframe,
+    recalculate_working_recommendation,
     recommendations_to_dataframe,
     risk_counts,
     supplier_summary,
+    working_qty_from_weeks,
+    working_weeks_from_qty,
 )
 from stem_order.ingest import load_importers_csv
 from stem_order.pipeline import build_ordering_pipeline
@@ -106,6 +108,103 @@ def approval_updates_for_suggested_quantities(df):
     return updates
 
 
+def editor_draft_key(editor_key):
+    return f"{editor_key}_draft"
+
+
+def editor_rows_key(editor_key):
+    return f"{editor_key}_rows"
+
+
+def editor_base_key(editor_key):
+    return f"{editor_key}_base"
+
+
+def sync_recommendation_controls(row_values, changes):
+    synced = dict(changes)
+    row = {**row_values, **synced}
+    if "Weeks w/ Recommended" in changes and "Recommended Qty" not in changes:
+        synced["Recommended Qty"] = working_qty_from_weeks(row)
+        row["Recommended Qty"] = synced["Recommended Qty"]
+    if "Recommended Qty" in synced:
+        synced["Weeks w/ Recommended"] = working_weeks_from_qty({**row_values, **synced})
+    return synced
+
+
+def capture_editor_draft(editor_key):
+    editor_state = st.session_state.get(editor_key, {})
+    edited_rows = editor_state.get("edited_rows", {}) if isinstance(editor_state, dict) else {}
+    row_ids = st.session_state.get(editor_rows_key(editor_key), [])
+    base_rows = st.session_state.get(editor_base_key(editor_key), [])
+    if not edited_rows or not row_ids:
+        return
+
+    draft = st.session_state.get(editor_draft_key(editor_key), {})
+    for row_index, changes in edited_rows.items():
+        try:
+            index = int(row_index)
+        except (TypeError, ValueError):
+            continue
+        if index < 0 or index >= len(row_ids):
+            continue
+        recommendation_id = row_ids[index]
+        if not recommendation_id:
+            continue
+        row_values = dict(base_rows[index]) if index < len(base_rows) else {}
+        row_values.update(draft.get(recommendation_id, {}))
+        draft.setdefault(recommendation_id, {}).update(sync_recommendation_controls(row_values, changes))
+    st.session_state[editor_draft_key(editor_key)] = draft
+
+
+def apply_editor_draft(editor_df, editor_key):
+    draft = st.session_state.get(editor_draft_key(editor_key), {})
+    if not draft or "id" not in editor_df.columns:
+        return editor_df
+
+    display = editor_df.copy()
+    for index, row in display.iterrows():
+        recommendation_id = row.get("id")
+        if recommendation_id not in draft:
+            continue
+        for column, value in draft[recommendation_id].items():
+            if column in display.columns:
+                display.at[index, column] = value
+    return display
+
+
+def clear_editor_draft(editor_key):
+    st.session_state.pop(editor_draft_key(editor_key), None)
+    editor_state = st.session_state.get(editor_key)
+    if isinstance(editor_state, dict):
+        editor_state["edited_rows"] = {}
+
+
+def apply_pending_editor_edits(editor_df, editor_key):
+    editor_state = st.session_state.get(editor_key, {})
+    edited_rows = editor_state.get("edited_rows", {}) if isinstance(editor_state, dict) else {}
+    if not edited_rows:
+        return recalculate_working_recommendation(apply_editor_draft(editor_df, editor_key))
+
+    display = apply_editor_draft(editor_df, editor_key)
+    for row_index, changes in edited_rows.items():
+        try:
+            index = int(row_index)
+        except (TypeError, ValueError):
+            continue
+        if index not in display.index:
+            continue
+        row_values = display.loc[index].to_dict()
+        for column, value in sync_recommendation_controls(row_values, changes).items():
+            if column in display.columns:
+                display.at[index, column] = value
+    return recalculate_working_recommendation(display)
+
+
+def current_editor_dataframe(edited_df, editor_key):
+    capture_editor_draft(editor_key)
+    return apply_pending_editor_edits(edited_df, editor_key)
+
+
 def render_importer_work_unit(
     *,
     importer_name,
@@ -114,6 +213,8 @@ def render_importer_work_unit(
     report_run_id,
     latest_repo,
     selected_statuses,
+    show_history=False,
+    show_forecast=False,
 ):
     key_base = f"{report_run_id}_{importer_key(importer_name)}_{'-'.join(selected_statuses)}"
     st.markdown(
@@ -141,47 +242,81 @@ def render_importer_work_unit(
     with stats[4]:
         metric_card("Value", format_money(summary["Suggested Value"]), "Suggested order", importer_status_tone(summary["Status"]))
 
-    editor_df = approval_editor_dataframe(importer_df)
+    editor_df = buyer_workbench_dataframe(
+        importer_df,
+        show_history=show_history,
+        show_forecast=show_forecast,
+    )
+    editor_key = f"approval_editor_{key_base}"
+    editor_df = apply_pending_editor_edits(editor_df, editor_key)
+    st.session_state[editor_rows_key(editor_key)] = editor_df["id"].tolist() if "id" in editor_df.columns else []
+    st.session_state[editor_base_key(editor_key)] = editor_df.to_dict(orient="records")
     edited_approvals = st.data_editor(
         editor_df,
         use_container_width=True,
         hide_index=True,
         height=min(520, max(240, 70 + (len(editor_df) * 36))),
-        key=f"approval_editor_{key_base}",
+        key=editor_key,
+        on_change=capture_editor_draft,
+        args=(editor_key,),
         column_config={
             "id": None,
-            "Approval": st.column_config.SelectboxColumn(
-                "Approval",
-                options=APPROVAL_STATUSES,
-                required=True,
+            "_Pack Size": None,
+            "Wine": st.column_config.TextColumn(
+                "Wine",
+                help="Importer rank plus Core / BTG flags.",
             ),
-            "Approved Qty": st.column_config.NumberColumn(
-                "Approved Qty",
+            "Approval": st.column_config.CheckboxColumn(
+                "Approval",
+                help="Approve this line for the PO draft.",
+            ),
+            "Weeks w/ Recommended": st.column_config.NumberColumn(
+                "Weeks w/ Recommended",
+                min_value=0.0,
+                step=0.1,
+                format="%.1f",
+                help="Target coverage. Editing this recalculates recommended quantity.",
+            ),
+            "Recommended Qty": st.column_config.NumberColumn(
+                "Recommended Qty",
                 min_value=0,
                 step=1,
                 format="%d",
-                help="Final bottle quantity to send into the PO draft.",
+                help="Working order quantity. Editing this recalculates target weeks.",
             ),
+            "Est. Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
         },
         disabled=[
-            "Supplier",
-            "Wine",
-            "Code",
-            "Status",
-            "Risk",
-            "Recommended Qty",
-            "Est. Cost",
+            col
+            for col in [
+                "Wine",
+                "True Available",
+                "On Order",
+                "30d Sales",
+                "60d Sales",
+                "90d Sales",
+                "Next 30d Forecast",
+                "LY Next 60d Forecast",
+                "LY Next 90d Forecast",
+                "Weekly Velocity",
+                "Velocity Trend",
+                "Weeks w/ On Order",
+                "Est. Cost",
+            ]
+            if col in editor_df.columns
         ],
     )
 
     actions = st.columns([1.1, 1.2, 1.2, 4])
     if actions[0].button("Save", type="primary", key=f"save_{key_base}"):
-        updates = approval_updates_from_editor(importer_df, edited_approvals)
+        current_approvals = current_editor_dataframe(edited_approvals, editor_key)
+        updates = buyer_updates_from_editor(importer_df, current_approvals)
         if not updates:
             st.info("No approval changes to save.")
         else:
             try:
                 latest_repo.update_recommendation_approvals(updates)
+                clear_editor_draft(editor_key)
                 st.success(f"Saved {len(updates):,} approval updates for {importer_name}.")
                 st.rerun()
             except Exception as approval_error:
@@ -258,6 +393,17 @@ body {
 /* Main Content Area */
 .stApp {
     background: linear-gradient(to bottom, var(--warm-white), var(--white)) !important;
+}
+
+section[data-testid="stSidebar"],
+div[data-testid="collapsedControl"] {
+    display: none !important;
+}
+
+.block-container {
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+    max-width: 100% !important;
 }
 
 .block-container {
@@ -1060,21 +1206,7 @@ st.markdown("""
 <div class="section-divider"></div>
 """, unsafe_allow_html=True)
 
-# Custom sidebar header
-st.sidebar.markdown("""
-<div class="sidebar-header">
-    <h3>Admin Refresh</h3>
-</div>
-""", unsafe_allow_html=True)
-
-# MVP Phase 1 - RB6 + RADs only
-st.sidebar.markdown("""
-<div style="padding: 0.5rem; background: linear-gradient(135deg, var(--deep-olive), var(--muted-green)); border-radius: 8px; margin-bottom: 1rem;">
-    <p style="margin: 0; color: white; font-size: 0.85rem; text-align: center;">Manual RB6 + RADs refresh</p>
-</div>
-""", unsafe_allow_html=True)
-
-developer_mode = st.sidebar.checkbox("Developer mode", value=False)
+developer_mode = False
 
 # Load importers.csv from project root
 project_root = os.path.dirname(os.path.abspath(__file__))
@@ -1134,8 +1266,8 @@ if latest_report_run:
     with metric_cols[5]:
         metric_card("Suppliers", format_count(metrics.suppliers_with_orders), "With suggested orders", "ink")
 
-    section_label("Workbench Focus", "Work globally by importer group, or choose a single importer and finish it cleanly.")
-    filter_cols = st.columns([1.6, 2.2, 2, 3, 1.2])
+    section_label("Workbench Focus", "Choose all importers or focus on one importer at a time.")
+    filter_cols = st.columns([2.4, 2, 3.4, 1.2])
     supplier_values = (
         dashboard_df["supplier_name"].dropna().unique()
         if "supplier_name" in dashboard_df.columns
@@ -1144,24 +1276,17 @@ if latest_report_run:
     supplier_options = ["All"] + sorted(
         [s for s in supplier_values if s]
     )
-    workbench_view = filter_cols[0].radio(
-        "View",
-        ["Show All", "By Importer"],
-        horizontal=True,
-    )
-    selected_supplier = filter_cols[1].selectbox(
+    active_supplier = filter_cols[0].selectbox(
         "Importer",
         supplier_options,
-        disabled=workbench_view == "Show All",
     )
-    active_supplier = selected_supplier if workbench_view == "By Importer" else "All"
-    selected_statuses = filter_cols[2].multiselect(
+    selected_statuses = filter_cols[1].multiselect(
         "Status",
         ["URGENT", "LOW", "OK", "NO SALES"],
         default=["URGENT", "LOW"],
     )
-    search_query = filter_cols[3].text_input("Wine search", "")
-    only_order_qty = filter_cols[4].checkbox("Qty > 0", value=True)
+    search_query = filter_cols[2].text_input("Wine search", "")
+    only_order_qty = filter_cols[3].checkbox("Qty > 0", value=True)
 
     filtered_dashboard = filter_recommendations(
         dashboard_df,
@@ -1193,6 +1318,10 @@ if latest_report_run:
             "Importer Workbench",
             "Importer sections are ordered by total suggested value; SKUs inside each importer are ordered largest to smallest.",
         )
+        toggle_cols = st.columns([1.2, 1.4, 5])
+        show_history = toggle_cols[0].checkbox("Show 60/90d sales", value=False)
+        show_forecast = toggle_cols[1].checkbox("Show LY 60/90d forecast", value=False)
+
         importer_summary = importer_workbench_summary(filtered_dashboard, po_sent_suppliers=po_sent_suppliers)
         importer_summary_display = importer_summary.copy()
         for money_col in ["Suggested Value", "Approved Value"]:
@@ -1208,7 +1337,7 @@ if latest_report_run:
         groups = importer_groups(filtered_dashboard, po_sent_suppliers=po_sent_suppliers)
         if not groups:
             st.info("No SKUs match the current workbench filters.")
-        elif workbench_view == "Show All":
+        elif active_supplier == "All":
             for index, group in enumerate(groups):
                 summary = group["summary"]
                 importer_name = summary["Importer"]
@@ -1223,21 +1352,22 @@ if latest_report_run:
                         report_run_id=latest_report_run["id"],
                         latest_repo=latest_repo,
                         selected_statuses=selected_statuses,
+                        show_history=show_history,
+                        show_forecast=show_forecast,
                     )
         else:
-            if active_supplier == "All":
-                st.info("Choose an importer to work importer-by-importer.")
-            else:
-                group = groups[0] if groups else None
-                if group:
-                    render_importer_work_unit(
-                        importer_name=group["summary"]["Importer"],
-                        importer_df=group["data"],
-                        summary=group["summary"],
-                        report_run_id=latest_report_run["id"],
-                        latest_repo=latest_repo,
-                        selected_statuses=selected_statuses,
-                    )
+            group = groups[0] if groups else None
+            if group:
+                render_importer_work_unit(
+                    importer_name=group["summary"]["Importer"],
+                    importer_df=group["data"],
+                    summary=group["summary"],
+                    report_run_id=latest_report_run["id"],
+                    latest_repo=latest_repo,
+                    selected_statuses=selected_statuses,
+                    show_history=show_history,
+                    show_forecast=show_forecast,
+                )
 
     with tab_suppliers:
         section_label("Supplier Board", "Use this as the buyer's queue across all suppliers.")
@@ -1311,12 +1441,15 @@ if latest_report_run:
 elif latest_repo:
     st.info("No saved recommendation run found yet. Upload RB6 and RADs files to create the first dashboard run.")
 
+admin_panel = st.expander("Admin tools", expanded=not latest_report_run)
+admin_panel.caption("Manual RB6 + RADs refresh and developer diagnostics live here.")
+developer_mode = admin_panel.checkbox("Developer mode", value=False)
 show_manual_refresh = developer_mode or not latest_report_run
 
 # File upload widgets - Phase 1: Only RB6 and RADs required
 if show_manual_refresh:
-    rb6_file = st.sidebar.file_uploader("Velocity Report RB6", type=['csv', 'xlsx'])
-    sales_file = st.sidebar.file_uploader("Sales History Vinosmith RADs File", type=['csv', 'xlsx'])
+    rb6_file = admin_panel.file_uploader("Velocity Report RB6", type=['csv', 'xlsx'])
+    sales_file = admin_panel.file_uploader("Sales History Vinosmith RADs File", type=['csv', 'xlsx'])
 else:
     rb6_file = None
     sales_file = None
@@ -1328,8 +1461,8 @@ if rb6_file and sales_file:
 
 # Run Again button (only show if files have been uploaded)
 if 'rb6_file' in st.session_state and 'sales_file' in st.session_state:
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🔄 Run Again", help="Re-process the uploaded files after making fixes"):
+    admin_panel.markdown("---")
+    if admin_panel.button("Run Again", help="Re-process the uploaded files after making fixes"):
         st.session_state['force_save_report_run'] = True
         st.rerun()
 
@@ -1384,37 +1517,37 @@ if rb6_file and sales_file:
             st.info("This uploaded file pair has already been saved to Supabase in this session.")
 
         if developer_mode:
-            st.sidebar.markdown("---")
-            st.sidebar.write("Detecting RB6 header...")
-            st.sidebar.write(f"Detected header at row {header_row}")
-            st.sidebar.write("Debug: Original columns:", original_cols[:10], "...")
-            st.sidebar.write("Debug: Normalized columns:", result.rb6.normalized_columns[:10], "...")
-            st.sidebar.write("Debug: Column mapping:", col_map)
-            st.sidebar.write(f"DEBUG: rb6_data shape: {rb6_data.shape}")
-            st.sidebar.write(f"DEBUG: rb6_data columns: {list(rb6_data.columns)[:15]}")
+            admin_panel.markdown("---")
+            admin_panel.write("Detecting RB6 header...")
+            admin_panel.write(f"Detected header at row {header_row}")
+            admin_panel.write("Debug: Original columns:", original_cols[:10], "...")
+            admin_panel.write("Debug: Normalized columns:", result.rb6.normalized_columns[:10], "...")
+            admin_panel.write("Debug: Column mapping:", col_map)
+            admin_panel.write(f"DEBUG: rb6_data shape: {rb6_data.shape}")
+            admin_panel.write(f"DEBUG: rb6_data columns: {list(rb6_data.columns)[:15]}")
 
-            st.sidebar.write("Sample RB6 data (first 3 rows):")
+            admin_panel.write("Sample RB6 data (first 3 rows):")
             sample_cols = ['name', 'importer', 'available_inventory', 'on_order']
             available_sample_cols = [c for c in sample_cols if c in rb6_data.columns]
-            st.sidebar.dataframe(rb6_data[available_sample_cols].head(3), hide_index=True)
+            admin_panel.dataframe(rb6_data[available_sample_cols].head(3), hide_index=True)
 
-            st.sidebar.markdown("---")
-            st.sidebar.write("Detecting RADs header...")
-            st.sidebar.write(f"Detected RADs header at row {rads_header_row}")
-            st.sidebar.write("Debug: Original RADs columns:", rads_original_cols[:10], "...")
-            st.sidebar.write("Debug: Normalized RADs columns:", result.rads.normalized_columns[:10], "...")
-            st.sidebar.write("Debug: RADs column mapping:", rads_col_map)
-            st.sidebar.write(f"DEBUG: sales_data shape: {sales_data.shape}")
-            st.sidebar.write(f"DEBUG: sales_data columns: {list(sales_data.columns)[:15]}")
-            st.sidebar.write("DEBUG: RADs columns setup complete!")
+            admin_panel.markdown("---")
+            admin_panel.write("Detecting RADs header...")
+            admin_panel.write(f"Detected RADs header at row {rads_header_row}")
+            admin_panel.write("Debug: Original RADs columns:", rads_original_cols[:10], "...")
+            admin_panel.write("Debug: Normalized RADs columns:", result.rads.normalized_columns[:10], "...")
+            admin_panel.write("Debug: RADs column mapping:", rads_col_map)
+            admin_panel.write(f"DEBUG: sales_data shape: {sales_data.shape}")
+            admin_panel.write(f"DEBUG: sales_data columns: {list(sales_data.columns)[:15]}")
+            admin_panel.write("DEBUG: RADs columns setup complete!")
 
-            st.sidebar.write("Sample RADs data (first 3 rows):")
+            admin_panel.write("Sample RADs data (first 3 rows):")
             rads_sample_cols = ['wine_name', 'quantity']
             if 'account' in sales_data.columns:
                 rads_sample_cols.append('account')
             rads_sample_cols.append('date')
             available_rads_sample_cols = [c for c in rads_sample_cols if c in sales_data.columns]
-            st.sidebar.dataframe(sales_data[available_rads_sample_cols].head(3), hide_index=True)
+            admin_panel.dataframe(sales_data[available_rads_sample_cols].head(3), hide_index=True)
 
         st.success("✅ Files loaded with dynamic header detection!")
 
@@ -1508,34 +1641,34 @@ if rb6_file and sales_file:
 
         if developer_mode:
             # DEBUG: Check data before passing to calculator
-            st.sidebar.markdown("---")
-            st.sidebar.write("🧮 **Pre-calculation Debug:**")
-            st.sidebar.write(f"- rb6_data shape: {rb6_data.shape}")
-            st.sidebar.write(f"- rb6_data columns: {list(rb6_data.columns)[:15]}")
+            admin_panel.markdown("---")
+            admin_panel.write("🧮 **Pre-calculation Debug:**")
+            admin_panel.write(f"- rb6_data shape: {rb6_data.shape}")
+            admin_panel.write(f"- rb6_data columns: {list(rb6_data.columns)[:15]}")
             if 'available_inventory' in rb6_data.columns:
                 ai_count = rb6_data['available_inventory'].notna().sum()
-                st.sidebar.write(f"- rb6_data available_inventory non-null: {ai_count}/{len(rb6_data)}")
-            st.sidebar.write(f"- sales_data shape: {sales_data.shape}")
-            st.sidebar.write(f"- sales_data columns: {list(sales_data.columns)[:10]}")
+                admin_panel.write(f"- rb6_data available_inventory non-null: {ai_count}/{len(rb6_data)}")
+            admin_panel.write(f"- sales_data shape: {sales_data.shape}")
+            admin_panel.write(f"- sales_data columns: {list(sales_data.columns)[:10]}")
 
             # DEBUG: Check what came back from calculator
             if recommendations is not None:
-                st.sidebar.markdown("---")
-                st.sidebar.write("📊 **Post-calculation Debug:**")
-                st.sidebar.write(f"- recommendations shape: {recommendations.shape}")
-                st.sidebar.write(f"- recommendations columns: {list(recommendations.columns)[:15]}")
+                admin_panel.markdown("---")
+                admin_panel.write("📊 **Post-calculation Debug:**")
+                admin_panel.write(f"- recommendations shape: {recommendations.shape}")
+                admin_panel.write(f"- recommendations columns: {list(recommendations.columns)[:15]}")
                 if 'true_available' in recommendations.columns:
                     ta_count = recommendations['true_available'].notna().sum()
-                    st.sidebar.write(f"- true_available non-null: {ta_count}/{len(recommendations)}")
+                    admin_panel.write(f"- true_available non-null: {ta_count}/{len(recommendations)}")
                 if 'available_inventory' in recommendations.columns:
                     ai_count = recommendations['available_inventory'].notna().sum()
-                    st.sidebar.write(f"- available_inventory non-null: {ai_count}/{len(recommendations)}")
+                    admin_panel.write(f"- available_inventory non-null: {ai_count}/{len(recommendations)}")
 
                 # Check FOB status
                 if 'fob' in recommendations.columns:
                     fob_nonzero = (recommendations['fob'] > 0).sum()
                     fob_zero = (recommendations['fob'] == 0).sum()
-                    st.sidebar.write(f"- FOB > 0: {fob_nonzero}/{len(recommendations)}, FOB = 0: {fob_zero}/{len(recommendations)}")
+                    admin_panel.write(f"- FOB > 0: {fob_nonzero}/{len(recommendations)}, FOB = 0: {fob_zero}/{len(recommendations)}")
                     if fob_zero > len(recommendations) * 0.5:  # More than 50% have zero FOB
                         st.warning(f"⚠️ {fob_zero} SKUs have FOB = 0. Order costs cannot be calculated correctly.")
 
@@ -1549,23 +1682,23 @@ if rb6_file and sales_file:
 
         if developer_mode:
             # --- VALIDATION: Check final output quality ---
-            st.sidebar.markdown("---")
-            st.sidebar.write("📋 **Final Output Validation:**")
-            st.sidebar.write(f"- DataFrame shape: {raw_df.shape}")
-            st.sidebar.write(f"- DataFrame columns: {list(raw_df.columns)}")
+            admin_panel.markdown("---")
+            admin_panel.write("📋 **Final Output Validation:**")
+            admin_panel.write(f"- DataFrame shape: {raw_df.shape}")
+            admin_panel.write(f"- DataFrame columns: {list(raw_df.columns)}")
 
             # Check inventory pipeline specifically
-            st.sidebar.write("🔍 **Inventory Pipeline Check:**")
+            admin_panel.write("🔍 **Inventory Pipeline Check:**")
             if 'true_available' in recommendations.columns:
                 ta_count = recommendations['true_available'].notna().sum()
                 ta_total = len(recommendations)
-                st.sidebar.write(f"- true_available: {ta_count}/{ta_total} populated ({(ta_count/ta_total)*100:.1f}%)")
+                admin_panel.write(f"- true_available: {ta_count}/{ta_total} populated ({(ta_count/ta_total)*100:.1f}%)")
             if 'available_inventory' in recommendations.columns:
                 ai_count = recommendations['available_inventory'].notna().sum()
-                st.sidebar.write(f"- available_inventory: {ai_count}/{len(recommendations)} populated")
+                admin_panel.write(f"- available_inventory: {ai_count}/{len(recommendations)} populated")
             if 'on_order' in recommendations.columns:
                 oo_count = recommendations['on_order'].notna().sum()
-                st.sidebar.write(f"- on_order: {oo_count}/{len(recommendations)} populated")
+                admin_panel.write(f"- on_order: {oo_count}/{len(recommendations)} populated")
 
             # Check key fields are not mostly null
             critical_fields = ['product_code', 'Name', 'importer', 'true_available', 'last_30_day_sales']
@@ -1575,14 +1708,14 @@ if rb6_file and sales_file:
                     total_count = len(raw_df)
                     null_pct = (null_count / total_count) * 100 if total_count > 0 else 0
                     status = "✅" if null_pct < 50 else "⚠️" if null_pct < 90 else "❌"
-                    st.sidebar.write(f"{status} {field}: {null_pct:.1f}% null ({null_count}/{total_count})")
+                    admin_panel.write(f"{status} {field}: {null_pct:.1f}% null ({null_count}/{total_count})")
 
             # Show sample of key fields
-            st.sidebar.write("📊 Sample of key fields (first 5 rows):")
+            admin_panel.write("📊 Sample of key fields (first 5 rows):")
             sample_fields = ['product_code', 'Name', 'importer', 'true_available', 'last_30_day_sales', 'weeks_on_hand']
             available_sample = [f for f in sample_fields if f in raw_df.columns]
             if available_sample:
-                st.sidebar.dataframe(raw_df[available_sample].head(5), hide_index=True)
+                admin_panel.dataframe(raw_df[available_sample].head(5), hide_index=True)
 
         # Display in styled card container
         st.markdown("""
