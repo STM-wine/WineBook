@@ -13,7 +13,7 @@ Terminology matters: Vinosmith calls the field `Importer`, but Stem's internal a
 3. A Python worker normalizes the source data and writes structured rows into Supabase Postgres.
 4. The reorder engine creates a `report_run` and `reorder_recommendations`.
 5. Recommendations default to rejected with zero approved quantity.
-6. Users open the app, filter by supplier/status/product/location, approve or edit quantities, and create a supplier PO draft.
+6. Users open the app, filter by supplier/status/product/location, adjust working recommendation quantities or target weeks, approve rows, and create a supplier PO draft.
 7. The app exports a PO for manual QuickBooks entry first.
 8. Later, QuickBooks OAuth/API integration creates or updates purchase orders directly.
 
@@ -63,19 +63,22 @@ This keeps the stack tight: GitHub for code and scheduling, Supabase for data/st
 
 Primary table fields should remain focused on buyer decisions:
 
-- Wine Name
-- BTG/Core flags
+- Wine Name with importer rank and BTG/Core flags inline
 - True Available Inventory
 - On Order Quantity
 - Last 30 Days Sales
 - Next 30 Days Forecast
 - Weekly Velocity
 - Velocity Trend
-- Risk Level
-- Recommended Quantity
-- Approval Status
+- Weeks Available with On Order
+- Weeks Available with Recommended Order Quantity
+- Recommended Quantity, editable as the buyer's working order quantity
+- Approval checkbox
+- Estimated Cost
 
 Optional/detail fields can expose last 60/90-day sales and next 60/90-day forecasts.
+
+The importer workbench is grouped by supplier/importer. The importer selector defaults to `All`, and selecting a single importer narrows the same workbench rather than switching to a separate mode. Recommendation rows remain opt-in: the buyer must approve a row before it is included in PO draft generation.
 
 ## Logistics Rollups
 
@@ -102,10 +105,11 @@ Future logistics work should add internal trucking cost per bottle, pallet confi
 4. Add a Supabase write path while manual uploads still exist.
 5. Replace upload-first workflow with latest-run dashboard.
 6. Save supplier-specific PO drafts from current recommendations.
-7. Add buyer approval state so all recommendations default to rejected until explicitly approved.
-8. Add logistics rollups and truck optimization summaries.
-9. Automate daily email ingestion with GitHub Actions.
-10. Add QuickBooks sync/export once the internal PO workflow is stable.
+7. Add buyer approval state so all recommendations default to rejected until explicitly approved. Done for the current Streamlit workflow.
+8. Add logistics rollups and truck optimization summaries. Initial freight and California truck summaries exist; producer rollups and intelligent fill recommendations remain future work.
+9. Automate daily email ingestion with GitHub Actions. Initial automation exists and searches Gmail All Mail so category sorting does not hide reports.
+10. Refine PO drafts into buyer-ready exports and status workflows.
+11. Add QuickBooks sync/export once the internal PO workflow is stable.
 
 ## Supabase Setup Inputs Needed
 

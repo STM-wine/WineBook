@@ -88,7 +88,7 @@ New recommendation rows default to an opt-in approval model:
 - `recommendation_status = rejected`
 - `approved_qty = 0`
 
-The next app step is to add row-level approval/edit controls and persist buyer changes back to Supabase.
+The app now includes row-level approval/edit controls in the importer workbench. Buyers can adjust either `Weeks w/ Recommended` or `Recommended Qty`; those two values stay synchronized in the Streamlit editor. When a row is approved, the current working `Recommended Qty` is persisted as `approved_qty` for PO draft generation.
 
 ## Daily Email Automation
 

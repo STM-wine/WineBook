@@ -20,9 +20,7 @@ from stem_order.ingest import (
 )
 from stem_order.pipeline import format_display_dataframe, select_raw_output
 from stem_order.dashboard import (
-    approval_editor_dataframe,
     approval_metrics,
-    approval_updates_from_editor,
     buyer_updates_from_editor,
     buyer_workbench_dataframe,
     california_truck_summary,
@@ -32,6 +30,8 @@ from stem_order.dashboard import (
     importer_workbench_summary,
     importer_workflow_status,
     location_summary,
+    po_draft_lines_dataframe,
+    po_drafts_dataframe,
     po_export_dataframe,
     recalculate_working_recommendation,
     recommendations_to_dataframe,
@@ -261,34 +261,6 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(metrics.recommended_bottles, 12)
         self.assertEqual(len(filtered), 1)
         self.assertEqual(po_df.loc[0, "Quantity"], 12)
-
-    def test_approval_editor_extracts_changed_rows(self):
-        original = recommendations_to_dataframe(
-            [
-                {
-                    "id": "rec-1",
-                    "supplier_name": "Supplier A",
-                    "product_name": "Wine A",
-                    "product_code": "A1",
-                    "reorder_status": "URGENT",
-                    "risk_level": "High",
-                    "recommended_qty_rounded": 12,
-                    "recommendation_status": "rejected",
-                    "approved_qty": 0,
-                    "order_cost": 120,
-                }
-            ]
-        )
-        edited = approval_editor_dataframe(original)
-        edited.loc[0, "Approval"] = "approved"
-        edited.loc[0, "Approved Qty"] = 12
-
-        updates = approval_updates_from_editor(original, edited)
-
-        self.assertEqual(
-            updates,
-            [{"id": "rec-1", "recommendation_status": "approved", "approved_qty": 12}],
-        )
 
     def test_buyer_workbench_is_importer_scoped_and_decision_first(self):
         original = recommendations_to_dataframe(
@@ -561,8 +533,44 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(summary.loc[0, "Recommended Qty"], 120)
         self.assertEqual(truck["bottles_needed"], 10080)
 
+    def test_po_draft_display_helpers_shape_exports(self):
+        lines = po_draft_lines_dataframe(
+            [
+                {
+                    "product_name": "Wine A",
+                    "product_code": "A1",
+                    "planning_sku": "wine a",
+                    "approved_qty": 12,
+                    "fob": 10,
+                    "line_cost": 120,
+                }
+            ]
+        )
+        drafts = po_drafts_dataframe(
+            [
+                {
+                    "id": "abcdef12-3456",
+                    "supplier_name": "Supplier A",
+                    "status": "ready_for_entry",
+                    "created_at": "2026-05-06T10:00:00",
+                    "notes": "Ready",
+                }
+            ]
+        )
+
+        self.assertEqual(lines.loc[0, "Quantity"], 12)
+        self.assertEqual(lines.loc[0, "Estimated Cost"], 120)
+        self.assertEqual(drafts.loc[0, "Draft ID"], "abcdef12")
+        self.assertEqual(drafts.loc[0, "Status"], "Ready for Entry")
+
 
 class SupabaseRepositoryTests(unittest.TestCase):
+    def test_purchase_order_status_validation(self):
+        repo = SupabaseRepository(client=None)
+
+        with self.assertRaises(ValueError):
+            repo.update_purchase_order_draft_status("draft-1", "sent")
+
     def test_purchase_order_line_payload_uses_transitional_product_fields(self):
         repo = SupabaseRepository(client=None)
 

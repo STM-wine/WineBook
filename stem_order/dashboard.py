@@ -35,6 +35,12 @@ PO_COLUMNS = [
     "fob",
     "order_cost",
 ]
+PO_DRAFT_STATUS_LABELS = {
+    "draft": "Draft",
+    "ready_for_entry": "Ready for Entry",
+    "entered_in_quickbooks": "Entered in QuickBooks",
+    "cancelled": "Cancelled",
+}
 
 APPROVAL_STATUSES = ["rejected", "approved", "edited", "deferred"]
 APPROVED_STATUSES = ["approved", "edited"]
@@ -425,78 +431,6 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
-def approval_editor_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    columns = [
-        "id",
-        "supplier_name",
-        "product_name",
-        "product_code",
-        "reorder_status",
-        "risk_level",
-        "recommended_qty_rounded",
-        "recommendation_status",
-        "approved_qty",
-        "order_cost",
-    ]
-    available = [col for col in columns if col in df.columns]
-    editor = df[available].copy()
-
-    if "approved_qty" not in editor.columns:
-        editor["approved_qty"] = 0
-    if "recommendation_status" not in editor.columns:
-        editor["recommendation_status"] = "rejected"
-
-    for col in ["recommended_qty_rounded", "approved_qty"]:
-        if col in editor.columns:
-            editor[col] = pd.to_numeric(editor[col], errors="coerce").fillna(0).astype(int)
-
-    rename_map = {
-        "supplier_name": "Supplier",
-        "product_name": "Wine",
-        "product_code": "Code",
-        "reorder_status": "Status",
-        "risk_level": "Risk",
-        "recommended_qty_rounded": "Recommended Qty",
-        "recommendation_status": "Approval",
-        "approved_qty": "Approved Qty",
-        "order_cost": "Est. Cost",
-    }
-    return editor.rename(columns=rename_map)
-
-
-def approval_updates_from_editor(original: pd.DataFrame, edited: pd.DataFrame) -> list[dict]:
-    if original.empty or edited.empty or "id" not in original.columns or "id" not in edited.columns:
-        return []
-
-    original_by_id = original.set_index("id")
-    updates = []
-    for row in edited.to_dict(orient="records"):
-        recommendation_id = row.get("id")
-        if recommendation_id not in original_by_id.index:
-            continue
-
-        status = row.get("Approval", row.get("recommendation_status", "rejected"))
-        approved_qty = _clean_int(row.get("Approved Qty", row.get("approved_qty", 0)))
-        if status not in APPROVAL_STATUSES:
-            status = "rejected"
-        if approved_qty < 0:
-            approved_qty = 0
-
-        original_row = original_by_id.loc[recommendation_id]
-        original_status = original_row.get("recommendation_status", "rejected")
-        original_qty = _clean_int(original_row.get("approved_qty", 0))
-
-        if status != original_status or approved_qty != original_qty:
-            updates.append(
-                {
-                    "id": recommendation_id,
-                    "recommendation_status": status,
-                    "approved_qty": approved_qty,
-                }
-            )
-    return updates
-
-
 def buyer_workbench_dataframe(
     df: pd.DataFrame,
     show_history: bool = False,
@@ -784,6 +718,45 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def po_draft_lines_dataframe(lines: list[dict]) -> pd.DataFrame:
+    columns = ["Wine", "Code", "Planning SKU", "Quantity", "FOB", "Estimated Cost"]
+    if not lines:
+        return pd.DataFrame(columns=columns)
+
+    df = pd.DataFrame(lines)
+    display = pd.DataFrame(
+        {
+            "Wine": df.get("product_name", pd.Series(dtype=str)).fillna(""),
+            "Code": df.get("product_code", pd.Series(dtype=str)).fillna(""),
+            "Planning SKU": df.get("planning_sku", pd.Series(dtype=str)).fillna(""),
+            "Quantity": pd.to_numeric(df.get("approved_qty", 0), errors="coerce").fillna(0).astype(int),
+            "FOB": pd.to_numeric(df.get("fob", 0), errors="coerce").fillna(0),
+            "Estimated Cost": pd.to_numeric(df.get("line_cost", 0), errors="coerce").fillna(0),
+        }
+    )
+    return display[columns]
+
+
+def po_drafts_dataframe(drafts: list[dict]) -> pd.DataFrame:
+    columns = ["Draft ID", "Supplier", "Status", "Created", "Notes"]
+    if not drafts:
+        return pd.DataFrame(columns=columns)
+
+    rows = []
+    for draft in drafts:
+        status = draft.get("status") or "draft"
+        rows.append(
+            {
+                "Draft ID": str(draft.get("id", ""))[:8],
+                "Supplier": draft.get("supplier_name") or "",
+                "Status": PO_DRAFT_STATUS_LABELS.get(status, status),
+                "Created": draft.get("created_at") or "",
+                "Notes": draft.get("notes") or "",
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
 __all__ = [
     "ApprovalMetrics",
     "DashboardMetrics",
@@ -792,8 +765,6 @@ __all__ = [
     "dashboard_metrics",
     "filter_recommendations",
     "format_dashboard_dataframe",
-    "approval_editor_dataframe",
-    "approval_updates_from_editor",
     "buyer_workbench_dataframe",
     "buyer_updates_from_editor",
     "recalculate_working_recommendation",
@@ -805,6 +776,9 @@ __all__ = [
     "importer_workflow_status",
     "location_summary",
     "po_export_dataframe",
+    "po_draft_lines_dataframe",
+    "po_drafts_dataframe",
+    "PO_DRAFT_STATUS_LABELS",
     "recommendations_to_dataframe",
     "risk_counts",
     "supplier_summary",

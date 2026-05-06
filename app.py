@@ -15,6 +15,8 @@ from stem_order.dashboard import (
     importer_groups,
     importer_workbench_summary,
     location_summary,
+    po_draft_lines_dataframe,
+    po_drafts_dataframe,
     po_export_dataframe,
     recalculate_working_recommendation,
     recommendations_to_dataframe,
@@ -42,6 +44,10 @@ def format_money(value):
 
 def format_count(value):
     return f"{int(value or 0):,}"
+
+
+def supplier_file_slug(value):
+    return "".join(char.lower() if char.isalnum() else "_" for char in str(value)).strip("_") or "supplier"
 
 
 def metric_card(label, value, note="", tone="ink"):
@@ -198,6 +204,55 @@ def apply_pending_editor_edits(editor_df, editor_key):
             if column in display.columns:
                 display.at[index, column] = value
     return recalculate_working_recommendation(display)
+
+
+def render_po_draft_card(draft, latest_repo):
+    draft_id = draft.get("id")
+    status = draft.get("status", "draft")
+    lines = latest_repo.get_purchase_order_draft_lines(draft_id) if draft_id else []
+    lines_df = po_draft_lines_dataframe(lines)
+    qty = int(lines_df["Quantity"].sum()) if "Quantity" in lines_df else 0
+    cost = float(lines_df["Estimated Cost"].sum()) if "Estimated Cost" in lines_df else 0.0
+    supplier = draft.get("supplier_name") or "supplier"
+    label = f"Draft {str(draft_id)[:8]} | {status.replace('_', ' ').title()} | {format_count(qty)} bottles | {format_money(cost)}"
+
+    with st.expander(label, expanded=False):
+        metric_cols = st.columns(3)
+        with metric_cols[0]:
+            metric_card("Lines", format_count(len(lines_df)), "PO rows", "ink")
+        with metric_cols[1]:
+            metric_card("Quantity", format_count(qty), "Bottles", "teal")
+        with metric_cols[2]:
+            metric_card("Value", format_money(cost), "Estimated", "wine")
+
+        st.dataframe(lines_df, use_container_width=True, hide_index=True, height=min(420, max(140, 45 + len(lines_df) * 35)))
+        action_cols = st.columns([1.4, 1.6, 4])
+        action_cols[0].download_button(
+            label="Download CSV",
+            data=lines_df.to_csv(index=False),
+            file_name=f"{supplier_file_slug(supplier)}_{str(draft_id)[:8]}_po.csv",
+            mime="text/csv",
+            disabled=lines_df.empty,
+            key=f"download_po_{draft_id}",
+        )
+        if status == "draft":
+            if action_cols[1].button("Mark Ready", key=f"ready_po_{draft_id}"):
+                try:
+                    latest_repo.update_purchase_order_draft_status(draft_id, "ready_for_entry")
+                    st.success("Marked PO draft ready for entry.")
+                    st.rerun()
+                except Exception as status_error:
+                    st.error(f"Could not update draft status: {status_error}")
+        elif status == "ready_for_entry":
+            if action_cols[1].button("Mark Entered", key=f"entered_po_{draft_id}"):
+                try:
+                    latest_repo.update_purchase_order_draft_status(draft_id, "entered_in_quickbooks")
+                    st.success("Marked PO draft entered in QuickBooks.")
+                    st.rerun()
+                except Exception as status_error:
+                    st.error(f"Could not update draft status: {status_error}")
+        else:
+            action_cols[1].caption(status.replace("_", " ").title())
 
 
 def current_editor_dataframe(edited_df, editor_key):
@@ -459,71 +514,8 @@ p, span, label {
     font-weight: 400 !important;
 }
 
-/* Enhanced Sidebar */
-.css-1d391kg, .css-1lcbmhc {
-    background: linear-gradient(to bottom, var(--off-white), var(--warm-white)) !important;
-    border-right: 1px solid var(--light-sand) !important;
-    box-shadow: 2px 0 8px var(--subtle-shadow) !important;
-}
-
-/* Sidebar Header */
-.sidebar-header {
-    background: linear-gradient(135deg, var(--deep-olive), var(--muted-green)) !important;
-    padding: 2rem 1.5rem !important;
-    margin: -1rem -1rem 2rem -1rem !important;
-    border-radius: 0 !important;
-    border-bottom: none !important;
-    box-shadow: 0 4px 12px rgba(90, 107, 62, 0.15) !important;
-}
-
-.sidebar-header h3 {
-    color: var(--white) !important;
-    font-weight: 600 !important;
-    margin: 0 !important;
-    font-size: 1.4rem !important;
-    letter-spacing: -0.2px !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
-}
-
 /* Dark Mode Adaptations */
 @media (prefers-color-scheme: dark) {
-    /* Sidebar background in dark mode */
-    .css-1d391kg, .css-1lcbmhc, [data-testid="stSidebar"] {
-        background: linear-gradient(to bottom, #2D2D2D, #1F1F1F) !important;
-        border-right: 1px solid #404040 !important;
-    }
-
-    /* Sidebar text labels */
-    [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] .stMarkdown,
-    [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] span {
-        color: #E8E8E8 !important;
-    }
-
-    /* File uploader text */
-    [data-testid="stSidebar"] .stFileUploader label {
-        color: #E8E8E8 !important;
-    }
-
-    /* Upload area in dark mode */
-    [data-testid="stSidebar"] .stFileUploader {
-        background: linear-gradient(to bottom, #3A3A3A, #2D2D2D) !important;
-        border-color: #555555 !important;
-    }
-
-    /* Upload area text */
-    [data-testid="stSidebar"] .stFileUploader p,
-    [data-testid="stSidebar"] .stFileUploader span,
-    [data-testid="stSidebar"] .stFileUploader small {
-        color: #CCCCCC !important;
-    }
-
-    /* Small text in upload area */
-    [data-testid="stSidebar"] .stFileUploader [data-testid="stText"] {
-        color: #AAAAAA !important;
-    }
-
     /* Main content area in dark mode */
     body, .stApp, [data-testid="stAppViewContainer"] {
         background: linear-gradient(to bottom, #1F1F1F, #2D2D2D) !important;
@@ -532,7 +524,7 @@ p, span, label {
     /* Main content text */
     .stApp h1, .stApp h2, .stApp h3, .stApp h4,
     .stApp p, .stApp span, .stApp label,
-    .stApp div:not(.sidebar-header):not(.sidebar-header h3) {
+    .stApp div {
         color: #E8E8E8 !important;
     }
 
@@ -1404,6 +1396,24 @@ if latest_report_run:
         if active_supplier == "All":
             st.info("Select a supplier to preview a PO draft.")
         else:
+            supplier_drafts = [
+                draft
+                for draft in po_drafts
+                if draft.get("supplier_name") == active_supplier and draft.get("status") != "cancelled"
+            ]
+            section_label("Existing PO Drafts", "Download drafts, track handoff status, and mark QuickBooks entry progress.")
+            if supplier_drafts:
+                st.dataframe(
+                    po_drafts_dataframe(supplier_drafts),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(260, max(120, 45 + len(supplier_drafts) * 35)),
+                )
+                for draft in supplier_drafts:
+                    render_po_draft_card(draft, latest_repo)
+            else:
+                st.info("No PO drafts have been created for this supplier yet.")
+
             section_label("PO Draft Preview", "Only approved or edited rows with approved quantities appear here.")
             po_df = po_export_dataframe(filtered_dashboard)
             po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0
@@ -1420,8 +1430,9 @@ if latest_report_run:
             st.download_button(
                 label="Download PO CSV",
                 data=po_df.to_csv(index=False),
-                file_name=f"{active_supplier.replace(' ', '_').lower()}_po_draft.csv",
+                file_name=f"{supplier_file_slug(active_supplier)}_po_preview.csv",
                 mime="text/csv",
+                disabled=po_df.empty,
             )
             if po_df.empty:
                 st.info("This supplier has no approved order quantities in the current filter.")

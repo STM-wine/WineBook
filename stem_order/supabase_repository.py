@@ -17,6 +17,9 @@ from typing import Any
 import pandas as pd
 
 
+PO_DRAFT_STATUSES = {"draft", "ready_for_entry", "entered_in_quickbooks", "cancelled"}
+
+
 def load_dotenv(path: str | Path = ".env") -> None:
     path = Path(path)
     if not path.exists():
@@ -247,9 +250,25 @@ class SupabaseRepository:
             self.client.table("purchase_order_drafts")
             .select("*")
             .eq("report_run_id", report_run_id)
+            .order("created_at", desc=True)
             .execute()
         )
         return result.data or []
+
+    def get_purchase_order_draft_lines(self, purchase_order_draft_id: str) -> list[dict[str, Any]]:
+        result = (
+            self.client.table("purchase_order_lines")
+            .select("*")
+            .eq("purchase_order_draft_id", purchase_order_draft_id)
+            .order("created_at")
+            .execute()
+        )
+        return result.data or []
+
+    def update_purchase_order_draft_status(self, purchase_order_draft_id: str, status: str) -> dict[str, Any]:
+        if status not in PO_DRAFT_STATUSES:
+            raise ValueError(f"Unsupported purchase order draft status: {status}")
+        return self._update_one("purchase_order_drafts", purchase_order_draft_id, {"status": status})
 
     def update_recommendation_approval(
         self,
