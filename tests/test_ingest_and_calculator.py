@@ -5,6 +5,8 @@ import pandas as pd
 from scripts.process_daily_vinosmith_email import (
     AttachmentCandidate,
     classify_attachments,
+    dedupe_attachments,
+    mailbox_search_targets,
     safe_filename,
     storage_path,
 )
@@ -590,6 +592,19 @@ class SupabaseRepositoryTests(unittest.TestCase):
 
 
 class DailyEmailIngestTests(unittest.TestCase):
+    def test_gmail_mailbox_targets_include_all_mail_fallback(self):
+        self.assertEqual(
+            mailbox_search_targets("imap.gmail.com", "INBOX"),
+            ["INBOX", "[Gmail]/All Mail"],
+        )
+
+    def test_dedupe_attachments_removes_same_message_attachment(self):
+        attachment = AttachmentCandidate("report.xlsx", b"data", None, "message-1", None)
+
+        deduped = dedupe_attachments([attachment, attachment])
+
+        self.assertEqual(deduped, [attachment])
+
     def test_classify_attachments_uses_filename_keywords(self):
         rb6, rads = classify_attachments(
             [

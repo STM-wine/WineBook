@@ -110,6 +110,7 @@ Required GitHub Actions secrets:
 - `EMAIL_USERNAME`
 - `EMAIL_PASSWORD`
 - `EMAIL_MAILBOX` (`INBOX`)
+- `EMAIL_MAILBOXES` optional comma-separated override. For Google Workspace/Gmail, the script now searches `INBOX` and falls back to `[Gmail]/All Mail` automatically so category sorting like Updates does not hide the reports.
 - `IMPORTERS_CSV_BASE64`
 
 Optional GitHub Actions secrets/variables:
