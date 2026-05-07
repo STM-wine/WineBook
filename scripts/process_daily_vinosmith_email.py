@@ -299,6 +299,9 @@ def main() -> None:
         sender=sender,
         subject_keyword=subject_keyword,
     )
+    if not attachments:
+        print(f"No Vinosmith attachment candidates found for {report_date}; exiting so a later poll can retry.")
+        return
 
     with tempfile.TemporaryDirectory() as tmpdir:
         reports = write_report_attachments(
