@@ -13,7 +13,8 @@ on:
   schedule:
     # GitHub cron runs in UTC and scheduled jobs can be delayed. Poll through
     # the morning window; the script exits once a completed daily run exists.
-    - cron: "*/15 13-18 * * *"
+    # Use off-quarter-hour minutes to avoid crowded scheduler times.
+    - cron: "7,22,37,52 13-18 * * *"
 
 jobs:
   process-daily-reports:

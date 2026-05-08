@@ -92,7 +92,7 @@ The app now includes row-level approval/edit controls in the importer workbench.
 
 ## Daily Email Automation
 
-GitHub Actions runs `.github/workflows/daily-vinosmith-ingest.yml` through the morning ingestion window. GitHub scheduled jobs can be delayed, so the workflow polls every 15 minutes and the script exits after the first completed scheduled run for the report date. The workflow executes `scripts/process_daily_vinosmith_email.py`, which:
+GitHub Actions runs `.github/workflows/daily-vinosmith-ingest.yml` through the morning ingestion window. GitHub scheduled jobs can be delayed or dropped during high-load periods, so the workflow polls on off-quarter-hour minutes and the script exits after the first completed scheduled run for the report date. The workflow executes `scripts/process_daily_vinosmith_email.py`, which:
 
 1. Connects to the `stm@stemwinecompany.com` mailbox over IMAP.
 2. Finds the current day's Vinosmith report attachments.
