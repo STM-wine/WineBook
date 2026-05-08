@@ -24,6 +24,7 @@ from stem_order.dashboard import (
     supplier_summary,
     working_qty_from_weeks,
     working_weeks_from_qty,
+    active_po_draft_message,
 )
 from stem_order.ingest import load_importers_csv
 from stem_order.pipeline import build_ordering_pipeline
@@ -270,6 +271,7 @@ def render_importer_work_unit(
     selected_statuses,
     show_history=False,
     show_forecast=False,
+    existing_drafts=None,
 ):
     key_base = f"{report_run_id}_{importer_key(importer_name)}_{'-'.join(selected_statuses)}"
     st.markdown(
@@ -390,7 +392,10 @@ def render_importer_work_unit(
                 st.error(f"Could not approve importer: {approval_error}")
 
     po_df = po_export_dataframe(importer_df)
-    if actions[2].button("Create PO Draft", key=f"po_{key_base}", disabled=po_df.empty):
+    duplicate_message = active_po_draft_message(existing_drafts or [])
+    if duplicate_message:
+        actions[2].warning(duplicate_message)
+    if actions[2].button("Create PO Draft", key=f"po_{key_base}", disabled=po_df.empty or bool(duplicate_message)):
         try:
             draft = latest_repo.create_purchase_order_draft(
                 supplier_name=importer_name,
@@ -1346,6 +1351,11 @@ if latest_report_run:
                         selected_statuses=selected_statuses,
                         show_history=show_history,
                         show_forecast=show_forecast,
+                        existing_drafts=[
+                            draft
+                            for draft in po_drafts
+                            if draft.get("supplier_name") == importer_name and draft.get("status") != "cancelled"
+                        ],
                     )
         else:
             group = groups[0] if groups else None
@@ -1359,6 +1369,11 @@ if latest_report_run:
                     selected_statuses=selected_statuses,
                     show_history=show_history,
                     show_forecast=show_forecast,
+                    existing_drafts=[
+                        draft
+                        for draft in po_drafts
+                        if draft.get("supplier_name") == group["summary"]["Importer"] and draft.get("status") != "cancelled"
+                    ],
                 )
 
     with tab_suppliers:
@@ -1436,7 +1451,15 @@ if latest_report_run:
             )
             if po_df.empty:
                 st.info("This supplier has no approved order quantities in the current filter.")
-            elif st.button("Create PO Draft", type="primary"):
+            else:
+                duplicate_message = active_po_draft_message(supplier_drafts)
+                if duplicate_message:
+                    st.warning(duplicate_message)
+            if not po_df.empty and st.button(
+                "Create PO Draft",
+                type="primary",
+                disabled=bool(active_po_draft_message(supplier_drafts)),
+            ):
                 try:
                     draft = latest_repo.create_purchase_order_draft(
                         supplier_name=active_supplier,

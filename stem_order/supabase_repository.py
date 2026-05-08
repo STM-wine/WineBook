@@ -18,6 +18,7 @@ import pandas as pd
 
 
 PO_DRAFT_STATUSES = {"draft", "ready_for_entry", "entered_in_quickbooks", "cancelled"}
+ACTIVE_PO_DRAFT_STATUSES = {"draft", "ready_for_entry"}
 
 
 def load_dotenv(path: str | Path = ".env") -> None:
@@ -214,7 +215,15 @@ class SupabaseRepository:
         report_run_id: str,
         recommendations: pd.DataFrame,
         notes: str | None = None,
+        allow_duplicate: bool = False,
     ) -> dict[str, Any]:
+        if not allow_duplicate:
+            existing = self.active_purchase_order_draft_for_supplier(report_run_id, supplier_name)
+            if existing:
+                raise ValueError(
+                    f"An active PO draft already exists for {supplier_name}: {str(existing.get('id', ''))[:8]}"
+                )
+
         if "approved_qty" in recommendations:
             qty = pd.to_numeric(recommendations["approved_qty"], errors="coerce").fillna(0)
         else:
@@ -254,6 +263,24 @@ class SupabaseRepository:
             .execute()
         )
         return result.data or []
+
+    def active_purchase_order_draft_for_supplier(
+        self,
+        report_run_id: str,
+        supplier_name: str,
+    ) -> dict[str, Any] | None:
+        result = (
+            self.client.table("purchase_order_drafts")
+            .select("*")
+            .eq("report_run_id", report_run_id)
+            .eq("supplier_name", supplier_name)
+            .in_("status", sorted(ACTIVE_PO_DRAFT_STATUSES))
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
 
     def get_purchase_order_draft_lines(self, purchase_order_draft_id: str) -> list[dict[str, Any]]:
         result = (

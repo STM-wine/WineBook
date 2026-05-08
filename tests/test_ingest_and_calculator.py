@@ -20,6 +20,7 @@ from stem_order.ingest import (
 )
 from stem_order.pipeline import format_display_dataframe, select_raw_output
 from stem_order.dashboard import (
+    active_po_draft_message,
     approval_metrics,
     buyer_updates_from_editor,
     buyer_workbench_dataframe,
@@ -562,6 +563,21 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(lines.loc[0, "Estimated Cost"], 120)
         self.assertEqual(drafts.loc[0, "Draft ID"], "abcdef12")
         self.assertEqual(drafts.loc[0, "Status"], "Ready for Entry")
+
+    def test_active_po_draft_message_ignores_completed_and_cancelled_drafts(self):
+        self.assertEqual(
+            active_po_draft_message(
+                [
+                    {"id": "entered-1", "status": "entered_in_quickbooks"},
+                    {"id": "cancelled-1", "status": "cancelled"},
+                ]
+            ),
+            "",
+        )
+        self.assertIn(
+            "abcdef12",
+            active_po_draft_message([{"id": "abcdef12-3456", "status": "ready_for_entry"}]),
+        )
 
 
 class SupabaseRepositoryTests(unittest.TestCase):

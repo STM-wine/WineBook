@@ -17,7 +17,8 @@
 
 create extension if not exists pg_net with schema extensions;
 create extension if not exists pg_cron with schema extensions;
-create extension if not exists vault with schema vault;
+create schema if not exists vault;
+create extension if not exists supabase_vault with schema vault;
 
 do $$
 declare

@@ -757,11 +757,32 @@ def po_drafts_dataframe(drafts: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+def active_po_drafts(drafts: list[dict]) -> list[dict]:
+    return [
+        draft
+        for draft in drafts
+        if draft.get("status") in {"draft", "ready_for_entry"}
+    ]
+
+
+def active_po_draft_message(drafts: list[dict]) -> str:
+    active = active_po_drafts(drafts)
+    if not active:
+        return ""
+    draft = active[0]
+    return (
+        f"Active PO draft {str(draft.get('id', ''))[:8]} already exists. "
+        "Use the existing draft or mark it entered/cancelled before creating another."
+    )
+
+
 __all__ = [
     "ApprovalMetrics",
     "DashboardMetrics",
     "APPROVED_STATUSES",
     "approval_metrics",
+    "active_po_draft_message",
+    "active_po_drafts",
     "dashboard_metrics",
     "filter_recommendations",
     "format_dashboard_dataframe",
