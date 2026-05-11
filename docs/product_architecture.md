@@ -27,7 +27,7 @@ Terminology matters: Vinosmith calls the field `Importer`, but Stem's internal a
 - `wine_calculator.py`: existing calculation engine during migration.
 - `supabase/migrations/`: database schema for the future cloud app.
 - `scripts/`: local smoke checks against sample export files.
-- `.github/workflows/daily-vinosmith-ingest.yml`: scheduled GitHub Actions workflow for remote email ingestion.
+- `.github/workflows/daily-vinosmith-ingest.yml`: manually dispatchable GitHub Actions worker for remote email ingestion.
 
 ## Supabase Responsibilities
 
@@ -40,14 +40,15 @@ Heavy spreadsheet parsing and pandas calculation should remain in Python workers
 
 ## Automation Strategy
 
-The first remote automation target is GitHub Actions rather than a local machine:
+The current remote automation path uses Supabase as the clock and GitHub Actions as the worker:
 
 1. Vinosmith emails RB6/inventory and RADs/sales reports to `stm@stemwinecompany.com`.
-2. GitHub Actions runs on a weekday morning schedule and can also be triggered manually.
-3. `scripts/process_daily_vinosmith_email.py` connects to the mailbox, downloads matching attachments, stores raw files in Supabase Storage, and runs the existing Python pipeline.
-4. The script writes a `scheduled_email` report run. It skips if a completed scheduled run already exists for that report date unless forced.
+2. Supabase Cron runs through the morning window and calls GitHub's `workflow_dispatch` API only while the current Mountain-time report date lacks a completed `scheduled_email` report run.
+3. GitHub Actions runs `scripts/process_daily_vinosmith_email.py`.
+4. The script connects to the mailbox, downloads matching attachments, stores raw files in Supabase Storage, and runs the existing Python pipeline.
+5. The script writes a `scheduled_email` report run. It also skips if a completed scheduled run already exists for that report date unless forced.
 
-This keeps the stack tight: GitHub for code and scheduling, Supabase for data/storage/auth, Python for spreadsheet processing.
+This keeps the stack tight: GitHub for code and worker execution, Supabase for data/storage/auth/scheduling, Python for spreadsheet processing.
 
 ## Current Ordering Rules
 
@@ -107,9 +108,10 @@ Future logistics work should add internal trucking cost per bottle, pallet confi
 6. Save supplier-specific PO drafts from current recommendations.
 7. Add buyer approval state so all recommendations default to rejected until explicitly approved. Done for the current Streamlit workflow.
 8. Add logistics rollups and truck optimization summaries. Initial freight and California truck summaries exist; producer rollups and intelligent fill recommendations remain future work.
-9. Automate daily email ingestion with GitHub Actions. Initial automation exists and searches Gmail All Mail so category sorting does not hide reports.
-10. Refine PO drafts into buyer-ready exports and status workflows.
-11. Add QuickBooks sync/export once the internal PO workflow is stable.
+9. Automate daily email ingestion with Supabase-triggered GitHub Actions. Current automation exists, searches Gmail All Mail so category sorting does not hide reports, and suppresses extra GitHub dispatches after a completed daily run.
+10. Refine PO drafts into buyer-ready exports and status workflows. Initial draft review, CSV export, duplicate active-draft guard, and status changes exist.
+11. Decide the hosting path for the first non-local release.
+12. Add QuickBooks sync/export once the internal PO workflow is stable.
 
 ## Supabase Setup Inputs Needed
 
