@@ -74,10 +74,14 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
-importers.csv
 
 # Local source exports from Mark/Vinosmith. Keep these out of the shared repo.
 *.xlsx
 *.csv
 /*.xlsx
 /*.pdf
+
+# Tracked app reference data/templates.
+!/importers.csv
+!/templates/
+!/templates/*.xlsx

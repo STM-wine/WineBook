@@ -109,7 +109,7 @@ Future logistics work should add internal trucking cost per bottle, pallet confi
 7. Add buyer approval state so all recommendations default to rejected until explicitly approved. Done for the current Streamlit workflow.
 8. Add logistics rollups and truck optimization summaries. Initial freight and California truck summaries exist; producer rollups and intelligent fill recommendations remain future work.
 9. Automate daily email ingestion with Supabase-triggered GitHub Actions. Current automation exists, searches Gmail All Mail so category sorting does not hide reports, and suppresses extra GitHub dispatches after a completed daily run.
-10. Refine PO drafts into buyer-ready exports and status workflows. Initial draft review, CSV export, duplicate active-draft guard, and status changes exist.
+10. Refine PO drafts into buyer-ready exports and status workflows. Initial draft review, CSV/XLSX export, duplicate active-draft guard, and status changes exist.
 11. Decide the hosting path for the first non-local release.
 12. Add QuickBooks sync/export once the internal PO workflow is stable.
 

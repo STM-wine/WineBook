@@ -28,7 +28,7 @@ Keep the GRW converter separate unless the business explicitly decides to merge 
 5. `wine_calculator.py` calculates velocity, coverage, forecasts, risk, and recommended quantities.
 6. `stem_order.pipeline` adds supplier logistics from local `importers.csv` when available.
 7. The app reads the latest completed Supabase report run by default.
-8. Buyers review recommendations by supplier, adjust target weeks or recommended quantities, approve rows, and create supplier PO drafts for QuickBooks entry.
+8. Buyers review recommendations by supplier, adjust target weeks or recommended quantities, approve rows, and create supplier PO drafts/exports for QuickBooks entry.
 
 Manual RB6/RADs upload still exists as an admin fallback for reruns or later-in-day ordering, but the primary operating model is now automated daily ingestion.
 
@@ -43,6 +43,9 @@ WineBook/
 ├── grw_converter_app.py           # Separate GRW invoice converter utility
 ├── requirements.txt
 ├── .env.example                   # Safe local env template, no secrets
+├── importers.csv                   # Supplier logistics reference data
+├── templates/
+│   └── po_draft_template_stm.xlsx  # Excel PO draft template
 ├── docs/
 │   ├── product_architecture.md
 │   ├── supabase_setup.md
@@ -59,7 +62,7 @@ WineBook/
 └── modules/po_tools/              # GRW converter internals
 ```
 
-Local source exports such as `importers.csv`, RB6/RADs `.xlsx` files, PDFs, and `.env` are intentionally ignored.
+Local source exports such as RB6/RADs `.xlsx` files, PDFs, and `.env` are intentionally ignored. `importers.csv` is tracked as app reference data until supplier logistics move into an editable database table.
 
 ## Setup
 

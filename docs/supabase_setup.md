@@ -119,10 +119,10 @@ Required GitHub Actions secrets:
 - `EMAIL_PASSWORD`
 - `EMAIL_MAILBOX` (`INBOX`)
 - `EMAIL_MAILBOXES` optional comma-separated override. For Google Workspace/Gmail, the script now searches `INBOX` and falls back to `[Gmail]/All Mail` automatically so category sorting like Updates does not hide the reports.
-- `IMPORTERS_CSV_BASE64`
 
 Optional GitHub Actions secrets/variables:
 
+- `IMPORTERS_CSV_BASE64` optional override for the tracked repo `importers.csv`
 - `VINOSMITH_SENDER`
 - `VINOSMITH_SUBJECT_KEYWORD`
 - `RB6_ATTACHMENT_KEYWORDS`
@@ -153,13 +153,13 @@ where jobname = 'daily-vinosmith-github-dispatch';
 
 The GitHub workflow intentionally has no native `schedule` block now. It should be triggered by Supabase Cron or manually from GitHub Actions.
 
-To create `IMPORTERS_CSV_BASE64` locally:
+The workflow uses the tracked repo `importers.csv` by default. To temporarily override it with a GitHub secret, create `IMPORTERS_CSV_BASE64` locally:
 
 ```bash
 base64 -i importers.csv | pbcopy
 ```
 
-Paste the copied value into the GitHub secret. Keep the actual `importers.csv` out of the repo.
+Paste the copied value into the GitHub secret. Long term, supplier logistics should move into an editable Supabase table instead of a CSV file.
 
 `002_manual_recommendation_ingest.sql` should also add transitional recommendation fields:
 

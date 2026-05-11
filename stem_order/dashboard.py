@@ -1,7 +1,11 @@
 """Dashboard data shaping for ordering decisions."""
 
+from copy import copy
 from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
 
+from openpyxl import load_workbook
 import pandas as pd
 
 
@@ -33,6 +37,7 @@ PO_COLUMNS = [
     "planning_sku",
     "approved_qty",
     "fob",
+    "trucking_cost_per_bottle",
     "order_cost",
 ]
 PO_DRAFT_STATUS_LABELS = {
@@ -130,6 +135,10 @@ def recalculate_working_recommendation(df: pd.DataFrame) -> pd.DataFrame:
         return display
 
     display["Weeks w/ Recommended"] = display.apply(working_weeks_from_qty, axis=1)
+    if "_FOB" in display.columns and "Est. Cost" in display.columns:
+        qty = pd.to_numeric(display["Recommended Qty"], errors="coerce").fillna(0)
+        fob = pd.to_numeric(display["_FOB"], errors="coerce").fillna(0)
+        display["Est. Cost"] = qty * fob
     return display
 
 
@@ -328,10 +337,9 @@ def importer_groups(df: pd.DataFrame, po_sent_suppliers: set[str] | None = None)
     for row in summary.to_dict(orient="records"):
         importer = row["Importer"]
         group = df[df["supplier_name"].fillna("").replace("", "Unassigned") == importer].copy()
-        if "order_cost" in group:
-            group = group.sort_values("order_cost", ascending=False)
-        elif "recommended_qty_rounded" in group:
-            group = group.sort_values("recommended_qty_rounded", ascending=False)
+        sort_col = "product_name" if "product_name" in group else "Name" if "Name" in group else None
+        if sort_col:
+            group = group.sort_values(sort_col, key=lambda series: series.fillna("").astype(str).str.lower())
         groups.append({"summary": row, "data": group})
     return groups
 
@@ -413,9 +421,7 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     if "Weekly Velocity" in display:
-        display["Weekly Velocity"] = display["Weekly Velocity"].apply(
-            lambda x: f"{x:.2f}" if pd.notna(x) else ""
-        )
+        display["Weekly Velocity"] = display["Weekly Velocity"].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "")
 
     if "Weeks w/ On Order" in display:
         display["Weeks w/ On Order"] = display["Weeks w/ On Order"].apply(
@@ -544,6 +550,7 @@ def buyer_workbench_dataframe(
         "weeks_on_hand_with_on_order": "Weeks w/ On Order",
         "Working Recommended Qty": "Recommended Qty",
         "order_cost": "Est. Cost",
+        "fob": "_FOB",
     }
     editor = editor.rename(columns=rename_map)
     ordered = [
@@ -562,6 +569,7 @@ def buyer_workbench_dataframe(
         "Weeks w/ On Order",
         "Weeks w/ Recommended",
         "_Pack Size",
+        "_FOB",
         "Recommended Qty",
         "Approval",
         "Est. Cost",
@@ -569,8 +577,8 @@ def buyer_workbench_dataframe(
     display = editor[[col for col in ordered if col in editor.columns]].copy()
     if "Velocity Trend" in display:
         display["Velocity Trend"] = display["Velocity Trend"].apply(lambda x: f"{x:+.0f}%" if pd.notna(x) else "")
-    if "Recommended Qty" in display:
-        display = display.sort_values("Recommended Qty", ascending=False)
+    if "Wine" in display:
+        display = display.sort_values("Wine", key=lambda series: series.fillna("").astype(str).str.lower())
     return recalculate_working_recommendation(display.reset_index(drop=True))
 
 
@@ -704,8 +712,12 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if "approved_qty" in po_df.columns:
         po_df["approved_qty"] = pd.to_numeric(po_df["approved_qty"], errors="coerce").fillna(0).astype(int)
     if "fob" in po_df.columns:
-        po_df["Estimated Cost"] = pd.to_numeric(po_df["fob"], errors="coerce").fillna(0) * po_df["approved_qty"]
-        po_df = po_df.drop(columns=["fob"])
+        po_df["fob"] = pd.to_numeric(po_df["fob"], errors="coerce").fillna(0)
+        po_df["Estimated Cost"] = po_df["fob"] * po_df["approved_qty"]
+    if "trucking_cost_per_bottle" in po_df.columns:
+        po_df["trucking_cost_per_bottle"] = pd.to_numeric(
+            po_df["trucking_cost_per_bottle"], errors="coerce"
+        ).fillna(0)
     return po_df.rename(
         columns={
             "supplier_name": "Supplier",
@@ -713,9 +725,61 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             "product_code": "Code",
             "planning_sku": "Planning SKU",
             "approved_qty": "Quantity",
+            "fob": "FOB",
+            "trucking_cost_per_bottle": "Laid In Cost",
             "order_cost": "Recommended Cost",
         }
     )
+
+
+def _copy_row_style(sheet, source_row: int, target_row: int, max_column: int) -> None:
+    for column in range(1, max_column + 1):
+        source = sheet.cell(source_row, column)
+        target = sheet.cell(target_row, column)
+        if source.has_style:
+            target._style = copy(source._style)
+        if source.number_format:
+            target.number_format = source.number_format
+        if source.alignment:
+            target.alignment = copy(source.alignment)
+        if source.border:
+            target.border = copy(source.border)
+        if source.fill:
+            target.fill = copy(source.fill)
+        if source.font:
+            target.font = copy(source.font)
+
+
+def po_template_xlsx_bytes(po_df: pd.DataFrame, template_path: str | Path) -> bytes:
+    """Fill Mark's PO draft template from the approved PO preview dataframe."""
+    workbook = load_workbook(template_path)
+    sheet = workbook.active
+    start_row = 4
+    max_column = max(sheet.max_column, 23)
+
+    if sheet.max_row >= start_row:
+        for row in sheet.iter_rows(min_row=start_row, max_row=sheet.max_row, max_col=max_column):
+            for cell in row:
+                cell.value = None
+
+    ordered = po_df.sort_values(
+        ["Supplier", "Wine"],
+        key=lambda series: series.fillna("").astype(str).str.lower(),
+    )
+    for offset, row in enumerate(ordered.to_dict(orient="records")):
+        excel_row = start_row + offset
+        _copy_row_style(sheet, start_row, excel_row, max_column)
+        sheet.cell(excel_row, 1).value = row.get("Supplier", "")
+        sheet.cell(excel_row, 2).value = ""
+        sheet.cell(excel_row, 3).value = _clean_int(row.get("Quantity"), 0)
+        sheet.cell(excel_row, 4).value = row.get("Code", "")
+        sheet.cell(excel_row, 5).value = row.get("Wine", "")
+        sheet.cell(excel_row, 6).value = _clean_float(row.get("FOB"), 0.0)
+        sheet.cell(excel_row, 7).value = _clean_float(row.get("Laid In Cost"), 0.0)
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 def po_draft_lines_dataframe(lines: list[dict]) -> pd.DataFrame:
@@ -797,6 +861,7 @@ __all__ = [
     "importer_workflow_status",
     "location_summary",
     "po_export_dataframe",
+    "po_template_xlsx_bytes",
     "po_draft_lines_dataframe",
     "po_drafts_dataframe",
     "PO_DRAFT_STATUS_LABELS",

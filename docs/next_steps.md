@@ -12,7 +12,7 @@ WineBook is now a Supabase-backed ordering dashboard with automated daily ingest
 - GitHub Actions is no longer the primary scheduler; it is the worker and manual-debug entry point.
 - RB6/RADs/importers parsing has been extracted into reusable modules.
 - Recommendations are persisted to Supabase report runs.
-- Dashboard reads the latest completed report run and supports supplier filtering, recommendation review, supplier summaries, location summaries, PO CSV export, supplier PO drafts, PO draft review, and PO draft status changes.
+- Dashboard reads the latest completed report run and supports supplier filtering, recommendation review, supplier summaries, location summaries, PO CSV/XLSX export, supplier PO drafts, PO draft review, and PO draft status changes.
 - Recommendations default to `rejected` / `approved_qty = 0`, matching the ownership opt-in approval model.
 - Buyers can edit either `Weeks w/ Recommended` or `Recommended Qty`; those controls stay synchronized.
 - Active supplier PO drafts are guarded to reduce accidental duplicate drafts.
@@ -70,7 +70,7 @@ The product goal is a simple buyer workflow:
   - FTL progress
   - bottles/cases needed to reach FTL
   - estimated freight savings
-- Add trucking-cost-per-bottle support to a Supabase logistics table instead of relying on `importers.csv` forever.
+- Move supplier logistics out of tracked `importers.csv` and into a Supabase table with an app editing surface.
 - Add product/SKU pallet configuration table for future pallet-aware rounding.
 
 ## Hosting / Publication Questions
@@ -90,7 +90,7 @@ Current transitional feeds:
 
 - RB6 inventory export
 - RADs sales history export
-- `importers.csv` logistics data restored into GitHub Actions from a secret
+- tracked `importers.csv` logistics reference data
 
 Next expected feed:
 
@@ -106,7 +106,7 @@ Future durable source:
 - Keep daily ingest runnable both from GitHub Actions and locally for debugging.
 - Keep parser/calculation/persistence logic outside `app.py`.
 - Add tests around every business-rule change.
-- Treat `importers.csv`, `.env`, RB6/RADs exports, and PDFs as local data, not repo assets.
+- Treat `.env`, RB6/RADs exports, PDFs, and other source reports as local data, not repo assets.
 - Keep GRW converter code stable and separate unless explicitly brought into scope.
 
 ## Verification Commands

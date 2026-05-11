@@ -3,6 +3,7 @@ import os
 import traceback
 from html import escape
 from datetime import datetime, timedelta
+import pandas as pd
 from stem_order.core import normalize_planning_sku
 from stem_order.dashboard import (
     approval_metrics,
@@ -18,6 +19,7 @@ from stem_order.dashboard import (
     po_draft_lines_dataframe,
     po_drafts_dataframe,
     po_export_dataframe,
+    po_template_xlsx_bytes,
     recalculate_working_recommendation,
     recommendations_to_dataframe,
     risk_counts,
@@ -261,6 +263,70 @@ def current_editor_dataframe(edited_df, editor_key):
     return apply_pending_editor_edits(edited_df, editor_key)
 
 
+def apply_editor_state_to_recommendations(original_df, edited_df):
+    if original_df.empty or edited_df.empty or "id" not in original_df.columns or "id" not in edited_df.columns:
+        return original_df
+
+    working_df = original_df.copy()
+    for row in edited_df.to_dict(orient="records"):
+        recommendation_id = row.get("id")
+        if not recommendation_id:
+            continue
+        mask = working_df["id"] == recommendation_id
+        if not bool(mask.any()):
+            continue
+        suggested_qty = int(pd.to_numeric(working_df.loc[mask, "recommended_qty_rounded"], errors="coerce").fillna(0).iloc[0])
+        approved = bool(row.get("Approval", False))
+        if approved:
+            approved_qty = int(pd.to_numeric(pd.Series([row.get("Recommended Qty", suggested_qty)]), errors="coerce").fillna(suggested_qty).iloc[0])
+            status = "edited" if approved_qty != suggested_qty else "approved"
+        else:
+            approved_qty = 0
+            status = "rejected"
+        working_df.loc[mask, "approved_qty"] = approved_qty
+        working_df.loc[mask, "recommendation_status"] = status
+    return working_df
+
+
+def create_po_drafts_for_approved_suppliers(latest_repo, report_run_id, recommendations, existing_drafts):
+    if recommendations.empty or "supplier_name" not in recommendations.columns:
+        return [], [], ["No supplier data found for approved recommendations."]
+
+    active_suppliers = {
+        draft.get("supplier_name")
+        for draft in existing_drafts
+        if draft.get("supplier_name") and draft.get("status") in {"draft", "ready_for_entry"}
+    }
+    approved_qty = pd.to_numeric(recommendations.get("approved_qty", 0), errors="coerce").fillna(0)
+    approved_status = recommendations.get(
+        "recommendation_status",
+        pd.Series(["rejected"] * len(recommendations), index=recommendations.index),
+    ).isin(["approved", "edited"])
+    approved = recommendations[approved_status & (approved_qty > 0)].copy()
+
+    created = []
+    skipped = []
+    errors = []
+    for supplier_name, supplier_df in approved.groupby("supplier_name", dropna=False):
+        supplier = "Unassigned" if pd.isna(supplier_name) or supplier_name == "" else supplier_name
+        if supplier in active_suppliers:
+            skipped.append(f"{supplier}: active draft already exists")
+            continue
+        try:
+            created.append(
+                latest_repo.create_purchase_order_draft(
+                    supplier_name=supplier,
+                    report_run_id=report_run_id,
+                    recommendations=supplier_df,
+                    notes="Created from global PO Drafts action.",
+                )
+            )
+        except Exception as draft_error:
+            errors.append(f"{supplier}: {draft_error}")
+
+    return created, skipped, errors
+
+
 def render_importer_work_unit(
     *,
     importer_name,
@@ -274,14 +340,28 @@ def render_importer_work_unit(
     existing_drafts=None,
 ):
     key_base = f"{report_run_id}_{importer_key(importer_name)}_{'-'.join(selected_statuses)}"
+    editor_key = f"approval_editor_{key_base}"
+    editor_df = buyer_workbench_dataframe(
+        importer_df,
+        show_history=show_history,
+        show_forecast=show_forecast,
+    )
+    editor_df = apply_pending_editor_edits(editor_df, editor_key)
+
+    live_summary = dict(summary)
+    if not editor_df.empty and {"Approval", "Recommended Qty"}.issubset(editor_df.columns):
+        approved_mask = editor_df["Approval"].fillna(False).astype(bool)
+        approved_qty = pd.to_numeric(editor_df.loc[approved_mask, "Recommended Qty"], errors="coerce").fillna(0)
+        live_summary["Approved Qty"] = int(approved_qty.sum())
+
     st.markdown(
         f"""
-        <div class="importer-workunit importer-status-{importer_key(summary['Status'])}">
+        <div class="importer-workunit importer-status-{importer_key(live_summary['Status'])}">
             <div>
                 <h4>{escape(str(importer_name))}</h4>
-                <p>{escape(format_importer_summary(summary))}</p>
+                <p>{escape(format_importer_summary(live_summary))}</p>
             </div>
-            <span>{escape(summary['Status'])}</span>
+            <span>{escape(live_summary['Status'])}</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -293,19 +373,12 @@ def render_importer_work_unit(
     with stats[1]:
         metric_card("Urgent", format_count(summary["Urgent"]), "Need review", "red")
     with stats[2]:
-        metric_card("Suggested", format_count(summary["Suggested Qty"]), "Bottles", "green")
+        metric_card("Suggested", format_count(live_summary["Suggested Qty"]), "Bottles", "green")
     with stats[3]:
-        metric_card("Approved", format_count(summary["Approved Qty"]), "Bottles", "teal")
+        metric_card("Approved", format_count(live_summary["Approved Qty"]), "Bottles", "teal")
     with stats[4]:
-        metric_card("Value", format_money(summary["Suggested Value"]), "Suggested order", importer_status_tone(summary["Status"]))
+        metric_card("Value", format_money(live_summary["Suggested Value"]), "Suggested order", importer_status_tone(live_summary["Status"]))
 
-    editor_df = buyer_workbench_dataframe(
-        importer_df,
-        show_history=show_history,
-        show_forecast=show_forecast,
-    )
-    editor_key = f"approval_editor_{key_base}"
-    editor_df = apply_pending_editor_edits(editor_df, editor_key)
     st.session_state[editor_rows_key(editor_key)] = editor_df["id"].tolist() if "id" in editor_df.columns else []
     st.session_state[editor_base_key(editor_key)] = editor_df.to_dict(orient="records")
     edited_approvals = st.data_editor(
@@ -319,9 +392,11 @@ def render_importer_work_unit(
         column_config={
             "id": None,
             "_Pack Size": None,
+            "_FOB": None,
             "Wine": st.column_config.TextColumn(
                 "Wine",
                 help="Importer rank plus Core / BTG flags.",
+                width="large",
             ),
             "Approval": st.column_config.CheckboxColumn(
                 "Approval",
@@ -358,57 +433,26 @@ def render_importer_work_unit(
                 "Weekly Velocity",
                 "Velocity Trend",
                 "Weeks w/ On Order",
+                "_FOB",
                 "Est. Cost",
             ]
             if col in editor_df.columns
         ],
     )
 
-    actions = st.columns([1.1, 1.2, 1.2, 4])
-    if actions[0].button("Save", type="primary", key=f"save_{key_base}"):
-        current_approvals = current_editor_dataframe(edited_approvals, editor_key)
-        updates = buyer_updates_from_editor(importer_df, current_approvals)
-        if not updates:
-            st.info("No approval changes to save.")
-        else:
-            try:
-                latest_repo.update_recommendation_approvals(updates)
-                clear_editor_draft(editor_key)
-                st.success(f"Saved {len(updates):,} approval updates for {importer_name}.")
-                st.rerun()
-            except Exception as approval_error:
-                st.error(f"Could not save approvals: {approval_error}")
+    current_approvals = current_editor_dataframe(edited_approvals, editor_key)
+    updates = buyer_updates_from_editor(importer_df, current_approvals)
+    if updates:
+        try:
+            latest_repo.update_recommendation_approvals(updates)
+            st.toast(f"Autosaved {len(updates):,} approval update(s) for {importer_name}.")
+        except Exception as approval_error:
+            st.error(f"Could not autosave approvals: {approval_error}")
 
-    if actions[1].button("Approve Suggested", key=f"approve_suggested_{key_base}"):
-        updates = approval_updates_for_suggested_quantities(importer_df)
-        if not updates:
-            st.info("No suggested quantities to approve.")
-        else:
-            try:
-                latest_repo.update_recommendation_approvals(updates)
-                st.success(f"Approved suggested quantities for {importer_name}.")
-                st.rerun()
-            except Exception as approval_error:
-                st.error(f"Could not approve importer: {approval_error}")
-
-    po_df = po_export_dataframe(importer_df)
     duplicate_message = active_po_draft_message(existing_drafts or [])
     if duplicate_message:
-        actions[2].warning(duplicate_message)
-    if actions[2].button("Create PO Draft", key=f"po_{key_base}", disabled=po_df.empty or bool(duplicate_message)):
-        try:
-            draft = latest_repo.create_purchase_order_draft(
-                supplier_name=importer_name,
-                report_run_id=report_run_id,
-                recommendations=importer_df,
-                notes="Created from importer workbench.",
-            )
-            st.success(f"Created PO draft {draft['id']} with {len(draft.get('lines', [])):,} lines.")
-            st.rerun()
-        except Exception as draft_error:
-            st.error(f"Could not create PO draft: {draft_error}")
-
-    actions[3].caption("Importer status updates automatically from saved approval states and PO drafts.")
+        st.warning(duplicate_message)
+    st.caption("Approval checkboxes autosave. Use PO Drafts to create draft POs from all approved supplier lines.")
 
 
 # Set page configuration - must be first Streamlit command
@@ -949,52 +993,23 @@ st.markdown("""
     max-width: 1500px !important;
 }
 
-.stem-hero {
-    display: flex;
-    justify-content: space-between;
-    gap: 2rem;
-    align-items: flex-end;
-    padding: 1.35rem 1.5rem;
-    margin: 1.25rem 0 1.2rem 0;
-    background:
-        linear-gradient(135deg, rgba(70, 107, 88, 0.12), rgba(15, 107, 120, 0.06) 48%, rgba(123, 36, 68, 0.09)),
-        var(--stem-panel);
-    border: 1px solid var(--stem-line);
-    border-radius: 8px;
-    box-shadow: var(--stem-shadow);
-}
-
-.stem-hero h2 {
-    margin: 0 0 0.35rem 0 !important;
-    color: var(--stem-ink) !important;
-    font-size: 1.45rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0 !important;
-}
-
-.stem-hero p {
-    margin: 0 !important;
-    color: var(--stem-charcoal) !important;
-    font-size: 0.95rem !important;
-}
-
-.run-badge {
+.data-date-badge {
     display: inline-flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.15rem;
-    padding: 0.65rem 0.8rem;
-    background: rgba(255, 255, 255, 0.78);
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.42rem 0.65rem;
+    margin: 0.55rem 0 0.65rem;
+    background: rgba(255, 255, 255, 0.82);
     border: 1px solid rgba(70, 107, 88, 0.18);
-    border-radius: 8px;
+    border-radius: 999px;
     color: var(--stem-charcoal);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     white-space: nowrap;
 }
 
-.run-badge strong {
+.data-date-badge strong {
     color: var(--stem-green);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
 }
@@ -1133,13 +1148,7 @@ div[data-testid="stDataEditor"] {
 }
 
 @media (max-width: 900px) {
-    .stem-hero {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .run-badge {
-        align-items: flex-start;
+    .data-date-badge {
         white-space: normal;
     }
 }
@@ -1208,6 +1217,7 @@ developer_mode = False
 # Load importers.csv from project root
 project_root = os.path.dirname(os.path.abspath(__file__))
 importers_path = os.path.join(project_root, 'importers.csv')
+po_template_path = os.path.join(project_root, "templates", "po_draft_template_stm.xlsx")
 importers_data, importers_loaded, importers_warning = load_importers_csv(importers_path)
 
 latest_repo = None
@@ -1221,7 +1231,6 @@ if latest_report_run:
     dashboard_df = recommendations_to_dataframe(latest_recommendations)
     metrics = dashboard_metrics(dashboard_df)
     approvals = approval_metrics(dashboard_df)
-    completed_at = latest_report_run.get("completed_at", "unknown")
     run_date = latest_report_run.get("report_date") or "Latest"
     try:
         po_drafts = latest_repo.get_purchase_order_drafts_for_run(latest_report_run["id"])
@@ -1233,87 +1242,101 @@ if latest_report_run:
     except Exception:
         po_sent_suppliers = set()
 
-    st.markdown(
-        f"""
-        <div class="stem-hero">
-            <div>
-                <h2>Ordering Dashboard</h2>
-                <p>Morning recommendations are loaded. Review by supplier, approve quantities, then draft the PO.</p>
-            </div>
-            <div class="run-badge">
-                <strong>{escape(str(run_date))}</strong>
-                <span>Run {escape(str(latest_report_run["id"])[:8])} · {escape(str(completed_at))}</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    metric_cols = st.columns(6)
-    with metric_cols[0]:
-        metric_card("Urgent", format_count(metrics.urgent_skus), "SKUs need action", "red")
-    with metric_cols[1]:
-        metric_card("Low", format_count(metrics.low_skus), "Below target", "gold")
-    with metric_cols[2]:
-        metric_card("Recommended", format_count(metrics.recommended_bottles), "Bottles", "green")
-    with metric_cols[3]:
-        metric_card("Approved", format_count(approvals.approved_bottles), "Bottles ready for PO", "teal")
-    with metric_cols[4]:
-        metric_card("PO Value", format_money(approvals.approved_cost), f"{approvals.approved_lines:,} lines", "wine")
-    with metric_cols[5]:
-        metric_card("Suppliers", format_count(metrics.suppliers_with_orders), "With suggested orders", "ink")
-
-    section_label("Workbench Focus", "Choose all importers or focus on one importer at a time.")
-    filter_cols = st.columns([2.4, 2, 3.4, 1.2])
-    supplier_values = (
-        dashboard_df["supplier_name"].dropna().unique()
-        if "supplier_name" in dashboard_df.columns
-        else []
-    )
-    supplier_options = ["All"] + sorted(
-        [s for s in supplier_values if s]
-    )
-    active_supplier = filter_cols[0].selectbox(
-        "Importer",
-        supplier_options,
-    )
-    selected_statuses = filter_cols[1].multiselect(
-        "Status",
-        ["URGENT", "LOW", "OK", "NO SALES"],
-        default=["URGENT", "LOW"],
-    )
-    search_query = filter_cols[2].text_input("Wine search", "")
-    only_order_qty = filter_cols[3].checkbox("Qty > 0", value=True)
-
-    filtered_dashboard = filter_recommendations(
-        dashboard_df,
-        supplier=active_supplier,
-        statuses=selected_statuses,
-        search=search_query,
-        only_order_qty=only_order_qty,
-    )
-    filtered_approvals = approval_metrics(filtered_dashboard)
-    filtered_risks = risk_counts(filtered_dashboard)
-
-    focus_cols = st.columns(5)
-    with focus_cols[0]:
-        metric_card("Visible Rows", format_count(len(filtered_dashboard)), "Current working set", "ink")
-    with focus_cols[1]:
-        metric_card("High Risk", format_count(filtered_risks["High"]), "Needs close review", "red")
-    with focus_cols[2]:
-        metric_card("Medium Risk", format_count(filtered_risks["Medium"]), "Watch list", "gold")
-    with focus_cols[3]:
-        metric_card("Approved Qty", format_count(filtered_approvals.approved_bottles), "In this filter", "teal")
-    with focus_cols[4]:
-        metric_card("Pending", format_count(filtered_approvals.pending_lines), "Rejected by default", "wine")
-
     tab_recs, tab_suppliers, tab_locations, tab_po = st.tabs(
-        ["Order Review", "Supplier Board", "Freight", "PO Draft"]
+        ["Order Review", "Supplier Board", "Freight", "PO Drafts"]
     )
+
     with tab_recs:
+        metric_cols = st.columns(6)
+        with metric_cols[0]:
+            metric_card("Urgent", format_count(metrics.urgent_skus), "SKUs need action", "red")
+        with metric_cols[1]:
+            metric_card("Low", format_count(metrics.low_skus), "Below target", "gold")
+        with metric_cols[2]:
+            metric_card("Recommended", format_count(metrics.recommended_bottles), "Bottles", "green")
+        with metric_cols[3]:
+            metric_card("Approved", format_count(approvals.approved_bottles), "Bottles ready for PO", "teal")
+        with metric_cols[4]:
+            metric_card("PO Value", format_money(approvals.approved_cost), f"{approvals.approved_lines:,} lines", "wine")
+        with metric_cols[5]:
+            metric_card("Suppliers", format_count(metrics.suppliers_with_orders), "With suggested orders", "ink")
+
+        st.markdown(
+            f"""
+            <div class="data-date-badge">
+                <strong>Data Date</strong>
+                <span>{escape(str(run_date))}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("<div style='height: 1.2rem;'></div>", unsafe_allow_html=True)
+        toolbar_cols = st.columns([1.6, 5])
+        if toolbar_cols[0].button(
+            "Create PO Drafts",
+            type="primary",
+            disabled=approvals.approved_lines == 0,
+            key="create_all_po_drafts_review",
+        ):
+            created, skipped, errors = create_po_drafts_for_approved_suppliers(
+                latest_repo,
+                latest_report_run["id"],
+                dashboard_df,
+                po_drafts,
+            )
+            if created:
+                st.success(f"Created {len(created):,} PO draft(s).")
+                st.rerun()
+            if skipped:
+                st.info("Skipped: " + "; ".join(skipped))
+            if errors:
+                st.error("Errors: " + "; ".join(errors))
+        toolbar_cols[1].caption("Creates one draft per supplier from currently approved lines. Existing active drafts are skipped.")
+
+        section_label("Order Summary", "Show all suppliers or focus on one supplier at a time.")
+        filter_cols = st.columns([2.4, 2, 3.4, 1.2])
+        supplier_values = (
+            dashboard_df["supplier_name"].dropna().unique()
+            if "supplier_name" in dashboard_df.columns
+            else []
+        )
+        supplier_options = ["All"] + sorted([s for s in supplier_values if s])
+        active_supplier = filter_cols[0].selectbox("Supplier", supplier_options, key="order_review_supplier")
+        selected_statuses = filter_cols[1].multiselect(
+            "Status",
+            ["URGENT", "LOW", "OK", "NO SALES"],
+            default=["URGENT", "LOW", "OK", "NO SALES"],
+            key="order_review_statuses",
+        )
+        search_query = filter_cols[2].text_input("Wine search", "", key="order_review_search")
+        only_order_qty = filter_cols[3].checkbox("Suggested only", value=False, key="order_review_suggested_only")
+
+        filtered_dashboard = filter_recommendations(
+            dashboard_df,
+            supplier=active_supplier,
+            statuses=selected_statuses,
+            search=search_query,
+            only_order_qty=only_order_qty,
+        )
+        filtered_approvals = approval_metrics(filtered_dashboard)
+        filtered_risks = risk_counts(filtered_dashboard)
+
+        focus_cols = st.columns(5)
+        with focus_cols[0]:
+            metric_card("Visible Rows", format_count(len(filtered_dashboard)), "Current working set", "ink")
+        with focus_cols[1]:
+            metric_card("High Risk", format_count(filtered_risks["High"]), "Needs close review", "red")
+        with focus_cols[2]:
+            metric_card("Medium Risk", format_count(filtered_risks["Medium"]), "Watch list", "gold")
+        with focus_cols[3]:
+            metric_card("Approved Qty", format_count(filtered_approvals.approved_bottles), "In this filter", "teal")
+        with focus_cols[4]:
+            metric_card("Pending", format_count(filtered_approvals.pending_lines), "Rejected by default", "wine")
+
         section_label(
-            "Importer Workbench",
-            "Importer sections are ordered by total suggested value; SKUs inside each importer are ordered largest to smallest.",
+            "Order Summary",
+            "Supplier sections are ordered by total suggested value; wines inside each supplier are sorted A-Z.",
         )
         toggle_cols = st.columns([1.2, 1.4, 5])
         show_history = toggle_cols[0].checkbox("Show 60/90d sales", value=False)
@@ -1378,25 +1401,11 @@ if latest_report_run:
 
     with tab_suppliers:
         section_label("Supplier Board", "Use this as the buyer's queue across all suppliers.")
-        supplier_base = filter_recommendations(
-            dashboard_df,
-            supplier="All",
-            statuses=selected_statuses,
-            search=search_query,
-            only_order_qty=only_order_qty,
-        )
-        st.dataframe(supplier_summary(supplier_base), use_container_width=True, hide_index=True, height=560)
+        st.dataframe(supplier_summary(dashboard_df), use_container_width=True, hide_index=True, height=560)
 
     with tab_locations:
         section_label("Freight View", "Roll up ordering pressure by pickup location and watch California truck economics.")
-        location_base = filter_recommendations(
-            dashboard_df,
-            supplier="All",
-            statuses=selected_statuses,
-            search=search_query,
-            only_order_qty=only_order_qty,
-        )
-        truck = california_truck_summary(location_base)
+        truck = california_truck_summary(dashboard_df)
         truck_cols = st.columns(3)
         with truck_cols[0]:
             metric_card("CA Truck", f"{truck['progress_pct']:.0f}%", "Progress toward FTL", "teal")
@@ -1405,73 +1414,80 @@ if latest_report_run:
         with truck_cols[2]:
             metric_card("FTL Savings", format_money(truck["estimated_savings"]), "At threshold", "green")
         st.progress(min(float(truck["progress_pct"]) / 100, 1.0))
-        st.dataframe(location_summary(location_base), use_container_width=True, hide_index=True, height=460)
+        st.dataframe(location_summary(dashboard_df), use_container_width=True, hide_index=True, height=460)
 
     with tab_po:
-        if active_supplier == "All":
-            st.info("Select a supplier to preview a PO draft.")
-        else:
-            supplier_drafts = [
-                draft
-                for draft in po_drafts
-                if draft.get("supplier_name") == active_supplier and draft.get("status") != "cancelled"
-            ]
-            section_label("Existing PO Drafts", "Download drafts, track handoff status, and mark QuickBooks entry progress.")
-            if supplier_drafts:
-                st.dataframe(
-                    po_drafts_dataframe(supplier_drafts),
-                    use_container_width=True,
-                    hide_index=True,
-                    height=min(260, max(120, 45 + len(supplier_drafts) * 35)),
-                )
-                for draft in supplier_drafts:
-                    render_po_draft_card(draft, latest_repo)
-            else:
-                st.info("No PO drafts have been created for this supplier yet.")
+        section_label("PO Drafts", "Create supplier drafts from approved rows and track QuickBooks handoff status.")
+        po_df = po_export_dataframe(dashboard_df)
+        po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0
+        po_cost_col = "Estimated Cost" if "Estimated Cost" in po_df else "Recommended Cost"
+        po_cost = float(po_df[po_cost_col].sum()) if po_cost_col in po_df else 0
+        po_metric_cols = st.columns(4)
+        with po_metric_cols[0]:
+            metric_card("PO Lines", format_count(len(po_df)), "Approved rows", "ink")
+        with po_metric_cols[1]:
+            metric_card("PO Qty", format_count(po_qty), "Approved bottles", "teal")
+        with po_metric_cols[2]:
+            metric_card("PO Est. Cost", format_money(po_cost), "Draft value", "wine")
+        with po_metric_cols[3]:
+            metric_card("Existing Drafts", format_count(len(po_drafts)), "This report run", "gold")
 
-            section_label("PO Draft Preview", "Only approved or edited rows with approved quantities appear here.")
-            po_df = po_export_dataframe(filtered_dashboard)
-            po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0
-            po_cost_col = "Estimated Cost" if "Estimated Cost" in po_df else "Recommended Cost"
-            po_cost = float(po_df[po_cost_col].sum()) if po_cost_col in po_df else 0
-            po_metric_cols = st.columns(3)
-            with po_metric_cols[0]:
-                metric_card("PO Lines", format_count(len(po_df)), active_supplier, "ink")
-            with po_metric_cols[1]:
-                metric_card("PO Qty", format_count(po_qty), "Approved bottles", "teal")
-            with po_metric_cols[2]:
-                metric_card("PO Est. Cost", format_money(po_cost), "Draft value", "wine")
-            st.dataframe(po_df, use_container_width=True, hide_index=True, height=460)
-            st.download_button(
-                label="Download PO CSV",
-                data=po_df.to_csv(index=False),
-                file_name=f"{supplier_file_slug(active_supplier)}_po_preview.csv",
-                mime="text/csv",
-                disabled=po_df.empty,
+        st.markdown("<div style='height: 1.2rem;'></div>", unsafe_allow_html=True)
+        po_action_cols = st.columns([1.5, 1.4, 4])
+        if po_action_cols[0].button(
+            "Create PO Drafts",
+            type="primary",
+            disabled=po_df.empty,
+            key="create_all_po_drafts_tab",
+        ):
+            created, skipped, errors = create_po_drafts_for_approved_suppliers(
+                latest_repo,
+                latest_report_run["id"],
+                dashboard_df,
+                po_drafts,
             )
-            if po_df.empty:
-                st.info("This supplier has no approved order quantities in the current filter.")
-            else:
-                duplicate_message = active_po_draft_message(supplier_drafts)
-                if duplicate_message:
-                    st.warning(duplicate_message)
-            if not po_df.empty and st.button(
-                "Create PO Draft",
-                type="primary",
-                disabled=bool(active_po_draft_message(supplier_drafts)),
-            ):
-                try:
-                    draft = latest_repo.create_purchase_order_draft(
-                        supplier_name=active_supplier,
-                        report_run_id=latest_report_run["id"],
-                        recommendations=filtered_dashboard,
-                        notes="Created from Ordering Dashboard supplier preview.",
-                    )
-                    st.success(
-                        f"Created PO draft {draft['id']} with {len(draft.get('lines', [])):,} lines."
-                    )
-                except Exception as draft_error:
-                    st.error(f"Could not create PO draft: {draft_error}")
+            if created:
+                st.success(f"Created {len(created):,} PO draft(s).")
+                st.rerun()
+            if skipped:
+                st.info("Skipped: " + "; ".join(skipped))
+            if errors:
+                st.error("Errors: " + "; ".join(errors))
+        po_action_cols[1].download_button(
+            label="Download PO CSV",
+            data=po_df.to_csv(index=False),
+            file_name=f"winebook_{run_date}_approved_po_preview.csv",
+            mime="text/csv",
+            disabled=po_df.empty,
+        )
+        po_xlsx = po_template_xlsx_bytes(po_df, po_template_path) if not po_df.empty else b""
+        po_action_cols[2].download_button(
+            label="Download PO XLSX",
+            data=po_xlsx,
+            file_name=f"winebook_{run_date}_po_draft.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disabled=po_df.empty,
+        )
+        st.caption("Global PO creation builds one draft per supplier and skips suppliers that already have an active draft.")
+
+        if po_df.empty:
+            st.info("No approved order quantities yet.")
+        else:
+            st.dataframe(po_df, use_container_width=True, hide_index=True, height=460)
+
+        section_label("Existing PO Drafts", "Download drafts, track handoff status, and mark QuickBooks entry progress.")
+        active_drafts = [draft for draft in po_drafts if draft.get("status") != "cancelled"]
+        if active_drafts:
+            st.dataframe(
+                po_drafts_dataframe(active_drafts),
+                use_container_width=True,
+                hide_index=True,
+                height=min(260, max(120, 45 + len(active_drafts) * 35)),
+            )
+            for draft in active_drafts:
+                render_po_draft_card(draft, latest_repo)
+        else:
+            st.info("No PO drafts have been created for this report run yet.")
 elif latest_repo:
     st.info("No saved recommendation run found yet. Upload RB6 and RADs files to create the first dashboard run.")
 

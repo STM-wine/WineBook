@@ -49,7 +49,7 @@ jobs:
           if [ -n "$IMPORTERS_CSV_BASE64" ]; then
             printf '%s' "$IMPORTERS_CSV_BASE64" | base64 -d > importers.csv
           else
-            echo "IMPORTERS_CSV_BASE64 is not set; processing will continue without importer logistics."
+            echo "IMPORTERS_CSV_BASE64 is not set; using tracked importers.csv from the repository."
           fi
 
       - name: Process Vinosmith email reports

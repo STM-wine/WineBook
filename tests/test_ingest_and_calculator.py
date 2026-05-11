@@ -1,5 +1,8 @@
 import unittest
+from tempfile import TemporaryDirectory
+from io import BytesIO
 
+from openpyxl import Workbook, load_workbook
 import pandas as pd
 
 from scripts.process_daily_vinosmith_email import (
@@ -34,6 +37,7 @@ from stem_order.dashboard import (
     po_draft_lines_dataframe,
     po_drafts_dataframe,
     po_export_dataframe,
+    po_template_xlsx_bytes,
     recalculate_working_recommendation,
     recommendations_to_dataframe,
     risk_counts,
@@ -105,6 +109,26 @@ class IngestTests(unittest.TestCase):
         self.assertFalse(loaded)
         self.assertIn("not found", warning)
         self.assertIn("eta_days", data.columns)
+
+    def test_importers_csv_accepts_laid_in_per_bottle_alias(self):
+        with TemporaryDirectory() as temp_dir:
+            path = f"{temp_dir}/importers.csv"
+            pd.DataFrame(
+                [
+                    {
+                        "name": "Supplier A",
+                        "eta_days": 14,
+                        "laid_in_per_bottle": 1.25,
+                    }
+                ]
+            ).to_csv(path, index=False)
+
+            data, loaded, warning = load_importers_csv(path)
+
+        self.assertTrue(loaded)
+        self.assertIsNone(warning)
+        self.assertIn("trucking_cost_per_bottle", data.columns)
+        self.assertEqual(data.loc[0, "trucking_cost_per_bottle"], 1.25)
 
 
 class CalculatorTests(unittest.TestCase):
@@ -331,6 +355,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("60d Sales", expanded.columns)
         self.assertIn("LY Next 90d Forecast", expanded.columns)
         self.assertEqual(compact.loc[0, "Velocity Trend"], "+15%")
+        self.assertEqual(compact.loc[0, "Weekly Velocity"], 12)
         self.assertEqual(compact.loc[0, "Weeks w/ Recommended"], 4.0)
 
     def test_buyer_workbench_recommended_qty_override_is_saved_when_approved(self):
@@ -425,6 +450,8 @@ class DashboardTests(unittest.TestCase):
                     "Recommended Qty": 30,
                     "Weekly Velocity": 5,
                     "Weeks w/ Recommended": 0,
+                    "_FOB": 10,
+                    "Est. Cost": 0,
                 }
             ]
         )
@@ -432,6 +459,7 @@ class DashboardTests(unittest.TestCase):
         updated = recalculate_working_recommendation(display)
 
         self.assertEqual(updated.loc[0, "Weeks w/ Recommended"], 9.0)
+        self.assertEqual(updated.loc[0, "Est. Cost"], 300)
 
     def test_approval_and_risk_metrics(self):
         df = recommendations_to_dataframe(
@@ -535,6 +563,23 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(truck["bottles_needed"], 10080)
 
     def test_po_draft_display_helpers_shape_exports(self):
+        po_export = po_export_dataframe(
+            recommendations_to_dataframe(
+                [
+                    {
+                        "supplier_name": "Supplier A",
+                        "product_name": "Wine A",
+                        "product_code": "A1",
+                        "planning_sku": "wine a",
+                        "recommendation_status": "approved",
+                        "approved_qty": 12,
+                        "fob": 10,
+                        "trucking_cost_per_bottle": 1.25,
+                        "order_cost": 120,
+                    }
+                ]
+            )
+        )
         lines = po_draft_lines_dataframe(
             [
                 {
@@ -559,10 +604,52 @@ class DashboardTests(unittest.TestCase):
             ]
         )
 
+        self.assertEqual(po_export.loc[0, "Supplier"], "Supplier A")
+        self.assertEqual(po_export.loc[0, "Quantity"], 12)
+        self.assertEqual(po_export.loc[0, "FOB"], 10)
+        self.assertEqual(po_export.loc[0, "Laid In Cost"], 1.25)
         self.assertEqual(lines.loc[0, "Quantity"], 12)
         self.assertEqual(lines.loc[0, "Estimated Cost"], 120)
         self.assertEqual(drafts.loc[0, "Draft ID"], "abcdef12")
         self.assertEqual(drafts.loc[0, "Status"], "Ready for Entry")
+
+    def test_po_template_export_populates_mark_template_columns(self):
+        po_df = pd.DataFrame(
+            [
+                {
+                    "Supplier": "Supplier A",
+                    "Wine": "Wine A 2024 12/750ml",
+                    "Code": "A1",
+                    "Planning SKU": "wine a",
+                    "Quantity": 12,
+                    "FOB": 10.5,
+                    "Laid In Cost": 1.25,
+                }
+            ]
+        )
+        with TemporaryDirectory() as temp_dir:
+            template_path = f"{temp_dir}/template.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet["A2"] = "Supplier/Importer"
+            sheet["B2"] = "Producer"
+            sheet["C2"] = "Quantity"
+            sheet["D2"] = "Item Code"
+            sheet["E2"] = "Item Description"
+            sheet["F2"] = "FOB"
+            sheet["G2"] = "Laid In Cost"
+            workbook.save(template_path)
+
+            output = po_template_xlsx_bytes(po_df, template_path)
+
+        exported = load_workbook(BytesIO(output), data_only=True)
+        sheet = exported.active
+        self.assertEqual(sheet["A4"].value, "Supplier A")
+        self.assertEqual(sheet["C4"].value, 12)
+        self.assertEqual(sheet["D4"].value, "A1")
+        self.assertEqual(sheet["E4"].value, "Wine A 2024 12/750ml")
+        self.assertEqual(sheet["F4"].value, 10.5)
+        self.assertEqual(sheet["G4"].value, 1.25)
 
     def test_active_po_draft_message_ignores_completed_and_cancelled_drafts(self):
         self.assertEqual(
