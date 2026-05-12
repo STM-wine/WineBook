@@ -887,30 +887,30 @@ def render_invoice_summary(invoice_summary: dict[str, Any]) -> None:
     if not summary_items:
         return
 
-    cards_html = "".join(
-        f"""
-        <div class="mini-card">
-            <div class="mini-card-label">{label}</div>
-            <div class="mini-card-value">{value}</div>
-        </div>
-        """
-        for label, value in summary_items
-    )
-
     st.markdown(
-        f"""
+        """
         <div class="section-card tight">
-            <div class="panel-title">Invoice adjustments</div>
+            <div class="panel-title">Invoice details</div>
             <p class="panel-copy">
-                Invoice-level credit and payment details are shown separately from wine setup rows.
+                If there is a credit or payment on the invoice, those details are shown here separately from the line item detail.
             </p>
-            <div class="mini-card-grid">
-                {cards_html}
-            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    summary_columns = st.columns(len(summary_items))
+    for column, (label, value) in zip(summary_columns, summary_items):
+        with column:
+            st.markdown(
+                f"""
+                <div class="mini-card">
+                    <div class="mini-card-label">{label}</div>
+                    <div class="mini-card-value">{value}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_success_state(result: ConversionSuccess) -> None:
@@ -962,6 +962,10 @@ def render_success_state(result: ConversionSuccess) -> None:
         st.warning(f"Some item numbers were not detected during parsing: {missing}")
 
     st.markdown("### Extracted line items")
+    if result.invoice_summary.get("credit_amount") is not None:
+        st.info(
+            "This invoice includes a credit/payment entry. It is shown above in Invoice details and is not merged into the wine line items below."
+        )
     st.dataframe(
         result.preview_df,
         use_container_width=True,
