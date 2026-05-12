@@ -133,7 +133,8 @@ def write_to_updated_template(
     template_path: str,
     output_path: str,
     invoice_number: str,
-    customer_name: str
+    customer_name: str,
+    invoice_summary: Dict[str, Any] | None = None,
 ) -> str:
     """
     Write priced items to the UPDATED Excel template with dynamic row insertion.
@@ -211,11 +212,34 @@ def write_to_updated_template(
     if total_section_start_row is None:
         total_section_start_row = item_start_row + 10
     
-    # Calculate available rows for items
+    def build_invoice_summary_rows(summary: Dict[str, Any] | None) -> list[tuple[str, str]]:
+        if not summary:
+            return []
+        rows: list[tuple[str, str]] = []
+        ordered_fields = [
+            ("Subtotal", summary.get("subtotal")),
+            ("Credit Applied", summary.get("credit_amount")),
+            ("Credit Date", summary.get("credit_date")),
+            ("Paid", summary.get("paid_amount")),
+            ("Balance Due", summary.get("balance_due")),
+        ]
+        for label, value in ordered_fields:
+            if value in (None, "", 0.0) and label != "Credit Applied":
+                continue
+            if label in {"Subtotal", "Credit Applied", "Paid", "Balance Due"} and isinstance(value, (int, float)):
+                rows.append((label, f"${value:,.2f}"))
+            elif value not in (None, ""):
+                rows.append((label, str(value)))
+        return rows
+
+    summary_rows = build_invoice_summary_rows(invoice_summary)
+    reserved_summary_rows = len(summary_rows) + (1 if summary_rows else 0)
+
+    # Calculate available rows for items and invoice summary
     available_rows = total_section_start_row - item_start_row
     
     # Check if we need to insert rows
-    extra_rows_needed = len(items) - available_rows
+    extra_rows_needed = (len(items) + reserved_summary_rows) - available_rows
     
     if extra_rows_needed > 0:
         # Insert rows at total_section_start_row
@@ -333,6 +357,14 @@ def write_to_updated_template(
     if written_count != len(items):
         raise RuntimeError(f"Item count mismatch: wrote {written_count} but expected {len(items)}")
     
+    if summary_rows:
+        summary_start_row = item_start_row + written_count + 1
+        title_cell = sheet.cell(row=summary_start_row, column=1)
+        title_cell.value = "Invoice adjustments"
+        for offset, (label, value) in enumerate(summary_rows, start=1):
+            sheet.cell(row=summary_start_row + offset, column=1).value = label
+            sheet.cell(row=summary_start_row + offset, column=2).value = value
+
     # Update total formulas to include all written items
     # Calculate the last item row for dynamic SUM ranges
     last_item_row = item_start_row + written_count - 1

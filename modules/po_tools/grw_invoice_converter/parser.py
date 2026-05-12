@@ -11,6 +11,19 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 
+def parse_currency_value(value: str | None) -> float | None:
+    """Convert a currency-like string into a float."""
+    if not value:
+        return None
+    cleaned = value.replace(",", "").replace("$", "").strip()
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
 def clean_text(text: str) -> str:
     """Remove hidden unicode characters and normalize whitespace."""
     if not text:
@@ -20,6 +33,54 @@ def clean_text(text: str) -> str:
     # Normalize whitespace
     text = ' '.join(text.split())
     return text.strip()
+
+
+def extract_invoice_summary_from_text(text: str) -> Dict[str, Any]:
+    """Extract invoice-level payment/credit summary values from raw PDF text."""
+    summary: Dict[str, Any] = {}
+    if not text:
+        return summary
+
+    compact_text = clean_text(text)
+
+    credit_match = re.search(
+        r'(\d{2}/\d{2}/\d{4})\s+Credit\s+\$\s*([\d,]+\.\d{2})',
+        compact_text,
+        re.IGNORECASE,
+    )
+    if credit_match:
+        summary["credit_date"] = credit_match.group(1)
+        summary["credit_amount"] = parse_currency_value(credit_match.group(2))
+
+    currency_patterns = {
+        "subtotal": r'Subtotal:\s*\$?\s*([\d,]+\.\d{2})',
+        "sales_tax": r'Sales Tax:\s*\$?\s*([\d,]+\.\d{2})',
+        "total": r'Total:\s*\$?\s*([\d,]+\.\d{2})',
+        "paid_amount": r'Paid:\s*\$?\s*([\d,]+\.\d{2})',
+        "balance_due": r'Balance Due:\s*\$?\s*([\d,]+\.\d{2})',
+    }
+    for key, pattern in currency_patterns.items():
+        match = re.search(pattern, compact_text, re.IGNORECASE)
+        if match:
+            summary[key] = parse_currency_value(match.group(1))
+
+    return summary
+
+
+def extract_invoice_summary(pdf_path: str) -> Dict[str, Any]:
+    """Extract invoice-level payment/credit summary values from a GRW PDF."""
+    pdf_path_obj = Path(pdf_path)
+    if not pdf_path_obj.exists():
+        raise FileNotFoundError(f"PDF not found: {pdf_path_obj}")
+
+    page_text: list[str] = []
+    with pdfplumber.open(pdf_path_obj) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                page_text.append(text)
+
+    return extract_invoice_summary_from_text("\n".join(page_text))
 
 
 def extract_sku_prefix(description: str) -> str:

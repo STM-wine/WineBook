@@ -23,7 +23,7 @@ from modules.po_tools.grw_invoice_converter.grw_converter import (
     extract_order_number,
     write_to_updated_template,
 )
-from modules.po_tools.grw_invoice_converter.parser import parse_grw_pdf
+from modules.po_tools.grw_invoice_converter.parser import extract_invoice_summary, parse_grw_pdf
 from modules.po_tools.grw_invoice_converter.pricing import apply_pricing
 from modules.po_tools.grw_invoice_converter.validator import ValidationError, validate_invoice
 
@@ -72,6 +72,7 @@ class ConversionSuccess:
     preview_df: pd.DataFrame
     customer_name: str
     invoice_number: str
+    invoice_summary: dict[str, Any]
     debug_info: dict[str, Any]
     pages_parsed: Any
 
@@ -130,6 +131,7 @@ def build_excel_download_bytes(
     export_rows: list[dict[str, Any]],
     resolution: FileResolution,
     excel_filename: str,
+    invoice_summary: dict[str, Any],
 ) -> tuple[str, bytes]:
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_output_path = Path(temp_dir) / excel_filename
@@ -139,6 +141,7 @@ def build_excel_download_bytes(
             output_path=str(temp_output_path),
             invoice_number=resolution.invoice_number,
             customer_name=resolution.customer_name,
+            invoice_summary=invoice_summary,
         )
         excel_bytes = Path(output_file).read_bytes()
     return excel_filename, excel_bytes
@@ -864,6 +867,52 @@ def render_file_details(uploaded_pdf, customer_name: str | None, invoice_number:
     )
 
 
+def render_invoice_summary(invoice_summary: dict[str, Any]) -> None:
+    if not invoice_summary:
+        return
+
+    summary_items: list[tuple[str, str]] = []
+    if invoice_summary.get("subtotal") is not None:
+        summary_items.append(("Subtotal", f"${invoice_summary['subtotal']:,.2f}"))
+    if invoice_summary.get("credit_amount") is not None:
+        credit_label = "Credit Applied"
+        if invoice_summary.get("credit_date"):
+            credit_label = f"Credit Applied ({invoice_summary['credit_date']})"
+        summary_items.append((credit_label, f"${invoice_summary['credit_amount']:,.2f}"))
+    if invoice_summary.get("paid_amount") is not None:
+        summary_items.append(("Paid", f"${invoice_summary['paid_amount']:,.2f}"))
+    if invoice_summary.get("balance_due") is not None:
+        summary_items.append(("Balance Due", f"${invoice_summary['balance_due']:,.2f}"))
+
+    if not summary_items:
+        return
+
+    cards_html = "".join(
+        f"""
+        <div class="mini-card">
+            <div class="mini-card-label">{label}</div>
+            <div class="mini-card-value">{value}</div>
+        </div>
+        """
+        for label, value in summary_items
+    )
+
+    st.markdown(
+        f"""
+        <div class="section-card tight">
+            <div class="panel-title">Invoice adjustments</div>
+            <p class="panel-copy">
+                Invoice-level credit and payment details are shown separately from wine setup rows.
+            </p>
+            <div class="mini-card-grid">
+                {cards_html}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_success_state(result: ConversionSuccess) -> None:
     st.success("Conversion complete. The workbook is ready.")
 
@@ -880,6 +929,8 @@ def render_success_state(result: ConversionSuccess) -> None:
         st.metric("Total Ext Price", f"${total_ext_price:,.2f}")
     with metric_cols[3]:
         st.metric("BDX Items", bdx_count)
+
+    render_invoice_summary(result.invoice_summary)
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("#### Download outputs")
@@ -922,6 +973,7 @@ def render_success_state(result: ConversionSuccess) -> None:
         st.json(
             {
                 "pages_parsed": result.pages_parsed,
+                "invoice_summary": result.invoice_summary,
                 "debug_info": result.debug_info,
                 "export_row_count": len(result.export_rows),
             }
@@ -956,6 +1008,8 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
         except Exception as exc:
             raise RuntimeError(f"Unable to read line items from this PDF. {exc}") from exc
 
+        invoice_summary = extract_invoice_summary(pdf_path)
+
         if not items:
             raise RuntimeError("No line items were found in the PDF. Please check the file format and try again.")
 
@@ -967,7 +1021,9 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
 
         status.text("Validating workbook data")
         progress_bar.progress(75)
-        expected_subtotal = sum(item.get("ext_cost", 0) for item in priced_items)
+        expected_subtotal = invoice_summary.get("subtotal")
+        if expected_subtotal is None:
+            expected_subtotal = sum(item.get("ext_cost", 0) for item in priced_items)
         validation_result = validate_invoice(priced_items, expected_subtotal)
 
         status.text("Preparing Excel output")
@@ -975,7 +1031,7 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
         status.text("Building download files")
         progress_bar.progress(96)
         excel_filename, csv_filename = allocate_download_filenames(resolution)
-        excel_filename, excel_bytes = build_excel_download_bytes(export_rows, resolution, excel_filename)
+        excel_filename, excel_bytes = build_excel_download_bytes(export_rows, resolution, excel_filename, invoice_summary)
         csv_filename, csv_bytes = build_optional_saasant_csv(export_rows, resolution, csv_filename)
     finally:
         os.unlink(pdf_path)
@@ -994,6 +1050,7 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
         preview_df=preview_df,
         customer_name=resolution.customer_name,
         invoice_number=resolution.invoice_number,
+        invoice_summary=invoice_summary,
         debug_info=debug_info,
         pages_parsed=pages_parsed,
     )

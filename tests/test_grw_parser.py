@@ -12,6 +12,7 @@ from grw_converter_app import (
 from modules.po_tools.grw_invoice_converter.grw_converter import write_to_updated_template
 from modules.po_tools.grw_invoice_converter.parser import (
     extract_description_fragment_from_line,
+    extract_invoice_summary_from_text,
     format_item_description,
     parse_item_block,
 )
@@ -203,6 +204,74 @@ class GrwParserTests(unittest.TestCase):
         self.assertIn("Canon La Gaffeliere OWC 2024 12/750ml", csv_bytes.decode("utf-8"))
         self.assertIn("NEW", csv_bytes.decode("utf-8"))
         self.assertEqual(csv_filename, "SNGC_S58725_SAASANT.csv")
+
+    def test_extract_invoice_summary_from_text_captures_credit_and_balance(self):
+        text = """
+        Date Payment Amount
+        02/27/2026 Credit $ 1,553.75
+        Subtotal: $1,700.00
+        Sales Tax: $0.00
+        Total: $1,700.00
+        Paid: $1,553.75
+        Balance Due: $146.25
+        """
+
+        summary = extract_invoice_summary_from_text(text)
+
+        self.assertEqual(summary["credit_date"], "02/27/2026")
+        self.assertEqual(summary["credit_amount"], 1553.75)
+        self.assertEqual(summary["subtotal"], 1700.00)
+        self.assertEqual(summary["paid_amount"], 1553.75)
+        self.assertEqual(summary["balance_due"], 146.25)
+
+    def test_excel_export_includes_invoice_adjustments_block(self):
+        items = [
+            {
+                "Item Number": "NEW",
+                "Item Description": "Leoville Poyferre 2003 1/750ml",
+                "PK": 1,
+                "Quantity": 5,
+                "FOB Btl": 165.0,
+                "Frontline": 190,
+                "FOB Case": 165.0,
+                "Ext Cost": 825.0,
+                "Ext Price": 950.0,
+                "SKU": "BDX",
+                "STM Markup %": 0.15,
+            }
+        ]
+        invoice_summary = {
+            "subtotal": 1700.0,
+            "credit_date": "02/27/2026",
+            "credit_amount": 1553.75,
+            "paid_amount": 1553.75,
+            "balance_due": 146.25,
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "test.xlsx"
+            workbook_path = write_to_updated_template(
+                items,
+                "modules/po_tools/grw_invoice_converter/templates/GRW_Template_Updated.xlsx",
+                str(output_path),
+                "S59041",
+                "Dan King",
+                invoice_summary=invoice_summary,
+            )
+            workbook = load_workbook(workbook_path)
+            sheet = workbook.active
+
+            values = {
+                (row, col): sheet.cell(row=row, column=col).value
+                for row in range(1, 20)
+                for col in range(1, 3)
+            }
+
+            self.assertIn("Invoice adjustments", values.values())
+            self.assertIn("Credit Applied", values.values())
+            self.assertIn("$1,553.75", values.values())
+            self.assertIn("Balance Due", values.values())
+            self.assertIn("$146.25", values.values())
 
 
 if __name__ == "__main__":
