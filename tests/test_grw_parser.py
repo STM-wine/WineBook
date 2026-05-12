@@ -224,6 +224,25 @@ class GrwParserTests(unittest.TestCase):
         self.assertEqual(summary["paid_amount"], 1553.75)
         self.assertEqual(summary["balance_due"], 146.25)
 
+    def test_credit_footer_lines_do_not_pollute_last_item_description(self):
+        block = (
+            "2 Sale BDX:PAV:PAVM- Pavie Macquin 2005 750mL $175.00 5 750 $ 875.00\n"
+            "0750-2005-F0L0C0\n"
+            "Date Payment Amount\n"
+            "02/27/2026 Credit $ 1,553.75\n"
+            "Subtotal: $1,700.00\n"
+            "Paid: $1,553.75\n"
+            "Balance Due: $146.25"
+        )
+
+        item = parse_item_block(block)
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["description"], "Pavie Macquin 2005 1/750ml")
+        self.assertNotIn("Credit", item["description"])
+        self.assertNotIn("Balance Due", item["description"])
+        self.assertNotIn("Date Payment Amount", item["description"])
+
     def test_excel_export_includes_invoice_adjustments_block(self):
         items = [
             {

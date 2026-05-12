@@ -314,6 +314,12 @@ def is_description_continuation_line(line: str) -> bool:
         return False
     if re.match(r'^\s*Page\s+\d+', candidate, re.IGNORECASE):
         return False
+    if re.match(r'^\s*Date\s+Payment\s+Amount\b', candidate, re.IGNORECASE):
+        return False
+    if re.match(r'^\s*\d{2}/\d{2}/\d{4}\s+Credit\b', candidate, re.IGNORECASE):
+        return False
+    if re.match(r'^\s*(Subtotal|Sales Tax|Total|Paid|Balance Due|Approval|Terms and Conditions)\b', candidate, re.IGNORECASE):
+        return False
     return True
 
 
@@ -350,6 +356,8 @@ def extract_description_fragment_from_line(line: str) -> str:
 
     # Ignore lines that are now just bottle size or other non-description leftovers.
     if not re.search(r'[A-Za-z]', candidate):
+        return ""
+    if re.match(r'^(Date\s+Payment\s+Amount|Credit|Subtotal|Sales Tax|Total|Paid|Balance Due|Approval|Terms and Conditions)\b', candidate, re.IGNORECASE):
         return ""
     if re.fullmatch(r'(?:750mL|750ml|375mL|1500|3000|1\.5L)', candidate, flags=re.IGNORECASE):
         return ""
