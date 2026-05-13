@@ -8,7 +8,7 @@ Terminology matters: Vinosmith calls the field `Importer`, but Stem's internal a
 
 ## Target Flow
 
-1. Source files arrive from manual upload, email, cloud storage, or eventually QuickBooks.
+1. Source files arrive from email/cloud automation or eventually QuickBooks.
 2. Raw files are stored in Supabase Storage and recorded in `source_files`.
 3. A Python worker normalizes the source data and writes structured rows into Supabase Postgres.
 4. The reorder engine creates a `report_run` and `reorder_recommendations`.
@@ -55,6 +55,7 @@ This keeps the stack tight: GitHub for code and worker execution, Supabase for d
 - Core SKUs target 30 days of demand.
 - BTG SKUs target 45 days of demand.
 - Non-Core / Non-BTG SKUs with recent sales target 30 days of demand.
+- True available inventory is calculated from RB6 as `Available Inventory - Unconfirmed Line Item Qty`, clamped at zero.
 - Order quantity subtracts true available inventory and on-order quantity, then rounds up to full case equivalent.
 - High-volume SKUs over 480 bottles/month should eventually round to full pallet configuration. Today they are flagged because pallet configuration data is not yet modeled.
 - Every SKU gets a recommendation row.
@@ -81,6 +82,14 @@ Optional/detail fields can expose last 60/90-day sales and next 60/90-day foreca
 
 The importer workbench is grouped by supplier/importer. The importer selector defaults to `All`, and selecting a single importer narrows the same workbench rather than switching to a separate mode. Recommendation rows remain opt-in: the buyer must approve a row before it is included in PO draft generation.
 
+Calculated headers in the buyer workbench should explain their formulas in hover help. Current formulas include:
+
+- Weekly Velocity = `30d Sales / 4.345`.
+- Velocity Trend = `((Last 30d Sales - Prior 30d Sales) / Prior 30d Sales) x 100`; if prior-period sales are zero and current sales are positive, display `New`.
+- Weeks with On Order = `(True Available + On Order) / Weekly Velocity`.
+- Weeks with Recommended = `(True Available + On Order + Recommended Qty) / Weekly Velocity`.
+- Estimated Cost = `Recommended Qty x FOB`.
+
 ## Logistics Rollups
 
 The order summary should aggregate hierarchically:
@@ -104,7 +113,7 @@ Future logistics work should add internal trucking cost per bottle, pallet confi
 2. Move parsing and calculation out of `app.py` into reusable modules.
 3. Add tests around normalization and reorder calculations.
 4. Add a Supabase write path while manual uploads still exist.
-5. Replace upload-first workflow with latest-run dashboard.
+5. Replace upload-first workflow with latest-run dashboard. The old upload-first fallback is no longer part of the default app surface.
 6. Save supplier-specific PO drafts from current recommendations.
 7. Add buyer approval state so all recommendations default to rejected until explicitly approved. Done for the current Streamlit workflow.
 8. Add logistics rollups and truck optimization summaries. Initial freight and California truck summaries exist; producer rollups and intelligent fill recommendations remain future work.

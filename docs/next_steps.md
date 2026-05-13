@@ -16,6 +16,10 @@ WineBook is now a Supabase-backed ordering dashboard with automated daily ingest
 - Recommendations default to `rejected` / `approved_qty = 0`, matching the ownership opt-in approval model.
 - Buyers can edit either `Weeks w/ Recommended` or `Recommended Qty`; those controls stay synchronized.
 - Active supplier PO drafts are guarded to reduce accidental duplicate drafts.
+- True Available is calculated from RB6 as `Available Inventory - Unconfirmed Line Item Qty`.
+- Velocity Trend compares the most recent 30-day sales window with the prior 30-day window and displays `New` when prior sales are zero but current sales exist.
+- Calculated buyer-table columns include hover help with formulas.
+- The legacy upload-first fallback is hidden from the app surface; reruns should use automation/manual GitHub dispatch or local scripts.
 
 ## Business Direction
 
@@ -38,8 +42,8 @@ The product goal is a simple buyer workflow:
 
 ## Immediate Priorities
 
-1. Apply `20260511161706_guard_github_ingest_dispatch.sql` in Supabase so successful daily ingestion stops further GitHub dispatches for that report date.
-2. Watch one weekday morning run after that migration to confirm the reduced dispatch noise.
+1. Watch one weekday morning run after the latest Supabase/GitHub automation changes to confirm ingestion remains quiet after success.
+2. Spot-check True Available, On Order, and trend values against Mark's source spreadsheets.
 3. Work through Mark's next Linear issues against the buyer workbench.
 4. Tighten the PO draft output around the actual QuickBooks entry workflow.
 5. Decide the first hosted release strategy.
@@ -47,6 +51,7 @@ The product goal is a simple buyer workflow:
 ## Near-Term Product Work
 
 - Continue replacing remaining user-facing `Importer` labels with `Supplier`.
+- Evaluate replacing Streamlit's table with AG Grid or a custom frontend table if frozen Wine column behavior becomes essential.
 - Add lightweight in-app operational visibility:
   - latest report date
   - latest ingest status

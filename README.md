@@ -30,7 +30,7 @@ Keep the GRW converter separate unless the business explicitly decides to merge 
 7. The app reads the latest completed Supabase report run by default.
 8. Buyers review recommendations by supplier, adjust target weeks or recommended quantities, approve rows, and create supplier PO drafts/exports for QuickBooks entry.
 
-Manual RB6/RADs upload still exists as an admin fallback for reruns or later-in-day ordering, but the primary operating model is now automated daily ingestion.
+Manual RB6/RADs upload is no longer part of the default app surface. For reruns or same-day correction, use the GitHub Actions ingest workflow or the local processing scripts.
 
 `Importer` is Vinosmith terminology. In user-facing workflow and business language, use `Supplier`.
 
@@ -118,10 +118,13 @@ Current buyer-facing rules from Mark/ownership:
 - BTG SKUs target 45 days of demand.
 - Non-Core / Non-BTG SKUs with last-30-day sales target 30 days of demand.
 - Recommended quantity subtracts true available inventory and on-order quantity, then rounds up to full case equivalent.
+- True available inventory is calculated from RB6 as `Available Inventory - Unconfirmed Line Item Qty`, clamped at zero.
 - High-volume SKUs, currently defined as average monthly sales over 480 bottles, are flagged for future pallet-configuration rounding.
 - Every SKU receives a recommendation row.
 - Recommendations default to `rejected`; buyers must explicitly approve rows before PO entry.
 - Buyers can edit either `Weeks w/ Recommended` or `Recommended Qty`; the dashboard keeps those values synchronized and saves the working recommended quantity as the approved quantity when approved.
+- Weekly velocity is calculated as `30d Sales / 4.345`.
+- Velocity trend compares the latest 30-day RADs sales window against the prior 30-day window. If the prior period is zero and the latest period has sales, the buyer table displays `New`.
 
 Current buyer table includes:
 
@@ -137,6 +140,8 @@ Current buyer table includes:
 - Editable recommended quantity
 - Approval checkbox
 - Estimated wine cost and landed cost
+
+Calculated buyer-table headers include hover help with formulas and plain-English explanations.
 
 ## Logistics Direction
 

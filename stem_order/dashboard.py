@@ -17,9 +17,11 @@ DASHBOARD_COLUMNS = [
     "true_available",
     "on_order",
     "last_30_day_sales",
+    "prior_30_day_sales",
     "next_30_day_forecast",
     "weekly_velocity",
     "velocity_trend_pct",
+    "velocity_trend_label",
     "risk_level",
     "recommended_qty_rounded",
     "recommendation_status",
@@ -173,6 +175,7 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "last_30_day_sales",
         "last_60_day_sales",
         "last_90_day_sales",
+        "prior_30_day_sales",
         "next_30_day_forecast",
         "next_60_day_forecast",
         "next_90_day_forecast",
@@ -196,6 +199,7 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "recommendation_status",
         "risk_level",
         "pickup_location",
+        "velocity_trend_label",
     ]:
         if col in df.columns:
             df[col] = df[col].fillna("")
@@ -425,7 +429,7 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     if "Weeks w/ On Order" in display:
         display["Weeks w/ On Order"] = display["Weeks w/ On Order"].apply(
-            lambda x: f"{x:.2f}" if pd.notna(x) else ""
+            lambda x: f"{x:.1f}" if pd.notna(x) else ""
         )
 
     for col in ["Est. Cost", "Landed Cost"]:
@@ -453,6 +457,7 @@ def buyer_workbench_dataframe(
         "next_30_day_forecast",
         "weekly_velocity",
         "velocity_trend_pct",
+        "velocity_trend_label",
         "weeks_on_hand_with_on_order",
         "recommended_qty_rounded",
         "recommendation_status",
@@ -503,7 +508,7 @@ def buyer_workbench_dataframe(
         "pack_size",
         *optional,
     ]:
-        if col in editor.columns:
+        if col in editor.columns and col != "velocity_trend_label":
             editor[col] = pd.to_numeric(editor[col], errors="coerce").fillna(0)
 
     for col in ["is_core", "is_btg"]:
@@ -547,6 +552,7 @@ def buyer_workbench_dataframe(
         "next_90_day_forecast": "LY Next 90d Forecast",
         "weekly_velocity": "Weekly Velocity",
         "velocity_trend_pct": "Velocity Trend",
+        "velocity_trend_label": "_Velocity Trend Label",
         "weeks_on_hand_with_on_order": "Weeks w/ On Order",
         "Working Recommended Qty": "Recommended Qty",
         "order_cost": "Est. Cost",
@@ -566,6 +572,7 @@ def buyer_workbench_dataframe(
         "LY Next 90d Forecast",
         "Weekly Velocity",
         "Velocity Trend",
+        "_Velocity Trend Label",
         "Weeks w/ On Order",
         "Weeks w/ Recommended",
         "_Pack Size",
@@ -576,7 +583,15 @@ def buyer_workbench_dataframe(
     ]
     display = editor[[col for col in ordered if col in editor.columns]].copy()
     if "Velocity Trend" in display:
-        display["Velocity Trend"] = display["Velocity Trend"].apply(lambda x: f"{x:+.0f}%" if pd.notna(x) else "")
+        labels = (
+            display["_Velocity Trend Label"].fillna("").astype(str)
+            if "_Velocity Trend Label" in display
+            else pd.Series([""] * len(display), index=display.index)
+        )
+        display["Velocity Trend"] = [
+            label if label else (f"{value:+.0f}%" if pd.notna(value) else "")
+            for value, label in zip(display["Velocity Trend"], labels)
+        ]
     if "Wine" in display:
         display = display.sort_values("Wine", key=lambda series: series.fillna("").astype(str).str.lower())
     return recalculate_working_recommendation(display.reset_index(drop=True))

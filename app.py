@@ -359,7 +359,6 @@ def render_importer_work_unit(
         <div class="importer-workunit importer-status-{importer_key(live_summary['Status'])}">
             <div>
                 <h4>{escape(str(importer_name))}</h4>
-                <p>{escape(format_importer_summary(live_summary))}</p>
             </div>
             <span>{escape(live_summary['Status'])}</span>
         </div>
@@ -393,10 +392,87 @@ def render_importer_work_unit(
             "id": None,
             "_Pack Size": None,
             "_FOB": None,
+            "_Velocity Trend Label": None,
             "Wine": st.column_config.TextColumn(
                 "Wine",
                 help="Importer rank plus Core / BTG flags.",
                 width="large",
+            ),
+            "True Available": st.column_config.NumberColumn(
+                "True Available",
+                help=(
+                    "Formula: Available Inventory - Unconfirmed Line Item Qty. "
+                    "Both values come from the RB6 report. This estimates bottles that are actually available "
+                    "for ordering decisions after subtracting unconfirmed commitments; negative results are shown as 0."
+                ),
+            ),
+            "On Order": st.column_config.NumberColumn(
+                "On Order",
+                help="From the RB6 On Order column. Bottles already ordered but not yet received.",
+            ),
+            "30d Sales": st.column_config.NumberColumn(
+                "30d Sales",
+                help=(
+                    "Formula: total RADs bottle sales from the latest RADs sales date minus 30 days "
+                    "through the latest RADs sales date."
+                ),
+            ),
+            "60d Sales": st.column_config.NumberColumn(
+                "60d Sales",
+                help=(
+                    "Optional history. Formula: total RADs bottle sales from the latest RADs sales date "
+                    "minus 60 days through the latest RADs sales date."
+                ),
+            ),
+            "90d Sales": st.column_config.NumberColumn(
+                "90d Sales",
+                help=(
+                    "Optional history. Formula: total RADs bottle sales from the latest RADs sales date "
+                    "minus 90 days through the latest RADs sales date."
+                ),
+            ),
+            "Next 30d Forecast": st.column_config.NumberColumn(
+                "Next 30d Forecast",
+                help=(
+                    "Formula: sales from the same upcoming 30-day calendar window last year. "
+                    "This is a simple prior-year seasonal reference, not a predictive model."
+                ),
+            ),
+            "LY Next 60d Forecast": st.column_config.NumberColumn(
+                "LY Next 60d Forecast",
+                help=(
+                    "Optional forecast. Formula: sales from the same upcoming 60-day calendar window last year."
+                ),
+            ),
+            "LY Next 90d Forecast": st.column_config.NumberColumn(
+                "LY Next 90d Forecast",
+                help=(
+                    "Optional forecast. Formula: sales from the same upcoming 90-day calendar window last year."
+                ),
+            ),
+            "Weekly Velocity": st.column_config.NumberColumn(
+                "Weekly Velocity",
+                format="%d",
+                help=(
+                    "Formula: 30d Sales / 4.345. 4.345 is the average number of weeks per month "
+                    "in a calendar year, converting recent monthly bottle sales into weekly pace."
+                ),
+            ),
+            "Velocity Trend": st.column_config.TextColumn(
+                "Velocity Trend",
+                help=(
+                    "Formula: ((Last 30d Sales - Prior 30d Sales) / Prior 30d Sales) x 100. "
+                    "This compares the most recent 30 days with the 30 days before that. If prior sales are 0 "
+                    "and current sales are above 0, the row shows New instead of dividing by zero."
+                ),
+            ),
+            "Weeks w/ On Order": st.column_config.NumberColumn(
+                "Weeks w/ On Order",
+                format="%.1f",
+                help=(
+                    "Formula: (True Available + On Order) / Weekly Velocity. "
+                    "This estimates how many weeks current available bottles plus open orders would cover."
+                ),
             ),
             "Approval": st.column_config.CheckboxColumn(
                 "Approval",
@@ -407,16 +483,26 @@ def render_importer_work_unit(
                 min_value=0.0,
                 step=0.1,
                 format="%.1f",
-                help="Target coverage. Editing this recalculates recommended quantity.",
+                help=(
+                    "Formula: (True Available + On Order + Recommended Qty) / Weekly Velocity. "
+                    "Editing this target coverage recalculates Recommended Qty, rounded to the pack size."
+                ),
             ),
             "Recommended Qty": st.column_config.NumberColumn(
                 "Recommended Qty",
                 min_value=0,
                 step=1,
                 format="%d",
-                help="Working order quantity. Editing this recalculates target weeks.",
+                help=(
+                    "Formula: max(0, target bottles - True Available - On Order), rounded up to pack size. "
+                    "This is editable; changing it recalculates Weeks w/ Recommended."
+                ),
             ),
-            "Est. Cost": st.column_config.NumberColumn("Est. Cost", format="$%.2f"),
+            "Est. Cost": st.column_config.NumberColumn(
+                "Est. Cost",
+                format="$%.2f",
+                help="Formula: Recommended Qty x FOB bottle cost.",
+            ),
         },
         disabled=[
             col
@@ -1135,6 +1221,14 @@ div[data-testid="stTabs"] [aria-selected="true"] {
     color: var(--stem-wine) !important;
 }
 
+div[data-testid="stExpander"] details[open] > summary p {
+    display: none !important;
+}
+
+div[data-testid="stExpander"] details > summary {
+    min-height: 2.15rem !important;
+}
+
 div[data-testid="stDataFrame"],
 div[data-testid="stDataEditor"] {
     border-radius: 8px !important;
@@ -1362,7 +1456,7 @@ if latest_report_run:
                 summary = group["summary"]
                 importer_name = summary["Importer"]
                 with st.expander(
-                    f"{importer_name} - {format_importer_summary(summary)}",
+                    importer_name,
                     expanded=index == 0,
                 ):
                     render_importer_work_unit(
@@ -1491,10 +1585,14 @@ if latest_report_run:
 elif latest_repo:
     st.info("No saved recommendation run found yet. Upload RB6 and RADs files to create the first dashboard run.")
 
-admin_panel = st.expander("Admin tools", expanded=not latest_report_run)
-admin_panel.caption("Manual RB6 + RADs refresh and developer diagnostics live here.")
-developer_mode = admin_panel.checkbox("Developer mode", value=False)
-show_manual_refresh = developer_mode or not latest_report_run
+admin_panel = st.expander("Admin tools", expanded=False)
+admin_panel.caption("Daily ingestion now runs through Supabase Cron and GitHub Actions.")
+if latest_report_run:
+    admin_panel.write(f"Latest completed report run: {latest_report_run.get('report_date') or latest_report_run.get('id')}")
+else:
+    admin_panel.info("No completed report run is available yet. Use the GitHub Actions ingest workflow to load data.")
+developer_mode = False
+show_manual_refresh = False
 
 # File upload widgets - Phase 1: Only RB6 and RADs required
 if show_manual_refresh:

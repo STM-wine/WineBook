@@ -132,6 +132,21 @@ class IngestTests(unittest.TestCase):
 
 
 class CalculatorTests(unittest.TestCase):
+    def _trend_for_sales(self, sales_rows):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": "Trend Wine 2025 12/750ml",
+                    "available_inventory": 0,
+                    "on_order": 0,
+                    "fob": 10,
+                    "pack_size": 12,
+                }
+            ]
+        )
+        sales = pd.DataFrame(sales_rows)
+        return calculate_reorder_recommendations(rb6, sales).iloc[0]
+
     def test_normalize_planning_sku_removes_vintage_but_keeps_pack_size(self):
         self.assertEqual(
             normalize_planning_sku("Pavette Sauvignon Blanc 2025 12/750ml"),
@@ -186,6 +201,39 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "recommendation_status"], "rejected")
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "approved_qty"], 0)
 
+    def test_true_available_subtracts_unconfirmed_line_item_quantity(self):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": "Allocated Wine 2025 12/750ml",
+                    "available_inventory": 10,
+                    "unconfirmed_line_item_qty": 3,
+                    "on_order": 0,
+                    "fob": 10,
+                    "pack_size": 12,
+                },
+                {
+                    "name": "Oversold Wine 2025 12/750ml",
+                    "available_inventory": 2,
+                    "unconfirmed_line_item_qty": 5,
+                    "on_order": 0,
+                    "fob": 10,
+                    "pack_size": 12,
+                },
+            ]
+        )
+        sales = pd.DataFrame(
+            [
+                {"wine_name": "Allocated Wine 2024 12/750ml", "quantity": 12, "date": "2026-04-01"},
+                {"wine_name": "Oversold Wine 2024 12/750ml", "quantity": 12, "date": "2026-04-01"},
+            ]
+        )
+
+        result = calculate_reorder_recommendations(rb6, sales).set_index("Name")
+
+        self.assertEqual(result.loc["Allocated Wine 2025 12/750ml", "true_available"], 7)
+        self.assertEqual(result.loc["Oversold Wine 2025 12/750ml", "true_available"], 0)
+
     def test_sales_windows_forecasts_and_velocity_trend_are_calculated(self):
         rb6 = pd.DataFrame(
             [
@@ -212,9 +260,53 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result["last_30_day_sales"], 30)
         self.assertEqual(result["last_60_day_sales"], 60)
         self.assertEqual(result["last_90_day_sales"], 60)
+        self.assertEqual(result["prior_30_day_sales"], 30)
         self.assertEqual(result["next_30_day_forecast"], 40)
-        self.assertIn("velocity_trend_pct", result)
+        self.assertEqual(result["velocity_trend_pct"], 0)
         self.assertIn(result["risk_level"], ["High", "Medium", "Low", "No Sales", "Unknown"])
+
+    def test_velocity_trend_positive_against_prior_30_days(self):
+        result = self._trend_for_sales(
+            [
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 20, "date": "2026-04-01"},
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 10, "date": "2026-02-15"},
+            ]
+        )
+
+        self.assertEqual(result["last_30_day_sales"], 20)
+        self.assertEqual(result["prior_30_day_sales"], 10)
+        self.assertEqual(result["velocity_trend_pct"], 100)
+
+    def test_velocity_trend_negative_against_prior_30_days(self):
+        result = self._trend_for_sales(
+            [
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 5, "date": "2026-04-01"},
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 10, "date": "2026-02-15"},
+            ]
+        )
+
+        self.assertEqual(result["velocity_trend_pct"], -50)
+
+    def test_velocity_trend_flat_against_prior_30_days(self):
+        result = self._trend_for_sales(
+            [
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 10, "date": "2026-04-01"},
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 10, "date": "2026-02-15"},
+            ]
+        )
+
+        self.assertEqual(result["velocity_trend_pct"], 0)
+
+    def test_velocity_trend_marks_new_when_prior_30_days_are_zero(self):
+        result = self._trend_for_sales(
+            [
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 10, "date": "2026-04-01"},
+            ]
+        )
+
+        self.assertEqual(result["prior_30_day_sales"], 0)
+        self.assertTrue(pd.isna(result["velocity_trend_pct"]))
+        self.assertEqual(result["velocity_trend_label"], "New")
 
     def test_pipeline_output_formatting_keeps_raw_numeric_values(self):
         recommendations = pd.DataFrame(
@@ -357,6 +449,31 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(compact.loc[0, "Velocity Trend"], "+15%")
         self.assertEqual(compact.loc[0, "Weekly Velocity"], 12)
         self.assertEqual(compact.loc[0, "Weeks w/ Recommended"], 4.0)
+
+    def test_buyer_workbench_velocity_trend_displays_new_label(self):
+        original = recommendations_to_dataframe(
+            [
+                {
+                    "id": "rec-1",
+                    "supplier_name": "Importer A",
+                    "product_name": "New Mover",
+                    "true_available": 0,
+                    "on_order": 0,
+                    "last_30_day_sales": 12,
+                    "prior_30_day_sales": 0,
+                    "weekly_velocity": 3,
+                    "velocity_trend_pct": None,
+                    "velocity_trend_label": "New",
+                    "recommended_qty_rounded": 12,
+                    "recommendation_status": "rejected",
+                    "approved_qty": 0,
+                }
+            ]
+        )
+
+        compact = buyer_workbench_dataframe(original)
+
+        self.assertEqual(compact.loc[0, "Velocity Trend"], "New")
 
     def test_buyer_workbench_recommended_qty_override_is_saved_when_approved(self):
         original = recommendations_to_dataframe(
