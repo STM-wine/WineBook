@@ -3,6 +3,7 @@ import os
 import traceback
 from html import escape
 from datetime import datetime, timedelta
+from components.supplier_catalog.module import render_supplier_catalog
 from stem_order.core import normalize_planning_sku
 from stem_order.dashboard import (
     APPROVAL_STATUSES,
@@ -885,6 +886,21 @@ developer_mode = st.sidebar.checkbox("Developer mode", value=False)
 project_root = os.path.dirname(os.path.abspath(__file__))
 importers_path = os.path.join(project_root, 'importers.csv')
 importers_data, importers_loaded, importers_warning = load_importers_csv(importers_path)
+
+top_nav = st.radio(
+    "Primary navigation",
+    ["Order Review", "Supplier Hub", "PO Drafts", "Freight"],
+    horizontal=True,
+    label_visibility="collapsed",
+)
+
+if top_nav == "Supplier Hub":
+    render_supplier_catalog(importers_data)
+    st.stop()
+elif top_nav == "PO Drafts":
+    st.info("PO Drafts are currently available inside the Ordering Dashboard supplier workflow.")
+elif top_nav == "Freight":
+    st.info("Freight is currently available inside the Ordering Dashboard freight view.")
 
 latest_repo = None
 try:
