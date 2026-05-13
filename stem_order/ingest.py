@@ -120,12 +120,33 @@ def map_rb6_columns(df: pd.DataFrame) -> dict[str, str]:
             break
 
     for col in df.columns:
-        if col in ["on_order", "onorder"]:
+        if col in ["on_order", "onorder", "qty_on_order", "quantity_on_order"]:
             col_map["on_order"] = col
             break
-        if "order" in col and "on" in col:
-            col_map["on_order"] = col
-            break
+
+    if "on_order" not in col_map:
+        for col in df.columns:
+            if col.startswith("on_order") or col.endswith("_on_order"):
+                col_map["on_order"] = col
+                break
+
+    if "on_order" not in col_map:
+        for col in df.columns:
+            if "on_order" in col and not any(
+                excluded in col
+                for excluded in ["considered", "remaining", "interval", "supply", "presold", "pre_sold"]
+            ):
+                col_map["on_order"] = col
+                break
+
+    if "on_order" not in col_map:
+        for col in df.columns:
+            if "order" in col and "on" in col and not any(
+                excluded in col
+                for excluded in ["considered", "remaining", "interval", "supply", "presold", "pre_sold"]
+            ):
+                col_map["on_order"] = col
+                break
 
     for col in df.columns:
         lowered = col.lower()
@@ -274,6 +295,8 @@ def load_importers_csv(path: str | Path) -> tuple[pd.DataFrame, bool, str | None
         importers_data = normalize_columns(pd.read_csv(path))
         if "name" in importers_data.columns:
             importers_data = importers_data.rename(columns={"name": "importer_name"})
+        if "trucking_cost_per_bottle" not in importers_data.columns and "laid_in_per_bottle" in importers_data.columns:
+            importers_data = importers_data.rename(columns={"laid_in_per_bottle": "trucking_cost_per_bottle"})
 
         required_cols = ["importer_name", "eta_days"]
         missing_cols = [col for col in required_cols if col not in importers_data.columns]

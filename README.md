@@ -3,7 +3,7 @@
 Internal ordering tools for Stem Wine Company.
 
 **GitHub:** `https://github.com/STM-wine/WineBook`
-**Last updated:** April 2026
+**Last updated:** May 2026
 **Stack:** Python 3.11, Streamlit, pandas, openpyxl, Supabase
 
 ## Overview
@@ -21,14 +21,16 @@ Keep the GRW converter separate unless the business explicitly decides to merge 
 
 ## Current Ordering Flow
 
-1. Manual RB6 inventory and RADs sales exports are uploaded in the Streamlit app.
-2. `stem_order.ingest` detects headers, normalizes columns, and prepares source frames.
-3. `wine_calculator.py` calculates velocity, coverage, forecasts, risk, and recommended quantities.
-4. `stem_order.pipeline` adds supplier logistics from local `importers.csv` when available.
-5. The app saves report runs and recommendation rows to Supabase when credentials are configured.
-6. Buyers open the dashboard, filter by supplier/status/product, review recommendations, and create supplier PO drafts.
+1. Vinosmith emails daily RB6 inventory and RADs sales exports to `stm@stemwinecompany.com`.
+2. Supabase Cron dispatches the GitHub Actions worker during the morning ingestion window until the current report date has a completed `scheduled_email` run.
+3. `scripts/process_daily_vinosmith_email.py` downloads the matching attachments, uploads raw files to Supabase Storage, and runs the shared Python pipeline.
+4. `stem_order.ingest` detects headers, normalizes columns, and prepares source frames.
+5. `wine_calculator.py` calculates velocity, coverage, forecasts, risk, and recommended quantities.
+6. `stem_order.pipeline` adds supplier logistics from local `importers.csv` when available.
+7. The app reads the latest completed Supabase report run by default.
+8. Buyers review recommendations by supplier, adjust target weeks or recommended quantities, approve rows, and create supplier PO drafts/exports for QuickBooks entry.
 
-The remote automation path uses GitHub Actions to run `scripts/process_daily_vinosmith_email.py` on weekday mornings after Vinosmith emails the reports to `stm@stemwinecompany.com`. The workflow downloads the attachments, uploads raw source files to Supabase Storage, and creates a `scheduled_email` report run.
+Manual RB6/RADs upload is no longer part of the default app surface. For reruns or same-day correction, use the GitHub Actions ingest workflow or the local processing scripts.
 
 `Importer` is Vinosmith terminology. In user-facing workflow and business language, use `Supplier`.
 
@@ -41,6 +43,9 @@ WineBook/
 ├── grw_converter_app.py           # Separate GRW invoice converter utility
 ├── requirements.txt
 ├── .env.example                   # Safe local env template, no secrets
+├── importers.csv                   # Supplier logistics reference data
+├── templates/
+│   └── po_draft_template_stm.xlsx  # Excel PO draft template
 ├── docs/
 │   ├── product_architecture.md
 │   ├── supabase_setup.md
@@ -57,7 +62,7 @@ WineBook/
 └── modules/po_tools/              # GRW converter internals
 ```
 
-Local source exports such as `importers.csv`, RB6/RADs `.xlsx` files, PDFs, and `.env` are intentionally ignored.
+Local source exports such as RB6/RADs `.xlsx` files, PDFs, and `.env` are intentionally ignored. `importers.csv` is tracked as app reference data until supplier logistics move into an editable database table.
 
 ## Setup
 
@@ -94,7 +99,7 @@ Project URL:
 https://hpnvlxvnzpojpfepcerl.supabase.co
 ```
 
-Apply migrations in numeric order from `supabase/migrations/`. See `docs/supabase_setup.md` for the full setup checklist.
+Apply migrations from `supabase/migrations/` in order. The first six are numbered historical setup migrations; later timestamped migrations are incremental production changes. See `docs/supabase_setup.md` for the full setup checklist.
 
 Useful local checks:
 
@@ -113,25 +118,30 @@ Current buyer-facing rules from Mark/ownership:
 - BTG SKUs target 45 days of demand.
 - Non-Core / Non-BTG SKUs with last-30-day sales target 30 days of demand.
 - Recommended quantity subtracts true available inventory and on-order quantity, then rounds up to full case equivalent.
+- True available inventory is calculated from RB6 as `Available Inventory - Unconfirmed Line Item Qty`, clamped at zero.
 - High-volume SKUs, currently defined as average monthly sales over 480 bottles, are flagged for future pallet-configuration rounding.
 - Every SKU receives a recommendation row.
-- Recommendations default to `rejected`; buyers must explicitly approve or edit quantities before PO entry.
+- Recommendations default to `rejected`; buyers must explicitly approve rows before PO entry.
+- Buyers can edit either `Weeks w/ Recommended` or `Recommended Qty`; the dashboard keeps those values synchronized and saves the working recommended quantity as the approved quantity when approved.
+- Weekly velocity is calculated as `30d Sales / 4.345`.
+- Velocity trend compares the latest 30-day RADs sales window against the prior 30-day window. If the prior period is zero and the latest period has sales, the buyer table displays `New`.
 
-Current output includes:
+Current buyer table includes:
 
-- Supplier
-- Wine name
-- BTG/Core flags
+- Wine name with supplier-rank badge and BTG/Core flags
 - True available inventory
 - On-order quantity
-- Last 30/60/90 day sales
-- Next 30/60/90 day forecast fields
+- Last 30 day sales, with optional 60/90 day sales
+- Next 30 day forecast, with optional LY 60/90 day forecast fields
 - Weekly velocity
 - Velocity trend percentage
-- Risk level
-- Recommended quantity
-- Approval status
+- Weeks available with on-order quantity
+- Weeks available with recommended quantity
+- Editable recommended quantity
+- Approval checkbox
 - Estimated wine cost and landed cost
+
+Calculated buyer-table headers include hover help with formulas and plain-English explanations.
 
 ## Logistics Direction
 
@@ -157,4 +167,5 @@ python scripts/smoke_ordering_pipeline.py
 - Keep calculation and ingest logic reusable outside Streamlit. Scheduled workers will need the same pipeline.
 - Keep `display_df` UI-only; use raw numeric frames for calculations and persistence.
 - Use Supabase service-role keys only in trusted server-side/local scripts.
-- The current hosted-product direction is still open: Streamlit can continue as the near-term app, but a future authenticated web app can reuse the same Supabase schema and Python worker pipeline.
+- Supabase Cron is the scheduling source of truth. GitHub Actions remains the Python worker and can still be manually dispatched for debugging.
+- The hosted-product direction is still open: Streamlit can continue as the near-term app, but a future authenticated web app can reuse the same Supabase schema and Python worker pipeline.

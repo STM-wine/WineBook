@@ -10,6 +10,8 @@
   - `supabase/migrations/003_manual_po_draft_ingest.sql`
   - `supabase/migrations/004_buyer_recommendation_fields.sql`
   - `supabase/migrations/005_daily_email_ingest.sql`
+  - `supabase/migrations/006_supabase_github_ingest_trigger.sql`
+  - `supabase/migrations/20260511161706_guard_github_ingest_dispatch.sql`
 
 Do not commit database passwords, service-role keys, or `.env` files. If the database password has been shared outside a password manager, rotate it in Supabase before production use.
 
@@ -42,6 +44,8 @@ For the first pass, the simplest route is the Supabase dashboard:
 5. Paste and run the contents of `supabase/migrations/003_manual_po_draft_ingest.sql`.
 6. Paste and run the contents of `supabase/migrations/004_buyer_recommendation_fields.sql`.
 7. Paste and run the contents of `supabase/migrations/005_daily_email_ingest.sql`.
+8. After creating the GitHub dispatch token described below, paste and run the contents of `supabase/migrations/006_supabase_github_ingest_trigger.sql`.
+9. Paste and run the contents of `supabase/migrations/20260511161706_guard_github_ingest_dispatch.sql` to reschedule the job with the database-side completed-run guard.
 
 After that, install dependencies and check the connection:
 
@@ -88,11 +92,15 @@ New recommendation rows default to an opt-in approval model:
 - `recommendation_status = rejected`
 - `approved_qty = 0`
 
-The next app step is to add row-level approval/edit controls and persist buyer changes back to Supabase.
+The app now includes row-level approval/edit controls in the importer workbench. Buyers can adjust either `Weeks w/ Recommended` or `Recommended Qty`; those two values stay synchronized in the Streamlit editor. When a row is approved, the current working `Recommended Qty` is persisted as `approved_qty` for PO draft generation.
 
 ## Daily Email Automation
 
-GitHub Actions runs `.github/workflows/daily-vinosmith-ingest.yml` on weekday mornings. The workflow executes `scripts/process_daily_vinosmith_email.py`, which:
+Supabase is the reliable scheduler for the daily Vinosmith ingest. The scheduled database job calls GitHub's `workflow_dispatch` API through the morning ingestion window. GitHub Actions remains the worker, but GitHub is no longer trusted as the clock.
+
+The incremental migration `20260511161706_guard_github_ingest_dispatch.sql` keeps the same morning polling window but adds a database-side guard: once a completed `scheduled_email` report run exists for the current Mountain-time report date, Supabase stops dispatching additional GitHub Actions runs for that day.
+
+The workflow executes `scripts/process_daily_vinosmith_email.py`, which:
 
 1. Connects to the `stm@stemwinecompany.com` mailbox over IMAP.
 2. Finds the current day's Vinosmith report attachments.
@@ -110,22 +118,48 @@ Required GitHub Actions secrets:
 - `EMAIL_USERNAME`
 - `EMAIL_PASSWORD`
 - `EMAIL_MAILBOX` (`INBOX`)
-- `IMPORTERS_CSV_BASE64`
+- `EMAIL_MAILBOXES` optional comma-separated override. For Google Workspace/Gmail, the script now searches `INBOX` and falls back to `[Gmail]/All Mail` automatically so category sorting like Updates does not hide the reports.
 
 Optional GitHub Actions secrets/variables:
 
+- `IMPORTERS_CSV_BASE64` optional override for the tracked repo `importers.csv`
 - `VINOSMITH_SENDER`
 - `VINOSMITH_SUBJECT_KEYWORD`
 - `RB6_ATTACHMENT_KEYWORDS`
 - `RADS_ATTACHMENT_KEYWORDS`
 
-To create `IMPORTERS_CSV_BASE64` locally:
+Supabase scheduled trigger setup:
+
+1. Create a fine-grained GitHub token for `STM-wine/WineBook` with repository `Actions: Read and write`.
+2. In Supabase SQL Editor, store it in Vault:
+
+```sql
+select vault.create_secret(
+    '<fine-grained-github-token>',
+    'github_actions_dispatch_token',
+    'Token allowed to dispatch STM-wine/WineBook workflows'
+);
+```
+
+3. Apply `supabase/migrations/006_supabase_github_ingest_trigger.sql`.
+4. Apply `supabase/migrations/20260511161706_guard_github_ingest_dispatch.sql`.
+5. Verify the job exists:
+
+```sql
+select jobid, jobname, schedule, active
+from cron.job
+where jobname = 'daily-vinosmith-github-dispatch';
+```
+
+The GitHub workflow intentionally has no native `schedule` block now. It should be triggered by Supabase Cron or manually from GitHub Actions.
+
+The workflow uses the tracked repo `importers.csv` by default. To temporarily override it with a GitHub secret, create `IMPORTERS_CSV_BASE64` locally:
 
 ```bash
 base64 -i importers.csv | pbcopy
 ```
 
-Paste the copied value into the GitHub secret. Keep the actual `importers.csv` out of the repo.
+Paste the copied value into the GitHub secret. Long term, supplier logistics should move into an editable Supabase table instead of a CSV file.
 
 `002_manual_recommendation_ingest.sql` should also add transitional recommendation fields:
 
@@ -161,3 +195,7 @@ Paste the copied value into the GitHub secret. Keep the actual `importers.csv` o
 - `report_runs.source_channel`
 - scheduled-run lookup index by report date/status
 - `source_files.email_message_id`
+
+`006_supabase_github_ingest_trigger.sql` should create the Supabase-owned GitHub dispatch job.
+
+`20260511161706_guard_github_ingest_dispatch.sql` should replace that job with a version that checks `report_runs` before dispatching.

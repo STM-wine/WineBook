@@ -33,6 +33,7 @@ DEFAULT_RB6_KEYWORDS = ["inventory", "velocity", "rb6"]
 DEFAULT_RADS_KEYWORDS = ["rads", "sales", "vinosmith"]
 DEFAULT_TIMEZONE = "America/Denver"
 DEFAULT_BUCKET = "source-files"
+GMAIL_ALL_MAIL = "[Gmail]/All Mail"
 
 
 @dataclass
@@ -57,6 +58,16 @@ def csv_env(name: str, default: list[str]) -> list[str]:
     if not raw:
         return default
     return [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+
+def csv_mailbox_env(name: str, default: list[str]) -> list[str]:
+    raw = os.getenv(name)
+    values = [part.strip() for part in raw.split(",") if part.strip()] if raw else default
+    unique = []
+    for value in values:
+        if value not in unique:
+            unique.append(value)
+    return unique
 
 
 def normalized_filename(filename: str) -> str:
@@ -162,12 +173,35 @@ def imap_date(value: date) -> str:
     return value.strftime("%d-%b-%Y")
 
 
+def mailbox_search_targets(host: str, configured_mailbox: str) -> list[str]:
+    configured = csv_mailbox_env("EMAIL_MAILBOXES", [configured_mailbox])
+    if "gmail" in host.lower() and GMAIL_ALL_MAIL not in configured:
+        configured.append(GMAIL_ALL_MAIL)
+    return configured
+
+
+def dedupe_attachments(attachments: list[AttachmentCandidate]) -> list[AttachmentCandidate]:
+    unique = []
+    seen = set()
+    for attachment in attachments:
+        key = (
+            attachment.message_id,
+            attachment.filename,
+            len(attachment.payload),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(attachment)
+    return unique
+
+
 def fetch_vinosmith_attachments(
     report_date: date,
     host: str,
     username: str,
     password: str,
-    mailbox: str = "INBOX",
+    mailbox: str | list[str] = "INBOX",
     port: int = 993,
     sender: str | None = None,
     subject_keyword: str | None = None,
@@ -180,20 +214,32 @@ def fetch_vinosmith_attachments(
 
     with imaplib.IMAP4_SSL(host, port) as imap:
         imap.login(username, password)
-        imap.select(mailbox)
-        status, data = imap.search(None, *search_parts)
-        if status != "OK":
-            raise RuntimeError(f"IMAP search failed with status {status}")
-
         attachments: list[AttachmentCandidate] = []
-        for message_num in data[0].split():
-            status, message_data = imap.fetch(message_num, "(RFC822)")
+        mailboxes = mailbox if isinstance(mailbox, list) else [mailbox]
+        selected_any = False
+        for mailbox_name in mailboxes:
+            status, _ = imap.select(f'"{mailbox_name}"', readonly=True)
             if status != "OK":
+                print(f"Skipping IMAP mailbox {mailbox_name!r}; select returned {status}.")
                 continue
-            raw_message = message_data[0][1]
-            message = BytesParser(policy=policy.default).parsebytes(raw_message)
-            attachments.extend(attachment_candidates_from_message(message))
-        return attachments
+            selected_any = True
+            status, data = imap.search(None, *search_parts)
+            if status != "OK":
+                raise RuntimeError(f"IMAP search failed in {mailbox_name!r} with status {status}")
+
+            mailbox_attachments = []
+            for message_num in data[0].split():
+                status, message_data = imap.fetch(message_num, "(RFC822)")
+                if status != "OK":
+                    continue
+                raw_message = message_data[0][1]
+                message = BytesParser(policy=policy.default).parsebytes(raw_message)
+                mailbox_attachments.extend(attachment_candidates_from_message(message))
+            print(f"Found {len(mailbox_attachments)} attachment candidates in {mailbox_name!r}.")
+            attachments.extend(mailbox_attachments)
+        if not selected_any:
+            raise RuntimeError(f"Could not select any configured IMAP mailboxes: {mailboxes}")
+        return dedupe_attachments(attachments)
 
 
 def parse_args() -> argparse.Namespace:
@@ -229,6 +275,7 @@ def main() -> None:
     username = env_required("EMAIL_USERNAME")
     password = env_required("EMAIL_PASSWORD")
     mailbox = os.getenv("EMAIL_MAILBOX") or "INBOX"
+    mailboxes = mailbox_search_targets(host, mailbox)
     port = int(os.getenv("EMAIL_PORT") or "993")
     sender = os.getenv("VINOSMITH_SENDER") or None
     subject_keyword = os.getenv("VINOSMITH_SUBJECT_KEYWORD") or None
@@ -247,11 +294,14 @@ def main() -> None:
         host=host,
         username=username,
         password=password,
-        mailbox=mailbox,
+        mailbox=mailboxes,
         port=port,
         sender=sender,
         subject_keyword=subject_keyword,
     )
+    if not attachments:
+        print(f"No Vinosmith attachment candidates found for {report_date}; exiting so a later poll can retry.")
+        return
 
     with tempfile.TemporaryDirectory() as tmpdir:
         reports = write_report_attachments(

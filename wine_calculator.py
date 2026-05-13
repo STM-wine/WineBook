@@ -119,6 +119,21 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         grouped.columns = ['planning_sku_norm', f'last_{days}_day_sales']
         return grouped
 
+    def aggregate_sales_window(start_days_ago, end_days_ago, column_name):
+        if not (date_col and sales_data[date_col].notna().any()):
+            return pd.DataFrame(columns=['planning_sku_norm', column_name])
+
+        max_date = sales_data[date_col].max()
+        start_date = max_date - timedelta(days=start_days_ago)
+        end_date = max_date - timedelta(days=end_days_ago)
+        period_sales = sales_data[
+            (sales_data[date_col] >= start_date) &
+            (sales_data[date_col] < end_date)
+        ].copy()
+        grouped = period_sales.groupby('planning_sku_norm').agg({qty_col: 'sum'}).reset_index()
+        grouped.columns = ['planning_sku_norm', column_name]
+        return grouped
+
     def aggregate_same_period_last_year(days):
         column_name = f'next_{days}_day_forecast'
         if not (date_col and sales_data[date_col].notna().any()):
@@ -148,6 +163,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
 
     sales_60d = aggregate_sales_since(60)
     sales_90d = aggregate_sales_since(90)
+    prior_30d = aggregate_sales_window(60, 30, 'prior_30_day_sales')
     forecast_30d = aggregate_same_period_last_year(30)
     forecast_60d = aggregate_same_period_last_year(60)
     forecast_90d = aggregate_same_period_last_year(90)
@@ -158,6 +174,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     recommendations = rb6_inventory.merge(sales_30d, on='planning_sku_norm', how='left')
     recommendations = recommendations.merge(sales_60d, on='planning_sku_norm', how='left')
     recommendations = recommendations.merge(sales_90d, on='planning_sku_norm', how='left')
+    recommendations = recommendations.merge(prior_30d, on='planning_sku_norm', how='left')
     recommendations = recommendations.merge(forecast_30d, on='planning_sku_norm', how='left')
     recommendations = recommendations.merge(forecast_60d, on='planning_sku_norm', how='left')
     recommendations = recommendations.merge(forecast_90d, on='planning_sku_norm', how='left')
@@ -167,6 +184,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     for col in [
         'last_60_day_sales',
         'last_90_day_sales',
+        'prior_30_day_sales',
         'next_30_day_forecast',
         'next_60_day_forecast',
         'next_90_day_forecast',
@@ -175,7 +193,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     recommendations['next_60_days_ly_sales'] = recommendations['next_60_day_forecast']
     
     # --- STEP 6: CALCULATE INVENTORY FIELDS ---
-    # available_inventory comes directly from RB6 - should be preserved after merge
+    # True Available = Available Inventory - Unconfirmed Line Item Qty
     recommendations['true_available'] = pd.to_numeric(
         recommendations['available_inventory'], errors='coerce'
     ).fillna(0)
@@ -262,11 +280,17 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     # Optional seasonal velocity reference
     recommendations['seasonal_velocity_reference'] = recommendations['next_60_day_forecast'] / 8.6  # 8.6 weeks in 60 days
     recommendations['avg_weekly_velocity_90d'] = recommendations['last_90_day_sales'] / 12.86
+    prior_30 = pd.to_numeric(recommendations['prior_30_day_sales'], errors='coerce').fillna(0)
+    last_30 = pd.to_numeric(recommendations['last_30_day_sales'], errors='coerce').fillna(0)
     recommendations['velocity_trend_pct'] = np.where(
-        recommendations['avg_weekly_velocity_90d'] > 0,
-        ((recommendations['weekly_velocity'] - recommendations['avg_weekly_velocity_90d'])
-         / recommendations['avg_weekly_velocity_90d']) * 100,
+        prior_30 > 0,
+        ((last_30 - prior_30) / prior_30) * 100,
         None
+    )
+    recommendations['velocity_trend_label'] = np.where(
+        prior_30 > 0,
+        None,
+        np.where(last_30 > 0, 'New', '')
     )
     
     # --- STEP 7b: CALCULATE RECOMMENDED ORDER QUANTITIES ---
@@ -452,6 +476,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         'last_30_day_sales',
         'last_60_day_sales',
         'last_90_day_sales',
+        'prior_30_day_sales',
         'next_30_day_forecast',
         'next_60_day_forecast',
         'next_90_day_forecast',
@@ -466,6 +491,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         # Calculated metrics
         'weekly_velocity',
         'velocity_trend_pct',
+        'velocity_trend_label',
         'weeks_on_hand',
         'weeks_on_hand_with_on_order',
         

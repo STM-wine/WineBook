@@ -1,7 +1,11 @@
 """Dashboard data shaping for ordering decisions."""
 
+from copy import copy
 from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
 
+from openpyxl import load_workbook
 import pandas as pd
 
 
@@ -13,9 +17,11 @@ DASHBOARD_COLUMNS = [
     "true_available",
     "on_order",
     "last_30_day_sales",
+    "prior_30_day_sales",
     "next_30_day_forecast",
     "weekly_velocity",
     "velocity_trend_pct",
+    "velocity_trend_label",
     "risk_level",
     "recommended_qty_rounded",
     "recommendation_status",
@@ -33,10 +39,27 @@ PO_COLUMNS = [
     "planning_sku",
     "approved_qty",
     "fob",
+    "trucking_cost_per_bottle",
     "order_cost",
 ]
+PO_DRAFT_STATUS_LABELS = {
+    "draft": "Draft",
+    "ready_for_entry": "Ready for Entry",
+    "entered_in_quickbooks": "Entered in QuickBooks",
+    "cancelled": "Cancelled",
+}
 
 APPROVAL_STATUSES = ["rejected", "approved", "edited", "deferred"]
+APPROVED_STATUSES = ["approved", "edited"]
+IMPORTER_WORKFLOW_STATUSES = ["Not Started", "In Progress", "Approved", "PO Sent"]
+BUYER_OPTIONAL_HISTORY_COLUMNS = [
+    "last_60_day_sales",
+    "last_90_day_sales",
+]
+BUYER_OPTIONAL_FORECAST_COLUMNS = [
+    "next_60_day_forecast",
+    "next_90_day_forecast",
+]
 
 
 def _clean_int(value, default: int = 0) -> int:
@@ -44,6 +67,81 @@ def _clean_int(value, default: int = 0) -> int:
     if pd.isna(parsed):
         return default
     return int(parsed)
+
+
+def _clean_float(value, default: float = 0.0) -> float:
+    parsed = pd.to_numeric(value, errors="coerce")
+    if pd.isna(parsed):
+        return default
+    return float(parsed)
+
+
+def _round_up_to_pack(quantity: float, pack_size: float | int | None) -> int:
+    if quantity <= 0:
+        return 0
+    pack = _clean_int(pack_size, 1)
+    if pack <= 0:
+        pack = 1
+    return int(((int(quantity + pack - 1)) // pack) * pack)
+
+
+def _rank_velocity_series(df: pd.DataFrame) -> pd.Series:
+    for column in [
+        "last_365_day_sales",
+        "last_12_month_sales",
+        "last_90_day_sales",
+        "last_60_day_sales",
+        "last_30_day_sales",
+    ]:
+        if column in df.columns:
+            values = pd.to_numeric(df[column], errors="coerce").fillna(0)
+            if float(values.sum()) > 0:
+                return values
+    return pd.Series([0] * len(df), index=df.index)
+
+
+def _wine_display(row: pd.Series) -> str:
+    flags = []
+    if bool(row.get("is_core", False)):
+        flags.append("⭐")
+    if bool(row.get("is_btg", False)):
+        flags.append("🍷")
+    suffix = f" {' '.join(flags)}" if flags else ""
+    return f"#{_clean_int(row.get('_importer_rank'), 0)} {row.get('product_name', '')}{suffix}"
+
+
+def working_qty_from_weeks(row: dict | pd.Series) -> int:
+    target_weeks = _clean_float(row.get("Weeks w/ Recommended"), 0.0)
+    weekly_velocity = _clean_float(row.get("Weekly Velocity"), 0.0)
+    true_available = _clean_float(row.get("True Available"), 0.0)
+    on_order = _clean_float(row.get("On Order"), 0.0)
+    pack_size = row.get("_Pack Size", 1)
+    raw_qty = max(0.0, (target_weeks * weekly_velocity) - (true_available + on_order))
+    return _round_up_to_pack(raw_qty, pack_size)
+
+
+def working_weeks_from_qty(row: dict | pd.Series) -> float:
+    weekly_velocity = _clean_float(row.get("Weekly Velocity"), 0.0)
+    if weekly_velocity <= 0:
+        return 0.0
+    true_available = _clean_float(row.get("True Available"), 0.0)
+    on_order = _clean_float(row.get("On Order"), 0.0)
+    recommended_qty = _clean_float(row.get("Recommended Qty"), 0.0)
+    return round((true_available + on_order + recommended_qty) / weekly_velocity, 1)
+
+
+def recalculate_working_recommendation(df: pd.DataFrame) -> pd.DataFrame:
+    display = df.copy()
+    required = ["True Available", "On Order", "Recommended Qty", "Weekly Velocity"]
+    if display.empty or not all(col in display.columns for col in required):
+        return display
+
+    display["Weeks w/ Recommended"] = display.apply(working_weeks_from_qty, axis=1)
+    if "_FOB" in display.columns and "Est. Cost" in display.columns:
+        qty = pd.to_numeric(display["Recommended Qty"], errors="coerce").fillna(0)
+        fob = pd.to_numeric(display["_FOB"], errors="coerce").fillna(0)
+        display["Est. Cost"] = qty * fob
+    return display
 
 
 @dataclass
@@ -77,6 +175,7 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "last_30_day_sales",
         "last_60_day_sales",
         "last_90_day_sales",
+        "prior_30_day_sales",
         "next_30_day_forecast",
         "next_60_day_forecast",
         "next_90_day_forecast",
@@ -86,6 +185,7 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "order_cost",
         "landed_cost",
         "trucking_cost_per_bottle",
+        "fob",
     ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -99,6 +199,7 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "recommendation_status",
         "risk_level",
         "pickup_location",
+        "velocity_trend_label",
     ]:
         if col in df.columns:
             df[col] = df[col].fillna("")
@@ -167,6 +268,84 @@ def risk_counts(df: pd.DataFrame) -> dict[str, int]:
         "Medium": int(counts.get("Medium", 0)),
         "Low": int(counts.get("Low", 0)),
     }
+
+
+def importer_workflow_status(df: pd.DataFrame, po_sent: bool = False) -> str:
+    if po_sent:
+        return "PO Sent"
+    if df.empty:
+        return "Not Started"
+
+    actionable = df[pd.to_numeric(df.get("recommended_qty_rounded", 0), errors="coerce").fillna(0) > 0]
+    if actionable.empty:
+        return "Not Started"
+
+    statuses = actionable.get("recommendation_status", pd.Series(["rejected"] * len(actionable), index=actionable.index))
+    approved_qty = pd.to_numeric(actionable.get("approved_qty", 0), errors="coerce").fillna(0)
+    approved_mask = statuses.isin(APPROVED_STATUSES) & (approved_qty > 0)
+
+    if bool(approved_mask.all()):
+        return "Approved"
+    if bool(approved_mask.any()) or bool((statuses != "rejected").any()):
+        return "In Progress"
+    return "Not Started"
+
+
+def importer_workbench_summary(df: pd.DataFrame, po_sent_suppliers: set[str] | None = None) -> pd.DataFrame:
+    columns = [
+        "Importer",
+        "Status",
+        "SKUs",
+        "Urgent",
+        "Suggested Qty",
+        "Suggested Value",
+        "Approved Qty",
+        "Approved Value",
+    ]
+    if df.empty or "supplier_name" not in df:
+        return pd.DataFrame(columns=columns)
+
+    po_sent_suppliers = po_sent_suppliers or set()
+    rows = []
+    for supplier, group in df.groupby("supplier_name", dropna=False):
+        supplier_name = "Unassigned" if pd.isna(supplier) or supplier == "" else supplier
+        suggested_qty = int(pd.to_numeric(group.get("recommended_qty_rounded", 0), errors="coerce").fillna(0).sum())
+        suggested_value = float(pd.to_numeric(group.get("order_cost", 0), errors="coerce").fillna(0).sum())
+        approved_qty = pd.to_numeric(group.get("approved_qty", 0), errors="coerce").fillna(0)
+        if "fob" in group:
+            approved_value = float((pd.to_numeric(group["fob"], errors="coerce").fillna(0) * approved_qty).sum())
+        else:
+            approved_value = 0.0
+        rows.append(
+            {
+                "Importer": supplier_name,
+                "Status": importer_workflow_status(group, supplier_name in po_sent_suppliers),
+                "SKUs": int(len(group)),
+                "Urgent": int((group.get("reorder_status", "") == "URGENT").sum()),
+                "Suggested Qty": suggested_qty,
+                "Suggested Value": suggested_value,
+                "Approved Qty": int(approved_qty.sum()),
+                "Approved Value": approved_value,
+            }
+        )
+
+    summary = pd.DataFrame(rows, columns=columns)
+    if summary.empty:
+        return summary
+    return summary.sort_values("Suggested Value", ascending=False).reset_index(drop=True)
+
+
+def importer_groups(df: pd.DataFrame, po_sent_suppliers: set[str] | None = None) -> list[dict]:
+    summary = importer_workbench_summary(df, po_sent_suppliers=po_sent_suppliers)
+    groups = []
+    for row in summary.to_dict(orient="records"):
+        importer = row["Importer"]
+        group = df[df["supplier_name"].fillna("").replace("", "Unassigned") == importer].copy()
+        sort_col = "product_name" if "product_name" in group else "Name" if "Name" in group else None
+        if sort_col:
+            group = group.sort_values(sort_col, key=lambda series: series.fillna("").astype(str).str.lower())
+        groups.append({"summary": row, "data": group})
+    return groups
 
 
 def filter_recommendations(
@@ -246,13 +425,11 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     if "Weekly Velocity" in display:
-        display["Weekly Velocity"] = display["Weekly Velocity"].apply(
-            lambda x: f"{x:.2f}" if pd.notna(x) else ""
-        )
+        display["Weekly Velocity"] = display["Weekly Velocity"].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "")
 
     if "Weeks w/ On Order" in display:
         display["Weeks w/ On Order"] = display["Weeks w/ On Order"].apply(
-            lambda x: f"{x:.2f}" if pd.notna(x) else ""
+            lambda x: f"{x:.1f}" if pd.notna(x) else ""
         )
 
     for col in ["Est. Cost", "Landed Cost"]:
@@ -264,46 +441,163 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
-def approval_editor_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+def buyer_workbench_dataframe(
+    df: pd.DataFrame,
+    show_history: bool = False,
+    show_forecast: bool = False,
+) -> pd.DataFrame:
     columns = [
         "id",
-        "supplier_name",
         "product_name",
-        "product_code",
-        "reorder_status",
-        "risk_level",
+        "is_core",
+        "is_btg",
+        "true_available",
+        "on_order",
+        "last_30_day_sales",
+        "next_30_day_forecast",
+        "weekly_velocity",
+        "velocity_trend_pct",
+        "velocity_trend_label",
+        "weeks_on_hand_with_on_order",
         "recommended_qty_rounded",
         "recommendation_status",
         "approved_qty",
         "order_cost",
+        "fob",
+        "pack_size",
     ]
-    available = [col for col in columns if col in df.columns]
+    optional = []
+    if show_history:
+        optional.extend(BUYER_OPTIONAL_HISTORY_COLUMNS)
+    if show_forecast:
+        optional.extend(BUYER_OPTIONAL_FORECAST_COLUMNS)
+
+    available = [col for col in columns + optional if col in df.columns]
     editor = df[available].copy()
+    if editor.empty:
+        return pd.DataFrame(
+            columns=[
+                "id",
+                "Wine",
+                "True Available",
+                "On Order",
+                "30d Sales",
+                "Next 30d Forecast",
+                "Weekly Velocity",
+                "Velocity Trend",
+                "Weeks w/ On Order",
+                "Weeks w/ Recommended",
+                "Recommended Qty",
+                "Approval",
+                "Est. Cost",
+            ]
+        )
 
-    if "approved_qty" not in editor.columns:
-        editor["approved_qty"] = 0
-    if "recommendation_status" not in editor.columns:
-        editor["recommendation_status"] = "rejected"
+    for col in [
+        "true_available",
+        "on_order",
+        "last_30_day_sales",
+        "next_30_day_forecast",
+        "weekly_velocity",
+        "velocity_trend_pct",
+        "weeks_on_hand_with_on_order",
+        "recommended_qty_rounded",
+        "approved_qty",
+        "order_cost",
+        "fob",
+        "pack_size",
+        *optional,
+    ]:
+        if col in editor.columns and col != "velocity_trend_label":
+            editor[col] = pd.to_numeric(editor[col], errors="coerce").fillna(0)
 
-    for col in ["recommended_qty_rounded", "approved_qty"]:
-        if col in editor.columns:
-            editor[col] = pd.to_numeric(editor[col], errors="coerce").fillna(0).astype(int)
+    for col in ["is_core", "is_btg"]:
+        if col not in editor.columns:
+            editor[col] = False
+        editor[col] = editor[col].fillna(False).astype(bool)
+
+    editor["_velocity_rank_basis"] = _rank_velocity_series(df).reindex(editor.index).fillna(0)
+    editor["_importer_rank"] = editor["_velocity_rank_basis"].rank(method="dense", ascending=False).astype(int)
+    editor["Wine"] = editor.apply(_wine_display, axis=1)
+    statuses = (
+        editor["recommendation_status"]
+        if "recommendation_status" in editor.columns
+        else pd.Series(["rejected"] * len(editor), index=editor.index)
+    )
+    editor["Approval"] = (
+        statuses.isin(APPROVED_STATUSES)
+        & (pd.to_numeric(editor.get("approved_qty", 0), errors="coerce").fillna(0) > 0)
+    )
+    approved_qty = pd.to_numeric(editor.get("approved_qty", 0), errors="coerce").fillna(0)
+    working_qty = pd.to_numeric(editor.get("recommended_qty_rounded", 0), errors="coerce").fillna(0)
+    editor["Working Recommended Qty"] = working_qty
+    editor.loc[statuses.isin(APPROVED_STATUSES) & (approved_qty > 0), "Working Recommended Qty"] = approved_qty
+
+    coverage_qty = editor["true_available"] + editor["on_order"] + editor["Working Recommended Qty"]
+    weekly_velocity = editor["weekly_velocity"].replace(0, pd.NA)
+    editor["Weeks w/ Recommended"] = (coverage_qty / weekly_velocity).fillna(0).round(1)
+    if "pack_size" in editor.columns:
+        editor["_Pack Size"] = pd.to_numeric(editor["pack_size"], errors="coerce").fillna(1)
+    else:
+        editor["_Pack Size"] = 1
 
     rename_map = {
-        "supplier_name": "Supplier",
-        "product_name": "Wine",
-        "product_code": "Code",
-        "reorder_status": "Status",
-        "risk_level": "Risk",
-        "recommended_qty_rounded": "Recommended Qty",
-        "recommendation_status": "Approval",
-        "approved_qty": "Approved Qty",
+        "true_available": "True Available",
+        "on_order": "On Order",
+        "last_30_day_sales": "30d Sales",
+        "last_60_day_sales": "60d Sales",
+        "last_90_day_sales": "90d Sales",
+        "next_30_day_forecast": "Next 30d Forecast",
+        "next_60_day_forecast": "LY Next 60d Forecast",
+        "next_90_day_forecast": "LY Next 90d Forecast",
+        "weekly_velocity": "Weekly Velocity",
+        "velocity_trend_pct": "Velocity Trend",
+        "velocity_trend_label": "_Velocity Trend Label",
+        "weeks_on_hand_with_on_order": "Weeks w/ On Order",
+        "Working Recommended Qty": "Recommended Qty",
         "order_cost": "Est. Cost",
+        "fob": "_FOB",
     }
-    return editor.rename(columns=rename_map)
+    editor = editor.rename(columns=rename_map)
+    ordered = [
+        "id",
+        "Wine",
+        "True Available",
+        "On Order",
+        "30d Sales",
+        "60d Sales",
+        "90d Sales",
+        "Next 30d Forecast",
+        "LY Next 60d Forecast",
+        "LY Next 90d Forecast",
+        "Weekly Velocity",
+        "Velocity Trend",
+        "_Velocity Trend Label",
+        "Weeks w/ On Order",
+        "Weeks w/ Recommended",
+        "_Pack Size",
+        "_FOB",
+        "Recommended Qty",
+        "Approval",
+        "Est. Cost",
+    ]
+    display = editor[[col for col in ordered if col in editor.columns]].copy()
+    if "Velocity Trend" in display:
+        labels = (
+            display["_Velocity Trend Label"].fillna("").astype(str)
+            if "_Velocity Trend Label" in display
+            else pd.Series([""] * len(display), index=display.index)
+        )
+        display["Velocity Trend"] = [
+            label if label else (f"{value:+.0f}%" if pd.notna(value) else "")
+            for value, label in zip(display["Velocity Trend"], labels)
+        ]
+    if "Wine" in display:
+        display = display.sort_values("Wine", key=lambda series: series.fillna("").astype(str).str.lower())
+    return recalculate_working_recommendation(display.reset_index(drop=True))
 
 
-def approval_updates_from_editor(original: pd.DataFrame, edited: pd.DataFrame) -> list[dict]:
+def buyer_updates_from_editor(original: pd.DataFrame, edited: pd.DataFrame) -> list[dict]:
     if original.empty or edited.empty or "id" not in original.columns or "id" not in edited.columns:
         return []
 
@@ -314,17 +608,21 @@ def approval_updates_from_editor(original: pd.DataFrame, edited: pd.DataFrame) -
         if recommendation_id not in original_by_id.index:
             continue
 
-        status = row.get("Approval", row.get("recommendation_status", "rejected"))
-        approved_qty = _clean_int(row.get("Approved Qty", row.get("approved_qty", 0)))
-        if status not in APPROVAL_STATUSES:
-            status = "rejected"
-        if approved_qty < 0:
-            approved_qty = 0
-
         original_row = original_by_id.loc[recommendation_id]
-        original_status = original_row.get("recommendation_status", "rejected")
-        original_qty = _clean_int(original_row.get("approved_qty", 0))
+        approved = bool(row.get("Approval", False))
+        suggested_qty = _clean_int(original_row.get("recommended_qty_rounded"), 0)
 
+        if approved:
+            approved_qty = _clean_int(row.get("Recommended Qty"), suggested_qty)
+            if approved_qty < 0:
+                approved_qty = 0
+            status = "edited" if approved_qty != suggested_qty else "approved"
+        else:
+            approved_qty = 0
+            status = "rejected"
+
+        original_status = original_row.get("recommendation_status", "rejected")
+        original_qty = _clean_int(original_row.get("approved_qty"), 0)
         if status != original_status or approved_qty != original_qty:
             updates.append(
                 {
@@ -429,8 +727,12 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if "approved_qty" in po_df.columns:
         po_df["approved_qty"] = pd.to_numeric(po_df["approved_qty"], errors="coerce").fillna(0).astype(int)
     if "fob" in po_df.columns:
-        po_df["Estimated Cost"] = pd.to_numeric(po_df["fob"], errors="coerce").fillna(0) * po_df["approved_qty"]
-        po_df = po_df.drop(columns=["fob"])
+        po_df["fob"] = pd.to_numeric(po_df["fob"], errors="coerce").fillna(0)
+        po_df["Estimated Cost"] = po_df["fob"] * po_df["approved_qty"]
+    if "trucking_cost_per_bottle" in po_df.columns:
+        po_df["trucking_cost_per_bottle"] = pd.to_numeric(
+            po_df["trucking_cost_per_bottle"], errors="coerce"
+        ).fillna(0)
     return po_df.rename(
         columns={
             "supplier_name": "Supplier",
@@ -438,25 +740,149 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             "product_code": "Code",
             "planning_sku": "Planning SKU",
             "approved_qty": "Quantity",
+            "fob": "FOB",
+            "trucking_cost_per_bottle": "Laid In Cost",
             "order_cost": "Recommended Cost",
         }
+    )
+
+
+def _copy_row_style(sheet, source_row: int, target_row: int, max_column: int) -> None:
+    for column in range(1, max_column + 1):
+        source = sheet.cell(source_row, column)
+        target = sheet.cell(target_row, column)
+        if source.has_style:
+            target._style = copy(source._style)
+        if source.number_format:
+            target.number_format = source.number_format
+        if source.alignment:
+            target.alignment = copy(source.alignment)
+        if source.border:
+            target.border = copy(source.border)
+        if source.fill:
+            target.fill = copy(source.fill)
+        if source.font:
+            target.font = copy(source.font)
+
+
+def po_template_xlsx_bytes(po_df: pd.DataFrame, template_path: str | Path) -> bytes:
+    """Fill Mark's PO draft template from the approved PO preview dataframe."""
+    workbook = load_workbook(template_path)
+    sheet = workbook.active
+    start_row = 4
+    max_column = max(sheet.max_column, 23)
+
+    if sheet.max_row >= start_row:
+        for row in sheet.iter_rows(min_row=start_row, max_row=sheet.max_row, max_col=max_column):
+            for cell in row:
+                cell.value = None
+
+    ordered = po_df.sort_values(
+        ["Supplier", "Wine"],
+        key=lambda series: series.fillna("").astype(str).str.lower(),
+    )
+    for offset, row in enumerate(ordered.to_dict(orient="records")):
+        excel_row = start_row + offset
+        _copy_row_style(sheet, start_row, excel_row, max_column)
+        sheet.cell(excel_row, 1).value = row.get("Supplier", "")
+        sheet.cell(excel_row, 2).value = ""
+        sheet.cell(excel_row, 3).value = _clean_int(row.get("Quantity"), 0)
+        sheet.cell(excel_row, 4).value = row.get("Code", "")
+        sheet.cell(excel_row, 5).value = row.get("Wine", "")
+        sheet.cell(excel_row, 6).value = _clean_float(row.get("FOB"), 0.0)
+        sheet.cell(excel_row, 7).value = _clean_float(row.get("Laid In Cost"), 0.0)
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def po_draft_lines_dataframe(lines: list[dict]) -> pd.DataFrame:
+    columns = ["Wine", "Code", "Planning SKU", "Quantity", "FOB", "Estimated Cost"]
+    if not lines:
+        return pd.DataFrame(columns=columns)
+
+    df = pd.DataFrame(lines)
+    display = pd.DataFrame(
+        {
+            "Wine": df.get("product_name", pd.Series(dtype=str)).fillna(""),
+            "Code": df.get("product_code", pd.Series(dtype=str)).fillna(""),
+            "Planning SKU": df.get("planning_sku", pd.Series(dtype=str)).fillna(""),
+            "Quantity": pd.to_numeric(df.get("approved_qty", 0), errors="coerce").fillna(0).astype(int),
+            "FOB": pd.to_numeric(df.get("fob", 0), errors="coerce").fillna(0),
+            "Estimated Cost": pd.to_numeric(df.get("line_cost", 0), errors="coerce").fillna(0),
+        }
+    )
+    return display[columns]
+
+
+def po_drafts_dataframe(drafts: list[dict]) -> pd.DataFrame:
+    columns = ["Draft ID", "Supplier", "Status", "Created", "Notes"]
+    if not drafts:
+        return pd.DataFrame(columns=columns)
+
+    rows = []
+    for draft in drafts:
+        status = draft.get("status") or "draft"
+        rows.append(
+            {
+                "Draft ID": str(draft.get("id", ""))[:8],
+                "Supplier": draft.get("supplier_name") or "",
+                "Status": PO_DRAFT_STATUS_LABELS.get(status, status),
+                "Created": draft.get("created_at") or "",
+                "Notes": draft.get("notes") or "",
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def active_po_drafts(drafts: list[dict]) -> list[dict]:
+    return [
+        draft
+        for draft in drafts
+        if draft.get("status") in {"draft", "ready_for_entry"}
+    ]
+
+
+def active_po_draft_message(drafts: list[dict]) -> str:
+    active = active_po_drafts(drafts)
+    if not active:
+        return ""
+    draft = active[0]
+    return (
+        f"Active PO draft {str(draft.get('id', ''))[:8]} already exists. "
+        "Use the existing draft or mark it entered/cancelled before creating another."
     )
 
 
 __all__ = [
     "ApprovalMetrics",
     "DashboardMetrics",
+    "APPROVED_STATUSES",
     "approval_metrics",
+    "active_po_draft_message",
+    "active_po_drafts",
     "dashboard_metrics",
     "filter_recommendations",
     "format_dashboard_dataframe",
-    "approval_editor_dataframe",
-    "approval_updates_from_editor",
+    "buyer_workbench_dataframe",
+    "buyer_updates_from_editor",
+    "recalculate_working_recommendation",
     "APPROVAL_STATUSES",
+    "IMPORTER_WORKFLOW_STATUSES",
     "california_truck_summary",
+    "importer_groups",
+    "importer_workbench_summary",
+    "importer_workflow_status",
     "location_summary",
     "po_export_dataframe",
+    "po_template_xlsx_bytes",
+    "po_draft_lines_dataframe",
+    "po_drafts_dataframe",
+    "PO_DRAFT_STATUS_LABELS",
     "recommendations_to_dataframe",
     "risk_counts",
     "supplier_summary",
+    "working_qty_from_weeks",
+    "working_weeks_from_qty",
 ]

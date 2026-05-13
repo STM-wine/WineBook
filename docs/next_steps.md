@@ -2,17 +2,24 @@
 
 ## Current Status
 
-WineBook has moved beyond the original local MVP shape.
+WineBook is now a Supabase-backed ordering dashboard with automated daily ingestion.
 
 - GitHub repo: `https://github.com/STM-wine/WineBook`
 - Ordering Dashboard runs locally in Streamlit.
-- Supabase project exists and is connected through local `.env`.
-- Numbered schema migrations live in `supabase/migrations/`.
-- Daily Vinosmith email automation has a GitHub Actions workflow and Python processing script.
+- Supabase project is connected through local `.env`.
+- Numbered and timestamped schema migrations live in `supabase/migrations/`.
+- Daily Vinosmith email ingestion runs remotely: Supabase Cron triggers the GitHub Actions worker.
+- GitHub Actions is no longer the primary scheduler; it is the worker and manual-debug entry point.
 - RB6/RADs/importers parsing has been extracted into reusable modules.
-- Recommendations can be saved to Supabase report runs.
-- Dashboard reads the latest saved report run and supports supplier filtering, recommendation review, supplier summaries, location summaries, PO CSV export, and transitional supplier PO draft creation.
-- Recommendations now default to `rejected` / `approved_qty = 0`, matching the ownership opt-in approval model.
+- Recommendations are persisted to Supabase report runs.
+- Dashboard reads the latest completed report run and supports supplier filtering, recommendation review, supplier summaries, location summaries, PO CSV/XLSX export, supplier PO drafts, PO draft review, and PO draft status changes.
+- Recommendations default to `rejected` / `approved_qty = 0`, matching the ownership opt-in approval model.
+- Buyers can edit either `Weeks w/ Recommended` or `Recommended Qty`; those controls stay synchronized.
+- Active supplier PO drafts are guarded to reduce accidental duplicate drafts.
+- True Available is calculated from RB6 as `Available Inventory - Unconfirmed Line Item Qty`.
+- Velocity Trend compares the most recent 30-day sales window with the prior 30-day window and displays `New` when prior sales are zero but current sales exist.
+- Calculated buyer-table columns include hover help with formulas.
+- The legacy upload-first fallback is hidden from the app surface; reruns should use automation/manual GitHub dispatch or local scripts.
 
 ## Business Direction
 
@@ -20,32 +27,46 @@ Use Stem's internal terminology:
 
 - Vinosmith `Importer` = Stem `Supplier`
 - User-facing app copy should say `Supplier`.
-- Source compatibility code may still refer to `importer` where it is mapping Vinosmith fields.
+- Source compatibility code may still refer to `importer` where it maps Vinosmith fields.
 
 The product goal is a simple buyer workflow:
 
 1. Daily source data is ingested automatically.
-2. Recommendations are already populated when a buyer logs in.
+2. Recommendations are already populated when a buyer opens the app.
 3. Buyer filters by supplier, pickup location, or SKU.
-4. Buyer approves or edits quantities.
-5. WineBook creates supplier PO drafts.
-6. A human enters POs into QuickBooks initially.
-7. Later, approved POs sync directly to QuickBooks.
+4. Buyer edits target weeks or recommended quantities.
+5. Buyer approves rows.
+6. WineBook creates supplier PO drafts.
+7. A human enters POs into QuickBooks initially.
+8. Later, approved POs sync directly to QuickBooks.
 
 ## Immediate Priorities
 
-1. Apply `005_daily_email_ingest.sql` in Supabase before the first automated run.
-2. Add GitHub Actions secrets for Supabase, mailbox access, and `IMPORTERS_CSV_BASE64`.
-3. Run the `Daily Vinosmith Ingest` workflow manually with `workflow_dispatch` to validate mailbox access.
-4. Add in-app approval controls for recommendation rows instead of only defaulting rows to rejected in the database.
-5. Persist approved quantities and status changes back to Supabase.
-6. Update PO draft creation to use approved lines/approved quantities instead of raw recommended quantities.
+1. Watch one weekday morning run after the latest Supabase/GitHub automation changes to confirm ingestion remains quiet after success.
+2. Spot-check True Available, On Order, and trend values against Mark's source spreadsheets.
+3. Work through Mark's next Linear issues against the buyer workbench.
+4. Tighten the PO draft output around the actual QuickBooks entry workflow.
+5. Decide the first hosted release strategy.
 
 ## Near-Term Product Work
 
-- Rename remaining user-facing `Importer` labels to `Supplier`.
-- Add explicit buyer workflow states: `rejected`, `approved`, `edited`, `deferred`.
-- Add a saved PO draft review screen.
+- Continue replacing remaining user-facing `Importer` labels with `Supplier`.
+- Evaluate replacing Streamlit's table with AG Grid or a custom frontend table if frozen Wine column behavior becomes essential.
+- Add lightweight in-app operational visibility:
+  - latest report date
+  - latest ingest status
+  - source files used
+  - last successful automation time
+- Improve PO draft formatting for real operations:
+  - supplier header
+  - pickup location
+  - cases and bottles
+  - estimated cost
+  - status and entry notes
+- Add better saved-draft affordances:
+  - cancel draft
+  - copy/reopen draft
+  - clearer duplicate-draft message
 - Add pickup-location hierarchy:
   - Pickup Location
   - Supplier
@@ -54,8 +75,19 @@ The product goal is a simple buyer workflow:
   - FTL progress
   - bottles/cases needed to reach FTL
   - estimated freight savings
-- Add trucking-cost-per-bottle support to `importers.csv` or a Supabase logistics table.
+- Move supplier logistics out of tracked `importers.csv` and into a Supabase table with an app editing surface.
 - Add product/SKU pallet configuration table for future pallet-aware rounding.
+
+## Hosting / Publication Questions
+
+Current app is still Streamlit on localhost. For the first non-local release, likely options are:
+
+- Streamlit Community Cloud or another Streamlit host for fastest path.
+- A small hosted VM/container running Streamlit for more control.
+- A new web frontend backed by Supabase for a more durable app shape.
+- Eventually embedding or linking from Stem's existing website after authentication is settled.
+
+Near-term recommendation: keep Streamlit while buyer workflow is still changing quickly, then choose the hosted path once the Linear issues clarify the stable surface.
 
 ## Data Roadmap
 
@@ -63,7 +95,7 @@ Current transitional feeds:
 
 - RB6 inventory export
 - RADs sales history export
-- local `importers.csv`
+- tracked `importers.csv` logistics reference data
 
 Next expected feed:
 
@@ -79,7 +111,7 @@ Future durable source:
 - Keep daily ingest runnable both from GitHub Actions and locally for debugging.
 - Keep parser/calculation/persistence logic outside `app.py`.
 - Add tests around every business-rule change.
-- Treat `importers.csv`, `.env`, RB6/RADs exports, and PDFs as local data, not repo assets.
+- Treat `.env`, RB6/RADs exports, PDFs, and other source reports as local data, not repo assets.
 - Keep GRW converter code stable and separate unless explicitly brought into scope.
 
 ## Verification Commands

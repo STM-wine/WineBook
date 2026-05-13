@@ -4,21 +4,30 @@ import traceback
 from html import escape
 from datetime import datetime, timedelta
 from components.supplier_catalog.module import render_supplier_catalog
+import pandas as pd
 from stem_order.core import normalize_planning_sku
 from stem_order.dashboard import (
-    APPROVAL_STATUSES,
-    approval_editor_dataframe,
     approval_metrics,
-    approval_updates_from_editor,
+    buyer_updates_from_editor,
+    buyer_workbench_dataframe,
     california_truck_summary,
     dashboard_metrics,
     filter_recommendations,
     format_dashboard_dataframe,
+    importer_groups,
+    importer_workbench_summary,
     location_summary,
+    po_draft_lines_dataframe,
+    po_drafts_dataframe,
     po_export_dataframe,
+    po_template_xlsx_bytes,
+    recalculate_working_recommendation,
     recommendations_to_dataframe,
     risk_counts,
     supplier_summary,
+    working_qty_from_weeks,
+    working_weeks_from_qty,
+    active_po_draft_message,
 )
 from stem_order.ingest import load_importers_csv
 from stem_order.pipeline import build_ordering_pipeline
@@ -39,6 +48,10 @@ def format_money(value):
 
 def format_count(value):
     return f"{int(value or 0):,}"
+
+
+def supplier_file_slug(value):
+    return "".join(char.lower() if char.isalnum() else "_" for char in str(value)).strip("_") or "supplier"
 
 
 def metric_card(label, value, note="", tone="ink"):
@@ -64,6 +77,469 @@ def section_label(title, subtitle=""):
         """,
         unsafe_allow_html=True,
     )
+
+
+def importer_key(value):
+    return "".join(char.lower() if char.isalnum() else "_" for char in str(value)).strip("_") or "unassigned"
+
+
+def format_importer_summary(summary):
+    return (
+        f"{summary['Status']} | "
+        f"{format_count(summary['Suggested Qty'])} bottles | "
+        f"{format_money(summary['Suggested Value'])}"
+    )
+
+
+def importer_status_tone(status):
+    return {
+        "Not Started": "ink",
+        "In Progress": "gold",
+        "Approved": "teal",
+        "PO Sent": "green",
+    }.get(status, "ink")
+
+
+def approval_updates_for_suggested_quantities(df):
+    updates = []
+    for row in df.to_dict(orient="records"):
+        recommended_qty = int(row.get("recommended_qty_rounded") or 0)
+        if not row.get("id") or recommended_qty <= 0:
+            continue
+        if row.get("recommendation_status") in ["approved", "edited"] and int(row.get("approved_qty") or 0) == recommended_qty:
+            continue
+        updates.append(
+            {
+                "id": row["id"],
+                "recommendation_status": "approved",
+                "approved_qty": recommended_qty,
+            }
+        )
+    return updates
+
+
+def editor_draft_key(editor_key):
+    return f"{editor_key}_draft"
+
+
+def editor_rows_key(editor_key):
+    return f"{editor_key}_rows"
+
+
+def editor_base_key(editor_key):
+    return f"{editor_key}_base"
+
+
+def sync_recommendation_controls(row_values, changes):
+    synced = dict(changes)
+    row = {**row_values, **synced}
+    if "Weeks w/ Recommended" in changes and "Recommended Qty" not in changes:
+        synced["Recommended Qty"] = working_qty_from_weeks(row)
+        row["Recommended Qty"] = synced["Recommended Qty"]
+    if "Recommended Qty" in synced:
+        synced["Weeks w/ Recommended"] = working_weeks_from_qty({**row_values, **synced})
+    return synced
+
+
+def capture_editor_draft(editor_key):
+    editor_state = st.session_state.get(editor_key, {})
+    edited_rows = editor_state.get("edited_rows", {}) if isinstance(editor_state, dict) else {}
+    row_ids = st.session_state.get(editor_rows_key(editor_key), [])
+    base_rows = st.session_state.get(editor_base_key(editor_key), [])
+    if not edited_rows or not row_ids:
+        return
+
+    draft = st.session_state.get(editor_draft_key(editor_key), {})
+    for row_index, changes in edited_rows.items():
+        try:
+            index = int(row_index)
+        except (TypeError, ValueError):
+            continue
+        if index < 0 or index >= len(row_ids):
+            continue
+        recommendation_id = row_ids[index]
+        if not recommendation_id:
+            continue
+        row_values = dict(base_rows[index]) if index < len(base_rows) else {}
+        row_values.update(draft.get(recommendation_id, {}))
+        draft.setdefault(recommendation_id, {}).update(sync_recommendation_controls(row_values, changes))
+    st.session_state[editor_draft_key(editor_key)] = draft
+
+
+def apply_editor_draft(editor_df, editor_key):
+    draft = st.session_state.get(editor_draft_key(editor_key), {})
+    if not draft or "id" not in editor_df.columns:
+        return editor_df
+
+    display = editor_df.copy()
+    for index, row in display.iterrows():
+        recommendation_id = row.get("id")
+        if recommendation_id not in draft:
+            continue
+        for column, value in draft[recommendation_id].items():
+            if column in display.columns:
+                display.at[index, column] = value
+    return display
+
+
+def clear_editor_draft(editor_key):
+    st.session_state.pop(editor_draft_key(editor_key), None)
+    editor_state = st.session_state.get(editor_key)
+    if isinstance(editor_state, dict):
+        editor_state["edited_rows"] = {}
+
+
+def apply_pending_editor_edits(editor_df, editor_key):
+    editor_state = st.session_state.get(editor_key, {})
+    edited_rows = editor_state.get("edited_rows", {}) if isinstance(editor_state, dict) else {}
+    if not edited_rows:
+        return recalculate_working_recommendation(apply_editor_draft(editor_df, editor_key))
+
+    display = apply_editor_draft(editor_df, editor_key)
+    for row_index, changes in edited_rows.items():
+        try:
+            index = int(row_index)
+        except (TypeError, ValueError):
+            continue
+        if index not in display.index:
+            continue
+        row_values = display.loc[index].to_dict()
+        for column, value in sync_recommendation_controls(row_values, changes).items():
+            if column in display.columns:
+                display.at[index, column] = value
+    return recalculate_working_recommendation(display)
+
+
+def render_po_draft_card(draft, latest_repo):
+    draft_id = draft.get("id")
+    status = draft.get("status", "draft")
+    lines = latest_repo.get_purchase_order_draft_lines(draft_id) if draft_id else []
+    lines_df = po_draft_lines_dataframe(lines)
+    qty = int(lines_df["Quantity"].sum()) if "Quantity" in lines_df else 0
+    cost = float(lines_df["Estimated Cost"].sum()) if "Estimated Cost" in lines_df else 0.0
+    supplier = draft.get("supplier_name") or "supplier"
+    label = f"Draft {str(draft_id)[:8]} | {status.replace('_', ' ').title()} | {format_count(qty)} bottles | {format_money(cost)}"
+
+    with st.expander(label, expanded=False):
+        metric_cols = st.columns(3)
+        with metric_cols[0]:
+            metric_card("Lines", format_count(len(lines_df)), "PO rows", "ink")
+        with metric_cols[1]:
+            metric_card("Quantity", format_count(qty), "Bottles", "teal")
+        with metric_cols[2]:
+            metric_card("Value", format_money(cost), "Estimated", "wine")
+
+        st.dataframe(lines_df, use_container_width=True, hide_index=True, height=min(420, max(140, 45 + len(lines_df) * 35)))
+        action_cols = st.columns([1.4, 1.6, 4])
+        action_cols[0].download_button(
+            label="Download CSV",
+            data=lines_df.to_csv(index=False),
+            file_name=f"{supplier_file_slug(supplier)}_{str(draft_id)[:8]}_po.csv",
+            mime="text/csv",
+            disabled=lines_df.empty,
+            key=f"download_po_{draft_id}",
+        )
+        if status == "draft":
+            if action_cols[1].button("Mark Ready", key=f"ready_po_{draft_id}"):
+                try:
+                    latest_repo.update_purchase_order_draft_status(draft_id, "ready_for_entry")
+                    st.success("Marked PO draft ready for entry.")
+                    st.rerun()
+                except Exception as status_error:
+                    st.error(f"Could not update draft status: {status_error}")
+        elif status == "ready_for_entry":
+            if action_cols[1].button("Mark Entered", key=f"entered_po_{draft_id}"):
+                try:
+                    latest_repo.update_purchase_order_draft_status(draft_id, "entered_in_quickbooks")
+                    st.success("Marked PO draft entered in QuickBooks.")
+                    st.rerun()
+                except Exception as status_error:
+                    st.error(f"Could not update draft status: {status_error}")
+        else:
+            action_cols[1].caption(status.replace("_", " ").title())
+
+
+def current_editor_dataframe(edited_df, editor_key):
+    capture_editor_draft(editor_key)
+    return apply_pending_editor_edits(edited_df, editor_key)
+
+
+def apply_editor_state_to_recommendations(original_df, edited_df):
+    if original_df.empty or edited_df.empty or "id" not in original_df.columns or "id" not in edited_df.columns:
+        return original_df
+
+    working_df = original_df.copy()
+    for row in edited_df.to_dict(orient="records"):
+        recommendation_id = row.get("id")
+        if not recommendation_id:
+            continue
+        mask = working_df["id"] == recommendation_id
+        if not bool(mask.any()):
+            continue
+        suggested_qty = int(pd.to_numeric(working_df.loc[mask, "recommended_qty_rounded"], errors="coerce").fillna(0).iloc[0])
+        approved = bool(row.get("Approval", False))
+        if approved:
+            approved_qty = int(pd.to_numeric(pd.Series([row.get("Recommended Qty", suggested_qty)]), errors="coerce").fillna(suggested_qty).iloc[0])
+            status = "edited" if approved_qty != suggested_qty else "approved"
+        else:
+            approved_qty = 0
+            status = "rejected"
+        working_df.loc[mask, "approved_qty"] = approved_qty
+        working_df.loc[mask, "recommendation_status"] = status
+    return working_df
+
+
+def create_po_drafts_for_approved_suppliers(latest_repo, report_run_id, recommendations, existing_drafts):
+    if recommendations.empty or "supplier_name" not in recommendations.columns:
+        return [], [], ["No supplier data found for approved recommendations."]
+
+    active_suppliers = {
+        draft.get("supplier_name")
+        for draft in existing_drafts
+        if draft.get("supplier_name") and draft.get("status") in {"draft", "ready_for_entry"}
+    }
+    approved_qty = pd.to_numeric(recommendations.get("approved_qty", 0), errors="coerce").fillna(0)
+    approved_status = recommendations.get(
+        "recommendation_status",
+        pd.Series(["rejected"] * len(recommendations), index=recommendations.index),
+    ).isin(["approved", "edited"])
+    approved = recommendations[approved_status & (approved_qty > 0)].copy()
+
+    created = []
+    skipped = []
+    errors = []
+    for supplier_name, supplier_df in approved.groupby("supplier_name", dropna=False):
+        supplier = "Unassigned" if pd.isna(supplier_name) or supplier_name == "" else supplier_name
+        if supplier in active_suppliers:
+            skipped.append(f"{supplier}: active draft already exists")
+            continue
+        try:
+            created.append(
+                latest_repo.create_purchase_order_draft(
+                    supplier_name=supplier,
+                    report_run_id=report_run_id,
+                    recommendations=supplier_df,
+                    notes="Created from global PO Drafts action.",
+                )
+            )
+        except Exception as draft_error:
+            errors.append(f"{supplier}: {draft_error}")
+
+    return created, skipped, errors
+
+
+def render_importer_work_unit(
+    *,
+    importer_name,
+    importer_df,
+    summary,
+    report_run_id,
+    latest_repo,
+    selected_statuses,
+    show_history=False,
+    show_forecast=False,
+    existing_drafts=None,
+):
+    key_base = f"{report_run_id}_{importer_key(importer_name)}_{'-'.join(selected_statuses)}"
+    editor_key = f"approval_editor_{key_base}"
+    editor_df = buyer_workbench_dataframe(
+        importer_df,
+        show_history=show_history,
+        show_forecast=show_forecast,
+    )
+    editor_df = apply_pending_editor_edits(editor_df, editor_key)
+
+    live_summary = dict(summary)
+    if not editor_df.empty and {"Approval", "Recommended Qty"}.issubset(editor_df.columns):
+        approved_mask = editor_df["Approval"].fillna(False).astype(bool)
+        approved_qty = pd.to_numeric(editor_df.loc[approved_mask, "Recommended Qty"], errors="coerce").fillna(0)
+        live_summary["Approved Qty"] = int(approved_qty.sum())
+
+    st.markdown(
+        f"""
+        <div class="importer-workunit importer-status-{importer_key(live_summary['Status'])}">
+            <div>
+                <h4>{escape(str(importer_name))}</h4>
+            </div>
+            <span>{escape(live_summary['Status'])}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    stats = st.columns(5)
+    with stats[0]:
+        metric_card("SKUs", format_count(summary["SKUs"]), "In this importer", "ink")
+    with stats[1]:
+        metric_card("Urgent", format_count(summary["Urgent"]), "Need review", "red")
+    with stats[2]:
+        metric_card("Suggested", format_count(live_summary["Suggested Qty"]), "Bottles", "green")
+    with stats[3]:
+        metric_card("Approved", format_count(live_summary["Approved Qty"]), "Bottles", "teal")
+    with stats[4]:
+        metric_card("Value", format_money(live_summary["Suggested Value"]), "Suggested order", importer_status_tone(live_summary["Status"]))
+
+    st.session_state[editor_rows_key(editor_key)] = editor_df["id"].tolist() if "id" in editor_df.columns else []
+    st.session_state[editor_base_key(editor_key)] = editor_df.to_dict(orient="records")
+    edited_approvals = st.data_editor(
+        editor_df,
+        use_container_width=True,
+        hide_index=True,
+        height=min(520, max(240, 70 + (len(editor_df) * 36))),
+        key=editor_key,
+        on_change=capture_editor_draft,
+        args=(editor_key,),
+        column_config={
+            "id": None,
+            "_Pack Size": None,
+            "_FOB": None,
+            "_Velocity Trend Label": None,
+            "Wine": st.column_config.TextColumn(
+                "Wine",
+                help="Importer rank plus Core / BTG flags.",
+                width="large",
+            ),
+            "True Available": st.column_config.NumberColumn(
+                "True Available",
+                help=(
+                    "Formula: Available Inventory - Unconfirmed Line Item Qty. "
+                    "Both values come from the RB6 report. This estimates bottles that are actually available "
+                    "for ordering decisions after subtracting unconfirmed commitments; negative results are shown as 0."
+                ),
+            ),
+            "On Order": st.column_config.NumberColumn(
+                "On Order",
+                help="From the RB6 On Order column. Bottles already ordered but not yet received.",
+            ),
+            "30d Sales": st.column_config.NumberColumn(
+                "30d Sales",
+                help=(
+                    "Formula: total RADs bottle sales from the latest RADs sales date minus 30 days "
+                    "through the latest RADs sales date."
+                ),
+            ),
+            "60d Sales": st.column_config.NumberColumn(
+                "60d Sales",
+                help=(
+                    "Optional history. Formula: total RADs bottle sales from the latest RADs sales date "
+                    "minus 60 days through the latest RADs sales date."
+                ),
+            ),
+            "90d Sales": st.column_config.NumberColumn(
+                "90d Sales",
+                help=(
+                    "Optional history. Formula: total RADs bottle sales from the latest RADs sales date "
+                    "minus 90 days through the latest RADs sales date."
+                ),
+            ),
+            "Next 30d Forecast": st.column_config.NumberColumn(
+                "Next 30d Forecast",
+                help=(
+                    "Formula: sales from the same upcoming 30-day calendar window last year. "
+                    "This is a simple prior-year seasonal reference, not a predictive model."
+                ),
+            ),
+            "LY Next 60d Forecast": st.column_config.NumberColumn(
+                "LY Next 60d Forecast",
+                help=(
+                    "Optional forecast. Formula: sales from the same upcoming 60-day calendar window last year."
+                ),
+            ),
+            "LY Next 90d Forecast": st.column_config.NumberColumn(
+                "LY Next 90d Forecast",
+                help=(
+                    "Optional forecast. Formula: sales from the same upcoming 90-day calendar window last year."
+                ),
+            ),
+            "Weekly Velocity": st.column_config.NumberColumn(
+                "Weekly Velocity",
+                format="%d",
+                help=(
+                    "Formula: 30d Sales / 4.345. 4.345 is the average number of weeks per month "
+                    "in a calendar year, converting recent monthly bottle sales into weekly pace."
+                ),
+            ),
+            "Velocity Trend": st.column_config.TextColumn(
+                "Velocity Trend",
+                help=(
+                    "Formula: ((Last 30d Sales - Prior 30d Sales) / Prior 30d Sales) x 100. "
+                    "This compares the most recent 30 days with the 30 days before that. If prior sales are 0 "
+                    "and current sales are above 0, the row shows New instead of dividing by zero."
+                ),
+            ),
+            "Weeks w/ On Order": st.column_config.NumberColumn(
+                "Weeks w/ On Order",
+                format="%.1f",
+                help=(
+                    "Formula: (True Available + On Order) / Weekly Velocity. "
+                    "This estimates how many weeks current available bottles plus open orders would cover."
+                ),
+            ),
+            "Approval": st.column_config.CheckboxColumn(
+                "Approval",
+                help="Approve this line for the PO draft.",
+            ),
+            "Weeks w/ Recommended": st.column_config.NumberColumn(
+                "Weeks w/ Recommended",
+                min_value=0.0,
+                step=0.1,
+                format="%.1f",
+                help=(
+                    "Formula: (True Available + On Order + Recommended Qty) / Weekly Velocity. "
+                    "Editing this target coverage recalculates Recommended Qty, rounded to the pack size."
+                ),
+            ),
+            "Recommended Qty": st.column_config.NumberColumn(
+                "Recommended Qty",
+                min_value=0,
+                step=1,
+                format="%d",
+                help=(
+                    "Formula: max(0, target bottles - True Available - On Order), rounded up to pack size. "
+                    "This is editable; changing it recalculates Weeks w/ Recommended."
+                ),
+            ),
+            "Est. Cost": st.column_config.NumberColumn(
+                "Est. Cost",
+                format="$%.2f",
+                help="Formula: Recommended Qty x FOB bottle cost.",
+            ),
+        },
+        disabled=[
+            col
+            for col in [
+                "Wine",
+                "True Available",
+                "On Order",
+                "30d Sales",
+                "60d Sales",
+                "90d Sales",
+                "Next 30d Forecast",
+                "LY Next 60d Forecast",
+                "LY Next 90d Forecast",
+                "Weekly Velocity",
+                "Velocity Trend",
+                "Weeks w/ On Order",
+                "_FOB",
+                "Est. Cost",
+            ]
+            if col in editor_df.columns
+        ],
+    )
+
+    current_approvals = current_editor_dataframe(edited_approvals, editor_key)
+    updates = buyer_updates_from_editor(importer_df, current_approvals)
+    if updates:
+        try:
+            latest_repo.update_recommendation_approvals(updates)
+            st.toast(f"Autosaved {len(updates):,} approval update(s) for {importer_name}.")
+        except Exception as approval_error:
+            st.error(f"Could not autosave approvals: {approval_error}")
+
+    duplicate_message = active_po_draft_message(existing_drafts or [])
+    if duplicate_message:
+        st.warning(duplicate_message)
+    st.caption("Approval checkboxes autosave. Use PO Drafts to create draft POs from all approved supplier lines.")
 
 
 # Set page configuration - must be first Streamlit command
@@ -108,6 +584,17 @@ body {
 /* Main Content Area */
 .stApp {
     background: linear-gradient(to bottom, var(--warm-white), var(--white)) !important;
+}
+
+section[data-testid="stSidebar"],
+div[data-testid="collapsedControl"] {
+    display: none !important;
+}
+
+.block-container {
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+    max-width: 100% !important;
 }
 
 .block-container {
@@ -163,71 +650,8 @@ p, span, label {
     font-weight: 400 !important;
 }
 
-/* Enhanced Sidebar */
-.css-1d391kg, .css-1lcbmhc {
-    background: linear-gradient(to bottom, var(--off-white), var(--warm-white)) !important;
-    border-right: 1px solid var(--light-sand) !important;
-    box-shadow: 2px 0 8px var(--subtle-shadow) !important;
-}
-
-/* Sidebar Header */
-.sidebar-header {
-    background: linear-gradient(135deg, var(--deep-olive), var(--muted-green)) !important;
-    padding: 2rem 1.5rem !important;
-    margin: -1rem -1rem 2rem -1rem !important;
-    border-radius: 0 !important;
-    border-bottom: none !important;
-    box-shadow: 0 4px 12px rgba(90, 107, 62, 0.15) !important;
-}
-
-.sidebar-header h3 {
-    color: var(--white) !important;
-    font-weight: 600 !important;
-    margin: 0 !important;
-    font-size: 1.4rem !important;
-    letter-spacing: -0.2px !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
-}
-
 /* Dark Mode Adaptations */
 @media (prefers-color-scheme: dark) {
-    /* Sidebar background in dark mode */
-    .css-1d391kg, .css-1lcbmhc, [data-testid="stSidebar"] {
-        background: linear-gradient(to bottom, #2D2D2D, #1F1F1F) !important;
-        border-right: 1px solid #404040 !important;
-    }
-
-    /* Sidebar text labels */
-    [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] .stMarkdown,
-    [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] span {
-        color: #E8E8E8 !important;
-    }
-
-    /* File uploader text */
-    [data-testid="stSidebar"] .stFileUploader label {
-        color: #E8E8E8 !important;
-    }
-
-    /* Upload area in dark mode */
-    [data-testid="stSidebar"] .stFileUploader {
-        background: linear-gradient(to bottom, #3A3A3A, #2D2D2D) !important;
-        border-color: #555555 !important;
-    }
-
-    /* Upload area text */
-    [data-testid="stSidebar"] .stFileUploader p,
-    [data-testid="stSidebar"] .stFileUploader span,
-    [data-testid="stSidebar"] .stFileUploader small {
-        color: #CCCCCC !important;
-    }
-
-    /* Small text in upload area */
-    [data-testid="stSidebar"] .stFileUploader [data-testid="stText"] {
-        color: #AAAAAA !important;
-    }
-
     /* Main content area in dark mode */
     body, .stApp, [data-testid="stAppViewContainer"] {
         background: linear-gradient(to bottom, #1F1F1F, #2D2D2D) !important;
@@ -236,7 +660,7 @@ p, span, label {
     /* Main content text */
     .stApp h1, .stApp h2, .stApp h3, .stApp h4,
     .stApp p, .stApp span, .stApp label,
-    .stApp div:not(.sidebar-header):not(.sidebar-header h3) {
+    .stApp div {
         color: #E8E8E8 !important;
     }
 
@@ -656,52 +1080,23 @@ st.markdown("""
     max-width: 1500px !important;
 }
 
-.stem-hero {
-    display: flex;
-    justify-content: space-between;
-    gap: 2rem;
-    align-items: flex-end;
-    padding: 1.35rem 1.5rem;
-    margin: 1.25rem 0 1.2rem 0;
-    background:
-        linear-gradient(135deg, rgba(70, 107, 88, 0.12), rgba(15, 107, 120, 0.06) 48%, rgba(123, 36, 68, 0.09)),
-        var(--stem-panel);
-    border: 1px solid var(--stem-line);
-    border-radius: 8px;
-    box-shadow: var(--stem-shadow);
-}
-
-.stem-hero h2 {
-    margin: 0 0 0.35rem 0 !important;
-    color: var(--stem-ink) !important;
-    font-size: 1.45rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0 !important;
-}
-
-.stem-hero p {
-    margin: 0 !important;
-    color: var(--stem-charcoal) !important;
-    font-size: 0.95rem !important;
-}
-
-.run-badge {
+.data-date-badge {
     display: inline-flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.15rem;
-    padding: 0.65rem 0.8rem;
-    background: rgba(255, 255, 255, 0.78);
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.42rem 0.65rem;
+    margin: 0.55rem 0 0.65rem;
+    background: rgba(255, 255, 255, 0.82);
     border: 1px solid rgba(70, 107, 88, 0.18);
-    border-radius: 8px;
+    border-radius: 999px;
     color: var(--stem-charcoal);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     white-space: nowrap;
 }
 
-.run-badge strong {
+.data-date-badge strong {
     color: var(--stem-green);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
 }
@@ -747,6 +1142,50 @@ st.markdown("""
 .stem-metric-red { border-top: 4px solid var(--stem-red); }
 .stem-metric-ink { border-top: 4px solid var(--stem-ink); }
 
+.importer-workunit {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 0.75rem 0 0.85rem;
+    padding: 0.95rem 1rem;
+    background: var(--stem-panel);
+    border: 1px solid var(--stem-line);
+    border-left: 6px solid var(--stem-ink);
+    border-radius: 8px;
+    box-shadow: 0 10px 26px rgba(24, 23, 22, 0.06);
+}
+
+.importer-workunit h4 {
+    margin: 0 !important;
+    color: var(--stem-ink) !important;
+    font-size: 1.05rem !important;
+    font-weight: 800 !important;
+    letter-spacing: 0 !important;
+}
+
+.importer-workunit p {
+    margin: 0.2rem 0 0 !important;
+    color: #686B66 !important;
+    font-size: 0.86rem !important;
+}
+
+.importer-workunit span {
+    flex: 0 0 auto;
+    padding: 0.38rem 0.62rem;
+    border-radius: 999px;
+    background: rgba(24, 23, 22, 0.07);
+    color: var(--stem-ink);
+    font-size: 0.76rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.importer-status-in_progress { border-left-color: var(--stem-gold); }
+.importer-status-approved { border-left-color: var(--stem-teal); }
+.importer-status-po_sent { border-left-color: var(--stem-green); }
+
 .workflow-panel {
     padding: 1rem;
     margin: 1rem 0;
@@ -783,6 +1222,14 @@ div[data-testid="stTabs"] [aria-selected="true"] {
     color: var(--stem-wine) !important;
 }
 
+div[data-testid="stExpander"] details[open] > summary p {
+    display: none !important;
+}
+
+div[data-testid="stExpander"] details > summary {
+    min-height: 2.15rem !important;
+}
+
 div[data-testid="stDataFrame"],
 div[data-testid="stDataEditor"] {
     border-radius: 8px !important;
@@ -796,13 +1243,7 @@ div[data-testid="stDataEditor"] {
 }
 
 @media (max-width: 900px) {
-    .stem-hero {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .run-badge {
-        align-items: flex-start;
+    .data-date-badge {
         white-space: normal;
     }
 }
@@ -866,25 +1307,12 @@ st.markdown("""
 <div class="section-divider"></div>
 """, unsafe_allow_html=True)
 
-# Custom sidebar header
-st.sidebar.markdown("""
-<div class="sidebar-header">
-    <h3>Admin Refresh</h3>
-</div>
-""", unsafe_allow_html=True)
-
-# MVP Phase 1 - RB6 + RADs only
-st.sidebar.markdown("""
-<div style="padding: 0.5rem; background: linear-gradient(135deg, var(--deep-olive), var(--muted-green)); border-radius: 8px; margin-bottom: 1rem;">
-    <p style="margin: 0; color: white; font-size: 0.85rem; text-align: center;">Manual RB6 + RADs refresh</p>
-</div>
-""", unsafe_allow_html=True)
-
-developer_mode = st.sidebar.checkbox("Developer mode", value=False)
+developer_mode = False
 
 # Load importers.csv from project root
 project_root = os.path.dirname(os.path.abspath(__file__))
 importers_path = os.path.join(project_root, 'importers.csv')
+po_template_path = os.path.join(project_root, "templates", "po_draft_template_stm.xlsx")
 importers_data, importers_loaded, importers_warning = load_importers_csv(importers_path)
 
 top_nav = st.radio(
@@ -913,160 +1341,181 @@ if latest_report_run:
     dashboard_df = recommendations_to_dataframe(latest_recommendations)
     metrics = dashboard_metrics(dashboard_df)
     approvals = approval_metrics(dashboard_df)
-    completed_at = latest_report_run.get("completed_at", "unknown")
     run_date = latest_report_run.get("report_date") or "Latest"
-
-    st.markdown(
-        f"""
-        <div class="stem-hero">
-            <div>
-                <h2>Ordering Dashboard</h2>
-                <p>Morning recommendations are loaded. Review by supplier, approve quantities, then draft the PO.</p>
-            </div>
-            <div class="run-badge">
-                <strong>{escape(str(run_date))}</strong>
-                <span>Run {escape(str(latest_report_run["id"])[:8])} · {escape(str(completed_at))}</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    metric_cols = st.columns(6)
-    with metric_cols[0]:
-        metric_card("Urgent", format_count(metrics.urgent_skus), "SKUs need action", "red")
-    with metric_cols[1]:
-        metric_card("Low", format_count(metrics.low_skus), "Below target", "gold")
-    with metric_cols[2]:
-        metric_card("Recommended", format_count(metrics.recommended_bottles), "Bottles", "green")
-    with metric_cols[3]:
-        metric_card("Approved", format_count(approvals.approved_bottles), "Bottles ready for PO", "teal")
-    with metric_cols[4]:
-        metric_card("PO Value", format_money(approvals.approved_cost), f"{approvals.approved_lines:,} lines", "wine")
-    with metric_cols[5]:
-        metric_card("Suppliers", format_count(metrics.suppliers_with_orders), "With suggested orders", "ink")
-
-    section_label("Supplier Focus", "Choose a supplier, narrow the buying set, then work the approval table.")
-    filter_cols = st.columns([2.2, 2, 3, 1.2])
-    supplier_values = (
-        dashboard_df["supplier_name"].dropna().unique()
-        if "supplier_name" in dashboard_df.columns
-        else []
-    )
-    supplier_options = ["All"] + sorted(
-        [s for s in supplier_values if s]
-    )
-    selected_supplier = filter_cols[0].selectbox("Supplier", supplier_options)
-    selected_statuses = filter_cols[1].multiselect(
-        "Status",
-        ["URGENT", "LOW", "OK", "NO SALES"],
-        default=["URGENT", "LOW"],
-    )
-    search_query = filter_cols[2].text_input("Wine search", "")
-    only_order_qty = filter_cols[3].checkbox("Qty > 0", value=True)
-
-    filtered_dashboard = filter_recommendations(
-        dashboard_df,
-        supplier=selected_supplier,
-        statuses=selected_statuses,
-        search=search_query,
-        only_order_qty=only_order_qty,
-    )
-    filtered_approvals = approval_metrics(filtered_dashboard)
-    filtered_risks = risk_counts(filtered_dashboard)
-
-    focus_cols = st.columns(5)
-    with focus_cols[0]:
-        metric_card("Visible Rows", format_count(len(filtered_dashboard)), "Current working set", "ink")
-    with focus_cols[1]:
-        metric_card("High Risk", format_count(filtered_risks["High"]), "Needs close review", "red")
-    with focus_cols[2]:
-        metric_card("Medium Risk", format_count(filtered_risks["Medium"]), "Watch list", "gold")
-    with focus_cols[3]:
-        metric_card("Approved Qty", format_count(filtered_approvals.approved_bottles), "In this filter", "teal")
-    with focus_cols[4]:
-        metric_card("Pending", format_count(filtered_approvals.pending_lines), "Rejected by default", "wine")
+    try:
+        po_drafts = latest_repo.get_purchase_order_drafts_for_run(latest_report_run["id"])
+        po_sent_suppliers = {
+            draft.get("supplier_name")
+            for draft in po_drafts
+            if draft.get("supplier_name") and draft.get("status") != "cancelled"
+        }
+    except Exception:
+        po_sent_suppliers = set()
 
     tab_recs, tab_suppliers, tab_locations, tab_po = st.tabs(
-        ["Order Review", "Supplier Board", "Freight", "PO Draft"]
+        ["Order Review", "Supplier Board", "Freight", "PO Drafts"]
     )
+
     with tab_recs:
-        section_label("Recommended Buying Set", "Sorted by velocity so the fastest-moving SKUs rise to the top.")
-        st.dataframe(
-            format_dashboard_dataframe(filtered_dashboard),
-            use_container_width=True,
-            hide_index=True,
-            height=360,
+        metric_cols = st.columns(6)
+        with metric_cols[0]:
+            metric_card("Urgent", format_count(metrics.urgent_skus), "SKUs need action", "red")
+        with metric_cols[1]:
+            metric_card("Low", format_count(metrics.low_skus), "Below target", "gold")
+        with metric_cols[2]:
+            metric_card("Recommended", format_count(metrics.recommended_bottles), "Bottles", "green")
+        with metric_cols[3]:
+            metric_card("Approved", format_count(approvals.approved_bottles), "Bottles ready for PO", "teal")
+        with metric_cols[4]:
+            metric_card("PO Value", format_money(approvals.approved_cost), f"{approvals.approved_lines:,} lines", "wine")
+        with metric_cols[5]:
+            metric_card("Suppliers", format_count(metrics.suppliers_with_orders), "With suggested orders", "ink")
+
+        st.markdown(
+            f"""
+            <div class="data-date-badge">
+                <strong>Data Date</strong>
+                <span>{escape(str(run_date))}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        section_label("Approval Workbench", "Approve suggested quantities or edit the final bottle count before drafting a PO.")
-        editor_df = approval_editor_dataframe(filtered_dashboard)
-        edited_approvals = st.data_editor(
-            editor_df,
+        st.markdown("<div style='height: 1.2rem;'></div>", unsafe_allow_html=True)
+        toolbar_cols = st.columns([1.6, 5])
+        if toolbar_cols[0].button(
+            "Create PO Drafts",
+            type="primary",
+            disabled=approvals.approved_lines == 0,
+            key="create_all_po_drafts_review",
+        ):
+            created, skipped, errors = create_po_drafts_for_approved_suppliers(
+                latest_repo,
+                latest_report_run["id"],
+                dashboard_df,
+                po_drafts,
+            )
+            if created:
+                st.success(f"Created {len(created):,} PO draft(s).")
+                st.rerun()
+            if skipped:
+                st.info("Skipped: " + "; ".join(skipped))
+            if errors:
+                st.error("Errors: " + "; ".join(errors))
+        toolbar_cols[1].caption("Creates one draft per supplier from currently approved lines. Existing active drafts are skipped.")
+
+        section_label("Order Summary", "Show all suppliers or focus on one supplier at a time.")
+        filter_cols = st.columns([2.4, 2, 3.4, 1.2])
+        supplier_values = (
+            dashboard_df["supplier_name"].dropna().unique()
+            if "supplier_name" in dashboard_df.columns
+            else []
+        )
+        supplier_options = ["All"] + sorted([s for s in supplier_values if s])
+        active_supplier = filter_cols[0].selectbox("Supplier", supplier_options, key="order_review_supplier")
+        selected_statuses = filter_cols[1].multiselect(
+            "Status",
+            ["URGENT", "LOW", "OK", "NO SALES"],
+            default=["URGENT", "LOW", "OK", "NO SALES"],
+            key="order_review_statuses",
+        )
+        search_query = filter_cols[2].text_input("Wine search", "", key="order_review_search")
+        only_order_qty = filter_cols[3].checkbox("Suggested only", value=False, key="order_review_suggested_only")
+
+        filtered_dashboard = filter_recommendations(
+            dashboard_df,
+            supplier=active_supplier,
+            statuses=selected_statuses,
+            search=search_query,
+            only_order_qty=only_order_qty,
+        )
+        filtered_approvals = approval_metrics(filtered_dashboard)
+        filtered_risks = risk_counts(filtered_dashboard)
+
+        focus_cols = st.columns(5)
+        with focus_cols[0]:
+            metric_card("Visible Rows", format_count(len(filtered_dashboard)), "Current working set", "ink")
+        with focus_cols[1]:
+            metric_card("High Risk", format_count(filtered_risks["High"]), "Needs close review", "red")
+        with focus_cols[2]:
+            metric_card("Medium Risk", format_count(filtered_risks["Medium"]), "Watch list", "gold")
+        with focus_cols[3]:
+            metric_card("Approved Qty", format_count(filtered_approvals.approved_bottles), "In this filter", "teal")
+        with focus_cols[4]:
+            metric_card("Pending", format_count(filtered_approvals.pending_lines), "Rejected by default", "wine")
+
+        section_label(
+            "Order Summary",
+            "Supplier sections are ordered by total suggested value; wines inside each supplier are sorted A-Z.",
+        )
+        toggle_cols = st.columns([1.2, 1.4, 5])
+        show_history = toggle_cols[0].checkbox("Show 60/90d sales", value=False)
+        show_forecast = toggle_cols[1].checkbox("Show LY 60/90d forecast", value=False)
+
+        importer_summary = importer_workbench_summary(filtered_dashboard, po_sent_suppliers=po_sent_suppliers)
+        importer_summary_display = importer_summary.copy()
+        for money_col in ["Suggested Value", "Approved Value"]:
+            if money_col in importer_summary_display:
+                importer_summary_display[money_col] = importer_summary_display[money_col].apply(format_money)
+        st.dataframe(
+            importer_summary_display,
             use_container_width=True,
             hide_index=True,
-            height=430,
-            key=f"approval_editor_{latest_report_run['id']}_{selected_supplier}_{'-'.join(selected_statuses)}",
-            column_config={
-                "id": None,
-                "Approval": st.column_config.SelectboxColumn(
-                    "Approval",
-                    options=APPROVAL_STATUSES,
-                    required=True,
-                ),
-                "Approved Qty": st.column_config.NumberColumn(
-                    "Approved Qty",
-                    min_value=0,
-                    step=1,
-                    format="%d",
-                    help="Final bottle quantity to send into the PO draft.",
-                ),
-            },
-            disabled=[
-                "Supplier",
-                "Wine",
-                "Code",
-                "Status",
-                "Risk",
-                "Recommended Qty",
-                "Est. Cost",
-            ],
+            height=min(320, max(120, 45 + len(importer_summary) * 35)),
         )
-        approval_cols = st.columns([1, 3])
-        if approval_cols[0].button("Save Approvals", type="primary"):
-            updates = approval_updates_from_editor(filtered_dashboard, edited_approvals)
-            if not updates:
-                st.info("No approval changes to save.")
-            else:
-                try:
-                    latest_repo.update_recommendation_approvals(updates)
-                    st.success(f"Saved {len(updates):,} approval updates.")
-                    st.rerun()
-                except Exception as approval_error:
-                    st.error(f"Could not save approvals: {approval_error}")
-        approval_cols[1].caption("Set Approval to approved/edited and enter Approved Qty before creating a PO draft.")
+
+        groups = importer_groups(filtered_dashboard, po_sent_suppliers=po_sent_suppliers)
+        if not groups:
+            st.info("No SKUs match the current workbench filters.")
+        elif active_supplier == "All":
+            for index, group in enumerate(groups):
+                summary = group["summary"]
+                importer_name = summary["Importer"]
+                with st.expander(
+                    importer_name,
+                    expanded=index == 0,
+                ):
+                    render_importer_work_unit(
+                        importer_name=importer_name,
+                        importer_df=group["data"],
+                        summary=summary,
+                        report_run_id=latest_report_run["id"],
+                        latest_repo=latest_repo,
+                        selected_statuses=selected_statuses,
+                        show_history=show_history,
+                        show_forecast=show_forecast,
+                        existing_drafts=[
+                            draft
+                            for draft in po_drafts
+                            if draft.get("supplier_name") == importer_name and draft.get("status") != "cancelled"
+                        ],
+                    )
+        else:
+            group = groups[0] if groups else None
+            if group:
+                render_importer_work_unit(
+                    importer_name=group["summary"]["Importer"],
+                    importer_df=group["data"],
+                    summary=group["summary"],
+                    report_run_id=latest_report_run["id"],
+                    latest_repo=latest_repo,
+                    selected_statuses=selected_statuses,
+                    show_history=show_history,
+                    show_forecast=show_forecast,
+                    existing_drafts=[
+                        draft
+                        for draft in po_drafts
+                        if draft.get("supplier_name") == group["summary"]["Importer"] and draft.get("status") != "cancelled"
+                    ],
+                )
 
     with tab_suppliers:
         section_label("Supplier Board", "Use this as the buyer's queue across all suppliers.")
-        supplier_base = filter_recommendations(
-            dashboard_df,
-            supplier="All",
-            statuses=selected_statuses,
-            search=search_query,
-            only_order_qty=only_order_qty,
-        )
-        st.dataframe(supplier_summary(supplier_base), use_container_width=True, hide_index=True, height=560)
+        st.dataframe(supplier_summary(dashboard_df), use_container_width=True, hide_index=True, height=560)
 
     with tab_locations:
         section_label("Freight View", "Roll up ordering pressure by pickup location and watch California truck economics.")
-        location_base = filter_recommendations(
-            dashboard_df,
-            supplier="All",
-            statuses=selected_statuses,
-            search=search_query,
-            only_order_qty=only_order_qty,
-        )
-        truck = california_truck_summary(location_base)
+        truck = california_truck_summary(dashboard_df)
         truck_cols = st.columns(3)
         with truck_cols[0]:
             metric_card("CA Truck", f"{truck['progress_pct']:.0f}%", "Progress toward FTL", "teal")
@@ -1075,52 +1524,99 @@ if latest_report_run:
         with truck_cols[2]:
             metric_card("FTL Savings", format_money(truck["estimated_savings"]), "At threshold", "green")
         st.progress(min(float(truck["progress_pct"]) / 100, 1.0))
-        st.dataframe(location_summary(location_base), use_container_width=True, hide_index=True, height=460)
+        st.dataframe(location_summary(dashboard_df), use_container_width=True, hide_index=True, height=460)
 
     with tab_po:
-        if selected_supplier == "All":
-            st.info("Select a supplier to preview a PO draft.")
-        else:
-            section_label("PO Draft Preview", "Only approved or edited rows with approved quantities appear here.")
-            po_df = po_export_dataframe(filtered_dashboard)
-            po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0
-            po_cost_col = "Estimated Cost" if "Estimated Cost" in po_df else "Recommended Cost"
-            po_cost = float(po_df[po_cost_col].sum()) if po_cost_col in po_df else 0
-            po_metric_cols = st.columns(3)
-            with po_metric_cols[0]:
-                metric_card("PO Lines", format_count(len(po_df)), selected_supplier, "ink")
-            with po_metric_cols[1]:
-                metric_card("PO Qty", format_count(po_qty), "Approved bottles", "teal")
-            with po_metric_cols[2]:
-                metric_card("PO Est. Cost", format_money(po_cost), "Draft value", "wine")
-            st.dataframe(po_df, use_container_width=True, hide_index=True, height=460)
-            st.download_button(
-                label="Download PO CSV",
-                data=po_df.to_csv(index=False),
-                file_name=f"{selected_supplier.replace(' ', '_').lower()}_po_draft.csv",
-                mime="text/csv",
+        section_label("PO Drafts", "Create supplier drafts from approved rows and track QuickBooks handoff status.")
+        po_df = po_export_dataframe(dashboard_df)
+        po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0
+        po_cost_col = "Estimated Cost" if "Estimated Cost" in po_df else "Recommended Cost"
+        po_cost = float(po_df[po_cost_col].sum()) if po_cost_col in po_df else 0
+        po_metric_cols = st.columns(4)
+        with po_metric_cols[0]:
+            metric_card("PO Lines", format_count(len(po_df)), "Approved rows", "ink")
+        with po_metric_cols[1]:
+            metric_card("PO Qty", format_count(po_qty), "Approved bottles", "teal")
+        with po_metric_cols[2]:
+            metric_card("PO Est. Cost", format_money(po_cost), "Draft value", "wine")
+        with po_metric_cols[3]:
+            metric_card("Existing Drafts", format_count(len(po_drafts)), "This report run", "gold")
+
+        st.markdown("<div style='height: 1.2rem;'></div>", unsafe_allow_html=True)
+        po_action_cols = st.columns([1.5, 1.4, 4])
+        if po_action_cols[0].button(
+            "Create PO Drafts",
+            type="primary",
+            disabled=po_df.empty,
+            key="create_all_po_drafts_tab",
+        ):
+            created, skipped, errors = create_po_drafts_for_approved_suppliers(
+                latest_repo,
+                latest_report_run["id"],
+                dashboard_df,
+                po_drafts,
             )
-            if po_df.empty:
-                st.info("This supplier has no approved order quantities in the current filter.")
-            elif st.button("Create PO Draft", type="primary"):
-                try:
-                    draft = latest_repo.create_purchase_order_draft(
-                        supplier_name=selected_supplier,
-                        report_run_id=latest_report_run["id"],
-                        recommendations=filtered_dashboard,
-                        notes="Created from Ordering Dashboard supplier preview.",
-                    )
-                    st.success(
-                        f"Created PO draft {draft['id']} with {len(draft.get('lines', [])):,} lines."
-                    )
-                except Exception as draft_error:
-                    st.error(f"Could not create PO draft: {draft_error}")
+            if created:
+                st.success(f"Created {len(created):,} PO draft(s).")
+                st.rerun()
+            if skipped:
+                st.info("Skipped: " + "; ".join(skipped))
+            if errors:
+                st.error("Errors: " + "; ".join(errors))
+        po_action_cols[1].download_button(
+            label="Download PO CSV",
+            data=po_df.to_csv(index=False),
+            file_name=f"winebook_{run_date}_approved_po_preview.csv",
+            mime="text/csv",
+            disabled=po_df.empty,
+        )
+        po_xlsx = po_template_xlsx_bytes(po_df, po_template_path) if not po_df.empty else b""
+        po_action_cols[2].download_button(
+            label="Download PO XLSX",
+            data=po_xlsx,
+            file_name=f"winebook_{run_date}_po_draft.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disabled=po_df.empty,
+        )
+        st.caption("Global PO creation builds one draft per supplier and skips suppliers that already have an active draft.")
+
+        if po_df.empty:
+            st.info("No approved order quantities yet.")
+        else:
+            st.dataframe(po_df, use_container_width=True, hide_index=True, height=460)
+
+        section_label("Existing PO Drafts", "Download drafts, track handoff status, and mark QuickBooks entry progress.")
+        active_drafts = [draft for draft in po_drafts if draft.get("status") != "cancelled"]
+        if active_drafts:
+            st.dataframe(
+                po_drafts_dataframe(active_drafts),
+                use_container_width=True,
+                hide_index=True,
+                height=min(260, max(120, 45 + len(active_drafts) * 35)),
+            )
+            for draft in active_drafts:
+                render_po_draft_card(draft, latest_repo)
+        else:
+            st.info("No PO drafts have been created for this report run yet.")
 elif latest_repo:
     st.info("No saved recommendation run found yet. Upload RB6 and RADs files to create the first dashboard run.")
 
+admin_panel = st.expander("Admin tools", expanded=False)
+admin_panel.caption("Daily ingestion now runs through Supabase Cron and GitHub Actions.")
+if latest_report_run:
+    admin_panel.write(f"Latest completed report run: {latest_report_run.get('report_date') or latest_report_run.get('id')}")
+else:
+    admin_panel.info("No completed report run is available yet. Use the GitHub Actions ingest workflow to load data.")
+developer_mode = False
+show_manual_refresh = False
+
 # File upload widgets - Phase 1: Only RB6 and RADs required
-rb6_file = st.sidebar.file_uploader("Velocity Report RB6", type=['csv', 'xlsx'])
-sales_file = st.sidebar.file_uploader("Sales History Vinosmith RADs File", type=['csv', 'xlsx'])
+if show_manual_refresh:
+    rb6_file = admin_panel.file_uploader("Velocity Report RB6", type=['csv', 'xlsx'])
+    sales_file = admin_panel.file_uploader("Sales History Vinosmith RADs File", type=['csv', 'xlsx'])
+else:
+    rb6_file = None
+    sales_file = None
 
 # Store files in session state for re-run capability
 if rb6_file and sales_file:
@@ -1129,8 +1625,8 @@ if rb6_file and sales_file:
 
 # Run Again button (only show if files have been uploaded)
 if 'rb6_file' in st.session_state and 'sales_file' in st.session_state:
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🔄 Run Again", help="Re-process the uploaded files after making fixes"):
+    admin_panel.markdown("---")
+    if admin_panel.button("Run Again", help="Re-process the uploaded files after making fixes"):
         st.session_state['force_save_report_run'] = True
         st.rerun()
 
@@ -1185,37 +1681,37 @@ if rb6_file and sales_file:
             st.info("This uploaded file pair has already been saved to Supabase in this session.")
 
         if developer_mode:
-            st.sidebar.markdown("---")
-            st.sidebar.write("Detecting RB6 header...")
-            st.sidebar.write(f"Detected header at row {header_row}")
-            st.sidebar.write("Debug: Original columns:", original_cols[:10], "...")
-            st.sidebar.write("Debug: Normalized columns:", result.rb6.normalized_columns[:10], "...")
-            st.sidebar.write("Debug: Column mapping:", col_map)
-            st.sidebar.write(f"DEBUG: rb6_data shape: {rb6_data.shape}")
-            st.sidebar.write(f"DEBUG: rb6_data columns: {list(rb6_data.columns)[:15]}")
+            admin_panel.markdown("---")
+            admin_panel.write("Detecting RB6 header...")
+            admin_panel.write(f"Detected header at row {header_row}")
+            admin_panel.write("Debug: Original columns:", original_cols[:10], "...")
+            admin_panel.write("Debug: Normalized columns:", result.rb6.normalized_columns[:10], "...")
+            admin_panel.write("Debug: Column mapping:", col_map)
+            admin_panel.write(f"DEBUG: rb6_data shape: {rb6_data.shape}")
+            admin_panel.write(f"DEBUG: rb6_data columns: {list(rb6_data.columns)[:15]}")
 
-            st.sidebar.write("Sample RB6 data (first 3 rows):")
+            admin_panel.write("Sample RB6 data (first 3 rows):")
             sample_cols = ['name', 'importer', 'available_inventory', 'on_order']
             available_sample_cols = [c for c in sample_cols if c in rb6_data.columns]
-            st.sidebar.dataframe(rb6_data[available_sample_cols].head(3), hide_index=True)
+            admin_panel.dataframe(rb6_data[available_sample_cols].head(3), hide_index=True)
 
-            st.sidebar.markdown("---")
-            st.sidebar.write("Detecting RADs header...")
-            st.sidebar.write(f"Detected RADs header at row {rads_header_row}")
-            st.sidebar.write("Debug: Original RADs columns:", rads_original_cols[:10], "...")
-            st.sidebar.write("Debug: Normalized RADs columns:", result.rads.normalized_columns[:10], "...")
-            st.sidebar.write("Debug: RADs column mapping:", rads_col_map)
-            st.sidebar.write(f"DEBUG: sales_data shape: {sales_data.shape}")
-            st.sidebar.write(f"DEBUG: sales_data columns: {list(sales_data.columns)[:15]}")
-            st.sidebar.write("DEBUG: RADs columns setup complete!")
+            admin_panel.markdown("---")
+            admin_panel.write("Detecting RADs header...")
+            admin_panel.write(f"Detected RADs header at row {rads_header_row}")
+            admin_panel.write("Debug: Original RADs columns:", rads_original_cols[:10], "...")
+            admin_panel.write("Debug: Normalized RADs columns:", result.rads.normalized_columns[:10], "...")
+            admin_panel.write("Debug: RADs column mapping:", rads_col_map)
+            admin_panel.write(f"DEBUG: sales_data shape: {sales_data.shape}")
+            admin_panel.write(f"DEBUG: sales_data columns: {list(sales_data.columns)[:15]}")
+            admin_panel.write("DEBUG: RADs columns setup complete!")
 
-            st.sidebar.write("Sample RADs data (first 3 rows):")
+            admin_panel.write("Sample RADs data (first 3 rows):")
             rads_sample_cols = ['wine_name', 'quantity']
             if 'account' in sales_data.columns:
                 rads_sample_cols.append('account')
             rads_sample_cols.append('date')
             available_rads_sample_cols = [c for c in rads_sample_cols if c in sales_data.columns]
-            st.sidebar.dataframe(sales_data[available_rads_sample_cols].head(3), hide_index=True)
+            admin_panel.dataframe(sales_data[available_rads_sample_cols].head(3), hide_index=True)
 
         st.success("✅ Files loaded with dynamic header detection!")
 
@@ -1309,34 +1805,34 @@ if rb6_file and sales_file:
 
         if developer_mode:
             # DEBUG: Check data before passing to calculator
-            st.sidebar.markdown("---")
-            st.sidebar.write("🧮 **Pre-calculation Debug:**")
-            st.sidebar.write(f"- rb6_data shape: {rb6_data.shape}")
-            st.sidebar.write(f"- rb6_data columns: {list(rb6_data.columns)[:15]}")
+            admin_panel.markdown("---")
+            admin_panel.write("🧮 **Pre-calculation Debug:**")
+            admin_panel.write(f"- rb6_data shape: {rb6_data.shape}")
+            admin_panel.write(f"- rb6_data columns: {list(rb6_data.columns)[:15]}")
             if 'available_inventory' in rb6_data.columns:
                 ai_count = rb6_data['available_inventory'].notna().sum()
-                st.sidebar.write(f"- rb6_data available_inventory non-null: {ai_count}/{len(rb6_data)}")
-            st.sidebar.write(f"- sales_data shape: {sales_data.shape}")
-            st.sidebar.write(f"- sales_data columns: {list(sales_data.columns)[:10]}")
+                admin_panel.write(f"- rb6_data available_inventory non-null: {ai_count}/{len(rb6_data)}")
+            admin_panel.write(f"- sales_data shape: {sales_data.shape}")
+            admin_panel.write(f"- sales_data columns: {list(sales_data.columns)[:10]}")
 
             # DEBUG: Check what came back from calculator
             if recommendations is not None:
-                st.sidebar.markdown("---")
-                st.sidebar.write("📊 **Post-calculation Debug:**")
-                st.sidebar.write(f"- recommendations shape: {recommendations.shape}")
-                st.sidebar.write(f"- recommendations columns: {list(recommendations.columns)[:15]}")
+                admin_panel.markdown("---")
+                admin_panel.write("📊 **Post-calculation Debug:**")
+                admin_panel.write(f"- recommendations shape: {recommendations.shape}")
+                admin_panel.write(f"- recommendations columns: {list(recommendations.columns)[:15]}")
                 if 'true_available' in recommendations.columns:
                     ta_count = recommendations['true_available'].notna().sum()
-                    st.sidebar.write(f"- true_available non-null: {ta_count}/{len(recommendations)}")
+                    admin_panel.write(f"- true_available non-null: {ta_count}/{len(recommendations)}")
                 if 'available_inventory' in recommendations.columns:
                     ai_count = recommendations['available_inventory'].notna().sum()
-                    st.sidebar.write(f"- available_inventory non-null: {ai_count}/{len(recommendations)}")
+                    admin_panel.write(f"- available_inventory non-null: {ai_count}/{len(recommendations)}")
 
                 # Check FOB status
                 if 'fob' in recommendations.columns:
                     fob_nonzero = (recommendations['fob'] > 0).sum()
                     fob_zero = (recommendations['fob'] == 0).sum()
-                    st.sidebar.write(f"- FOB > 0: {fob_nonzero}/{len(recommendations)}, FOB = 0: {fob_zero}/{len(recommendations)}")
+                    admin_panel.write(f"- FOB > 0: {fob_nonzero}/{len(recommendations)}, FOB = 0: {fob_zero}/{len(recommendations)}")
                     if fob_zero > len(recommendations) * 0.5:  # More than 50% have zero FOB
                         st.warning(f"⚠️ {fob_zero} SKUs have FOB = 0. Order costs cannot be calculated correctly.")
 
@@ -1350,23 +1846,23 @@ if rb6_file and sales_file:
 
         if developer_mode:
             # --- VALIDATION: Check final output quality ---
-            st.sidebar.markdown("---")
-            st.sidebar.write("📋 **Final Output Validation:**")
-            st.sidebar.write(f"- DataFrame shape: {raw_df.shape}")
-            st.sidebar.write(f"- DataFrame columns: {list(raw_df.columns)}")
+            admin_panel.markdown("---")
+            admin_panel.write("📋 **Final Output Validation:**")
+            admin_panel.write(f"- DataFrame shape: {raw_df.shape}")
+            admin_panel.write(f"- DataFrame columns: {list(raw_df.columns)}")
 
             # Check inventory pipeline specifically
-            st.sidebar.write("🔍 **Inventory Pipeline Check:**")
+            admin_panel.write("🔍 **Inventory Pipeline Check:**")
             if 'true_available' in recommendations.columns:
                 ta_count = recommendations['true_available'].notna().sum()
                 ta_total = len(recommendations)
-                st.sidebar.write(f"- true_available: {ta_count}/{ta_total} populated ({(ta_count/ta_total)*100:.1f}%)")
+                admin_panel.write(f"- true_available: {ta_count}/{ta_total} populated ({(ta_count/ta_total)*100:.1f}%)")
             if 'available_inventory' in recommendations.columns:
                 ai_count = recommendations['available_inventory'].notna().sum()
-                st.sidebar.write(f"- available_inventory: {ai_count}/{len(recommendations)} populated")
+                admin_panel.write(f"- available_inventory: {ai_count}/{len(recommendations)} populated")
             if 'on_order' in recommendations.columns:
                 oo_count = recommendations['on_order'].notna().sum()
-                st.sidebar.write(f"- on_order: {oo_count}/{len(recommendations)} populated")
+                admin_panel.write(f"- on_order: {oo_count}/{len(recommendations)} populated")
 
             # Check key fields are not mostly null
             critical_fields = ['product_code', 'Name', 'importer', 'true_available', 'last_30_day_sales']
@@ -1376,14 +1872,14 @@ if rb6_file and sales_file:
                     total_count = len(raw_df)
                     null_pct = (null_count / total_count) * 100 if total_count > 0 else 0
                     status = "✅" if null_pct < 50 else "⚠️" if null_pct < 90 else "❌"
-                    st.sidebar.write(f"{status} {field}: {null_pct:.1f}% null ({null_count}/{total_count})")
+                    admin_panel.write(f"{status} {field}: {null_pct:.1f}% null ({null_count}/{total_count})")
 
             # Show sample of key fields
-            st.sidebar.write("📊 Sample of key fields (first 5 rows):")
+            admin_panel.write("📊 Sample of key fields (first 5 rows):")
             sample_fields = ['product_code', 'Name', 'importer', 'true_available', 'last_30_day_sales', 'weeks_on_hand']
             available_sample = [f for f in sample_fields if f in raw_df.columns]
             if available_sample:
-                st.sidebar.dataframe(raw_df[available_sample].head(5), hide_index=True)
+                admin_panel.dataframe(raw_df[available_sample].head(5), hide_index=True)
 
         # Display in styled card container
         st.markdown("""
@@ -1542,7 +2038,7 @@ if rb6_file and sales_file:
         st.error(f"Error processing files: {str(e)}")
         st.error("Full traceback:")
         st.code(traceback.format_exc())
-else:
+elif show_manual_refresh:
     st.info("📋 **Phase 1**: Please upload both RB6 and RADs files to generate reorder recommendations.")
 
     # Premium file format information

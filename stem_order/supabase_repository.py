@@ -17,6 +17,10 @@ from typing import Any
 import pandas as pd
 
 
+PO_DRAFT_STATUSES = {"draft", "ready_for_entry", "entered_in_quickbooks", "cancelled"}
+ACTIVE_PO_DRAFT_STATUSES = {"draft", "ready_for_entry"}
+
+
 def load_dotenv(path: str | Path = ".env") -> None:
     path = Path(path)
     if not path.exists():
@@ -211,7 +215,15 @@ class SupabaseRepository:
         report_run_id: str,
         recommendations: pd.DataFrame,
         notes: str | None = None,
+        allow_duplicate: bool = False,
     ) -> dict[str, Any]:
+        if not allow_duplicate:
+            existing = self.active_purchase_order_draft_for_supplier(report_run_id, supplier_name)
+            if existing:
+                raise ValueError(
+                    f"An active PO draft already exists for {supplier_name}: {str(existing.get('id', ''))[:8]}"
+                )
+
         if "approved_qty" in recommendations:
             qty = pd.to_numeric(recommendations["approved_qty"], errors="coerce").fillna(0)
         else:
@@ -241,6 +253,49 @@ class SupabaseRepository:
         lines_result = self.client.table("purchase_order_lines").insert(line_payloads).execute()
         draft["lines"] = lines_result.data or []
         return draft
+
+    def get_purchase_order_drafts_for_run(self, report_run_id: str) -> list[dict[str, Any]]:
+        result = (
+            self.client.table("purchase_order_drafts")
+            .select("*")
+            .eq("report_run_id", report_run_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return result.data or []
+
+    def active_purchase_order_draft_for_supplier(
+        self,
+        report_run_id: str,
+        supplier_name: str,
+    ) -> dict[str, Any] | None:
+        result = (
+            self.client.table("purchase_order_drafts")
+            .select("*")
+            .eq("report_run_id", report_run_id)
+            .eq("supplier_name", supplier_name)
+            .in_("status", sorted(ACTIVE_PO_DRAFT_STATUSES))
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
+
+    def get_purchase_order_draft_lines(self, purchase_order_draft_id: str) -> list[dict[str, Any]]:
+        result = (
+            self.client.table("purchase_order_lines")
+            .select("*")
+            .eq("purchase_order_draft_id", purchase_order_draft_id)
+            .order("created_at")
+            .execute()
+        )
+        return result.data or []
+
+    def update_purchase_order_draft_status(self, purchase_order_draft_id: str, status: str) -> dict[str, Any]:
+        if status not in PO_DRAFT_STATUSES:
+            raise ValueError(f"Unsupported purchase order draft status: {status}")
+        return self._update_one("purchase_order_drafts", purchase_order_draft_id, {"status": status})
 
     def update_recommendation_approval(
         self,
@@ -341,12 +396,14 @@ class SupabaseRepository:
             "last_30_day_sales": clean_value(row.get("last_30_day_sales"), 0),
             "last_60_day_sales": clean_value(row.get("last_60_day_sales"), 0),
             "last_90_day_sales": clean_value(row.get("last_90_day_sales"), 0),
+            "prior_30_day_sales": clean_value(row.get("prior_30_day_sales"), 0),
             "next_30_day_forecast": clean_value(row.get("next_30_day_forecast"), 0),
             "next_60_day_forecast": clean_value(row.get("next_60_day_forecast"), 0),
             "next_90_day_forecast": clean_value(row.get("next_90_day_forecast"), 0),
             "next_60_days_ly_sales": clean_value(row.get("next_60_days_ly_sales"), 0),
             "weekly_velocity": clean_value(row.get("weekly_velocity")),
             "velocity_trend_pct": clean_value(row.get("velocity_trend_pct")),
+            "velocity_trend_label": clean_value(row.get("velocity_trend_label")),
             "weeks_on_hand": clean_value(row.get("weeks_on_hand")),
             "weeks_on_hand_with_on_order": clean_value(row.get("weeks_on_hand_with_on_order")),
             "target_days": int(clean_value(row.get("target_days"), 0) or 0),
