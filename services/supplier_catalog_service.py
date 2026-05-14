@@ -14,23 +14,61 @@ from services.price_change_service import detect_price_change
 from services.pricing_engine import calculate_pricing
 
 
+def _supplier_name_column(importers_data: pd.DataFrame) -> str | None:
+    if importers_data is None or importers_data.empty:
+        return None
+    for column in ["importer_name", "supplier_name", "name"]:
+        if column in importers_data.columns:
+            return column
+    return None
+
+
 def importer_options(importers_data: pd.DataFrame) -> list[str]:
-    if importers_data is None or importers_data.empty or "importer_name" not in importers_data:
+    name_column = _supplier_name_column(importers_data)
+    if not name_column:
         return []
-    return sorted(importers_data["importer_name"].dropna().astype(str).unique())
+    return sorted(
+        option
+        for option in importers_data[name_column].dropna().astype(str).str.strip().unique()
+        if option
+    )
+
+
+def supplier_filter_options(importers_data: pd.DataFrame, wines: list[dict] | None = None) -> list[str]:
+    supplier_names = set(importer_options(importers_data))
+    supplier_names.update(
+        wine.get("supplier_name", "")
+        for wine in wines or []
+        if wine.get("supplier_name")
+    )
+    return ["All"] + sorted(supplier for supplier in supplier_names if supplier)
+
+
+def _numeric_value(value) -> float:
+    parsed = pd.to_numeric(value, errors="coerce")
+    if pd.isna(parsed):
+        return 0.0
+    return float(parsed)
 
 
 def default_laid_in_for_supplier(importers_data: pd.DataFrame, supplier_name: str) -> float:
     if importers_data is None or importers_data.empty:
         return 0.0
-    supplier = str(supplier_name or "").strip().lower()
+    supplier = " ".join(str(supplier_name or "").strip().lower().split())
     if "importer_name_clean" in importers_data:
-        matches = importers_data[importers_data["importer_name_clean"] == " ".join(supplier.split())]
+        matches = importers_data[importers_data["importer_name_clean"] == supplier]
     else:
-        matches = importers_data[importers_data.get("importer_name", "").astype(str).str.lower() == supplier]
-    if matches.empty or "laid_in_per_bottle" not in matches:
+        name_column = _supplier_name_column(importers_data)
+        if not name_column:
+            return 0.0
+        clean_names = importers_data[name_column].fillna("").astype(str).str.lower().str.split().str.join(" ")
+        matches = importers_data[clean_names == supplier]
+    if matches.empty:
         return 0.0
-    return float(pd.to_numeric(matches.iloc[0]["laid_in_per_bottle"], errors="coerce") or 0)
+    for cost_column in ["laid_in_per_bottle", "trucking_cost_per_bottle"]:
+        if cost_column in matches.columns:
+            return _numeric_value(matches.iloc[0][cost_column])
+    return 0.0
 
 
 def build_available_wine(payload: dict, previous: dict | None = None) -> tuple[SupplierAvailableWine, dict | None]:
@@ -83,4 +121,3 @@ def search_wines(wines: list[dict], *, supplier="All", wine_name="", producer=""
         if query:
             filtered = [wine for wine in filtered if query in str(wine.get(field, "")).lower()]
     return filtered
-

@@ -1,12 +1,54 @@
 import unittest
 
+import pandas as pd
+
 from services.normalization_service import normalize_wine_identity
 from services.price_change_service import detect_price_change
 from services.pricing_engine import calculate_best_price, calculate_pricing
 from services.request_workflow_service import approve_request, create_request, is_approver
+from services.supplier_catalog_service import default_laid_in_for_supplier, importer_options, supplier_filter_options
 
 
 class SupplierCatalogServiceTests(unittest.TestCase):
+    def test_supplier_options_and_laid_in_use_loaded_importer_frame(self):
+        importers = pd.DataFrame(
+            [
+                {
+                    "importer_name": "Supplier B",
+                    "importer_name_clean": "supplier b",
+                    "laid_in_per_bottle": 1.75,
+                },
+                {
+                    "importer_name": "Supplier A",
+                    "importer_name_clean": "supplier a",
+                    "laid_in_per_bottle": 1.25,
+                },
+            ]
+        )
+
+        self.assertEqual(importer_options(importers), ["Supplier A", "Supplier B"])
+        self.assertEqual(default_laid_in_for_supplier(importers, " Supplier   A "), 1.25)
+        self.assertEqual(supplier_filter_options(importers, []), ["All", "Supplier A", "Supplier B"])
+
+    def test_supplier_filter_options_include_importers_and_catalog_wines(self):
+        importers = pd.DataFrame([{"importer_name": "Supplier A"}])
+        wines = [{"supplier_name": "Supplier C"}]
+
+        self.assertEqual(supplier_filter_options(importers, wines), ["All", "Supplier A", "Supplier C"])
+
+    def test_supplier_laid_in_falls_back_to_trucking_cost_column(self):
+        importers = pd.DataFrame(
+            [
+                {
+                    "supplier_name": "Supplier A",
+                    "trucking_cost_per_bottle": 2.5,
+                }
+            ]
+        )
+
+        self.assertEqual(importer_options(importers), ["Supplier A"])
+        self.assertEqual(default_laid_in_for_supplier(importers, "Supplier A"), 2.5)
+
     def test_pricing_calculates_bottle_case_frontline_best_price_and_margin(self):
         result = calculate_pricing(pack_size=12, fob_case=240, laid_in_per_bottle=2)
 

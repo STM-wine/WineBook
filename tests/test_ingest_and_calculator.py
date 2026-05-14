@@ -128,7 +128,9 @@ class IngestTests(unittest.TestCase):
         self.assertTrue(loaded)
         self.assertIsNone(warning)
         self.assertIn("trucking_cost_per_bottle", data.columns)
+        self.assertIn("laid_in_per_bottle", data.columns)
         self.assertEqual(data.loc[0, "trucking_cost_per_bottle"], 1.25)
+        self.assertEqual(data.loc[0, "laid_in_per_bottle"], 1.25)
 
 
 class CalculatorTests(unittest.TestCase):

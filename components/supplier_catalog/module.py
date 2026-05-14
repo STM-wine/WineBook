@@ -52,7 +52,7 @@ def render_supplier_catalog(importers_data) -> None:
         ]
     )
     with tab_search:
-        render_search_wines(wines)
+        render_search_wines(importers_data, wines)
     with tab_add:
         render_add_wine(importers_data, wines, price_events)
     with tab_requests:

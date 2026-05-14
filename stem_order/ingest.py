@@ -14,6 +14,7 @@ IMPORTER_LOGISTICS_COLUMNS = [
     "freight_forwarder",
     "order_frequency",
     "trucking_cost_per_bottle",
+    "laid_in_per_bottle",
     "notes",
 ]
 
@@ -296,7 +297,9 @@ def load_importers_csv(path: str | Path) -> tuple[pd.DataFrame, bool, str | None
         if "name" in importers_data.columns:
             importers_data = importers_data.rename(columns={"name": "importer_name"})
         if "trucking_cost_per_bottle" not in importers_data.columns and "laid_in_per_bottle" in importers_data.columns:
-            importers_data = importers_data.rename(columns={"laid_in_per_bottle": "trucking_cost_per_bottle"})
+            importers_data["trucking_cost_per_bottle"] = importers_data["laid_in_per_bottle"]
+        if "laid_in_per_bottle" not in importers_data.columns and "trucking_cost_per_bottle" in importers_data.columns:
+            importers_data["laid_in_per_bottle"] = importers_data["trucking_cost_per_bottle"]
 
         required_cols = ["importer_name", "eta_days"]
         missing_cols = [col for col in required_cols if col not in importers_data.columns]

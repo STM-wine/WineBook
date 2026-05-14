@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from services.supplier_catalog_service import search_wines
+from services.supplier_catalog_service import search_wines, supplier_filter_options
 
 
 SEARCH_COLUMNS = [
@@ -21,9 +21,9 @@ SEARCH_COLUMNS = [
 ]
 
 
-def render_search_wines(wines: list[dict]) -> None:
+def render_search_wines(importers_data, wines: list[dict]) -> None:
     filter_cols = st.columns([2, 2.5, 2, 1])
-    suppliers = ["All"] + sorted({wine.get("supplier_name", "") for wine in wines if wine.get("supplier_name")})
+    suppliers = supplier_filter_options(importers_data, wines)
     supplier = filter_cols[0].selectbox("Supplier", suppliers, key="catalog_search_supplier")
     wine_name = filter_cols[1].text_input("Wine name", key="catalog_search_wine_name")
     producer = filter_cols[2].text_input("Producer", key="catalog_search_producer")
@@ -58,4 +58,3 @@ def render_search_wines(wines: list[dict]) -> None:
     if "GP Margin" in display:
         display["GP Margin"] = display["GP Margin"].apply(lambda x: f"{float(x or 0):.1%}")
     st.dataframe(display, use_container_width=True, hide_index=True, height=520)
-
