@@ -31,6 +31,7 @@ from stem_order.dashboard import (
     california_truck_summary,
     dashboard_metrics,
     filter_recommendations,
+    format_dashboard_dataframe,
     importer_groups,
     importer_workbench_summary,
     importer_workflow_status,
@@ -350,6 +351,58 @@ class CalculatorTests(unittest.TestCase):
 
 
 class DashboardTests(unittest.TestCase):
+    def test_all_order_review_display_sorts_and_uses_landed_costs(self):
+        df = recommendations_to_dataframe(
+            [
+                {
+                    "supplier_name": "Supplier B",
+                    "product_name": "Zinfandel",
+                    "product_code": "B2",
+                    "planning_sku": "zinfandel",
+                    "recommended_qty_rounded": 10,
+                    "last_30_day_sales": 5,
+                    "order_cost": 100.0,
+                    "landed_cost": 125.0,
+                    "trucking_cost_per_bottle": 2.5,
+                },
+                {
+                    "supplier_name": "Supplier A",
+                    "product_name": "Merlot",
+                    "product_code": "A2",
+                    "planning_sku": "merlot",
+                    "recommended_qty_rounded": 6,
+                    "last_30_day_sales": 8,
+                    "order_cost": 72.0,
+                    "landed_cost": 90.0,
+                    "trucking_cost_per_bottle": 3.0,
+                },
+                {
+                    "supplier_name": "Supplier A",
+                    "product_name": "Cabernet",
+                    "product_code": "A1",
+                    "planning_sku": "cabernet",
+                    "recommended_qty_rounded": 12,
+                    "last_30_day_sales": 9,
+                    "order_cost": 120.0,
+                    "landed_cost": 138.0,
+                    "trucking_cost_per_bottle": 1.5,
+                },
+            ]
+        )
+
+        display = format_dashboard_dataframe(df)
+
+        self.assertEqual(display["Supplier"].tolist(), ["Supplier A", "Supplier A", "Supplier B"])
+        self.assertEqual(display["Wine"].tolist(), ["Cabernet", "Merlot", "Zinfandel"])
+        self.assertNotIn("Planning SKU", display.columns)
+        self.assertNotIn("Recommended Cost", display.columns)
+        self.assertIn("Total Wine Cost", display.columns)
+        self.assertIn("Total Laid In Cost", display.columns)
+        self.assertIn("Estimated Cost", display.columns)
+        self.assertEqual(display.loc[0, "Total Wine Cost"], "$120.00")
+        self.assertEqual(display.loc[0, "Total Laid In Cost"], "$18.00")
+        self.assertEqual(display.loc[0, "Estimated Cost"], "$138.00")
+
     def test_dashboard_filters_and_po_export(self):
         df = recommendations_to_dataframe(
             [

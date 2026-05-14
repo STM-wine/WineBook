@@ -1530,8 +1530,7 @@ if latest_report_run:
         section_label("PO Drafts", "Create supplier drafts from approved rows and track QuickBooks handoff status.")
         po_df = po_export_dataframe(dashboard_df)
         po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0
-        po_cost_col = "Estimated Cost" if "Estimated Cost" in po_df else "Recommended Cost"
-        po_cost = float(po_df[po_cost_col].sum()) if po_cost_col in po_df else 0
+        po_cost = float(po_df["Estimated Cost"].sum()) if "Estimated Cost" in po_df else 0
         po_metric_cols = st.columns(4)
         with po_metric_cols[0]:
             metric_card("PO Lines", format_count(len(po_df)), "Approved rows", "ink")
