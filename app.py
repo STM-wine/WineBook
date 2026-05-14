@@ -54,6 +54,30 @@ def supplier_file_slug(value):
     return "".join(char.lower() if char.isalnum() else "_" for char in str(value)).strip("_") or "supplier"
 
 
+def po_table_column_config():
+    return {
+        "Supplier": st.column_config.TextColumn("Supplier", width="medium"),
+        "Wine": st.column_config.TextColumn("Wine", width="large"),
+        "Code": st.column_config.TextColumn("Code", width="small"),
+        "Quantity": st.column_config.NumberColumn("Quantity", format="%d", width="small"),
+        "FOB": st.column_config.NumberColumn("FOB", format="$%.2f", width="small"),
+        "Laid In Cost": st.column_config.NumberColumn("Laid In Cost", format="$%.2f", width="small"),
+        "Total Wine Cost": st.column_config.NumberColumn("Total Wine Cost", format="$%.2f", width="medium"),
+        "Total Laid In Cost": st.column_config.NumberColumn("Total Laid In Cost", format="$%.2f", width="medium"),
+        "Estimated Cost": st.column_config.NumberColumn("Estimated Cost", format="$%.2f", width="medium"),
+    }
+
+
+def po_drafts_column_config():
+    return {
+        "Draft ID": st.column_config.TextColumn("Draft ID", width="small"),
+        "Supplier": st.column_config.TextColumn("Supplier", width="medium"),
+        "Status": st.column_config.TextColumn("Status", width="medium"),
+        "Created": st.column_config.TextColumn("Created", width="medium"),
+        "Notes": st.column_config.TextColumn("Notes", width="large"),
+    }
+
+
 def metric_card(label, value, note="", tone="ink"):
     st.markdown(
         f"""
@@ -229,7 +253,13 @@ def render_po_draft_card(draft, latest_repo):
         with metric_cols[2]:
             metric_card("Value", format_money(cost), "Estimated", "wine")
 
-        st.dataframe(lines_df, use_container_width=True, hide_index=True, height=min(420, max(140, 45 + len(lines_df) * 35)))
+        st.dataframe(
+            lines_df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(420, max(140, 45 + len(lines_df) * 35)),
+            column_config=po_table_column_config(),
+        )
         action_cols = st.columns([1.4, 1.6, 4])
         action_cols[0].download_button(
             label="Download CSV",
@@ -238,9 +268,10 @@ def render_po_draft_card(draft, latest_repo):
             mime="text/csv",
             disabled=lines_df.empty,
             key=f"download_po_{draft_id}",
+            use_container_width=True,
         )
         if status == "draft":
-            if action_cols[1].button("Mark Ready", key=f"ready_po_{draft_id}"):
+            if action_cols[1].button("Mark Ready", key=f"ready_po_{draft_id}", use_container_width=True):
                 try:
                     latest_repo.update_purchase_order_draft_status(draft_id, "ready_for_entry")
                     st.success("Marked PO draft ready for entry.")
@@ -248,7 +279,7 @@ def render_po_draft_card(draft, latest_repo):
                 except Exception as status_error:
                     st.error(f"Could not update draft status: {status_error}")
         elif status == "ready_for_entry":
-            if action_cols[1].button("Mark Entered", key=f"entered_po_{draft_id}"):
+            if action_cols[1].button("Mark Entered", key=f"entered_po_{draft_id}", use_container_width=True):
                 try:
                     latest_repo.update_purchase_order_draft_status(draft_id, "entered_in_quickbooks")
                     st.success("Marked PO draft entered in QuickBooks.")
@@ -1583,7 +1614,13 @@ if latest_report_run:
         if po_df.empty:
             st.info("No approved order quantities yet.")
         else:
-            st.dataframe(po_df, use_container_width=True, hide_index=True, height=460)
+            st.dataframe(
+                po_df,
+                use_container_width=True,
+                hide_index=True,
+                height=460,
+                column_config=po_table_column_config(),
+            )
 
         section_label("Existing PO Drafts", "Download drafts, track handoff status, and mark QuickBooks entry progress.")
         active_drafts = [draft for draft in po_drafts if draft.get("status") != "cancelled"]
@@ -1593,6 +1630,7 @@ if latest_report_run:
                 use_container_width=True,
                 hide_index=True,
                 height=min(260, max(120, 45 + len(active_drafts) * 35)),
+                column_config=po_drafts_column_config(),
             )
             for draft in active_drafts:
                 render_po_draft_card(draft, latest_repo)
