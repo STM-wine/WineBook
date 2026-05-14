@@ -45,6 +45,7 @@ from stem_order.dashboard import (
     risk_counts,
 )
 from stem_order.supabase_repository import SupabaseRepository
+from components.supplier_catalog.supplier_logistics import _rows_to_editor
 
 
 class IngestTests(unittest.TestCase):
@@ -253,6 +254,45 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result.loc["Allocated Wine 2025 12/750ml", "true_available"], 7)
         self.assertEqual(result.loc["Oversold Wine 2025 12/750ml", "true_available"], 0)
 
+    def test_live_rb6_row_prefers_stocked_current_vintage_for_non_vintage_sku(self):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": "Prost Riesling 2024 12/750ml",
+                    "code": "GWC000173",
+                    "vintage": 2024,
+                    "available_inventory": 0,
+                    "on_order": 0,
+                    "fob": 6.5,
+                    "pack_size": 12,
+                    "last_30_day_sales_qty_across_all_accounts": 0,
+                },
+                {
+                    "name": "Prost Riesling 2025 12/750ml",
+                    "code": "GWC000194",
+                    "vintage": 2025,
+                    "available_inventory": 702,
+                    "on_order": 0,
+                    "fob": 6.5,
+                    "pack_size": 12,
+                    "last_30_day_sales_qty_across_all_accounts": 642,
+                },
+            ]
+        )
+        sales = pd.DataFrame(
+            [
+                {"wine_name": "Prost Riesling 2025 12/750ml", "quantity": 642, "date": "2026-05-12"},
+                {"wine_name": "Prost Riesling 2024 12/750ml", "quantity": 144, "date": "2026-04-01"},
+            ]
+        )
+
+        result = calculate_reorder_recommendations(rb6, sales).iloc[0]
+
+        self.assertEqual(result["Name"], "Prost Riesling 2025 12/750ml")
+        self.assertEqual(result["product_code"], "GWC000194")
+        self.assertEqual(result["true_available"], 702)
+        self.assertEqual(result["planning_sku"], "prost riesling 12/750ml")
+
     def test_sales_windows_forecasts_and_velocity_trend_are_calculated(self):
         rb6 = pd.DataFrame(
             [
@@ -351,6 +391,23 @@ class CalculatorTests(unittest.TestCase):
 
 
 class DashboardTests(unittest.TestCase):
+    def test_supplier_logistics_editor_uses_text_importer_ids(self):
+        editor = _rows_to_editor(
+            [
+                {
+                    "name": "Supplier A",
+                    "importer_id": 12345,
+                    "eta_days": 15,
+                    "trucking_cost_per_bottle": 1.25,
+                    "active": True,
+                }
+            ],
+            pd.DataFrame(),
+        )
+
+        self.assertEqual(editor.loc[0, "importer_id"], "12345")
+        self.assertEqual(editor["importer_id"].dtype, object)
+
     def test_all_order_review_display_sorts_and_uses_landed_costs(self):
         df = recommendations_to_dataframe(
             [

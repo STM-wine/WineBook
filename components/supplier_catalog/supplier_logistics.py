@@ -34,6 +34,8 @@ def _rows_to_editor(rows: list[dict], fallback_data: pd.DataFrame) -> pd.DataFra
     df["trucking_cost_per_bottle"] = pd.to_numeric(
         df["trucking_cost_per_bottle"], errors="coerce"
     ).fillna(0.0)
+    for column in ["id", "name", "importer_id", "pick_up_location", "freight_forwarder", "order_frequency", "notes"]:
+        df[column] = df[column].fillna("").astype(str)
     df["active"] = df["active"].fillna(True).astype(bool)
     return df.sort_values("name", key=lambda series: series.fillna("").astype(str).str.lower()).reset_index(drop=True)
 
