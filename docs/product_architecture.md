@@ -24,6 +24,9 @@ Terminology matters: Vinosmith calls the field `Importer`, but Stem's internal a
 - `stem_order/pipeline.py`: source preparation, recommendation assembly, importer logistics, and UI-ready output formatting.
 - `stem_order/dashboard.py`: dashboard table shaping, PO exports, location rollups, and California truck summary helpers.
 - `stem_order/supabase_repository.py`: optional Supabase write layer, dormant until credentials and the Supabase Python client are available.
+- `components/supplier_catalog/`: Supplier Hub Streamlit module for manual supplier wine intelligence.
+- `services/`: Supplier Hub pricing, catalog, request workflow, normalization, and price-change services.
+- `models/`: Supplier Hub domain objects for supplier wines, wine requests, and price changes.
 - `wine_calculator.py`: existing calculation engine during migration.
 - `supabase/migrations/`: database schema for the future cloud app.
 - `scripts/`: local smoke checks against sample export files.

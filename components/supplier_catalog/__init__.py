@@ -1,0 +1,2 @@
+"""Supplier Catalog Streamlit views."""
+

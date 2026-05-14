@@ -4,6 +4,7 @@ import traceback
 from html import escape
 from datetime import datetime, timedelta
 import pandas as pd
+from components.supplier_catalog.module import render_supplier_catalog
 from stem_order.core import normalize_planning_sku
 from stem_order.dashboard import (
     approval_metrics,
@@ -1336,8 +1337,8 @@ if latest_report_run:
     except Exception:
         po_sent_suppliers = set()
 
-    tab_recs, tab_suppliers, tab_locations, tab_po = st.tabs(
-        ["Order Review", "Supplier Board", "Freight", "PO Drafts"]
+    tab_recs, tab_supplier_hub, tab_suppliers, tab_locations, tab_po = st.tabs(
+        ["Order Review", "Supplier Hub", "Supplier Board", "Freight", "PO Drafts"]
     )
 
     with tab_recs:
@@ -1492,6 +1493,9 @@ if latest_report_run:
                         if draft.get("supplier_name") == group["summary"]["Importer"] and draft.get("status") != "cancelled"
                     ],
                 )
+
+    with tab_supplier_hub:
+        render_supplier_catalog(importers_data)
 
     with tab_suppliers:
         section_label("Supplier Board", "Use this as the buyer's queue across all suppliers.")

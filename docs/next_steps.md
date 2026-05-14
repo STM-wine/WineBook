@@ -20,6 +20,7 @@ WineBook is now a Supabase-backed ordering dashboard with automated daily ingest
 - Velocity Trend compares the most recent 30-day sales window with the prior 30-day window and displays `New` when prior sales are zero but current sales exist.
 - Calculated buyer-table columns include hover help with formulas.
 - The legacy upload-first fallback is hidden from the app surface; reruns should use automation/manual GitHub dispatch or local scripts.
+- Supplier Hub has been ported as a local/session-state MVP foundation for supplier wine search, manual wine entry, bottle-level pricing, requests, pending product creation, and price-change tracking.
 
 ## Business Direction
 
@@ -44,14 +45,16 @@ The product goal is a simple buyer workflow:
 
 1. Watch one weekday morning run after the latest Supabase/GitHub automation changes to confirm ingestion remains quiet after success.
 2. Spot-check True Available, On Order, and trend values against Mark's source spreadsheets.
-3. Work through Mark's next Linear issues against the buyer workbench.
-4. Tighten the PO draft output around the actual QuickBooks entry workflow.
-5. Decide the first hosted release strategy.
+3. Validate Supplier Hub terminology, pricing rules, and request workflow with Mark before adding persistence.
+4. Work through Mark's next Linear issues against the buyer workbench.
+5. Tighten the PO draft output around the actual QuickBooks entry workflow.
+6. Decide the first hosted release strategy.
 
 ## Near-Term Product Work
 
 - Continue replacing remaining user-facing `Importer` labels with `Supplier`.
 - Evaluate replacing Streamlit's table with AG Grid or a custom frontend table if frozen Wine column behavior becomes essential.
+- Decide the Supabase schema for Supplier Hub before moving it beyond session-state storage.
 - Add lightweight in-app operational visibility:
   - latest report date
   - latest ingest status

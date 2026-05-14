@@ -46,10 +46,13 @@ WineBook/
 ├── importers.csv                   # Supplier logistics reference data
 ├── templates/
 │   └── po_draft_template_stm.xlsx  # Excel PO draft template
+├── components/supplier_catalog/   # Supplier Hub Streamlit module
 ├── docs/
 │   ├── product_architecture.md
 │   ├── supabase_setup.md
 │   └── next_steps.md
+├── models/                        # Supplier Hub domain models
+├── services/                      # Supplier Hub pricing/request/catalog services
 ├── stem_order/
 │   ├── ingest.py                  # RB6/RADs/importers normalization
 │   ├── pipeline.py                # Shared ordering pipeline
@@ -77,12 +80,14 @@ Fill `.env` with local Supabase keys when you need database reads/writes. Never 
 
 ## Running
 
-Ordering Dashboard:
+Ordering Dashboard and Supplier Hub:
 
 ```bash
 source .venv/bin/activate
 streamlit run app.py
 ```
+
+The app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. Supplier Hub is currently local/session-state only; it is a foundation for supplier wine search, manual wine entry, pricing, requests, pending product creation, and price-change tracking.
 
 GRW Invoice Converter:
 
