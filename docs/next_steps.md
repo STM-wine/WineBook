@@ -85,14 +85,16 @@ The product goal is a simple buyer workflow:
 
 ## Hosting / Publication Questions
 
-Current app is still Streamlit on localhost. For the first non-local release, likely options are:
+Current app is still Streamlit on localhost. Wix can be part of the access path, but it should not be treated as the runtime for the ordering application. Wix supports embedding an external HTTPS site or widget in an iframe, and Velo custom elements can be hosted on Wix or an external server. Those are useful integration points, but they do not make Wix a natural home for the Python ingestion/calculation worker, Supabase service-role operations, or a large buyer table UI.
+
+For the first non-local release, likely options are:
 
 - Streamlit Community Cloud or another Streamlit host for fastest path.
 - A small hosted VM/container running Streamlit for more control.
-- A new web frontend backed by Supabase for a more durable app shape.
-- Eventually embedding or linking from Stem's existing website after authentication is settled.
+- A new web frontend backed by Supabase for a more durable app shape, with the Python worker retained for ingestion/calculation.
+- Link to the app from Stem's Wix site, or embed it only if iframe sizing/auth behavior is acceptable.
 
-Near-term recommendation: keep Streamlit while buyer workflow is still changing quickly, then choose the hosted path once the Linear issues clarify the stable surface.
+Near-term recommendation: keep Streamlit while buyer workflow is still changing quickly, then publish it as a separate authenticated app or subdomain once the current feature scope settles. Treat Wix as the marketing-site shell or launch point, not the operational backend.
 
 ## Data Roadmap
 
@@ -100,7 +102,7 @@ Current transitional feeds:
 
 - RB6 inventory export
 - RADs sales history export
-- tracked `importers.csv` logistics reference data
+- Supabase `suppliers` logistics table, seeded from tracked `importers.csv` as needed
 
 Next expected feed:
 

@@ -145,6 +145,6 @@ After the project exists:
 2. Install dependencies with `pip install -r requirements.txt`.
 3. Run `python scripts/check_supabase_connection.py` to verify credentials and table writes.
 4. Decide user roles for the first release: likely `admin`, `buyer`, and `viewer`.
-5. Decide whether the first hosted app is Streamlit-backed or a new authenticated web app backed by the same Supabase schema.
+5. Decide whether the first hosted app is Streamlit-backed or a new authenticated web app backed by the same Supabase schema. Wix should be treated as a possible entry point, link, or embed surface rather than the main application runtime.
 
 See `docs/supabase_setup.md` for the project-specific setup checklist.
