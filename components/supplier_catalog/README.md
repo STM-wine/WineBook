@@ -87,10 +87,11 @@ The top navigation is:
 
 - Order Review
 - Supplier Hub
-- PO Drafts
+- Supplier Board
 - Freight
+- PO Drafts
 
-Supplier Hub is a standalone module in the Streamlit app. PO Drafts and Freight currently remain tied to the existing ordering dashboard workflow while the module structure matures.
+Supplier Hub is a standalone tab in the Streamlit app. Supplier Board, Freight, and PO Drafts remain tied to the existing ordering dashboard workflow while the module structure matures.
 
 ## Supplier Hub Tabs
 
@@ -102,7 +103,7 @@ Table-driven supplier catalog search. Filters include supplier, wine name, produ
 
 Manual entry workflow for supplier/importer selection, wine identity, pack format, FOB pricing, laid-in cost, availability status, and match/conversion status.
 
-Supplier selection is the first step. After a supplier is selected, the app loads `laid_in_per_bottle` from `importers.csv` and uses it as the default landed-cost input. Users can override it manually.
+Supplier selection is the first step. After a supplier is selected, the app loads the supplier's per-bottle freight/laid-in value from `importers.csv` and uses it as the default landed-cost input. Users can override it manually.
 
 ### Requests
 
@@ -145,7 +146,7 @@ fob_bottle = fob_case / pack_size
 
 ### Laid-In Cost
 
-Supplier Hub loads `laid_in_per_bottle` from `importers.csv` for the selected supplier/importer. This becomes the default laid-in cost and remains editable.
+Supplier Hub loads `laid_in_per_bottle` or `trucking_cost_per_bottle` from `importers.csv` for the selected supplier/importer. This becomes the default laid-in cost and remains editable.
 
 ### Landed Bottle Cost
 

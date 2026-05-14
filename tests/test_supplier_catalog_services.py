@@ -138,6 +138,19 @@ class SupplierCatalogServiceTests(unittest.TestCase):
         self.assertEqual(approved.fulfillment_status, "waiting_for_next_order")
         self.assertEqual(approved.ordering_workflow_payload["source"], "supplier_catalog_request")
 
+    def test_default_laid_in_uses_current_importer_trucking_column(self):
+        importers = pd.DataFrame(
+            [
+                {
+                    "importer_name": "Supplier A",
+                    "importer_name_clean": "supplier a",
+                    "trucking_cost_per_bottle": 1.25,
+                }
+            ]
+        )
+
+        self.assertEqual(default_laid_in_for_supplier(importers, "Supplier A"), 1.25)
+
     def test_price_change_event_generated_on_fob_or_frontline_change(self):
         previous = {
             "supplier_name": "Supplier",
