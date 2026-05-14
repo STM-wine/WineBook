@@ -20,6 +20,7 @@ from stem_order.ingest import (
     map_rads_columns,
     map_rb6_columns,
     normalize_columns,
+    supplier_logistics_rows_to_frame,
 )
 from stem_order.pipeline import format_display_dataframe, select_raw_output
 from stem_order.dashboard import (
@@ -128,6 +129,23 @@ class IngestTests(unittest.TestCase):
         self.assertTrue(loaded)
         self.assertIsNone(warning)
         self.assertIn("trucking_cost_per_bottle", data.columns)
+        self.assertEqual(data.loc[0, "trucking_cost_per_bottle"], 1.25)
+
+    def test_supplier_rows_shape_like_importer_logistics(self):
+        data = supplier_logistics_rows_to_frame(
+            [
+                {
+                    "name": "Supplier A",
+                    "eta_days": 14,
+                    "pick_up_location": "California",
+                    "trucking_cost_per_bottle": 1.25,
+                    "active": True,
+                }
+            ]
+        )
+
+        self.assertEqual(data.loc[0, "importer_name"], "Supplier A")
+        self.assertEqual(data.loc[0, "importer_name_clean"], "supplier a")
         self.assertEqual(data.loc[0, "trucking_cost_per_bottle"], 1.25)
 
 
@@ -725,6 +743,11 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(po_export.loc[0, "Quantity"], 12)
         self.assertEqual(po_export.loc[0, "FOB"], 10)
         self.assertEqual(po_export.loc[0, "Laid In Cost"], 1.25)
+        self.assertNotIn("Planning SKU", po_export.columns)
+        self.assertNotIn("Recommended Cost", po_export.columns)
+        self.assertEqual(po_export.loc[0, "Total Wine Cost"], 120)
+        self.assertEqual(po_export.loc[0, "Total Laid In Cost"], 15)
+        self.assertEqual(po_export.loc[0, "Estimated Cost"], 135)
         self.assertEqual(lines.loc[0, "Quantity"], 12)
         self.assertEqual(lines.loc[0, "Estimated Cost"], 120)
         self.assertEqual(drafts.loc[0, "Draft ID"], "abcdef12")
@@ -741,6 +764,15 @@ class DashboardTests(unittest.TestCase):
                     "Quantity": 12,
                     "FOB": 10.5,
                     "Laid In Cost": 1.25,
+                }
+                ,
+                {
+                    "Supplier": "Supplier B",
+                    "Wine": "Wine B 2024 12/750ml",
+                    "Code": "B1",
+                    "Quantity": 6,
+                    "FOB": 12,
+                    "Laid In Cost": 2,
                 }
             ]
         )
@@ -767,6 +799,8 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(sheet["E4"].value, "Wine A 2024 12/750ml")
         self.assertEqual(sheet["F4"].value, 10.5)
         self.assertEqual(sheet["G4"].value, 1.25)
+        self.assertIsNone(sheet["A5"].value)
+        self.assertEqual(sheet["A6"].value, "Supplier B")
 
     def test_active_po_draft_message_ignores_completed_and_cancelled_drafts(self):
         self.assertEqual(
@@ -805,6 +839,7 @@ class SupabaseRepositoryTests(unittest.TestCase):
                 "approved_qty": 6,
                 "order_cost": 120.0,
                 "fob": "10.0",
+                "trucking_cost_per_bottle": 1.25,
                 "diagnostics": {"fob": 10.0},
             },
         )
@@ -817,6 +852,10 @@ class SupabaseRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["approved_qty"], 6)
         self.assertEqual(payload["fob"], 10.0)
         self.assertEqual(payload["line_cost"], 60.0)
+        self.assertEqual(payload["trucking_cost_per_bottle"], 1.25)
+        self.assertEqual(payload["wine_cost"], 60.0)
+        self.assertEqual(payload["laid_in_cost"], 7.5)
+        self.assertEqual(payload["landed_cost"], 67.5)
 
 
 class DailyEmailIngestTests(unittest.TestCase):

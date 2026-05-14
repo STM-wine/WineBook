@@ -89,6 +89,8 @@ streamlit run app.py
 
 The app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. Supplier Hub is currently local/session-state only; it is a foundation for supplier wine search, manual wine entry, pricing, requests, pending product creation, and price-change tracking.
 
+Supplier logistics are managed in the Supplier Hub tab and stored in Supabase `suppliers` when the latest supplier-logistics migration has been applied. `importers.csv` remains a seed/fallback file, not the normal management workflow.
+
 GRW Invoice Converter:
 
 ```bash

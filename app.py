@@ -29,7 +29,7 @@ from stem_order.dashboard import (
     working_weeks_from_qty,
     active_po_draft_message,
 )
-from stem_order.ingest import load_importers_csv
+from stem_order.ingest import load_importers_csv, supplier_logistics_rows_to_frame
 from stem_order.pipeline import build_ordering_pipeline
 from stem_order.supabase_repository import SupabaseRepository
 
@@ -1313,13 +1313,25 @@ developer_mode = False
 project_root = os.path.dirname(os.path.abspath(__file__))
 importers_path = os.path.join(project_root, 'importers.csv')
 po_template_path = os.path.join(project_root, "templates", "po_draft_template_stm.xlsx")
-importers_data, importers_loaded, importers_warning = load_importers_csv(importers_path)
+csv_importers_data, csv_importers_loaded, csv_importers_warning = load_importers_csv(importers_path)
+importers_data = csv_importers_data
+importers_loaded = csv_importers_loaded
+importers_warning = csv_importers_warning
+importers_source = "importers.csv" if csv_importers_loaded else "none"
 
 latest_repo = None
 try:
     latest_repo = SupabaseRepository.from_env()
+    supplier_logistics = supplier_logistics_rows_to_frame(latest_repo.get_supplier_logistics())
+    if not supplier_logistics.empty:
+        importers_data = supplier_logistics
+        importers_loaded = True
+        importers_warning = None
+        importers_source = "Supabase suppliers"
     latest_report_run, latest_recommendations = latest_repo.get_latest_recommendations(limit=5000)
-except Exception:
+except Exception as repo_error:
+    if not importers_loaded:
+        importers_warning = f"Supplier logistics unavailable: {repo_error}"
     latest_report_run, latest_recommendations = None, []
 
 if latest_report_run:
@@ -1495,7 +1507,7 @@ if latest_report_run:
                 )
 
     with tab_supplier_hub:
-        render_supplier_catalog(importers_data)
+        render_supplier_catalog(importers_data, repo=latest_repo, source_label=importers_source)
 
     with tab_suppliers:
         section_label("Supplier Board", "Use this as the buyer's queue across all suppliers.")
@@ -1532,6 +1544,7 @@ if latest_report_run:
 
         st.markdown("<div style='height: 1.2rem;'></div>", unsafe_allow_html=True)
         po_action_cols = st.columns([1.5, 1.4, 4])
+        export_stamp = datetime.now().strftime("%Y-%m-%d %H%M")
         if po_action_cols[0].button(
             "Create PO Drafts",
             type="primary",
@@ -1554,7 +1567,7 @@ if latest_report_run:
         po_action_cols[1].download_button(
             label="Download PO CSV",
             data=po_df.to_csv(index=False),
-            file_name=f"winebook_{run_date}_approved_po_preview.csv",
+            file_name=f"POs {export_stamp}.csv",
             mime="text/csv",
             disabled=po_df.empty,
         )
@@ -1562,7 +1575,7 @@ if latest_report_run:
         po_action_cols[2].download_button(
             label="Download PO XLSX",
             data=po_xlsx,
-            file_name=f"winebook_{run_date}_po_draft.xlsx",
+            file_name=f"POs {export_stamp}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             disabled=po_df.empty,
         )

@@ -93,6 +93,8 @@ Calculated headers in the buyer workbench should explain their formulas in hover
 - Weeks with Recommended = `(True Available + On Order + Recommended Qty) / Weekly Velocity`.
 - Estimated Cost = `Recommended Qty x FOB`.
 
+Supplier logistics are now expected to live in Supabase `suppliers`, including ETA, pickup location, freight forwarder, order frequency, notes, active status, and `trucking_cost_per_bottle`. `importers.csv` remains a seed/fallback source until the database table is fully populated.
+
 ## Logistics Rollups
 
 The order summary should aggregate hierarchically:

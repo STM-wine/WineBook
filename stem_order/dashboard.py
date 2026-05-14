@@ -36,7 +36,6 @@ PO_COLUMNS = [
     "supplier_name",
     "product_name",
     "product_code",
-    "planning_sku",
     "approved_qty",
     "fob",
     "trucking_cost_per_bottle",
@@ -728,23 +727,38 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         po_df["approved_qty"] = pd.to_numeric(po_df["approved_qty"], errors="coerce").fillna(0).astype(int)
     if "fob" in po_df.columns:
         po_df["fob"] = pd.to_numeric(po_df["fob"], errors="coerce").fillna(0)
-        po_df["Estimated Cost"] = po_df["fob"] * po_df["approved_qty"]
     if "trucking_cost_per_bottle" in po_df.columns:
         po_df["trucking_cost_per_bottle"] = pd.to_numeric(
             po_df["trucking_cost_per_bottle"], errors="coerce"
         ).fillna(0)
-    return po_df.rename(
+    else:
+        po_df["trucking_cost_per_bottle"] = 0
+    if "fob" in po_df.columns and "approved_qty" in po_df.columns:
+        po_df["Total Wine Cost"] = po_df["fob"] * po_df["approved_qty"]
+        po_df["Total Laid In Cost"] = po_df["trucking_cost_per_bottle"] * po_df["approved_qty"]
+        po_df["Estimated Cost"] = po_df["Total Wine Cost"] + po_df["Total Laid In Cost"]
+    display = po_df.rename(
         columns={
             "supplier_name": "Supplier",
             "product_name": "Wine",
             "product_code": "Code",
-            "planning_sku": "Planning SKU",
             "approved_qty": "Quantity",
             "fob": "FOB",
             "trucking_cost_per_bottle": "Laid In Cost",
-            "order_cost": "Recommended Cost",
         }
     )
+    columns = [
+        "Supplier",
+        "Wine",
+        "Code",
+        "Quantity",
+        "FOB",
+        "Laid In Cost",
+        "Total Wine Cost",
+        "Total Laid In Cost",
+        "Estimated Cost",
+    ]
+    return display[[col for col in columns if col in display.columns]]
 
 
 def _copy_row_style(sheet, source_row: int, target_row: int, max_column: int) -> None:
@@ -781,8 +795,14 @@ def po_template_xlsx_bytes(po_df: pd.DataFrame, template_path: str | Path) -> by
         ["Supplier", "Wine"],
         key=lambda series: series.fillna("").astype(str).str.lower(),
     )
-    for offset, row in enumerate(ordered.to_dict(orient="records")):
-        excel_row = start_row + offset
+    excel_row = start_row
+    previous_supplier = None
+    for row in ordered.to_dict(orient="records"):
+        supplier = row.get("Supplier", "")
+        if previous_supplier is not None and supplier != previous_supplier:
+            _copy_row_style(sheet, start_row, excel_row, max_column)
+            excel_row += 1
+        previous_supplier = supplier
         _copy_row_style(sheet, start_row, excel_row, max_column)
         sheet.cell(excel_row, 1).value = row.get("Supplier", "")
         sheet.cell(excel_row, 2).value = ""
@@ -791,6 +811,7 @@ def po_template_xlsx_bytes(po_df: pd.DataFrame, template_path: str | Path) -> by
         sheet.cell(excel_row, 5).value = row.get("Wine", "")
         sheet.cell(excel_row, 6).value = _clean_float(row.get("FOB"), 0.0)
         sheet.cell(excel_row, 7).value = _clean_float(row.get("Laid In Cost"), 0.0)
+        excel_row += 1
 
     buffer = BytesIO()
     workbook.save(buffer)
@@ -798,19 +819,28 @@ def po_template_xlsx_bytes(po_df: pd.DataFrame, template_path: str | Path) -> by
 
 
 def po_draft_lines_dataframe(lines: list[dict]) -> pd.DataFrame:
-    columns = ["Wine", "Code", "Planning SKU", "Quantity", "FOB", "Estimated Cost"]
+    columns = ["Wine", "Code", "Quantity", "FOB", "Laid In Cost", "Total Wine Cost", "Total Laid In Cost", "Estimated Cost"]
     if not lines:
         return pd.DataFrame(columns=columns)
 
     df = pd.DataFrame(lines)
+    def numeric_column(name: str, default=0) -> pd.Series:
+        value = df.get(name)
+        if value is None:
+            value = pd.Series([default] * len(df), index=df.index)
+        parsed = pd.to_numeric(value, errors="coerce")
+        return parsed if default is None else parsed.fillna(default)
+
     display = pd.DataFrame(
         {
             "Wine": df.get("product_name", pd.Series(dtype=str)).fillna(""),
             "Code": df.get("product_code", pd.Series(dtype=str)).fillna(""),
-            "Planning SKU": df.get("planning_sku", pd.Series(dtype=str)).fillna(""),
-            "Quantity": pd.to_numeric(df.get("approved_qty", 0), errors="coerce").fillna(0).astype(int),
-            "FOB": pd.to_numeric(df.get("fob", 0), errors="coerce").fillna(0),
-            "Estimated Cost": pd.to_numeric(df.get("line_cost", 0), errors="coerce").fillna(0),
+            "Quantity": numeric_column("approved_qty").astype(int),
+            "FOB": numeric_column("fob"),
+            "Laid In Cost": numeric_column("trucking_cost_per_bottle"),
+            "Total Wine Cost": numeric_column("wine_cost", None).fillna(numeric_column("line_cost")),
+            "Total Laid In Cost": numeric_column("laid_in_cost"),
+            "Estimated Cost": numeric_column("landed_cost", None).fillna(numeric_column("line_cost")),
         }
     )
     return display[columns]

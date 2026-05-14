@@ -308,14 +308,21 @@ def build_ordering_pipeline(
     rb6_file_or_path,
     rads_file_or_path,
     importers_path: str | Path | None = None,
+    importers_data: pd.DataFrame | None = None,
 ) -> PipelineResult:
     rb6 = prepare_rb6_source(rb6_file_or_path)
     rads = prepare_rads_source(rads_file_or_path)
-    importers_data, importers_loaded, importers_warning = load_importers_csv(importers_path) if importers_path else (
-        pd.DataFrame(),
-        False,
-        "importers.csv not configured",
-    )
+    if importers_data is not None:
+        importers_loaded = not importers_data.empty
+        importers_warning = None if importers_loaded else "supplier logistics table is empty"
+    elif importers_path:
+        importers_data, importers_loaded, importers_warning = load_importers_csv(importers_path)
+    else:
+        importers_data, importers_loaded, importers_warning = (
+            pd.DataFrame(),
+            False,
+            "importers.csv not configured",
+        )
 
     recommendations = calculate_reorder_recommendations(rb6.data, rads.data)
     recommendations = add_importer_logistics(recommendations, rb6.data, importers_data, importers_loaded)
