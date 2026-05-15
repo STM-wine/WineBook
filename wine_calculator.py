@@ -35,6 +35,56 @@ def normalize_planning_sku(name: str) -> str:
     return name.strip()
 
 
+def _choose_live_rb6_rows(rb6_data: pd.DataFrame) -> pd.DataFrame:
+    """Pick the current inventory row for each non-vintage planning SKU."""
+    rb6_inventory = rb6_data.copy()
+    rb6_inventory["_source_order"] = range(len(rb6_inventory))
+
+    def numeric_series(column: str) -> pd.Series:
+        if column not in rb6_inventory.columns:
+            return pd.Series([0] * len(rb6_inventory), index=rb6_inventory.index)
+        return pd.to_numeric(rb6_inventory[column], errors="coerce").fillna(0)
+
+    available = numeric_series("available_inventory")
+    unconfirmed = numeric_series("unconfirmed_line_item_qty")
+    on_order = numeric_series("on_order")
+    prearrival = numeric_series("pre_arrival_total_quantity")
+    rb6_inventory["_stock_position"] = np.maximum(0, available - unconfirmed) + on_order + prearrival
+
+    velocity_columns = [
+        "last_30_day_sales_qty_across_all_accounts",
+        "last_60_day_sales_qty_across_all_accounts",
+        "last_90_day_sales_qty_across_all_accounts",
+    ]
+    rb6_inventory["_rb6_velocity_signal"] = 0
+    for column in velocity_columns:
+        if column in rb6_inventory.columns:
+            rb6_inventory["_rb6_velocity_signal"] += pd.to_numeric(
+                rb6_inventory[column], errors="coerce"
+            ).fillna(0)
+
+    rb6_inventory["_vintage_sort"] = pd.to_numeric(
+        rb6_inventory["vintage"] if "vintage" in rb6_inventory.columns else pd.Series([0] * len(rb6_inventory)),
+        errors="coerce",
+    ).fillna(0)
+
+    rb6_inventory = rb6_inventory.sort_values(
+        [
+            "planning_sku_norm",
+            "_stock_position",
+            "_rb6_velocity_signal",
+            "_vintage_sort",
+            "_source_order",
+        ],
+        ascending=[True, False, False, False, True],
+    )
+    rb6_inventory = rb6_inventory.drop_duplicates(subset=["planning_sku_norm"], keep="first").copy()
+    return rb6_inventory.drop(
+        columns=["_source_order", "_stock_position", "_rb6_velocity_signal", "_vintage_sort"],
+        errors="ignore",
+    )
+
+
 def calculate_reorder_recommendations(rb6_data, sales_data):
     """
     Calculate wine reorder recommendations using RB6 inventory and RADs sales data.
@@ -76,11 +126,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     
     # --- STEP 2: CREATE CLEAN RB6 SKU INVENTORY FRAME ---
     # Ensure planning_sku is unique before any merge - RB6 is the source of truth for inventory
-    rb6_inventory = rb6_data.copy()
-    
-    # Use planning_sku_norm as the unique key (already normalized)
-    # Keep first occurrence to get live item code
-    rb6_inventory = rb6_inventory.drop_duplicates(subset=['planning_sku_norm'], keep='first').copy()
+    rb6_inventory = _choose_live_rb6_rows(rb6_data)
     
     # Rename planning_sku_norm to planning_sku for final output
     rb6_inventory['planning_sku'] = rb6_inventory['planning_sku_norm']

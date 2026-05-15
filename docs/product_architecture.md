@@ -93,6 +93,8 @@ Calculated headers in the buyer workbench should explain their formulas in hover
 - Weeks with Recommended = `(True Available + On Order + Recommended Qty) / Weekly Velocity`.
 - Estimated Cost = `Recommended Qty x FOB`.
 
+Supplier logistics are now expected to live in Supabase `suppliers`, including ETA, pickup location, freight forwarder, order frequency, notes, active status, and `trucking_cost_per_bottle`. `importers.csv` remains a seed/fallback source until the database table is fully populated.
+
 ## Logistics Rollups
 
 The order summary should aggregate hierarchically:
@@ -143,6 +145,6 @@ After the project exists:
 2. Install dependencies with `pip install -r requirements.txt`.
 3. Run `python scripts/check_supabase_connection.py` to verify credentials and table writes.
 4. Decide user roles for the first release: likely `admin`, `buyer`, and `viewer`.
-5. Decide whether the first hosted app is Streamlit-backed or a new authenticated web app backed by the same Supabase schema.
+5. Decide whether the first hosted app is Streamlit-backed or a new authenticated web app backed by the same Supabase schema. Wix should be treated as a possible entry point, link, or embed surface rather than the main application runtime.
 
 See `docs/supabase_setup.md` for the project-specific setup checklist.

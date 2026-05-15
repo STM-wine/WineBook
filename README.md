@@ -26,7 +26,7 @@ Keep the GRW converter separate unless the business explicitly decides to merge 
 3. `scripts/process_daily_vinosmith_email.py` downloads the matching attachments, uploads raw files to Supabase Storage, and runs the shared Python pipeline.
 4. `stem_order.ingest` detects headers, normalizes columns, and prepares source frames.
 5. `wine_calculator.py` calculates velocity, coverage, forecasts, risk, and recommended quantities.
-6. `stem_order.pipeline` adds supplier logistics from local `importers.csv` when available.
+6. `stem_order.pipeline` adds supplier logistics from Supabase `suppliers`, with local `importers.csv` as a seed/fallback.
 7. The app reads the latest completed Supabase report run by default.
 8. Buyers review recommendations by supplier, adjust target weeks or recommended quantities, approve rows, and create supplier PO drafts/exports for QuickBooks entry.
 
@@ -65,7 +65,7 @@ WineBook/
 └── modules/po_tools/              # GRW converter internals
 ```
 
-Local source exports such as RB6/RADs `.xlsx` files, PDFs, and `.env` are intentionally ignored. `importers.csv` is tracked as app reference data until supplier logistics move into an editable database table.
+Local source exports such as RB6/RADs `.xlsx` files, PDFs, and `.env` are intentionally ignored. `importers.csv` is tracked as seed/reference data; normal supplier-logistics management happens in the Supplier Hub tab and persists to Supabase.
 
 ## Setup
 
@@ -88,6 +88,8 @@ streamlit run app.py
 ```
 
 The app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. Supplier Hub is currently local/session-state only; it is a foundation for supplier wine search, manual wine entry, pricing, requests, pending product creation, and price-change tracking.
+
+Supplier logistics are managed in the Supplier Hub tab and stored in Supabase `suppliers` when the latest supplier-logistics migration has been applied. `importers.csv` remains a seed/fallback file, not the normal management workflow.
 
 GRW Invoice Converter:
 

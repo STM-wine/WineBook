@@ -20,7 +20,8 @@ WineBook is now a Supabase-backed ordering dashboard with automated daily ingest
 - Velocity Trend compares the most recent 30-day sales window with the prior 30-day window and displays `New` when prior sales are zero but current sales exist.
 - Calculated buyer-table columns include hover help with formulas.
 - The legacy upload-first fallback is hidden from the app surface; reruns should use automation/manual GitHub dispatch or local scripts.
-- Supplier Hub has been ported as a local/session-state MVP foundation for supplier wine search, manual wine entry, bottle-level pricing, requests, pending product creation, and price-change tracking.
+- Supplier Hub has been ported as an MVP foundation for supplier wine search, manual wine entry, bottle-level pricing, requests, supplier logistics management, pending product creation, and price-change tracking.
+- Supplier logistics can be edited in-app and stored in Supabase `suppliers`; `importers.csv` is now a seed/fallback source.
 
 ## Business Direction
 
@@ -45,10 +46,11 @@ The product goal is a simple buyer workflow:
 
 1. Watch one weekday morning run after the latest Supabase/GitHub automation changes to confirm ingestion remains quiet after success.
 2. Spot-check True Available, On Order, and trend values against Mark's source spreadsheets.
-3. Validate Supplier Hub terminology, pricing rules, and request workflow with Mark before adding persistence.
-4. Work through Mark's next Linear issues against the buyer workbench.
-5. Tighten the PO draft output around the actual QuickBooks entry workflow.
-6. Decide the first hosted release strategy.
+3. Apply the supplier-logistics and PO laid-in-cost migrations in Supabase, then seed suppliers from `importers.csv` in the Supplier Hub logistics tab.
+4. Validate Supplier Hub terminology, pricing rules, and request workflow with Mark before adding persistence for catalog wines/requests.
+5. Work through Mark's next Linear issues against the buyer workbench.
+6. Tighten the PO draft output around the actual QuickBooks entry workflow.
+7. Decide the first hosted release strategy.
 
 ## Near-Term Product Work
 
@@ -83,14 +85,16 @@ The product goal is a simple buyer workflow:
 
 ## Hosting / Publication Questions
 
-Current app is still Streamlit on localhost. For the first non-local release, likely options are:
+Current app is still Streamlit on localhost. Wix can be part of the access path, but it should not be treated as the runtime for the ordering application. Wix supports embedding an external HTTPS site or widget in an iframe, and Velo custom elements can be hosted on Wix or an external server. Those are useful integration points, but they do not make Wix a natural home for the Python ingestion/calculation worker, Supabase service-role operations, or a large buyer table UI.
+
+For the first non-local release, likely options are:
 
 - Streamlit Community Cloud or another Streamlit host for fastest path.
 - A small hosted VM/container running Streamlit for more control.
-- A new web frontend backed by Supabase for a more durable app shape.
-- Eventually embedding or linking from Stem's existing website after authentication is settled.
+- A new web frontend backed by Supabase for a more durable app shape, with the Python worker retained for ingestion/calculation.
+- Link to the app from Stem's Wix site, or embed it only if iframe sizing/auth behavior is acceptable.
 
-Near-term recommendation: keep Streamlit while buyer workflow is still changing quickly, then choose the hosted path once the Linear issues clarify the stable surface.
+Near-term recommendation: keep Streamlit while buyer workflow is still changing quickly, then publish it as a separate authenticated app or subdomain once the current feature scope settles. Treat Wix as the marketing-site shell or launch point, not the operational backend.
 
 ## Data Roadmap
 
@@ -98,7 +102,7 @@ Current transitional feeds:
 
 - RB6 inventory export
 - RADs sales history export
-- tracked `importers.csv` logistics reference data
+- Supabase `suppliers` logistics table, seeded from tracked `importers.csv` as needed
 
 Next expected feed:
 

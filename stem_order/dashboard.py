@@ -25,10 +25,10 @@ DASHBOARD_COLUMNS = [
     "risk_level",
     "recommended_qty_rounded",
     "recommendation_status",
+    "trucking_cost_per_bottle",
     "order_cost",
     "landed_cost",
     "product_code",
-    "planning_sku",
 ]
 
 
@@ -36,7 +36,6 @@ PO_COLUMNS = [
     "supplier_name",
     "product_name",
     "product_code",
-    "planning_sku",
     "approved_qty",
     "fob",
     "trucking_cost_per_bottle",
@@ -217,6 +216,7 @@ def dashboard_metrics(df: pd.DataFrame) -> DashboardMetrics:
         return DashboardMetrics(0, 0, 0, 0, 0.0, 0)
 
     order_df = df[df.get("recommended_qty_rounded", 0) > 0]
+    cost_col = "landed_cost" if "landed_cost" in df else "order_cost"
     return DashboardMetrics(
         rows=len(df),
         urgent_skus=int((df["reorder_status"] == "URGENT").sum()) if "reorder_status" in df else 0,
@@ -224,7 +224,7 @@ def dashboard_metrics(df: pd.DataFrame) -> DashboardMetrics:
         recommended_bottles=int(df["recommended_qty_rounded"].sum())
         if "recommended_qty_rounded" in df
         else 0,
-        estimated_order_cost=float(df["order_cost"].sum()) if "order_cost" in df else 0.0,
+        estimated_order_cost=float(df[cost_col].sum()) if cost_col in df else 0.0,
         suppliers_with_orders=order_df["supplier_name"].nunique()
         if "supplier_name" in order_df
         else 0,
@@ -246,7 +246,11 @@ def approval_metrics(df: pd.DataFrame) -> ApprovalMetrics:
 
     if "fob" in approved_df:
         fob = pd.to_numeric(approved_df["fob"], errors="coerce")
-        approved_cost = float((fob.fillna(0) * approved_df.get("approved_qty", 0)).sum())
+        if "trucking_cost_per_bottle" in approved_df:
+            freight = pd.to_numeric(approved_df["trucking_cost_per_bottle"], errors="coerce").fillna(0)
+        else:
+            freight = pd.Series([0] * len(approved_df), index=approved_df.index)
+        approved_cost = float(((fob.fillna(0) + freight) * approved_df.get("approved_qty", 0)).sum())
     else:
         approved_cost = float(approved_df.get("order_cost", pd.Series(dtype=float)).sum())
 
@@ -310,10 +314,15 @@ def importer_workbench_summary(df: pd.DataFrame, po_sent_suppliers: set[str] | N
     for supplier, group in df.groupby("supplier_name", dropna=False):
         supplier_name = "Unassigned" if pd.isna(supplier) or supplier == "" else supplier
         suggested_qty = int(pd.to_numeric(group.get("recommended_qty_rounded", 0), errors="coerce").fillna(0).sum())
-        suggested_value = float(pd.to_numeric(group.get("order_cost", 0), errors="coerce").fillna(0).sum())
+        suggested_value = float(pd.to_numeric(group.get("landed_cost", group.get("order_cost", 0)), errors="coerce").fillna(0).sum())
         approved_qty = pd.to_numeric(group.get("approved_qty", 0), errors="coerce").fillna(0)
         if "fob" in group:
-            approved_value = float((pd.to_numeric(group["fob"], errors="coerce").fillna(0) * approved_qty).sum())
+            fob = pd.to_numeric(group["fob"], errors="coerce").fillna(0)
+            if "trucking_cost_per_bottle" in group:
+                freight = pd.to_numeric(group["trucking_cost_per_bottle"], errors="coerce").fillna(0)
+            else:
+                freight = pd.Series([0] * len(group), index=group.index)
+            approved_value = float(((fob + freight) * approved_qty).sum())
         else:
             approved_value = 0.0
         rows.append(
@@ -387,6 +396,16 @@ def filter_recommendations(
 def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     available = [col for col in DASHBOARD_COLUMNS if col in df.columns]
     display = df[available].copy()
+    if "trucking_cost_per_bottle" in display:
+        qty = pd.to_numeric(display.get("recommended_qty_rounded", 0), errors="coerce").fillna(0)
+        freight = pd.to_numeric(display["trucking_cost_per_bottle"], errors="coerce").fillna(0)
+        display["total_laid_in_cost"] = qty * freight
+        display = display.drop(columns=["trucking_cost_per_bottle"])
+    elif "landed_cost" in display and "order_cost" in display:
+        landed = pd.to_numeric(display["landed_cost"], errors="coerce").fillna(0)
+        wine = pd.to_numeric(display["order_cost"], errors="coerce").fillna(0)
+        display["total_laid_in_cost"] = (landed - wine).clip(lower=0)
+
     rename_map = {
         "supplier_name": "Supplier",
         "product_name": "Wine",
@@ -403,13 +422,21 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "reorder_status": "Status",
         "recommended_qty_rounded": "Recommended Qty",
         "last_30_day_sales": "30d Sales",
+        "prior_30_day_sales": "Prior 30d Sales",
         "weeks_on_hand_with_on_order": "Weeks w/ On Order",
         "order_timing_risk": "Timing Risk",
-        "order_cost": "Est. Cost",
-        "landed_cost": "Landed Cost",
-        "planning_sku": "Planning SKU",
+        "order_cost": "Total Wine Cost",
+        "total_laid_in_cost": "Total Laid In Cost",
+        "landed_cost": "Estimated Cost",
     }
     display = display.rename(columns=rename_map)
+
+    sort_columns = [col for col in ["Supplier", "Wine"] if col in display]
+    if sort_columns:
+        display = display.sort_values(
+            sort_columns,
+            key=lambda series: series.fillna("").astype(str).str.lower(),
+        ).reset_index(drop=True)
 
     for col in ["Recommended Qty", "30d Sales", "True Available", "On Order", "Next 30d Forecast"]:
         if col in display:
@@ -432,11 +459,34 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             lambda x: f"{x:.1f}" if pd.notna(x) else ""
         )
 
-    for col in ["Est. Cost", "Landed Cost"]:
+    for col in ["Total Wine Cost", "Total Laid In Cost", "Estimated Cost"]:
         if col in display:
             display[col] = display[col].apply(
                 lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00"
             )
+
+    preferred_order = [
+        "Supplier",
+        "Wine",
+        "BTG",
+        "Core",
+        "True Available",
+        "On Order",
+        "30d Sales",
+        "Prior 30d Sales",
+        "Next 30d Forecast",
+        "Weekly Velocity",
+        "Velocity Trend",
+        "Risk",
+        "Recommended Qty",
+        "Approval",
+        "Total Wine Cost",
+        "Total Laid In Cost",
+        "Estimated Cost",
+        "Code",
+    ]
+    ordered = [col for col in preferred_order if col in display]
+    display = display[ordered + [col for col in display.columns if col not in ordered]]
 
     return display
 
@@ -638,16 +688,17 @@ def supplier_summary(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["Supplier", "SKUs", "Urgent", "Recommended Qty", "Est. Cost"])
 
+    cost_col = "landed_cost" if "landed_cost" in df else "order_cost"
     grouped = (
         df.groupby("supplier_name", dropna=False)
         .agg(
             skus=("product_name", "count"),
             urgent=("reorder_status", lambda s: int((s == "URGENT").sum())),
             recommended_qty=("recommended_qty_rounded", "sum"),
-            order_cost=("order_cost", "sum"),
+            estimated_cost=(cost_col, "sum"),
         )
         .reset_index()
-        .sort_values(["urgent", "order_cost"], ascending=[False, False])
+        .sort_values(["urgent", "estimated_cost"], ascending=[False, False])
     )
     grouped = grouped.rename(
         columns={
@@ -655,7 +706,7 @@ def supplier_summary(df: pd.DataFrame) -> pd.DataFrame:
             "skus": "SKUs",
             "urgent": "Urgent",
             "recommended_qty": "Recommended Qty",
-            "order_cost": "Est. Cost",
+            "estimated_cost": "Est. Cost",
         }
     )
     grouped["Recommended Qty"] = grouped["Recommended Qty"].fillna(0).astype(int)
@@ -728,23 +779,38 @@ def po_export_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         po_df["approved_qty"] = pd.to_numeric(po_df["approved_qty"], errors="coerce").fillna(0).astype(int)
     if "fob" in po_df.columns:
         po_df["fob"] = pd.to_numeric(po_df["fob"], errors="coerce").fillna(0)
-        po_df["Estimated Cost"] = po_df["fob"] * po_df["approved_qty"]
     if "trucking_cost_per_bottle" in po_df.columns:
         po_df["trucking_cost_per_bottle"] = pd.to_numeric(
             po_df["trucking_cost_per_bottle"], errors="coerce"
         ).fillna(0)
-    return po_df.rename(
+    else:
+        po_df["trucking_cost_per_bottle"] = 0
+    if "fob" in po_df.columns and "approved_qty" in po_df.columns:
+        po_df["Total Wine Cost"] = po_df["fob"] * po_df["approved_qty"]
+        po_df["Total Laid In Cost"] = po_df["trucking_cost_per_bottle"] * po_df["approved_qty"]
+        po_df["Estimated Cost"] = po_df["Total Wine Cost"] + po_df["Total Laid In Cost"]
+    display = po_df.rename(
         columns={
             "supplier_name": "Supplier",
             "product_name": "Wine",
             "product_code": "Code",
-            "planning_sku": "Planning SKU",
             "approved_qty": "Quantity",
             "fob": "FOB",
             "trucking_cost_per_bottle": "Laid In Cost",
-            "order_cost": "Recommended Cost",
         }
     )
+    columns = [
+        "Supplier",
+        "Wine",
+        "Code",
+        "Quantity",
+        "FOB",
+        "Laid In Cost",
+        "Total Wine Cost",
+        "Total Laid In Cost",
+        "Estimated Cost",
+    ]
+    return display[[col for col in columns if col in display.columns]]
 
 
 def _copy_row_style(sheet, source_row: int, target_row: int, max_column: int) -> None:
@@ -781,8 +847,14 @@ def po_template_xlsx_bytes(po_df: pd.DataFrame, template_path: str | Path) -> by
         ["Supplier", "Wine"],
         key=lambda series: series.fillna("").astype(str).str.lower(),
     )
-    for offset, row in enumerate(ordered.to_dict(orient="records")):
-        excel_row = start_row + offset
+    excel_row = start_row
+    previous_supplier = None
+    for row in ordered.to_dict(orient="records"):
+        supplier = row.get("Supplier", "")
+        if previous_supplier is not None and supplier != previous_supplier:
+            _copy_row_style(sheet, start_row, excel_row, max_column)
+            excel_row += 1
+        previous_supplier = supplier
         _copy_row_style(sheet, start_row, excel_row, max_column)
         sheet.cell(excel_row, 1).value = row.get("Supplier", "")
         sheet.cell(excel_row, 2).value = ""
@@ -791,6 +863,7 @@ def po_template_xlsx_bytes(po_df: pd.DataFrame, template_path: str | Path) -> by
         sheet.cell(excel_row, 5).value = row.get("Wine", "")
         sheet.cell(excel_row, 6).value = _clean_float(row.get("FOB"), 0.0)
         sheet.cell(excel_row, 7).value = _clean_float(row.get("Laid In Cost"), 0.0)
+        excel_row += 1
 
     buffer = BytesIO()
     workbook.save(buffer)
@@ -798,19 +871,28 @@ def po_template_xlsx_bytes(po_df: pd.DataFrame, template_path: str | Path) -> by
 
 
 def po_draft_lines_dataframe(lines: list[dict]) -> pd.DataFrame:
-    columns = ["Wine", "Code", "Planning SKU", "Quantity", "FOB", "Estimated Cost"]
+    columns = ["Wine", "Code", "Quantity", "FOB", "Laid In Cost", "Total Wine Cost", "Total Laid In Cost", "Estimated Cost"]
     if not lines:
         return pd.DataFrame(columns=columns)
 
     df = pd.DataFrame(lines)
+    def numeric_column(name: str, default=0) -> pd.Series:
+        value = df.get(name)
+        if value is None:
+            value = pd.Series([default] * len(df), index=df.index)
+        parsed = pd.to_numeric(value, errors="coerce")
+        return parsed if default is None else parsed.fillna(default)
+
     display = pd.DataFrame(
         {
             "Wine": df.get("product_name", pd.Series(dtype=str)).fillna(""),
             "Code": df.get("product_code", pd.Series(dtype=str)).fillna(""),
-            "Planning SKU": df.get("planning_sku", pd.Series(dtype=str)).fillna(""),
-            "Quantity": pd.to_numeric(df.get("approved_qty", 0), errors="coerce").fillna(0).astype(int),
-            "FOB": pd.to_numeric(df.get("fob", 0), errors="coerce").fillna(0),
-            "Estimated Cost": pd.to_numeric(df.get("line_cost", 0), errors="coerce").fillna(0),
+            "Quantity": numeric_column("approved_qty").astype(int),
+            "FOB": numeric_column("fob"),
+            "Laid In Cost": numeric_column("trucking_cost_per_bottle"),
+            "Total Wine Cost": numeric_column("wine_cost", None).fillna(numeric_column("line_cost")),
+            "Total Laid In Cost": numeric_column("laid_in_cost"),
+            "Estimated Cost": numeric_column("landed_cost", None).fillna(numeric_column("line_cost")),
         }
     )
     return display[columns]

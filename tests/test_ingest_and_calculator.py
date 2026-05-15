@@ -20,6 +20,7 @@ from stem_order.ingest import (
     map_rads_columns,
     map_rb6_columns,
     normalize_columns,
+    supplier_logistics_rows_to_frame,
 )
 from stem_order.pipeline import format_display_dataframe, select_raw_output
 from stem_order.dashboard import (
@@ -30,6 +31,7 @@ from stem_order.dashboard import (
     california_truck_summary,
     dashboard_metrics,
     filter_recommendations,
+    format_dashboard_dataframe,
     importer_groups,
     importer_workbench_summary,
     importer_workflow_status,
@@ -43,6 +45,7 @@ from stem_order.dashboard import (
     risk_counts,
 )
 from stem_order.supabase_repository import SupabaseRepository
+from components.supplier_catalog.supplier_logistics import _rows_to_editor
 
 
 class IngestTests(unittest.TestCase):
@@ -131,6 +134,23 @@ class IngestTests(unittest.TestCase):
         self.assertIn("laid_in_per_bottle", data.columns)
         self.assertEqual(data.loc[0, "trucking_cost_per_bottle"], 1.25)
         self.assertEqual(data.loc[0, "laid_in_per_bottle"], 1.25)
+
+    def test_supplier_rows_shape_like_importer_logistics(self):
+        data = supplier_logistics_rows_to_frame(
+            [
+                {
+                    "name": "Supplier A",
+                    "eta_days": 14,
+                    "pick_up_location": "California",
+                    "trucking_cost_per_bottle": 1.25,
+                    "active": True,
+                }
+            ]
+        )
+
+        self.assertEqual(data.loc[0, "importer_name"], "Supplier A")
+        self.assertEqual(data.loc[0, "importer_name_clean"], "supplier a")
+        self.assertEqual(data.loc[0, "trucking_cost_per_bottle"], 1.25)
 
 
 class CalculatorTests(unittest.TestCase):
@@ -236,6 +256,45 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result.loc["Allocated Wine 2025 12/750ml", "true_available"], 7)
         self.assertEqual(result.loc["Oversold Wine 2025 12/750ml", "true_available"], 0)
 
+    def test_live_rb6_row_prefers_stocked_current_vintage_for_non_vintage_sku(self):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": "Prost Riesling 2024 12/750ml",
+                    "code": "GWC000173",
+                    "vintage": 2024,
+                    "available_inventory": 0,
+                    "on_order": 0,
+                    "fob": 6.5,
+                    "pack_size": 12,
+                    "last_30_day_sales_qty_across_all_accounts": 0,
+                },
+                {
+                    "name": "Prost Riesling 2025 12/750ml",
+                    "code": "GWC000194",
+                    "vintage": 2025,
+                    "available_inventory": 702,
+                    "on_order": 0,
+                    "fob": 6.5,
+                    "pack_size": 12,
+                    "last_30_day_sales_qty_across_all_accounts": 642,
+                },
+            ]
+        )
+        sales = pd.DataFrame(
+            [
+                {"wine_name": "Prost Riesling 2025 12/750ml", "quantity": 642, "date": "2026-05-12"},
+                {"wine_name": "Prost Riesling 2024 12/750ml", "quantity": 144, "date": "2026-04-01"},
+            ]
+        )
+
+        result = calculate_reorder_recommendations(rb6, sales).iloc[0]
+
+        self.assertEqual(result["Name"], "Prost Riesling 2025 12/750ml")
+        self.assertEqual(result["product_code"], "GWC000194")
+        self.assertEqual(result["true_available"], 702)
+        self.assertEqual(result["planning_sku"], "prost riesling 12/750ml")
+
     def test_sales_windows_forecasts_and_velocity_trend_are_calculated(self):
         rb6 = pd.DataFrame(
             [
@@ -334,6 +393,75 @@ class CalculatorTests(unittest.TestCase):
 
 
 class DashboardTests(unittest.TestCase):
+    def test_supplier_logistics_editor_uses_text_importer_ids(self):
+        editor = _rows_to_editor(
+            [
+                {
+                    "name": "Supplier A",
+                    "importer_id": 12345,
+                    "eta_days": 15,
+                    "trucking_cost_per_bottle": 1.25,
+                    "active": True,
+                }
+            ],
+            pd.DataFrame(),
+        )
+
+        self.assertEqual(editor.loc[0, "importer_id"], "12345")
+        self.assertEqual(editor["importer_id"].dtype, object)
+
+    def test_all_order_review_display_sorts_and_uses_landed_costs(self):
+        df = recommendations_to_dataframe(
+            [
+                {
+                    "supplier_name": "Supplier B",
+                    "product_name": "Zinfandel",
+                    "product_code": "B2",
+                    "planning_sku": "zinfandel",
+                    "recommended_qty_rounded": 10,
+                    "last_30_day_sales": 5,
+                    "order_cost": 100.0,
+                    "landed_cost": 125.0,
+                    "trucking_cost_per_bottle": 2.5,
+                },
+                {
+                    "supplier_name": "Supplier A",
+                    "product_name": "Merlot",
+                    "product_code": "A2",
+                    "planning_sku": "merlot",
+                    "recommended_qty_rounded": 6,
+                    "last_30_day_sales": 8,
+                    "order_cost": 72.0,
+                    "landed_cost": 90.0,
+                    "trucking_cost_per_bottle": 3.0,
+                },
+                {
+                    "supplier_name": "Supplier A",
+                    "product_name": "Cabernet",
+                    "product_code": "A1",
+                    "planning_sku": "cabernet",
+                    "recommended_qty_rounded": 12,
+                    "last_30_day_sales": 9,
+                    "order_cost": 120.0,
+                    "landed_cost": 138.0,
+                    "trucking_cost_per_bottle": 1.5,
+                },
+            ]
+        )
+
+        display = format_dashboard_dataframe(df)
+
+        self.assertEqual(display["Supplier"].tolist(), ["Supplier A", "Supplier A", "Supplier B"])
+        self.assertEqual(display["Wine"].tolist(), ["Cabernet", "Merlot", "Zinfandel"])
+        self.assertNotIn("Planning SKU", display.columns)
+        self.assertNotIn("Recommended Cost", display.columns)
+        self.assertIn("Total Wine Cost", display.columns)
+        self.assertIn("Total Laid In Cost", display.columns)
+        self.assertIn("Estimated Cost", display.columns)
+        self.assertEqual(display.loc[0, "Total Wine Cost"], "$120.00")
+        self.assertEqual(display.loc[0, "Total Laid In Cost"], "$18.00")
+        self.assertEqual(display.loc[0, "Estimated Cost"], "$138.00")
+
     def test_dashboard_filters_and_po_export(self):
         df = recommendations_to_dataframe(
             [
@@ -727,6 +855,11 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(po_export.loc[0, "Quantity"], 12)
         self.assertEqual(po_export.loc[0, "FOB"], 10)
         self.assertEqual(po_export.loc[0, "Laid In Cost"], 1.25)
+        self.assertNotIn("Planning SKU", po_export.columns)
+        self.assertNotIn("Recommended Cost", po_export.columns)
+        self.assertEqual(po_export.loc[0, "Total Wine Cost"], 120)
+        self.assertEqual(po_export.loc[0, "Total Laid In Cost"], 15)
+        self.assertEqual(po_export.loc[0, "Estimated Cost"], 135)
         self.assertEqual(lines.loc[0, "Quantity"], 12)
         self.assertEqual(lines.loc[0, "Estimated Cost"], 120)
         self.assertEqual(drafts.loc[0, "Draft ID"], "abcdef12")
@@ -743,6 +876,15 @@ class DashboardTests(unittest.TestCase):
                     "Quantity": 12,
                     "FOB": 10.5,
                     "Laid In Cost": 1.25,
+                }
+                ,
+                {
+                    "Supplier": "Supplier B",
+                    "Wine": "Wine B 2024 12/750ml",
+                    "Code": "B1",
+                    "Quantity": 6,
+                    "FOB": 12,
+                    "Laid In Cost": 2,
                 }
             ]
         )
@@ -769,6 +911,8 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(sheet["E4"].value, "Wine A 2024 12/750ml")
         self.assertEqual(sheet["F4"].value, 10.5)
         self.assertEqual(sheet["G4"].value, 1.25)
+        self.assertIsNone(sheet["A5"].value)
+        self.assertEqual(sheet["A6"].value, "Supplier B")
 
     def test_active_po_draft_message_ignores_completed_and_cancelled_drafts(self):
         self.assertEqual(
@@ -807,6 +951,7 @@ class SupabaseRepositoryTests(unittest.TestCase):
                 "approved_qty": 6,
                 "order_cost": 120.0,
                 "fob": "10.0",
+                "trucking_cost_per_bottle": 1.25,
                 "diagnostics": {"fob": 10.0},
             },
         )
@@ -819,6 +964,10 @@ class SupabaseRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["approved_qty"], 6)
         self.assertEqual(payload["fob"], 10.0)
         self.assertEqual(payload["line_cost"], 60.0)
+        self.assertEqual(payload["trucking_cost_per_bottle"], 1.25)
+        self.assertEqual(payload["wine_cost"], 60.0)
+        self.assertEqual(payload["laid_in_cost"], 7.5)
+        self.assertEqual(payload["landed_cost"], 67.5)
 
 
 class DailyEmailIngestTests(unittest.TestCase):

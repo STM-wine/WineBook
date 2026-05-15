@@ -7,6 +7,7 @@ import pandas as pd
 
 
 IMPORTER_LOGISTICS_COLUMNS = [
+    "importer_name",
     "importer_name_clean",
     "importer_id",
     "eta_days",
@@ -323,6 +324,32 @@ def empty_importers_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=IMPORTER_LOGISTICS_COLUMNS)
 
 
+def supplier_logistics_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
+    """Shape Supabase supplier rows like importer logistics data."""
+    if not rows:
+        return empty_importers_frame()
+
+    data = pd.DataFrame(rows).copy()
+    rename_map = {
+        "name": "importer_name",
+        "pickup_location": "pick_up_location",
+    }
+    data = data.rename(columns={source: target for source, target in rename_map.items() if source in data.columns})
+    if "active" in data.columns:
+        data = data[data["active"].fillna(True).astype(bool)].copy()
+    if "trucking_cost_per_bottle" not in data.columns:
+        data["trucking_cost_per_bottle"] = 0
+    if "eta_days" not in data.columns:
+        data["eta_days"] = None
+    if "importer_name" not in data.columns:
+        return empty_importers_frame()
+    data["importer_name_clean"] = data["importer_name"].apply(clean_importer_name)
+    for column in IMPORTER_LOGISTICS_COLUMNS:
+        if column not in data.columns:
+            data[column] = None
+    return data[IMPORTER_LOGISTICS_COLUMNS].copy()
+
+
 __all__ = [
     "IMPORTER_LOGISTICS_COLUMNS",
     "clean_importer_name",
@@ -335,4 +362,5 @@ __all__ = [
     "normalize_columns",
     "normalize_rads_dataframe",
     "normalize_rb6_dataframe",
+    "supplier_logistics_rows_to_frame",
 ]

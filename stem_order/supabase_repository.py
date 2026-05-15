@@ -372,6 +372,34 @@ class SupabaseRepository:
                 return report_run, recommendations
         return None, []
 
+    def get_supplier_logistics(self, include_inactive: bool = False) -> list[dict[str, Any]]:
+        query = self.client.table("suppliers").select("*").order("name")
+        if not include_inactive:
+            query = query.eq("active", True)
+        result = query.execute()
+        return result.data or []
+
+    def upsert_supplier_logistics(self, suppliers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        payloads = [self._supplier_payload(row) for row in suppliers if clean_value(row.get("name") or row.get("importer_name"))]
+        if not payloads:
+            return []
+        saved = []
+        new_payloads = []
+        for payload in payloads:
+            supplier_id = payload.pop("id", None)
+            if supplier_id:
+                result = self.client.table("suppliers").update(payload).eq("id", supplier_id).execute()
+                saved.extend(result.data or [])
+            else:
+                new_payloads.append(payload)
+        if new_payloads:
+            result = self.client.table("suppliers").upsert(new_payloads, on_conflict="name").execute()
+            saved.extend(result.data or [])
+        return saved
+
+    def deactivate_supplier(self, supplier_id: str) -> dict[str, Any]:
+        return self._update_one("suppliers", supplier_id, {"active": False})
+
     def _insert_one(self, table: str, payload: dict[str, Any]) -> dict[str, Any]:
         result = self.client.table(table).insert(payload).execute()
         if not result.data:
@@ -433,11 +461,32 @@ class SupabaseRepository:
             },
         }
 
+    def _supplier_payload(self, row: dict[str, Any]) -> dict[str, Any]:
+        name = clean_value(row.get("name") or row.get("importer_name"))
+        payload = {
+            "name": name,
+            "importer_id": clean_value(row.get("importer_id")),
+            "eta_days": int(clean_value(row.get("eta_days"), 0) or 0),
+            "pick_up_location": clean_value(row.get("pick_up_location") or row.get("pickup_location")),
+            "freight_forwarder": clean_value(row.get("freight_forwarder")),
+            "order_frequency": clean_value(row.get("order_frequency")),
+            "trucking_cost_per_bottle": clean_value(row.get("trucking_cost_per_bottle") or row.get("laid_in_per_bottle"), 0),
+            "notes": clean_value(row.get("notes")),
+            "active": bool_value(row.get("active", True)),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if row.get("id"):
+            payload["id"] = row["id"]
+        return payload
+
     def _purchase_order_line_payload(self, purchase_order_draft_id: str, row: dict[str, Any]) -> dict[str, Any]:
         diagnostics = row.get("diagnostics") if isinstance(row.get("diagnostics"), dict) else {}
         recommended_qty = int(clean_value(row.get("recommended_qty_rounded"), 0) or 0)
         approved_qty = int(clean_value(row.get("approved_qty"), 0) or 0)
         fob = clean_numeric(clean_value(row.get("fob"), clean_value(diagnostics.get("fob"))))
+        trucking = clean_numeric(clean_value(row.get("trucking_cost_per_bottle"), 0), 0) or 0
+        wine_cost = (fob or 0) * approved_qty
+        laid_in_cost = trucking * approved_qty
         return {
             "purchase_order_draft_id": purchase_order_draft_id,
             "recommendation_id": clean_value(row.get("id")),
@@ -447,7 +496,11 @@ class SupabaseRepository:
             "recommended_qty": recommended_qty,
             "approved_qty": approved_qty,
             "fob": fob,
-            "line_cost": fob * approved_qty if fob is not None else clean_value(row.get("order_cost"), 0),
+            "trucking_cost_per_bottle": trucking,
+            "wine_cost": wine_cost,
+            "laid_in_cost": laid_in_cost,
+            "landed_cost": wine_cost + laid_in_cost,
+            "line_cost": wine_cost,
         }
 
 
