@@ -85,6 +85,53 @@ def _choose_live_rb6_rows(rb6_data: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _large_weeks_on_hand_sentinel(true_available, weekly_velocity) -> float | None:
+    true_available = pd.to_numeric(true_available, errors="coerce")
+    weekly_velocity = pd.to_numeric(weekly_velocity, errors="coerce")
+    if pd.isna(weekly_velocity) or weekly_velocity <= 0:
+        return 9999.0 if pd.notna(true_available) and true_available > 0 else 0.0
+    return round(float(true_available) / float(weekly_velocity), 2)
+
+
+def _inventory_risk(row) -> tuple[str, str]:
+    """Operational inventory risk based on RB6 stock value and RADs movement."""
+    inventory_value = pd.to_numeric(row.get("inventory_value", 0), errors="coerce")
+    weekly_velocity = pd.to_numeric(row.get("weekly_velocity", 0), errors="coerce")
+    weeks_on_hand = pd.to_numeric(row.get("weeks_on_hand", 0), errors="coerce")
+    days_since_last_sale = pd.to_numeric(row.get("days_since_last_sale"), errors="coerce")
+    last_90_day_sales = pd.to_numeric(row.get("last_90_day_sales", 0), errors="coerce")
+    is_core_or_btg = bool(row.get("is_core_bool", False)) or bool(row.get("is_btg_bool", False))
+
+    inventory_value = 0 if pd.isna(inventory_value) else float(inventory_value)
+    weekly_velocity = 0 if pd.isna(weekly_velocity) else float(weekly_velocity)
+    weeks_on_hand = 0 if pd.isna(weeks_on_hand) else float(weeks_on_hand)
+    last_90_day_sales = 0 if pd.isna(last_90_day_sales) else float(last_90_day_sales)
+    has_last_sale_gap = pd.notna(days_since_last_sale)
+    days_value = float(days_since_last_sale) if has_last_sale_gap else None
+
+    if last_90_day_sales <= 0 and inventory_value > 500:
+        return "FREEZE", "No sales in the last 90 days with more than $500 of inventory on hand."
+
+    if weeks_on_hand > 26:
+        if is_core_or_btg:
+            return "HIGH RISK", "Core/BTG item with high weeks on hand; review before freezing."
+        return "FREEZE", "More than 26 weeks of inventory on hand."
+
+    if has_last_sale_gap and days_value > 60:
+        return "HIGH RISK", "No RADs sale in more than 60 days."
+    if weeks_on_hand > 16:
+        return "HIGH RISK", "More than 16 weeks of inventory on hand."
+    if inventory_value > 5000 and weekly_velocity < 12:
+        return "HIGH RISK", "More than $5,000 of inventory with less than one case per week of velocity."
+
+    if has_last_sale_gap and days_value > 30:
+        return "WATCH", "No RADs sale in more than 30 days."
+    if weeks_on_hand > 8:
+        return "WATCH", "More than 8 weeks of inventory on hand."
+
+    return "LOW", "Inventory level is aligned with recent RADs movement."
+
+
 def calculate_reorder_recommendations(rb6_data, sales_data):
     """
     Calculate wine reorder recommendations using RB6 inventory and RADs sales data.
@@ -150,14 +197,16 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     # --- STEP 4: AGGREGATE SALES BY PLANNING_SKU ---
     # Aggregate by planning_sku_norm because historical demand spans vintages
     
-    today = datetime.now()
-    
     qty_col = 'quantity' if 'quantity' in sales_data.columns else 'Quantity'
+
+    if date_col and sales_data[date_col].notna().any():
+        reference_date = sales_data[date_col].max()
+    else:
+        reference_date = datetime.now()
 
     def aggregate_sales_since(days):
         if date_col and sales_data[date_col].notna().any():
-            max_date = sales_data[date_col].max()
-            start_date = max_date - timedelta(days=days)
+            start_date = reference_date - timedelta(days=days)
             period_sales = sales_data[sales_data[date_col] >= start_date].copy()
         else:
             period_sales = sales_data.copy()
@@ -169,9 +218,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         if not (date_col and sales_data[date_col].notna().any()):
             return pd.DataFrame(columns=['planning_sku_norm', column_name])
 
-        max_date = sales_data[date_col].max()
-        start_date = max_date - timedelta(days=start_days_ago)
-        end_date = max_date - timedelta(days=end_days_ago)
+        start_date = reference_date - timedelta(days=start_days_ago)
+        end_date = reference_date - timedelta(days=end_days_ago)
         period_sales = sales_data[
             (sales_data[date_col] >= start_date) &
             (sales_data[date_col] < end_date)
@@ -185,8 +233,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         if not (date_col and sales_data[date_col].notna().any()):
             return pd.DataFrame(columns=['planning_sku_norm', column_name])
 
-        future_start = today
-        future_end = today + timedelta(days=days)
+        future_start = reference_date
+        future_end = reference_date + timedelta(days=days)
         historical_start = future_start - timedelta(days=365)
         historical_end = future_end - timedelta(days=365)
         period_sales = sales_data[
@@ -213,6 +261,16 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     forecast_30d = aggregate_same_period_last_year(30)
     forecast_60d = aggregate_same_period_last_year(60)
     forecast_90d = aggregate_same_period_last_year(90)
+    if date_col and sales_data[date_col].notna().any():
+        last_sale_dates = (
+            sales_data.dropna(subset=[date_col])
+            .groupby('planning_sku_norm')[date_col]
+            .max()
+            .reset_index()
+        )
+        last_sale_dates.columns = ['planning_sku_norm', 'last_sale_date']
+    else:
+        last_sale_dates = pd.DataFrame(columns=['planning_sku_norm', 'last_sale_date'])
     
     # --- STEP 5: MERGE RB6 WITH AGGREGATED SALES ---
     # RB6 inventory is the base table - merge sales onto it (left join)
@@ -224,6 +282,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     recommendations = recommendations.merge(forecast_30d, on='planning_sku_norm', how='left')
     recommendations = recommendations.merge(forecast_60d, on='planning_sku_norm', how='left')
     recommendations = recommendations.merge(forecast_90d, on='planning_sku_norm', how='left')
+    recommendations = recommendations.merge(last_sale_dates, on='planning_sku_norm', how='left')
     
     # Fill missing sales with 0
     recommendations['last_30_day_sales'] = recommendations['last_30_day_sales'].fillna(0)
@@ -303,24 +362,33 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         recommendations['fob'] = pd.to_numeric(recommendations[fob_col], errors='coerce').fillna(0)
     else:
         recommendations['fob'] = 0
+    recommendations['inventory_value'] = recommendations['true_available'] * recommendations['fob']
+    if 'last_sale_date' in recommendations.columns:
+        recommendations['last_sale_date'] = pd.to_datetime(recommendations['last_sale_date'], errors='coerce')
+        recommendations['days_since_last_sale'] = (
+            reference_date - recommendations['last_sale_date']
+        ).dt.days
+    else:
+        recommendations['days_since_last_sale'] = None
     
     # --- STEP 7: CALCULATE VELOCITY METRICS ---
     # weekly_velocity = last_30_day_sales / 4.345 (weeks in 30 days)
     recommendations['weekly_velocity'] = recommendations['last_30_day_sales'] / 4.345
     
     # weeks_on_hand = true_available / weekly_velocity
-    # If no sales (velocity = 0), return blank/None instead of 0 or 999
-    recommendations['weeks_on_hand'] = np.where(
-        recommendations['weekly_velocity'] > 0,
-        (recommendations['true_available'] / recommendations['weekly_velocity']).round(2),
-        None  # No recent sales
+    # If there is inventory but no velocity, use a large sentinel for risk scoring.
+    recommendations['weeks_on_hand'] = recommendations.apply(
+        lambda row: _large_weeks_on_hand_sentinel(row['true_available'], row['weekly_velocity']),
+        axis=1,
     )
     
     # weeks_on_hand_with_on_order = (true_available + on_order) / weekly_velocity
-    recommendations['weeks_on_hand_with_on_order'] = np.where(
-        recommendations['weekly_velocity'] > 0,
-        ((recommendations['true_available'] + recommendations['on_order']) / recommendations['weekly_velocity']).round(2),
-        None  # No recent sales
+    recommendations['weeks_on_hand_with_on_order'] = recommendations.apply(
+        lambda row: _large_weeks_on_hand_sentinel(
+            row['true_available'] + row['on_order'],
+            row['weekly_velocity'],
+        ),
+        axis=1,
     )
     
     # Optional seasonal velocity reference
@@ -419,6 +487,9 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
 
     recommendations['is_btg_bool'] = recommendations['is_btg'].apply(flag_to_bool)
     recommendations['is_core_bool'] = recommendations['is_core'].apply(flag_to_bool)
+    risk_results = recommendations.apply(_inventory_risk, axis=1)
+    recommendations['inventory_risk_label'] = risk_results.apply(lambda result: result[0])
+    recommendations['inventory_risk_reason'] = risk_results.apply(lambda result: result[1])
     
     # Brand manager - try various possible column names
     brand_manager_val = None
@@ -517,6 +588,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         'on_order',
         'fob',
         'pack_size',
+        'inventory_value',
+        'days_since_last_sale',
         
         # Sales velocity (from RADs aggregation)
         'last_30_day_sales',
@@ -540,6 +613,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         'velocity_trend_label',
         'weeks_on_hand',
         'weeks_on_hand_with_on_order',
+        'inventory_risk_label',
+        'inventory_risk_reason',
         
         # Recommendations
         'target_days',

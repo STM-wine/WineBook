@@ -169,6 +169,48 @@ class CalculatorTests(unittest.TestCase):
         sales = pd.DataFrame(sales_rows)
         return calculate_reorder_recommendations(rb6, sales).iloc[0]
 
+    def _inventory_risk_for(
+        self,
+        target_sale_date="2026-05-15",
+        target_quantity=48,
+        report_date="2026-05-15",
+        available_inventory=24,
+        fob=10,
+        is_core="No",
+        is_btg="No",
+        name="Risk Wine 2025 12/750ml",
+    ):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": name,
+                    "available_inventory": available_inventory,
+                    "on_order": 0,
+                    "fob": fob,
+                    "pack_size": 12,
+                    "is_core": is_core,
+                    "is_btg": is_btg,
+                }
+            ]
+        )
+        sales_rows = [
+            {
+                "wine_name": name.replace("2025", "2024"),
+                "quantity": target_quantity,
+                "date": target_sale_date,
+            }
+        ]
+        if report_date != target_sale_date:
+            sales_rows.append(
+                {
+                    "wine_name": "Reference Wine 2024 12/750ml",
+                    "quantity": 1,
+                    "date": report_date,
+                }
+            )
+        sales = pd.DataFrame(sales_rows)
+        return calculate_reorder_recommendations(rb6, sales).iloc[0]
+
     def test_normalize_planning_sku_removes_vintage_but_keeps_pack_size(self):
         self.assertEqual(
             normalize_planning_sku("Pavette Sauvignon Blanc 2025 12/750ml"),
@@ -222,6 +264,101 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result.loc["Standard Wine 2025 12/750ml", "target_days"], 30)
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "recommendation_status"], "rejected")
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "approved_qty"], 0)
+
+    def test_inventory_risk_low_for_active_mover(self):
+        result = self._inventory_risk_for(
+            target_sale_date="2026-05-15",
+            target_quantity=48,
+            available_inventory=24,
+            fob=10,
+        )
+
+        self.assertEqual(result["inventory_value"], 240)
+        self.assertEqual(result["days_since_last_sale"], 0)
+        self.assertLess(result["weeks_on_hand"], 8)
+        self.assertEqual(result["inventory_risk_label"], "LOW")
+
+    def test_inventory_risk_watch_for_days_since_last_sale_over_30(self):
+        result = self._inventory_risk_for(
+            target_sale_date="2026-04-05",
+            report_date="2026-05-15",
+            target_quantity=24,
+            available_inventory=0,
+        )
+
+        self.assertEqual(result["days_since_last_sale"], 40)
+        self.assertEqual(result["inventory_risk_label"], "WATCH")
+        self.assertIn("30 days", result["inventory_risk_reason"])
+
+    def test_inventory_risk_high_for_days_since_last_sale_over_60(self):
+        result = self._inventory_risk_for(
+            target_sale_date="2026-03-06",
+            report_date="2026-05-15",
+            target_quantity=24,
+            available_inventory=0,
+        )
+
+        self.assertEqual(result["days_since_last_sale"], 70)
+        self.assertEqual(result["inventory_risk_label"], "HIGH RISK")
+        self.assertIn("60 days", result["inventory_risk_reason"])
+
+    def test_inventory_risk_freeze_for_no_sales_in_90_days_and_inventory_value_over_500(self):
+        result = self._inventory_risk_for(
+            target_sale_date="2026-02-04",
+            report_date="2026-05-15",
+            target_quantity=24,
+            available_inventory=60,
+            fob=10,
+        )
+
+        self.assertEqual(result["days_since_last_sale"], 100)
+        self.assertEqual(result["inventory_value"], 600)
+        self.assertEqual(result["last_90_day_sales"], 0)
+        self.assertEqual(result["inventory_risk_label"], "FREEZE")
+        self.assertIn("No sales in the last 90 days", result["inventory_risk_reason"])
+
+    def test_inventory_risk_freeze_for_weeks_on_hand_over_26(self):
+        result = self._inventory_risk_for(
+            target_sale_date="2026-05-15",
+            target_quantity=4,
+            available_inventory=30,
+            fob=10,
+        )
+
+        self.assertGreater(result["weeks_on_hand"], 26)
+        self.assertEqual(result["inventory_risk_label"], "FREEZE")
+        self.assertIn("26 weeks", result["inventory_risk_reason"])
+
+    def test_core_or_btg_weeks_on_hand_freeze_is_downgraded_to_high_risk(self):
+        core_result = self._inventory_risk_for(
+            target_sale_date="2026-05-15",
+            target_quantity=4,
+            available_inventory=30,
+            fob=10,
+            is_core="Yes",
+            name="Core Risk Wine 2025 12/750ml",
+        )
+        btg_result = self._inventory_risk_for(
+            target_sale_date="2026-05-15",
+            target_quantity=4,
+            available_inventory=30,
+            fob=10,
+            is_btg="Yes",
+            name="BTG Risk Wine 2025 12/750ml",
+        )
+
+        self.assertGreater(core_result["weeks_on_hand"], 26)
+        self.assertEqual(core_result["inventory_risk_label"], "HIGH RISK")
+        self.assertEqual(
+            core_result["inventory_risk_reason"],
+            "Core/BTG item with high weeks on hand; review before freezing.",
+        )
+        self.assertGreater(btg_result["weeks_on_hand"], 26)
+        self.assertEqual(btg_result["inventory_risk_label"], "HIGH RISK")
+        self.assertEqual(
+            btg_result["inventory_risk_reason"],
+            "Core/BTG item with high weeks on hand; review before freezing.",
+        )
 
     def test_true_available_subtracts_unconfirmed_line_item_quantity(self):
         rb6 = pd.DataFrame(
@@ -312,7 +449,7 @@ class CalculatorTests(unittest.TestCase):
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 10, "date": "2026-04-01"},
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 20, "date": "2026-03-10"},
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 30, "date": "2026-02-01"},
-                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 40, "date": "2025-05-15"},
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 40, "date": "2025-04-15"},
             ]
         )
 

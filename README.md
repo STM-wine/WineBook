@@ -133,15 +133,45 @@ Current buyer-facing rules from Mark/ownership:
 - Weekly velocity is calculated as `30d Sales / 4.345`.
 - Velocity trend compares the latest 30-day RADs sales window against the prior 30-day window. If the prior period is zero and the latest period has sales, the buyer table displays `New`.
 
+## Operational Inventory Risk
+
+WineBook also calculates a first-version operational inventory risk score in `wine_calculator.py`. This is not an accounting aging model. It does not use QuickBooks, receipt dates, landed inventory value, or accounting inventory aging. It uses only the current RB6 inventory export and RADs sales history to help buyers decide which wines are safe to replenish, which need review, and which should be frozen or reduced before more cash is tied up.
+
+The risk score uses:
+
+- `inventory_value`: true available bottles multiplied by FOB bottle cost.
+- `days_since_last_sale`: the report date minus the most recent RADs sale date for the planning SKU.
+- `weeks_on_hand`: true available inventory divided by weekly velocity. If there is inventory but no recent velocity, the calculator treats weeks on hand as very high for operational review.
+- `last_90_day_sales`: RADs movement in the last 90 days.
+
+Inventory value matters because slow-moving wine with a high dollar value can quietly consume working capital. A low-cost, low-quantity item may deserve a light review, while a high-value item with little movement may need to be frozen even before accounting aging data is available.
+
+Risk labels:
+
+| Label | Meaning |
+| --- | --- |
+| LOW | Inventory level appears aligned with recent RADs movement. |
+| WATCH | Movement is slowing or weeks on hand is elevated; review before adding more. |
+| HIGH RISK | The wine has a long sales gap, high weeks on hand, or high inventory value relative to velocity. |
+| FREEZE | Do not replenish without review; inventory is not moving enough for the cash tied up. |
+
+Core and BTG wines get human-review protection. If a Core or BTG item would be frozen only because weeks on hand is high, WineBook labels it `HIGH RISK` instead and asks for review before freezing. Core/BTG wines can still be labeled `FREEZE` when there are truly no sales in the last 90 days and inventory value is meaningfully high.
+
+Future QuickBooks-aware work may improve this with receipt dates, landed cost, accounting inventory aging, and better inventory valuation. That should extend the operational score rather than replacing the RB6/RADs view.
+
 Current buyer table includes:
 
 - Wine name with supplier-rank badge and BTG/Core flags
 - True available inventory
 - On-order quantity
+- Inventory value
+- Days since last sale
 - Last 30 day sales, with optional 60/90 day sales
 - Next 30 day forecast, with optional LY 60/90 day forecast fields
 - Weekly velocity
 - Velocity trend percentage
+- Weeks on hand
+- Inventory risk label and reason
 - Weeks available with on-order quantity
 - Weeks available with recommended quantity
 - Editable recommended quantity

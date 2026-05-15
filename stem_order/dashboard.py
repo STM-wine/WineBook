@@ -16,6 +16,8 @@ DASHBOARD_COLUMNS = [
     "is_core",
     "true_available",
     "on_order",
+    "inventory_value",
+    "days_since_last_sale",
     "last_30_day_sales",
     "prior_30_day_sales",
     "next_30_day_forecast",
@@ -23,6 +25,8 @@ DASHBOARD_COLUMNS = [
     "velocity_trend_pct",
     "velocity_trend_label",
     "risk_level",
+    "inventory_risk_label",
+    "inventory_risk_reason",
     "recommended_qty_rounded",
     "recommendation_status",
     "trucking_cost_per_bottle",
@@ -180,7 +184,9 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "next_90_day_forecast",
         "weekly_velocity",
         "velocity_trend_pct",
+        "weeks_on_hand",
         "weeks_on_hand_with_on_order",
+        "inventory_value",
         "order_cost",
         "landed_cost",
         "trucking_cost_per_bottle",
@@ -188,6 +194,8 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
     ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    if "days_since_last_sale" in df.columns:
+        df["days_since_last_sale"] = pd.to_numeric(df["days_since_last_sale"], errors="coerce")
 
     for col in [
         "supplier_name",
@@ -197,6 +205,8 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "reorder_status",
         "recommendation_status",
         "risk_level",
+        "inventory_risk_label",
+        "inventory_risk_reason",
         "pickup_location",
         "velocity_trend_label",
     ]:
@@ -413,16 +423,21 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "is_core": "Core",
         "true_available": "True Available",
         "on_order": "On Order",
+        "inventory_value": "Inventory Value",
+        "days_since_last_sale": "Days Since Last Sale",
         "next_30_day_forecast": "Next 30d Forecast",
         "weekly_velocity": "Weekly Velocity",
         "velocity_trend_pct": "Velocity Trend",
         "risk_level": "Risk",
+        "inventory_risk_label": "Inventory Risk",
+        "inventory_risk_reason": "Inventory Risk Reason",
         "recommendation_status": "Approval",
         "product_code": "Code",
         "reorder_status": "Status",
         "recommended_qty_rounded": "Recommended Qty",
         "last_30_day_sales": "30d Sales",
         "prior_30_day_sales": "Prior 30d Sales",
+        "weeks_on_hand": "Weeks On Hand",
         "weeks_on_hand_with_on_order": "Weeks w/ On Order",
         "order_timing_risk": "Timing Risk",
         "order_cost": "Total Wine Cost",
@@ -441,6 +456,10 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     for col in ["Recommended Qty", "30d Sales", "True Available", "On Order", "Next 30d Forecast"]:
         if col in display:
             display[col] = display[col].fillna(0).astype(int)
+    if "Days Since Last Sale" in display:
+        display["Days Since Last Sale"] = display["Days Since Last Sale"].apply(
+            lambda x: str(int(x)) if pd.notna(x) else ""
+        )
 
     for col in ["BTG", "Core"]:
         if col in display:
@@ -458,8 +477,12 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         display["Weeks w/ On Order"] = display["Weeks w/ On Order"].apply(
             lambda x: f"{x:.1f}" if pd.notna(x) else ""
         )
+    if "Weeks On Hand" in display:
+        display["Weeks On Hand"] = display["Weeks On Hand"].apply(
+            lambda x: f"{x:.1f}" if pd.notna(x) else ""
+        )
 
-    for col in ["Total Wine Cost", "Total Laid In Cost", "Estimated Cost"]:
+    for col in ["Total Wine Cost", "Total Laid In Cost", "Estimated Cost", "Inventory Value"]:
         if col in display:
             display[col] = display[col].apply(
                 lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00"
@@ -472,12 +495,16 @@ def format_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         "Core",
         "True Available",
         "On Order",
+        "Inventory Value",
+        "Days Since Last Sale",
         "30d Sales",
         "Prior 30d Sales",
         "Next 30d Forecast",
         "Weekly Velocity",
         "Velocity Trend",
         "Risk",
+        "Inventory Risk",
+        "Inventory Risk Reason",
         "Recommended Qty",
         "Approval",
         "Total Wine Cost",
@@ -503,12 +530,16 @@ def buyer_workbench_dataframe(
         "is_btg",
         "true_available",
         "on_order",
+        "inventory_value",
         "last_30_day_sales",
         "next_30_day_forecast",
         "weekly_velocity",
         "velocity_trend_pct",
         "velocity_trend_label",
+        "weeks_on_hand",
         "weeks_on_hand_with_on_order",
+        "inventory_risk_label",
+        "inventory_risk_reason",
         "recommended_qty_rounded",
         "recommendation_status",
         "approved_qty",
@@ -531,10 +562,15 @@ def buyer_workbench_dataframe(
                 "Wine",
                 "True Available",
                 "On Order",
+                "Inventory Value",
+                "Days Since Last Sale",
                 "30d Sales",
                 "Next 30d Forecast",
                 "Weekly Velocity",
                 "Velocity Trend",
+                "Weeks On Hand",
+                "Inventory Risk",
+                "Inventory Risk Reason",
                 "Weeks w/ On Order",
                 "Weeks w/ Recommended",
                 "Recommended Qty",
@@ -546,10 +582,13 @@ def buyer_workbench_dataframe(
     for col in [
         "true_available",
         "on_order",
+        "inventory_value",
+        "days_since_last_sale",
         "last_30_day_sales",
         "next_30_day_forecast",
         "weekly_velocity",
         "velocity_trend_pct",
+        "weeks_on_hand",
         "weeks_on_hand_with_on_order",
         "recommended_qty_rounded",
         "approved_qty",
@@ -560,6 +599,8 @@ def buyer_workbench_dataframe(
     ]:
         if col in editor.columns and col != "velocity_trend_label":
             editor[col] = pd.to_numeric(editor[col], errors="coerce").fillna(0)
+    if "days_since_last_sale" in editor.columns:
+        editor["days_since_last_sale"] = pd.to_numeric(editor["days_since_last_sale"], errors="coerce")
 
     for col in ["is_core", "is_btg"]:
         if col not in editor.columns:
@@ -603,7 +644,12 @@ def buyer_workbench_dataframe(
         "weekly_velocity": "Weekly Velocity",
         "velocity_trend_pct": "Velocity Trend",
         "velocity_trend_label": "_Velocity Trend Label",
+        "weeks_on_hand": "Weeks On Hand",
         "weeks_on_hand_with_on_order": "Weeks w/ On Order",
+        "inventory_value": "Inventory Value",
+        "days_since_last_sale": "Days Since Last Sale",
+        "inventory_risk_label": "Inventory Risk",
+        "inventory_risk_reason": "Inventory Risk Reason",
         "Working Recommended Qty": "Recommended Qty",
         "order_cost": "Est. Cost",
         "fob": "_FOB",
@@ -623,6 +669,11 @@ def buyer_workbench_dataframe(
         "Weekly Velocity",
         "Velocity Trend",
         "_Velocity Trend Label",
+        "Inventory Value",
+        "Days Since Last Sale",
+        "Weeks On Hand",
+        "Inventory Risk",
+        "Inventory Risk Reason",
         "Weeks w/ On Order",
         "Weeks w/ Recommended",
         "_Pack Size",

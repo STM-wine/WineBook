@@ -33,6 +33,8 @@ DISPLAY_COLUMNS = [
     "true_available",
     "on_order",
     "fob",
+    "inventory_value",
+    "days_since_last_sale",
     "last_30_day_sales",
     "last_60_day_sales",
     "last_90_day_sales",
@@ -50,6 +52,8 @@ DISPLAY_COLUMNS = [
     "velocity_trend_label",
     "weeks_on_hand",
     "weeks_on_hand_with_on_order",
+    "inventory_risk_label",
+    "inventory_risk_reason",
     "eta_days",
     "eta_weeks",
     "projected_arrival_date",
@@ -280,13 +284,17 @@ def format_display_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
     for col in bottle_columns:
         if col in display_df.columns:
             display_df[col] = display_df[col].fillna(0).astype(int)
+    if "days_since_last_sale" in display_df.columns:
+        display_df["days_since_last_sale"] = display_df["days_since_last_sale"].apply(
+            lambda x: str(int(x)) if pd.notna(x) else ""
+        )
 
     velocity_columns = ["weekly_velocity", "weeks_on_hand", "weeks_on_hand_with_on_order", "fob", "velocity_trend_pct"]
     for col in velocity_columns:
         if col in display_df.columns:
             display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "")
 
-    for money_col in ["order_cost", "landed_cost", "trucking_cost_per_bottle"]:
+    for money_col in ["order_cost", "landed_cost", "trucking_cost_per_bottle", "inventory_value"]:
         if money_col in display_df.columns:
             display_df[money_col] = display_df[money_col].apply(
                 lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00"
