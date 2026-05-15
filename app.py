@@ -669,6 +669,27 @@ p, span, label {
     font-weight: 400 !important;
 }
 
+/* Preserve Streamlit/Material icon fonts. Without this exception, the global
+   span font override can render internal icon glyph names like keyboard_arrow_right as text. */
+[data-testid="stIconMaterial"],
+span[class*="material-symbols"],
+span[class*="material-icons"],
+.material-symbols-rounded,
+.material-symbols-outlined,
+.material-icons {
+    font-family: 'Material Symbols Rounded', 'Material Symbols Outlined', 'Material Icons' !important;
+    font-weight: normal !important;
+    font-style: normal !important;
+    line-height: 1 !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
+    direction: ltr !important;
+    font-feature-settings: 'liga' !important;
+    -webkit-font-feature-settings: 'liga' !important;
+}
+
 /* Dark Mode Adaptations */
 @media (prefers-color-scheme: dark) {
     /* Main content area in dark mode */
