@@ -1,5 +1,4 @@
 import unittest
-from datetime import datetime, timedelta
 from tempfile import TemporaryDirectory
 from io import BytesIO
 
@@ -383,7 +382,6 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result["planning_sku"], "prost riesling 12/750ml")
 
     def test_sales_windows_forecasts_and_velocity_trend_are_calculated(self):
-        next_30_days_last_year = (datetime.now() - timedelta(days=364)).strftime("%Y-%m-%d")
         rb6 = pd.DataFrame(
             [
                 {
@@ -400,7 +398,7 @@ class CalculatorTests(unittest.TestCase):
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 10, "date": "2026-04-01"},
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 20, "date": "2026-03-10"},
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 30, "date": "2026-02-01"},
-                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 40, "date": next_30_days_last_year},
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 40, "date": "2025-04-15"},
             ]
         )
 
@@ -1024,6 +1022,32 @@ class SupabaseRepositoryTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             repo.update_purchase_order_draft_status("draft-1", "sent")
+
+    def test_recommendation_payload_persists_purchasing_environment_fields(self):
+        repo = SupabaseRepository(client=None)
+
+        payload = repo._recommendation_payload(
+            "report-1",
+            {
+                "planning_sku": "wine a",
+                "Name": "Wine A",
+                "target_days": 15,
+                "target_qty": 20.0,
+                "base_recommended_qty_raw": 16.5,
+                "purchasing_environment_multiplier": 0.75,
+                "purchasing_environment_mode": "Defensive",
+                "purchasing_environment_month": 5,
+                "recommended_qty_raw": 12.375,
+                "recommended_qty_rounded": 12,
+            },
+        )
+
+        self.assertEqual(payload["base_recommended_qty_raw"], 16.5)
+        self.assertEqual(payload["purchasing_environment_multiplier"], 0.75)
+        self.assertEqual(payload["purchasing_environment_mode"], "Defensive")
+        self.assertEqual(payload["purchasing_environment_month"], 5)
+        self.assertEqual(payload["diagnostics"]["purchasing_environment_multiplier"], 0.75)
+        self.assertEqual(payload["diagnostics"]["purchasing_environment_mode"], "Defensive")
 
     def test_purchase_order_line_payload_uses_transitional_product_fields(self):
         repo = SupabaseRepository(client=None)

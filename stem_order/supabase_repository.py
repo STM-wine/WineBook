@@ -436,6 +436,10 @@ class SupabaseRepository:
             "weeks_on_hand_with_on_order": clean_value(row.get("weeks_on_hand_with_on_order")),
             "target_days": int(clean_value(row.get("target_days"), 0) or 0),
             "target_qty": clean_value(row.get("target_qty"), 0),
+            "base_recommended_qty_raw": clean_value(row.get("base_recommended_qty_raw"), 0),
+            "purchasing_environment_multiplier": clean_value(row.get("purchasing_environment_multiplier"), 1),
+            "purchasing_environment_mode": clean_value(row.get("purchasing_environment_mode")),
+            "purchasing_environment_month": clean_value(row.get("purchasing_environment_month")),
             "recommended_qty_raw": clean_value(row.get("recommended_qty_raw"), 0),
             "recommended_qty_rounded": int(clean_value(row.get("recommended_qty_rounded"), 0) or 0),
             "recommendation_status": clean_value(row.get("recommendation_status"), "rejected"),
@@ -458,6 +462,9 @@ class SupabaseRepository:
                 "eta_days": clean_value(row.get("eta_days")),
                 "eta_weeks": clean_value(row.get("eta_weeks")),
                 "high_volume_rounding_required": clean_value(row.get("high_volume_rounding_required"), False),
+                "base_recommended_qty_raw": clean_value(row.get("base_recommended_qty_raw")),
+                "purchasing_environment_multiplier": clean_value(row.get("purchasing_environment_multiplier")),
+                "purchasing_environment_mode": clean_value(row.get("purchasing_environment_mode")),
             },
         }
 
