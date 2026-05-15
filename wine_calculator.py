@@ -3,6 +3,40 @@ import numpy as np
 import re
 from datetime import datetime, timedelta
 
+
+PURCHASING_ENVIRONMENT_BY_MONTH = {
+    1: ("Aggressive", 1.15),
+    2: ("Aggressive", 1.15),
+    3: ("Aggressive", 1.15),
+    4: ("Neutral", 1.00),
+    5: ("Defensive", 0.75),
+    6: ("Defensive", 0.75),
+    7: ("Defensive", 0.75),
+    8: ("Defensive", 0.75),
+    9: ("Rebuild", 1.00),
+    10: ("Growth", 1.10),
+    11: ("Growth", 1.10),
+    12: ("Growth", 1.10),
+}
+
+
+def purchasing_environment_for_month(month: int) -> tuple[str, float]:
+    """Return the purchasing mode and multiplier for a calendar month."""
+    try:
+        month_number = int(month)
+    except (TypeError, ValueError):
+        month_number = 4
+    return PURCHASING_ENVIRONMENT_BY_MONTH.get(month_number, ("Neutral", 1.00))
+
+
+def purchasing_environment_multiplier(reference_date: datetime | pd.Timestamp | None = None) -> float:
+    """Return the monthly purchasing risk multiplier for a report date."""
+    if reference_date is None or pd.isna(reference_date):
+        reference_date = datetime.now()
+    _, multiplier = purchasing_environment_for_month(reference_date.month)
+    return multiplier
+
+
 def normalize_planning_sku(name: str) -> str:
     """
     Normalize wine name for matching by planning_sku.
@@ -150,14 +184,16 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     # --- STEP 4: AGGREGATE SALES BY PLANNING_SKU ---
     # Aggregate by planning_sku_norm because historical demand spans vintages
     
-    today = datetime.now()
-    
     qty_col = 'quantity' if 'quantity' in sales_data.columns else 'Quantity'
+
+    if date_col and sales_data[date_col].notna().any():
+        reference_date = sales_data[date_col].max()
+    else:
+        reference_date = datetime.now()
 
     def aggregate_sales_since(days):
         if date_col and sales_data[date_col].notna().any():
-            max_date = sales_data[date_col].max()
-            start_date = max_date - timedelta(days=days)
+            start_date = reference_date - timedelta(days=days)
             period_sales = sales_data[sales_data[date_col] >= start_date].copy()
         else:
             period_sales = sales_data.copy()
@@ -169,9 +205,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         if not (date_col and sales_data[date_col].notna().any()):
             return pd.DataFrame(columns=['planning_sku_norm', column_name])
 
-        max_date = sales_data[date_col].max()
-        start_date = max_date - timedelta(days=start_days_ago)
-        end_date = max_date - timedelta(days=end_days_ago)
+        start_date = reference_date - timedelta(days=start_days_ago)
+        end_date = reference_date - timedelta(days=end_days_ago)
         period_sales = sales_data[
             (sales_data[date_col] >= start_date) &
             (sales_data[date_col] < end_date)
@@ -185,8 +220,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         if not (date_col and sales_data[date_col].notna().any()):
             return pd.DataFrame(columns=['planning_sku_norm', column_name])
 
-        future_start = today
-        future_end = today + timedelta(days=days)
+        future_start = reference_date
+        future_end = reference_date + timedelta(days=days)
         historical_start = future_start - timedelta(days=365)
         historical_end = future_end - timedelta(days=365)
         period_sales = sales_data[
@@ -354,29 +389,50 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         elif row_has_truthy_flag(row, ['Is Core', 'is_core', 'is_core_', 'core', 'core_flag']):
             return 30
         else:
-            return 30
+            return 15
     
     recommendations['target_days'] = recommendations.apply(get_target_days, axis=1)
+    mode, multiplier = purchasing_environment_for_month(reference_date.month)
+    recommendations['purchasing_environment_mode'] = mode
+    recommendations['purchasing_environment_multiplier'] = multiplier
+    recommendations['purchasing_environment_month'] = reference_date.month
     
     # Calculate target_qty = weekly_velocity * (target_days / 7)
     recommendations['target_qty'] = recommendations['weekly_velocity'] * (recommendations['target_days'] / 7)
     
-    # Calculate recommended_qty_raw = max(0, target_qty - (true_available + on_order))
-    recommendations['recommended_qty_raw'] = np.maximum(
+    # Base recommendation reflects demand coverage only:
+    # (target weeks x weekly velocity) - true available - on order.
+    recommendations['base_recommended_qty_raw'] = np.maximum(
         0, 
         recommendations['target_qty'] - (recommendations['true_available'] + recommendations['on_order'])
     )
+
+    # Purchasing environment adjusts risk tolerance without changing demand itself.
+    recommendations['recommended_qty_raw'] = (
+        recommendations['base_recommended_qty_raw'] * recommendations['purchasing_environment_multiplier']
+    )
     
-    # Round UP to nearest full case using Pack Size
-    def round_up_to_case(qty, pack_size):
+    # Round recommendations to full cases. Standard wines below one case are
+    # suppressed to avoid defensive-month inventory creep; Core/BTG wines keep
+    # the existing one-case round-up behavior when replenishment is justified.
+    def round_recommendation_qty(qty, pack_size, preserve_one_case=False):
         if pd.isna(qty) or qty <= 0:
             return 0
         if pd.isna(pack_size) or pack_size <= 0:
             return int(np.ceil(qty))
+        if not preserve_one_case and qty < pack_size:
+            return 0
         return int(np.ceil(qty / pack_size) * pack_size)
     
     recommendations['recommended_qty_rounded'] = recommendations.apply(
-        lambda row: round_up_to_case(row['recommended_qty_raw'], row['pack_size']),
+        lambda row: round_recommendation_qty(
+            row['recommended_qty_raw'],
+            row['pack_size'],
+            preserve_one_case=row_has_truthy_flag(
+                row,
+                ['Is BTG', 'is_btg', 'is_btg_', 'btg', 'btg_flag', 'Is Core', 'is_core', 'is_core_', 'core', 'core_flag'],
+            ),
+        ),
         axis=1
     )
     recommendations['high_volume_rounding_required'] = recommendations['last_30_day_sales'] > 480
@@ -544,6 +600,10 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         # Recommendations
         'target_days',
         'target_qty',
+        'base_recommended_qty_raw',
+        'purchasing_environment_mode',
+        'purchasing_environment_multiplier',
+        'purchasing_environment_month',
         'recommended_qty_raw',
         'recommended_qty_rounded',
         'recommendation_status',
