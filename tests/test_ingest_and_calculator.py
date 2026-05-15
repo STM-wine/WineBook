@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta
 from tempfile import TemporaryDirectory
 from io import BytesIO
 
@@ -294,6 +295,7 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result["planning_sku"], "prost riesling 12/750ml")
 
     def test_sales_windows_forecasts_and_velocity_trend_are_calculated(self):
+        next_30_days_last_year = (datetime.now() - timedelta(days=364)).strftime("%Y-%m-%d")
         rb6 = pd.DataFrame(
             [
                 {
@@ -310,7 +312,7 @@ class CalculatorTests(unittest.TestCase):
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 10, "date": "2026-04-01"},
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 20, "date": "2026-03-10"},
                 {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 30, "date": "2026-02-01"},
-                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 40, "date": "2025-05-15"},
+                {"wine_name": "Trend Wine 2024 12/750ml", "quantity": 40, "date": next_30_days_last_year},
             ]
         )
 
