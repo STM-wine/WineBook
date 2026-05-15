@@ -119,19 +119,53 @@ python scripts/process_daily_vinosmith_email.py --dry-run
 
 ## Ordering Logic
 
+The recommendation engine lives in `wine_calculator.py`. It separates two different ideas:
+
+- Demand signal: how quickly a wine is depleting, based on RADs sales history.
+- Purchasing environment: how aggressively Stem wants to convert that demand into inventory right now.
+
+This is intentionally not a demand forecasting model. The purchasing environment modifier represents risk tolerance, cash-flow posture, and Arizona seasonal buying behavior. It adjusts the order quantity after demand coverage is calculated; it does not pretend that customers are drinking more or less wine.
+
+Arizona summer buying is defensive because depletion can slow while inventory still consumes cash. Entering the slow season, the engine should avoid over-ordering marginal inventory, preserve working capital, and still let strong Core and BTG wines replenish when the math supports it.
+
 Current buyer-facing rules from Mark/ownership:
 
-- Core SKUs target 30 days of demand.
 - BTG SKUs target 45 days of demand.
-- Non-Core / Non-BTG SKUs with last-30-day sales target 30 days of demand.
-- Recommended quantity subtracts true available inventory and on-order quantity, then rounds up to full case equivalent.
+- Core SKUs target 30 days of demand.
+- Standard, non-Core / non-BTG SKUs target 15 days of demand.
+- Weekly velocity is calculated as `30d Sales / 4.345`.
+- Base recommendation is `(Target Weeks x Weekly Velocity) - True Available - On Order`, clamped at zero.
+- Final recommendation is `Base Recommendation x Purchasing Environment Modifier`.
 - True available inventory is calculated from RB6 as `Available Inventory - Unconfirmed Line Item Qty`, clamped at zero.
 - High-volume SKUs, currently defined as average monthly sales over 480 bottles, are flagged for future pallet-configuration rounding.
 - Every SKU receives a recommendation row.
 - Recommendations default to `rejected`; buyers must explicitly approve rows before PO entry.
 - Buyers can edit either `Weeks w/ Recommended` or `Recommended Qty`; the dashboard keeps those values synchronized and saves the working recommended quantity as the approved quantity when approved.
-- Weekly velocity is calculated as `30d Sales / 4.345`.
 - Velocity trend compares the latest 30-day RADs sales window against the prior 30-day window. If the prior period is zero and the latest period has sales, the buyer table displays `New`.
+
+Monthly purchasing environment:
+
+| Months | Mode | Multiplier | Intent |
+| --- | --- | ---: | --- |
+| January, February, March | Aggressive | 1.15 | Replenish after holiday depletion and support stronger early-year buying. |
+| April | Neutral | 1.00 | Let demand coverage drive the order. |
+| May, June, July, August | Defensive | 0.75 | Reduce over-ordering risk entering Arizona slow season. |
+| September | Rebuild | 1.00 | Reset toward normal buying before fall growth. |
+| October, November, December | Growth | 1.10 | Support holiday and year-end demand. |
+
+Minimum case threshold:
+
+- Standard wines with a final recommendation below one full case round down to zero.
+- Core and BTG wines keep the existing pack-size round-up behavior, so a justified sub-case recommendation can still become one case.
+- All positive recommended quantities still round to the wine's pack size.
+
+The helper functions for month mapping and purchasing multiplier lookup are intentionally small and isolated near the top of `wine_calculator.py`. Future branches can add working-capital-aware behavior there without rewriting demand calculations. Good future extension points include:
+
+- Cash posture modifiers
+- Inventory value targets
+- Inventory aging risk
+- Supplier ETA weighting
+- Supplier protection logic
 
 Current buyer table includes:
 

@@ -168,6 +168,38 @@ class CalculatorTests(unittest.TestCase):
         sales = pd.DataFrame(sales_rows)
         return calculate_reorder_recommendations(rb6, sales).iloc[0]
 
+    def _recommendation_for_report_month(
+        self,
+        report_date,
+        quantity=60,
+        is_core="No",
+        is_btg="No",
+        name="Modifier Wine 2025 12/750ml",
+    ):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": name,
+                    "available_inventory": 0,
+                    "on_order": 0,
+                    "fob": 10,
+                    "pack_size": 12,
+                    "is_core": is_core,
+                    "is_btg": is_btg,
+                }
+            ]
+        )
+        sales = pd.DataFrame(
+            [
+                {
+                    "wine_name": name.replace("2025", "2024"),
+                    "quantity": quantity,
+                    "date": report_date,
+                }
+            ]
+        )
+        return calculate_reorder_recommendations(rb6, sales).iloc[0]
+
     def test_normalize_planning_sku_removes_vintage_but_keeps_pack_size(self):
         self.assertEqual(
             normalize_planning_sku("Pavette Sauvignon Blanc 2025 12/750ml"),
@@ -218,9 +250,65 @@ class CalculatorTests(unittest.TestCase):
 
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "target_days"], 45)
         self.assertEqual(result.loc["Core Wine 2025 12/750ml", "target_days"], 30)
-        self.assertEqual(result.loc["Standard Wine 2025 12/750ml", "target_days"], 30)
+        self.assertEqual(result.loc["Standard Wine 2025 12/750ml", "target_days"], 15)
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "recommendation_status"], "rejected")
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "approved_qty"], 0)
+
+    def test_january_through_march_use_aggressive_purchasing_multiplier(self):
+        for report_date in ["2026-01-15", "2026-02-15", "2026-03-15"]:
+            with self.subTest(report_date=report_date):
+                result = self._recommendation_for_report_month(report_date)
+
+                self.assertEqual(result["purchasing_environment_mode"], "Aggressive")
+                self.assertEqual(result["purchasing_environment_multiplier"], 1.15)
+                self.assertEqual(result["purchasing_environment_month"], pd.Timestamp(report_date).month)
+
+    def test_may_through_august_use_defensive_purchasing_multiplier(self):
+        for report_date in ["2026-05-15", "2026-06-15", "2026-07-15", "2026-08-15"]:
+            with self.subTest(report_date=report_date):
+                result = self._recommendation_for_report_month(report_date)
+
+                self.assertEqual(result["purchasing_environment_mode"], "Defensive")
+                self.assertEqual(result["purchasing_environment_multiplier"], 0.75)
+                self.assertEqual(result["purchasing_environment_month"], pd.Timestamp(report_date).month)
+
+    def test_october_through_december_use_growth_purchasing_multiplier(self):
+        for report_date in ["2026-10-15", "2026-11-15", "2026-12-15"]:
+            with self.subTest(report_date=report_date):
+                result = self._recommendation_for_report_month(report_date)
+
+                self.assertEqual(result["purchasing_environment_mode"], "Growth")
+                self.assertEqual(result["purchasing_environment_multiplier"], 1.10)
+                self.assertEqual(result["purchasing_environment_month"], pd.Timestamp(report_date).month)
+
+    def test_standard_recommendation_under_one_case_rounds_to_zero(self):
+        result = self._recommendation_for_report_month("2026-04-15", quantity=20)
+
+        self.assertEqual(result["target_days"], 15)
+        self.assertGreater(result["recommended_qty_raw"], 0)
+        self.assertLess(result["recommended_qty_raw"], result["pack_size"])
+        self.assertEqual(result["recommended_qty_rounded"], 0)
+
+    def test_core_and_btg_under_one_case_can_still_round_to_one_case(self):
+        core_result = self._recommendation_for_report_month(
+            "2026-04-15",
+            quantity=10,
+            is_core="Yes",
+            name="Core Threshold Wine 2025 12/750ml",
+        )
+        btg_result = self._recommendation_for_report_month(
+            "2026-04-15",
+            quantity=7,
+            is_btg="Yes",
+            name="BTG Threshold Wine 2025 12/750ml",
+        )
+
+        self.assertGreater(core_result["recommended_qty_raw"], 0)
+        self.assertLess(core_result["recommended_qty_raw"], core_result["pack_size"])
+        self.assertEqual(core_result["recommended_qty_rounded"], 12)
+        self.assertGreater(btg_result["recommended_qty_raw"], 0)
+        self.assertLess(btg_result["recommended_qty_raw"], btg_result["pack_size"])
+        self.assertEqual(btg_result["recommended_qty_rounded"], 12)
 
     def test_true_available_subtracts_unconfirmed_line_item_quantity(self):
         rb6 = pd.DataFrame(
