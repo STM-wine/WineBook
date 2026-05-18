@@ -499,6 +499,7 @@ def buyer_workbench_dataframe(
     columns = [
         "id",
         "product_name",
+        "product_code",
         "is_core",
         "is_btg",
         "true_available",
@@ -529,6 +530,7 @@ def buyer_workbench_dataframe(
             columns=[
                 "id",
                 "Wine",
+                "Item #",
                 "True Available",
                 "On Order",
                 "30d Sales",
@@ -606,12 +608,14 @@ def buyer_workbench_dataframe(
         "weeks_on_hand_with_on_order": "Weeks w/ On Order",
         "Working Recommended Qty": "Recommended Qty",
         "order_cost": "Est. Cost",
+        "product_code": "Item #",
         "fob": "_FOB",
     }
     editor = editor.rename(columns=rename_map)
     ordered = [
         "id",
         "Wine",
+        "Item #",
         "True Available",
         "On Order",
         "30d Sales",

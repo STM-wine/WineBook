@@ -486,6 +486,10 @@ def render_importer_work_unit(
                     "and current sales are above 0, the row shows New instead of dividing by zero."
                 ),
             ),
+            "Item #": st.column_config.TextColumn(
+                "Item #",
+                help="Stem/Vinosmith item number from the RB6 report.",
+            ),
             "Weeks w/ On Order": st.column_config.NumberColumn(
                 "Weeks w/ On Order",
                 format="%.1f",
@@ -528,6 +532,7 @@ def render_importer_work_unit(
             col
             for col in [
                 "Wine",
+                "Item #",
                 "True Available",
                 "On Order",
                 "30d Sales",

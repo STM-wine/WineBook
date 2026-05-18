@@ -84,6 +84,7 @@ def _choose_live_rb6_rows(rb6_data: pd.DataFrame) -> pd.DataFrame:
     on_order = numeric_series("on_order")
     prearrival = numeric_series("pre_arrival_total_quantity")
     rb6_inventory["_stock_position"] = np.maximum(0, available - unconfirmed) + on_order + prearrival
+    rb6_inventory["_has_stock_position"] = rb6_inventory["_stock_position"] > 0
 
     velocity_columns = [
         "last_30_day_sales_qty_across_all_accounts",
@@ -105,16 +106,23 @@ def _choose_live_rb6_rows(rb6_data: pd.DataFrame) -> pd.DataFrame:
     rb6_inventory = rb6_inventory.sort_values(
         [
             "planning_sku_norm",
+            "_has_stock_position",
+            "_vintage_sort",
             "_stock_position",
             "_rb6_velocity_signal",
-            "_vintage_sort",
             "_source_order",
         ],
-        ascending=[True, False, False, False, True],
+        ascending=[True, False, False, False, False, True],
     )
     rb6_inventory = rb6_inventory.drop_duplicates(subset=["planning_sku_norm"], keep="first").copy()
     return rb6_inventory.drop(
-        columns=["_source_order", "_stock_position", "_rb6_velocity_signal", "_vintage_sort"],
+        columns=[
+            "_source_order",
+            "_stock_position",
+            "_has_stock_position",
+            "_rb6_velocity_signal",
+            "_vintage_sort",
+        ],
         errors="ignore",
     )
 

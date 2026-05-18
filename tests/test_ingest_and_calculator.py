@@ -381,6 +381,55 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result["true_available"], 702)
         self.assertEqual(result["planning_sku"], "prost riesling 12/750ml")
 
+    def test_live_rb6_row_prefers_newer_stocked_vintage_over_older_larger_inventory(self):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": "Domaine Perraud de la Grand Burette Macon Villages VV 2023 12/750ml",
+                    "code": "NB-2023",
+                    "vintage": 2023,
+                    "available_inventory": 48,
+                    "on_order": 0,
+                    "fob": 18,
+                    "pack_size": 12,
+                    "last_30_day_sales_qty_across_all_accounts": 24,
+                },
+                {
+                    "name": "Domaine Perraud de la Grand Burette Macon Villages VV 2024 12/750ml",
+                    "code": "NB-2024",
+                    "vintage": 2024,
+                    "available_inventory": 6,
+                    "on_order": 0,
+                    "fob": 18,
+                    "pack_size": 12,
+                    "last_30_day_sales_qty_across_all_accounts": 6,
+                },
+            ]
+        )
+        sales = pd.DataFrame(
+            [
+                {
+                    "wine_name": "Domaine Perraud de la Grand Burette Macon Villages VV 2023 12/750ml",
+                    "quantity": 24,
+                    "date": "2026-05-12",
+                },
+                {
+                    "wine_name": "Domaine Perraud de la Grand Burette Macon Villages VV 2024 12/750ml",
+                    "quantity": 12,
+                    "date": "2026-05-10",
+                },
+            ]
+        )
+
+        result = calculate_reorder_recommendations(rb6, sales).iloc[0]
+
+        self.assertEqual(
+            result["Name"],
+            "Domaine Perraud de la Grand Burette Macon Villages VV 2024 12/750ml",
+        )
+        self.assertEqual(result["product_code"], "NB-2024")
+        self.assertEqual(result["true_available"], 6)
+
     def test_sales_windows_forecasts_and_velocity_trend_are_calculated(self):
         rb6 = pd.DataFrame(
             [
@@ -602,6 +651,7 @@ class DashboardTests(unittest.TestCase):
                     "id": "rec-1",
                     "supplier_name": "Importer A",
                     "product_name": "Slower Wine",
+                    "product_code": "SLOW-1",
                     "is_core": True,
                     "is_btg": False,
                     "true_available": 6,
@@ -627,6 +677,7 @@ class DashboardTests(unittest.TestCase):
                     "id": "rec-2",
                     "supplier_name": "Importer A",
                     "product_name": "Faster Wine",
+                    "product_code": "FAST-1",
                     "is_core": False,
                     "is_btg": True,
                     "true_available": 0,
@@ -655,6 +706,7 @@ class DashboardTests(unittest.TestCase):
         expanded = buyer_workbench_dataframe(original, show_history=True, show_forecast=True)
 
         self.assertNotIn("Supplier", compact.columns)
+        self.assertEqual(compact.loc[0, "Item #"], "FAST-1")
         self.assertEqual(compact.loc[0, "Recommended Qty"], 48)
         self.assertTrue(compact.loc[0, "Wine"].startswith("#1 Faster Wine"))
         self.assertIn("🍷", compact.loc[0, "Wine"])
