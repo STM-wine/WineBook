@@ -376,7 +376,12 @@ class SupabaseRepository:
         query = self.client.table("suppliers").select("*").order("name")
         if not include_inactive:
             query = query.eq("active", True)
-        result = query.execute()
+        try:
+            result = query.execute()
+        except Exception as exc:
+            if include_inactive or "column suppliers.active does not exist" not in str(exc):
+                raise
+            result = self.client.table("suppliers").select("*").order("name").execute()
         return result.data or []
 
     def upsert_supplier_logistics(self, suppliers: list[dict[str, Any]]) -> list[dict[str, Any]]:

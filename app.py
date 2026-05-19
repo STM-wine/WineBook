@@ -1449,17 +1449,28 @@ importers_source = "importers.csv" if csv_importers_loaded else "none"
 latest_repo = None
 try:
     latest_repo = SupabaseRepository.from_env()
-    supplier_logistics = supplier_logistics_rows_to_frame(latest_repo.get_supplier_logistics())
+except Exception as repo_error:
+    latest_repo = None
+    if not importers_loaded:
+        importers_warning = f"Supabase unavailable: {repo_error}"
+
+latest_report_run, latest_recommendations = None, []
+if latest_repo:
+    try:
+        supplier_logistics = supplier_logistics_rows_to_frame(latest_repo.get_supplier_logistics())
+    except Exception as repo_error:
+        supplier_logistics = pd.DataFrame()
+        if not importers_loaded:
+            importers_warning = f"Supplier logistics unavailable: {repo_error}"
     if not supplier_logistics.empty:
         importers_data = supplier_logistics
         importers_loaded = True
         importers_warning = None
         importers_source = "Supabase suppliers"
-    latest_report_run, latest_recommendations = latest_repo.get_latest_recommendations(limit=5000)
-except Exception as repo_error:
-    if not importers_loaded:
-        importers_warning = f"Supplier logistics unavailable: {repo_error}"
-    latest_report_run, latest_recommendations = None, []
+    try:
+        latest_report_run, latest_recommendations = latest_repo.get_latest_recommendations(limit=5000)
+    except Exception as repo_error:
+        st.error(f"Recommendation data unavailable: {repo_error}")
 
 if latest_report_run:
     dashboard_df = recommendations_to_dataframe(latest_recommendations)
