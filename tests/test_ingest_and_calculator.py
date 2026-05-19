@@ -69,6 +69,7 @@ class IngestTests(unittest.TestCase):
                     "On Order",
                     "Importer",
                     "FOB",
+                    "Wine: External ID (1)",
                 ]
             )
         )
@@ -87,6 +88,7 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(map_rb6_columns(rb6)["description"], "name")
         self.assertEqual(map_rb6_columns(rb6)["available_inventory"], "available_inventory")
         self.assertEqual(map_rb6_columns(rb6)["on_order"], "on_order")
+        self.assertIn("wine_external_id_1", rb6.columns)
         self.assertEqual(map_rads_columns(rads)["product_name"], "wine_name")
         self.assertEqual(map_rads_columns(rads)["quantity"], "quantity")
         self.assertEqual(map_rads_columns(rads)["date"], "date_mm_dd_yyyy")
@@ -141,6 +143,7 @@ class IngestTests(unittest.TestCase):
                     "eta_days": 14,
                     "pick_up_location": "California",
                     "trucking_cost_per_bottle": 1.25,
+                    "tdm": "Mark",
                     "active": True,
                 }
             ]
@@ -149,6 +152,7 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(data.loc[0, "importer_name"], "Supplier A")
         self.assertEqual(data.loc[0, "importer_name_clean"], "supplier a")
         self.assertEqual(data.loc[0, "trucking_cost_per_bottle"], 1.25)
+        self.assertEqual(data.loc[0, "tdm"], "Mark")
 
 
 class CalculatorTests(unittest.TestCase):
@@ -535,6 +539,7 @@ class DashboardTests(unittest.TestCase):
                     "name": "Supplier A",
                     "importer_id": 12345,
                     "eta_days": 15,
+                    "tdm": "Mark",
                     "trucking_cost_per_bottle": 1.25,
                     "active": True,
                 }
@@ -544,6 +549,20 @@ class DashboardTests(unittest.TestCase):
 
         self.assertEqual(editor.loc[0, "importer_id"], "12345")
         self.assertEqual(editor["importer_id"].dtype, object)
+        self.assertEqual(editor.loc[0, "tdm"], "Mark")
+
+    def test_filter_recommendations_can_filter_by_brand_manager(self):
+        df = recommendations_to_dataframe(
+            [
+                {"product_name": "Wine A", "supplier_name": "Supplier A", "brand_manager": "Mark"},
+                {"product_name": "Wine B", "supplier_name": "Supplier B", "brand_manager": "Junaid"},
+            ]
+        )
+
+        filtered = filter_recommendations(df, brand_manager="Mark", only_order_qty=False)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered.iloc[0]["product_name"], "Wine A")
 
     def test_all_order_review_display_sorts_and_uses_landed_costs(self):
         df = recommendations_to_dataframe(
@@ -1085,6 +1104,7 @@ class SupabaseRepositoryTests(unittest.TestCase):
                 "Name": "Wine A",
                 "target_days": 15,
                 "target_qty": 20.0,
+                "brand_manager": "Mark",
                 "base_recommended_qty_raw": 16.5,
                 "purchasing_environment_multiplier": 0.75,
                 "purchasing_environment_mode": "Defensive",
@@ -1098,8 +1118,31 @@ class SupabaseRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["purchasing_environment_multiplier"], 0.75)
         self.assertEqual(payload["purchasing_environment_mode"], "Defensive")
         self.assertEqual(payload["purchasing_environment_month"], 5)
+        self.assertEqual(payload["brand_manager"], "Mark")
         self.assertEqual(payload["diagnostics"]["purchasing_environment_multiplier"], 0.75)
         self.assertEqual(payload["diagnostics"]["purchasing_environment_mode"], "Defensive")
+
+    def test_supplier_payload_persists_tdm(self):
+        repo = SupabaseRepository(client=None)
+
+        payload = repo._supplier_payload({"name": "Supplier A", "tdm": "Mark"})
+
+        self.assertEqual(payload["tdm"], "Mark")
+
+    def test_supplier_tdm_candidates_ignore_blank_and_na_values(self):
+        recommendations = pd.DataFrame(
+            [
+                {"importer": "Supplier A", "brand_manager": "Mark"},
+                {"importer": "Supplier A", "brand_manager": "Other"},
+                {"importer": "Supplier B", "brand_manager": "N/A"},
+                {"importer": "Supplier C", "brand_manager": ""},
+                {"importer": "", "brand_manager": "No Supplier"},
+            ]
+        )
+
+        candidates = SupabaseRepository._supplier_tdm_candidates(recommendations)
+
+        self.assertEqual(candidates, {"Supplier A": "Mark"})
 
     def test_purchase_order_line_payload_uses_transitional_product_fields(self):
         repo = SupabaseRepository(client=None)

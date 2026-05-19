@@ -397,6 +397,70 @@ class SupabaseRepository:
             saved.extend(result.data or [])
         return saved
 
+    def seed_supplier_tdm_from_recommendations(self, recommendations: pd.DataFrame) -> list[dict[str, Any]]:
+        """Fill blank supplier TDM values from RB6 External ID 1 recommendation data."""
+        candidates = self._supplier_tdm_candidates(recommendations)
+        if not candidates:
+            return []
+
+        existing_rows = self.get_supplier_logistics(include_inactive=True)
+        existing_by_name = {
+            str(row.get("name") or "").strip(): row
+            for row in existing_rows
+            if str(row.get("name") or "").strip()
+        }
+
+        saved = []
+        new_payloads = []
+        now = datetime.now(timezone.utc).isoformat()
+        for supplier_name, tdm in candidates.items():
+            existing = existing_by_name.get(supplier_name)
+            if existing:
+                current_tdm = clean_value(existing.get("tdm"))
+                if current_tdm:
+                    continue
+                result = (
+                    self.client.table("suppliers")
+                    .update({"tdm": tdm, "updated_at": now})
+                    .eq("id", existing["id"])
+                    .execute()
+                )
+                saved.extend(result.data or [])
+            else:
+                new_payloads.append(
+                    {
+                        "name": supplier_name,
+                        "tdm": tdm,
+                        "active": True,
+                        "updated_at": now,
+                    }
+                )
+
+        if new_payloads:
+            result = self.client.table("suppliers").upsert(new_payloads, on_conflict="name").execute()
+            saved.extend(result.data or [])
+        return saved
+
+    @staticmethod
+    def _supplier_tdm_candidates(recommendations: pd.DataFrame) -> dict[str, str]:
+        if recommendations.empty or "brand_manager" not in recommendations.columns:
+            return {}
+        supplier_col = next(
+            (col for col in ["importer", "supplier_name"] if col in recommendations.columns),
+            None,
+        )
+        if supplier_col is None:
+            return {}
+
+        candidates: dict[str, str] = {}
+        for row in recommendations[[supplier_col, "brand_manager"]].to_dict(orient="records"):
+            supplier_name = str(row.get(supplier_col) or "").strip()
+            tdm = str(row.get("brand_manager") or "").strip()
+            if not supplier_name or not tdm or tdm.lower() in {"n/a", "na", "none", "nan"}:
+                continue
+            candidates.setdefault(supplier_name, tdm)
+        return candidates
+
     def deactivate_supplier(self, supplier_id: str) -> dict[str, Any]:
         return self._update_one("suppliers", supplier_id, {"active": False})
 
@@ -419,6 +483,7 @@ class SupabaseRepository:
             "product_name": clean_value(row.get("Name")),
             "product_code": clean_value(row.get("product_code")),
             "supplier_name": clean_value(row.get("importer")),
+            "brand_manager": clean_value(row.get("brand_manager")),
             "is_btg": bool_value(row.get("is_btg_bool", row.get("is_btg"))),
             "is_core": bool_value(row.get("is_core_bool", row.get("is_core"))),
             "last_30_day_sales": clean_value(row.get("last_30_day_sales"), 0),
@@ -477,6 +542,7 @@ class SupabaseRepository:
             "pick_up_location": clean_value(row.get("pick_up_location") or row.get("pickup_location")),
             "freight_forwarder": clean_value(row.get("freight_forwarder")),
             "order_frequency": clean_value(row.get("order_frequency")),
+            "tdm": clean_value(row.get("tdm") or row.get("brand_manager")),
             "trucking_cost_per_bottle": clean_value(row.get("trucking_cost_per_bottle") or row.get("laid_in_per_bottle"), 0),
             "notes": clean_value(row.get("notes")),
             "active": bool_value(row.get("active", True)),

@@ -347,6 +347,30 @@ def create_po_drafts_for_approved_suppliers(latest_repo, report_run_id, recommen
     return created, skipped, errors
 
 
+def apply_supplier_tdm_overrides(dashboard_df, supplier_data):
+    if dashboard_df.empty or supplier_data.empty or "supplier_name" not in dashboard_df.columns:
+        return dashboard_df
+    if not {"importer_name", "tdm"}.issubset(supplier_data.columns):
+        return dashboard_df
+
+    tdm_map = (
+        supplier_data[["importer_name", "tdm"]]
+        .dropna(subset=["importer_name"])
+        .assign(tdm=lambda frame: frame["tdm"].fillna("").astype(str).str.strip())
+    )
+    tdm_map = tdm_map[tdm_map["tdm"] != ""].drop_duplicates("importer_name", keep="last")
+    if tdm_map.empty:
+        return dashboard_df
+
+    updated = dashboard_df.copy()
+    supplier_to_tdm = dict(zip(tdm_map["importer_name"], tdm_map["tdm"]))
+    if "brand_manager" not in updated.columns:
+        updated["brand_manager"] = ""
+    tdm_values = updated["supplier_name"].map(supplier_to_tdm).fillna("")
+    updated["brand_manager"] = updated["brand_manager"].where(tdm_values == "", tdm_values)
+    return updated
+
+
 def render_importer_work_unit(
     *,
     importer_name,
@@ -355,12 +379,21 @@ def render_importer_work_unit(
     report_run_id,
     latest_repo,
     selected_statuses,
-    show_history=False,
-    show_forecast=False,
     existing_drafts=None,
 ):
     key_base = f"{report_run_id}_{importer_key(importer_name)}_{'-'.join(selected_statuses)}"
     editor_key = f"approval_editor_{key_base}"
+    option_cols = st.columns([1.2, 1.4, 5])
+    show_history = option_cols[0].checkbox(
+        "Show 60/90d sales",
+        value=False,
+        key=f"show_history_{key_base}",
+    )
+    show_forecast = option_cols[1].checkbox(
+        "Show LY 60/90d forecast",
+        value=False,
+        key=f"show_forecast_{key_base}",
+    )
     editor_df = buyer_workbench_dataframe(
         importer_df,
         show_history=show_history,
@@ -1267,6 +1300,55 @@ div[data-testid="stTabs"] [aria-selected="true"] {
     color: var(--stem-wine) !important;
 }
 
+div[data-testid="stHorizontalBlock"]:has(div[data-testid="stRadio"] [role="radiogroup"]) {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 999 !important;
+    align-items: end !important;
+    padding: 0.35rem 0 0.45rem !important;
+    margin-bottom: 0.85rem !important;
+    background: rgba(255, 252, 248, 0.96) !important;
+    border-bottom: 1px solid var(--stem-line) !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+div[data-testid="stRadio"] {
+    margin-bottom: 0 !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] {
+    align-items: stretch !important;
+    gap: 0.25rem !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label {
+    min-height: 2.8rem !important;
+    padding: 0.72rem 1rem 0.62rem !important;
+    border-radius: 8px 8px 0 0 !important;
+    border-bottom: 3px solid transparent !important;
+    background: transparent !important;
+    cursor: pointer !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
+    border-bottom-color: var(--stem-red) !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label div[data-testid="stMarkdownContainer"] p {
+    font-size: 1.02rem !important;
+    font-weight: 700 !important;
+    color: var(--stem-charcoal) !important;
+    white-space: nowrap !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) div[data-testid="stMarkdownContainer"] p {
+    color: var(--stem-ink) !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child {
+    display: none !important;
+}
+
 div[data-testid="stExpander"] details[open] > summary p {
     display: none !important;
 }
@@ -1381,6 +1463,7 @@ except Exception as repo_error:
 
 if latest_report_run:
     dashboard_df = recommendations_to_dataframe(latest_recommendations)
+    dashboard_df = apply_supplier_tdm_overrides(dashboard_df, importers_data)
     metrics = dashboard_metrics(dashboard_df)
     approvals = approval_metrics(dashboard_df)
     run_date = latest_report_run.get("report_date") or "Latest"
@@ -1392,13 +1475,42 @@ if latest_report_run:
             if draft.get("supplier_name") and draft.get("status") != "cancelled"
         }
     except Exception:
+        po_drafts = []
         po_sent_suppliers = set()
 
-    tab_recs, tab_supplier_hub, tab_suppliers, tab_locations, tab_po = st.tabs(
-        ["Order Review", "Supplier Hub", "Supplier Board", "Freight", "PO Drafts"]
-    )
+    view_options = ["Order Review", "Supplier Hub", "Supplier Board", "Freight", "PO Drafts"]
+    nav_cols = st.columns([5, 1.35])
+    with nav_cols[0]:
+        active_view = st.radio(
+            "View",
+            view_options,
+            horizontal=True,
+            label_visibility="collapsed",
+            key="main_view",
+        )
+    with nav_cols[1]:
+        if st.button(
+            "Create PO Drafts",
+            type="primary",
+            disabled=approvals.approved_lines == 0,
+            key="create_all_po_drafts_toolbar",
+            use_container_width=True,
+        ):
+            created, skipped, errors = create_po_drafts_for_approved_suppliers(
+                latest_repo,
+                latest_report_run["id"],
+                dashboard_df,
+                po_drafts,
+            )
+            if created:
+                st.success(f"Created {len(created):,} PO draft(s).")
+                st.rerun()
+            if skipped:
+                st.info("Skipped: " + "; ".join(skipped))
+            if errors:
+                st.error("Errors: " + "; ".join(errors))
 
-    with tab_recs:
+    if active_view == "Order Review":
         metric_cols = st.columns(6)
         with metric_cols[0]:
             metric_card("Urgent", format_count(metrics.urgent_skus), "SKUs need action", "red")
@@ -1423,29 +1535,6 @@ if latest_report_run:
             unsafe_allow_html=True,
         )
 
-        st.markdown("<div style='height: 1.2rem;'></div>", unsafe_allow_html=True)
-        toolbar_cols = st.columns([1.6, 5])
-        if toolbar_cols[0].button(
-            "Create PO Drafts",
-            type="primary",
-            disabled=approvals.approved_lines == 0,
-            key="create_all_po_drafts_review",
-        ):
-            created, skipped, errors = create_po_drafts_for_approved_suppliers(
-                latest_repo,
-                latest_report_run["id"],
-                dashboard_df,
-                po_drafts,
-            )
-            if created:
-                st.success(f"Created {len(created):,} PO draft(s).")
-                st.rerun()
-            if skipped:
-                st.info("Skipped: " + "; ".join(skipped))
-            if errors:
-                st.error("Errors: " + "; ".join(errors))
-        toolbar_cols[1].caption("Creates one draft per supplier from currently approved lines. Existing active drafts are skipped.")
-
         section_label("Order Summary", "Show all suppliers or focus on one supplier at a time.")
         filter_cols = st.columns([2.4, 2, 3.4, 1.2])
         supplier_values = (
@@ -1455,19 +1544,26 @@ if latest_report_run:
         )
         supplier_options = ["All"] + sorted([s for s in supplier_values if s])
         active_supplier = filter_cols[0].selectbox("Supplier", supplier_options, key="order_review_supplier")
-        selected_statuses = filter_cols[1].multiselect(
-            "Status",
-            ["URGENT", "LOW", "OK", "NO SALES"],
-            default=["URGENT", "LOW", "OK", "NO SALES"],
-            key="order_review_statuses",
+        brand_manager_values = (
+            dashboard_df["brand_manager"].dropna().astype(str).str.strip().unique()
+            if "brand_manager" in dashboard_df.columns
+            else []
+        )
+        brand_manager_options = ["All"] + sorted([value for value in brand_manager_values if value])
+        active_brand_manager = filter_cols[1].selectbox(
+            "Brand Manager",
+            brand_manager_options,
+            key="order_review_brand_manager",
         )
         search_query = filter_cols[2].text_input("Wine search", "", key="order_review_search")
         only_order_qty = filter_cols[3].checkbox("Suggested only", value=False, key="order_review_suggested_only")
+        selected_statuses = ["URGENT", "LOW", "OK", "NO SALES"]
 
         filtered_dashboard = filter_recommendations(
             dashboard_df,
             supplier=active_supplier,
             statuses=selected_statuses,
+            brand_manager=active_brand_manager,
             search=search_query,
             only_order_qty=only_order_qty,
         )
@@ -1490,10 +1586,6 @@ if latest_report_run:
             "Order Summary",
             "Supplier sections are ordered by total suggested value; wines inside each supplier are sorted A-Z.",
         )
-        toggle_cols = st.columns([1.2, 1.4, 5])
-        show_history = toggle_cols[0].checkbox("Show 60/90d sales", value=False)
-        show_forecast = toggle_cols[1].checkbox("Show LY 60/90d forecast", value=False)
-
         importer_summary = importer_workbench_summary(filtered_dashboard, po_sent_suppliers=po_sent_suppliers)
         importer_summary_display = importer_summary.copy()
         for money_col in ["Suggested Value", "Approved Value"]:
@@ -1510,12 +1602,17 @@ if latest_report_run:
         if not groups:
             st.info("No SKUs match the current workbench filters.")
         elif active_supplier == "All":
+            expand_all_suppliers = st.checkbox(
+                "Expand all supplier workbenches",
+                value=False,
+                key="order_review_expand_all_suppliers",
+            )
             for index, group in enumerate(groups):
                 summary = group["summary"]
                 importer_name = summary["Importer"]
                 with st.expander(
                     importer_name,
-                    expanded=index == 0,
+                    expanded=expand_all_suppliers,
                 ):
                     render_importer_work_unit(
                         importer_name=importer_name,
@@ -1524,8 +1621,6 @@ if latest_report_run:
                         report_run_id=latest_report_run["id"],
                         latest_repo=latest_repo,
                         selected_statuses=selected_statuses,
-                        show_history=show_history,
-                        show_forecast=show_forecast,
                         existing_drafts=[
                             draft
                             for draft in po_drafts
@@ -1542,8 +1637,6 @@ if latest_report_run:
                     report_run_id=latest_report_run["id"],
                     latest_repo=latest_repo,
                     selected_statuses=selected_statuses,
-                    show_history=show_history,
-                    show_forecast=show_forecast,
                     existing_drafts=[
                         draft
                         for draft in po_drafts
@@ -1551,14 +1644,14 @@ if latest_report_run:
                     ],
                 )
 
-    with tab_supplier_hub:
+    elif active_view == "Supplier Hub":
         render_supplier_catalog(importers_data, repo=latest_repo, source_label=importers_source)
 
-    with tab_suppliers:
+    elif active_view == "Supplier Board":
         section_label("Supplier Board", "Use this as the buyer's queue across all suppliers.")
         st.dataframe(supplier_summary(dashboard_df), use_container_width=True, hide_index=True, height=560)
 
-    with tab_locations:
+    elif active_view == "Freight":
         section_label("Freight View", "Roll up ordering pressure by pickup location and watch California truck economics.")
         truck = california_truck_summary(dashboard_df)
         truck_cols = st.columns(3)
@@ -1571,7 +1664,7 @@ if latest_report_run:
         st.progress(min(float(truck["progress_pct"]) / 100, 1.0))
         st.dataframe(location_summary(dashboard_df), use_container_width=True, hide_index=True, height=460)
 
-    with tab_po:
+    elif active_view == "PO Drafts":
         section_label("PO Drafts", "Create supplier drafts from approved rows and track QuickBooks handoff status.")
         po_df = po_export_dataframe(dashboard_df)
         po_qty = int(po_df["Quantity"].sum()) if "Quantity" in po_df else 0

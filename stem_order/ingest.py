@@ -15,6 +15,7 @@ IMPORTER_LOGISTICS_COLUMNS = [
     "freight_forwarder",
     "order_frequency",
     "trucking_cost_per_bottle",
+    "tdm",
     "notes",
 ]
 

@@ -12,6 +12,7 @@ DISPLAY_COLUMNS = [
     "pick_up_location",
     "freight_forwarder",
     "order_frequency",
+    "tdm",
     "trucking_cost_per_bottle",
     "notes",
     "active",
@@ -34,7 +35,7 @@ def _rows_to_editor(rows: list[dict], fallback_data: pd.DataFrame) -> pd.DataFra
     df["trucking_cost_per_bottle"] = pd.to_numeric(
         df["trucking_cost_per_bottle"], errors="coerce"
     ).fillna(0.0)
-    for column in ["id", "name", "importer_id", "pick_up_location", "freight_forwarder", "order_frequency", "notes"]:
+    for column in ["id", "name", "importer_id", "pick_up_location", "freight_forwarder", "order_frequency", "tdm", "notes"]:
         df[column] = df[column].fillna("").astype(str)
     df["active"] = df["active"].fillna(True).astype(bool)
     return df.sort_values("name", key=lambda series: series.fillna("").astype(str).str.lower()).reset_index(drop=True)
@@ -59,6 +60,7 @@ def _editor_to_payloads(editor: pd.DataFrame) -> list[dict]:
                 "pick_up_location": str(row.get("pick_up_location") or "").strip() or None,
                 "freight_forwarder": str(row.get("freight_forwarder") or "").strip() or None,
                 "order_frequency": str(row.get("order_frequency") or "").strip() or None,
+                "tdm": str(row.get("tdm") or "").strip() or None,
                 "trucking_cost_per_bottle": float(clean_number(row.get("trucking_cost_per_bottle"), 0.0)),
                 "notes": str(row.get("notes") or "").strip() or None,
                 "active": bool(row.get("active", True)),
@@ -98,6 +100,10 @@ def render_supplier_logistics(repo, fallback_data: pd.DataFrame, source_label: s
             "pick_up_location": st.column_config.TextColumn("Pickup Location"),
             "freight_forwarder": st.column_config.TextColumn("Freight Forwarder"),
             "order_frequency": st.column_config.TextColumn("Order Frequency"),
+            "tdm": st.column_config.TextColumn(
+                "TDM",
+                help="Trade Development Manager / Brand Manager used by Order Review filtering.",
+            ),
             "trucking_cost_per_bottle": st.column_config.NumberColumn(
                 "Laid In / Bottle",
                 min_value=0.0,

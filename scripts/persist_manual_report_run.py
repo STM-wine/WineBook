@@ -27,6 +27,11 @@ def main() -> None:
     args = parse_args()
     result = build_ordering_pipeline(args.rb6, args.rads, args.importers)
     repo = SupabaseRepository.from_env()
+    try:
+        seeded_suppliers = repo.seed_supplier_tdm_from_recommendations(result.recommendations)
+    except Exception as exc:
+        seeded_suppliers = []
+        print(f"warning: could not seed supplier TDM values: {exc}")
     report_run = repo.create_report_run(
         run_type="manual_upload",
         diagnostics={
@@ -46,6 +51,7 @@ def main() -> None:
     print(f"report_run_id: {report_run['id']}")
     print(f"recommendations_built: {len(result.recommendations)}")
     print(f"recommendations_saved: {len(saved)}")
+    print(f"supplier_tdm_seeded: {len(seeded_suppliers)}")
     print(f"urgent_skus: {result.diagnostics['urgent_skus']}")
     print(f"recommended_bottles: {result.diagnostics['recommended_bottles']}")
     print(f"estimated_order_cost: ${result.diagnostics['estimated_order_cost']:,.2f}")
@@ -53,4 +59,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

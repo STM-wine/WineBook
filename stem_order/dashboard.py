@@ -199,6 +199,7 @@ def recommendations_to_dataframe(recommendations: list[dict]) -> pd.DataFrame:
         "risk_level",
         "pickup_location",
         "velocity_trend_label",
+        "brand_manager",
     ]:
         if col in df.columns:
             df[col] = df[col].fillna("")
@@ -361,6 +362,7 @@ def filter_recommendations(
     df: pd.DataFrame,
     supplier: str = "All",
     statuses: list[str] | None = None,
+    brand_manager: str = "All",
     search: str = "",
     only_order_qty: bool = True,
 ) -> pd.DataFrame:
@@ -371,6 +373,9 @@ def filter_recommendations(
 
     if statuses and "reorder_status" in filtered:
         filtered = filtered[filtered["reorder_status"].isin(statuses)]
+
+    if brand_manager != "All" and "brand_manager" in filtered:
+        filtered = filtered[filtered["brand_manager"].fillna("").astype(str) == brand_manager]
 
     if only_order_qty and "recommended_qty_rounded" in filtered:
         filtered = filtered[filtered["recommended_qty_rounded"] > 0]

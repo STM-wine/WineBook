@@ -343,6 +343,11 @@ def main() -> None:
             ROOT / "importers.csv",
             importers_data=supplier_logistics if not supplier_logistics.empty else None,
         )
+        try:
+            seeded_suppliers = repo.seed_supplier_tdm_from_recommendations(result.recommendations)
+        except Exception as exc:
+            seeded_suppliers = []
+            print(f"warning: could not seed supplier TDM values: {exc}")
         report_run = repo.create_report_run(
             run_type="scheduled_email",
             source_file_ids=[rb6_source["id"], rads_source["id"]],
@@ -371,6 +376,7 @@ def main() -> None:
         print(f"source_files: {rb6_source['id']}, {rads_source['id']}")
         print(f"recommendations_built: {len(result.recommendations)}")
         print(f"recommendations_saved: {len(saved)}")
+        print(f"supplier_tdm_seeded: {len(seeded_suppliers)}")
         print(f"urgent_skus: {result.diagnostics['urgent_skus']}")
         print(f"recommended_bottles: {result.diagnostics['recommended_bottles']}")
         print(f"estimated_order_cost: ${result.diagnostics['estimated_order_cost']:,.2f}")

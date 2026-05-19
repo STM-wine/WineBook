@@ -199,6 +199,7 @@ def add_importer_logistics(
             "freight_forwarder",
             "order_frequency",
             "trucking_cost_per_bottle",
+            "tdm",
             "notes",
         ]
         recommendations["importer_clean"] = recommendations["importer"].fillna("").apply(clean_importer_name)
@@ -211,6 +212,15 @@ def add_importer_logistics(
         recommendations = recommendations.drop(
             columns=["importer_name_clean", "importer_clean"], errors="ignore"
         )
+        if "tdm" in recommendations.columns:
+            tdm_values = recommendations["tdm"].fillna("").astype(str).str.strip()
+            if "brand_manager" in recommendations.columns:
+                recommendations["brand_manager"] = recommendations["brand_manager"].where(
+                    tdm_values == "",
+                    recommendations["tdm"],
+                )
+            else:
+                recommendations["brand_manager"] = recommendations["tdm"]
 
     if "eta_days" not in recommendations.columns:
         recommendations["eta_days"] = None
