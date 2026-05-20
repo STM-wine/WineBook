@@ -341,10 +341,35 @@ def create_po_drafts_for_approved_suppliers(latest_repo, report_run_id, recommen
                     notes="Created from global PO Drafts action.",
                 )
             )
+        except ValueError as draft_error:
+            if "active PO draft already exists" in str(draft_error):
+                skipped.append(f"{supplier}: active draft already exists")
+            else:
+                errors.append(f"{supplier}: {draft_error}")
         except Exception as draft_error:
             errors.append(f"{supplier}: {draft_error}")
 
     return created, skipped, errors
+
+
+def show_po_draft_result(created, skipped, errors):
+    if created:
+        message = f"Draft created: {len(created):,} supplier PO draft(s)."
+        st.session_state["po_draft_notice"] = message
+        st.success(message)
+        st.toast(message)
+    if skipped:
+        st.info("Already active: " + "; ".join(skipped))
+        if not created and not errors:
+            st.toast("PO drafts already exist for the approved supplier lines.")
+    if errors:
+        st.error("Errors: " + "; ".join(errors))
+
+
+def render_pending_po_draft_notice():
+    notice = st.session_state.pop("po_draft_notice", None)
+    if notice:
+        st.success(notice)
 
 
 def apply_supplier_tdm_overrides(dashboard_df, supplier_data):
@@ -448,8 +473,13 @@ def render_importer_work_unit(
             "_Velocity Trend Label": None,
             "Wine": st.column_config.TextColumn(
                 "Wine",
-                help="Importer rank plus Core / BTG flags.",
+                help="Wine name with Core / BTG flags.",
                 width="large",
+            ),
+            "Rank": st.column_config.NumberColumn(
+                "Rank",
+                format="%d",
+                help="Importer-level velocity rank based on trailing sales.",
             ),
             "True Available": st.column_config.NumberColumn(
                 "True Available",
@@ -551,8 +581,7 @@ def render_importer_work_unit(
                 step=1,
                 format="%d",
                 help=(
-                    "Formula: max(0, target bottles - True Available - On Order), rounded up to pack size. "
-                    "This is editable; changing it recalculates Weeks w/ Recommended."
+                    "Suggested bottles needed to reach target coverage after available inventory and open orders."
                 ),
             ),
             "Est. Cost": st.column_config.NumberColumn(
@@ -565,6 +594,7 @@ def render_importer_work_unit(
             col
             for col in [
                 "Wine",
+                "Rank",
                 "Item #",
                 "True Available",
                 "On Order",
@@ -1514,12 +1544,12 @@ if latest_report_run:
                 po_drafts,
             )
             if created:
-                st.success(f"Created {len(created):,} PO draft(s).")
+                show_po_draft_result(created, skipped, errors)
                 st.rerun()
-            if skipped:
-                st.info("Skipped: " + "; ".join(skipped))
-            if errors:
-                st.error("Errors: " + "; ".join(errors))
+            else:
+                show_po_draft_result(created, skipped, errors)
+
+    render_pending_po_draft_notice()
 
     if active_view == "Order Review":
         metric_cols = st.columns(6)
@@ -1706,12 +1736,10 @@ if latest_report_run:
                 po_drafts,
             )
             if created:
-                st.success(f"Created {len(created):,} PO draft(s).")
+                show_po_draft_result(created, skipped, errors)
                 st.rerun()
-            if skipped:
-                st.info("Skipped: " + "; ".join(skipped))
-            if errors:
-                st.error("Errors: " + "; ".join(errors))
+            else:
+                show_po_draft_result(created, skipped, errors)
         po_action_cols[1].download_button(
             label="Download PO CSV",
             data=po_df.to_csv(index=False),

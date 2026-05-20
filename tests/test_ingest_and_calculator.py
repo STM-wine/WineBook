@@ -725,9 +725,10 @@ class DashboardTests(unittest.TestCase):
         expanded = buyer_workbench_dataframe(original, show_history=True, show_forecast=True)
 
         self.assertNotIn("Supplier", compact.columns)
+        self.assertEqual(compact.loc[0, "Rank"], 1)
         self.assertEqual(compact.loc[0, "Item #"], "FAST-1")
         self.assertEqual(compact.loc[0, "Recommended Qty"], 48)
-        self.assertTrue(compact.loc[0, "Wine"].startswith("#1 Faster Wine"))
+        self.assertTrue(compact.loc[0, "Wine"].startswith("Faster Wine"))
         self.assertIn("🍷", compact.loc[0, "Wine"])
         self.assertIn("⭐", compact.loc[1, "Wine"])
         self.assertNotIn("60d Sales", compact.columns)
@@ -992,6 +993,7 @@ class DashboardTests(unittest.TestCase):
                     "planning_sku": "wine a",
                     "approved_qty": 12,
                     "fob": 10,
+                    "trucking_cost_per_bottle": 1.25,
                     "line_cost": 120,
                 }
             ]
@@ -1018,7 +1020,8 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(po_export.loc[0, "Total Laid In Cost"], 15)
         self.assertEqual(po_export.loc[0, "Estimated Cost"], 135)
         self.assertEqual(lines.loc[0, "Quantity"], 12)
-        self.assertEqual(lines.loc[0, "Estimated Cost"], 120)
+        self.assertEqual(lines.loc[0, "Total Laid In Cost"], 15)
+        self.assertEqual(lines.loc[0, "Estimated Cost"], 135)
         self.assertEqual(drafts.loc[0, "Draft ID"], "abcdef12")
         self.assertEqual(drafts.loc[0, "Status"], "Ready for Entry")
 

@@ -106,7 +106,7 @@ def _wine_display(row: pd.Series) -> str:
     if bool(row.get("is_btg", False)):
         flags.append("🍷")
     suffix = f" {' '.join(flags)}" if flags else ""
-    return f"#{_clean_int(row.get('_importer_rank'), 0)} {row.get('product_name', '')}{suffix}"
+    return f"{row.get('product_name', '')}{suffix}"
 
 
 def working_qty_from_weeks(row: dict | pd.Series) -> int:
@@ -534,6 +534,7 @@ def buyer_workbench_dataframe(
         return pd.DataFrame(
             columns=[
                 "id",
+                "Rank",
                 "Wine",
                 "Item #",
                 "True Available",
@@ -575,6 +576,7 @@ def buyer_workbench_dataframe(
 
     editor["_velocity_rank_basis"] = _rank_velocity_series(df).reindex(editor.index).fillna(0)
     editor["_importer_rank"] = editor["_velocity_rank_basis"].rank(method="dense", ascending=False).astype(int)
+    editor["Rank"] = editor["_importer_rank"]
     editor["Wine"] = editor.apply(_wine_display, axis=1)
     statuses = (
         editor["recommendation_status"]
@@ -619,6 +621,7 @@ def buyer_workbench_dataframe(
     editor = editor.rename(columns=rename_map)
     ordered = [
         "id",
+        "Rank",
         "Wine",
         "Item #",
         "True Available",
@@ -892,16 +895,23 @@ def po_draft_lines_dataframe(lines: list[dict]) -> pd.DataFrame:
         parsed = pd.to_numeric(value, errors="coerce")
         return parsed if default is None else parsed.fillna(default)
 
+    quantity = numeric_column("approved_qty").astype(int)
+    fob = numeric_column("fob")
+    laid_in_per_bottle = numeric_column("trucking_cost_per_bottle")
+    total_wine_cost = numeric_column("wine_cost", None).fillna(numeric_column("line_cost")).fillna(fob * quantity)
+    total_laid_in_cost = numeric_column("laid_in_cost", None).fillna(laid_in_per_bottle * quantity)
+    estimated_cost = numeric_column("landed_cost", None).fillna(total_wine_cost + total_laid_in_cost)
+
     display = pd.DataFrame(
         {
             "Wine": df.get("product_name", pd.Series(dtype=str)).fillna(""),
             "Code": df.get("product_code", pd.Series(dtype=str)).fillna(""),
-            "Quantity": numeric_column("approved_qty").astype(int),
-            "FOB": numeric_column("fob"),
-            "Laid In Cost": numeric_column("trucking_cost_per_bottle"),
-            "Total Wine Cost": numeric_column("wine_cost", None).fillna(numeric_column("line_cost")),
-            "Total Laid In Cost": numeric_column("laid_in_cost"),
-            "Estimated Cost": numeric_column("landed_cost", None).fillna(numeric_column("line_cost")),
+            "Quantity": quantity,
+            "FOB": fob,
+            "Laid In Cost": laid_in_per_bottle,
+            "Total Wine Cost": total_wine_cost,
+            "Total Laid In Cost": total_laid_in_cost,
+            "Estimated Cost": estimated_cost,
         }
     )
     return display[columns]

@@ -4,7 +4,8 @@ Internal ordering tools for Stem Wine Company.
 
 **GitHub:** `https://github.com/STM-wine/WineBook`
 **Last updated:** May 2026
-**Stack:** Python 3.11, Streamlit, pandas, openpyxl, Supabase
+**Current stack:** Python 3.11, Streamlit, pandas, openpyxl, Supabase
+**V1 deployment target:** Next.js + Supabase Auth/Data hosted on Render
 
 ## Overview
 
@@ -18,6 +19,8 @@ The repo currently contains two independent Streamlit tools:
 | GRW Invoice Converter | `grw_converter_app.py` | Existing utility, not part of the current ordering-dashboard work |
 
 Keep the GRW converter separate unless the business explicitly decides to merge it into a future unified front end.
+
+The Ordering Dashboard Streamlit app is the current reference implementation, not the final hosted V1 runtime. The next production step is to migrate the buyer workflow to an authenticated Next.js app hosted on Render while keeping the existing Python ingestion/calculation worker.
 
 ## Current Ordering Flow
 
@@ -132,7 +135,10 @@ Current buyer-facing rules from Mark/ownership:
 - Every SKU receives a recommendation row.
 - Recommendations default to `rejected`; buyers must explicitly approve rows before PO entry.
 - Buyers can edit either `Weeks w/ Recommended` or `Recommended Qty`; the dashboard keeps those values synchronized and saves the working recommended quantity as the approved quantity when approved.
+- Buyer workbench rank is displayed in its own `Rank` column; the Wine column remains the product name plus Core/BTG flags.
 - Velocity trend compares the latest 30-day RADs sales window against the prior 30-day window. If the prior period is zero and the latest period has sales, the buyer table displays `New`.
+- Brand Manager is sourced from RB6 `Wine: External ID (1)` / `brand_manager`; Supplier Hub `TDM` is the editable supplier-level override.
+- PO Draft review shows per-bottle laid-in cost, total wine cost, total laid-in cost, and estimated total cost.
 
 Minimum case threshold:
 
@@ -198,6 +204,27 @@ The dashboard now includes pickup-location rollups and a first California full-t
 - Non-FTL freight assumption from notes: $4.75 per case
 - Future work should use internal trucking-cost-per-bottle and pallet-configuration data to recommend incremental SKUs that efficiently fill trucks.
 
+## V1 Deployment Direction
+
+Streamlit exposed several buyer-workflow limits that are hard to solve cleanly in that framework: scroll position reset after table edits, awkward sticky/frozen table behavior, limited header/layout control, and constrained top navigation placement. V1 should therefore move to a standalone web app before final delivery.
+
+Planned production shape:
+
+- Next.js frontend/app shell.
+- Supabase Auth for Google/email login.
+- Supabase Postgres/Storage as the durable backend.
+- Render hosting for the app.
+- Existing Python/GitHub Actions worker remains responsible for daily Vinosmith email ingestion and calculation.
+- Wix may link to or embed the app, but it should not host the operational runtime.
+
+Deferred until after the migration:
+
+- DI vs Stateside ordering mode.
+- Ant Moore container-fill/container-mix logic.
+- Brand-level DI defaults, transit times, and freight-forwarder rules.
+- Delete SKU directly from an existing PO Draft.
+- QuickBooks writeback/API sync.
+
 ## Verification
 
 Run before pushing meaningful changes:
@@ -214,4 +241,4 @@ python scripts/smoke_ordering_pipeline.py
 - Keep `display_df` UI-only; use raw numeric frames for calculations and persistence.
 - Use Supabase service-role keys only in trusted server-side/local scripts.
 - Supabase Cron is the scheduling source of truth. GitHub Actions remains the Python worker and can still be manually dispatched for debugging.
-- The hosted-product direction is still open: Streamlit can continue as the near-term app, but a future authenticated web app can reuse the same Supabase schema and Python worker pipeline.
+- The hosted-product direction is Next.js + Supabase Auth/Data on Render, with the existing Python worker retained for ingestion/calculation.

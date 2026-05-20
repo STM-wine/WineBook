@@ -22,6 +22,10 @@ WineBook is now a Supabase-backed ordering dashboard with automated daily ingest
 - The legacy upload-first fallback is hidden from the app surface; reruns should use automation/manual GitHub dispatch or local scripts.
 - Supplier Hub has been ported as an MVP foundation for supplier wine search, manual wine entry, bottle-level pricing, requests, supplier logistics management, pending product creation, and price-change tracking.
 - Supplier logistics can be edited in-app and stored in Supabase `suppliers`; `importers.csv` is now a seed/fallback source.
+- The Order Review toolbar, supplier workbench filters, editable recommendations, PO draft creation, PO draft review, and PO XLSX/CSV export are the current V1 Streamlit workflow.
+- PO draft review now shows per-bottle laid-in cost, total wine cost, total laid-in cost, and estimated total cost. Existing draft rows fall back to calculating laid-in totals from `trucking_cost_per_bottle x approved_qty` when newer stored totals are missing.
+- Brand Manager filtering is populated from RB6 `Wine: External ID (1)` / persisted recommendation `brand_manager`, with Supplier Hub `TDM` as the editable supplier-level override.
+- Supplier workbench ranking is shown as a separate `Rank` column so wine names can remain clean and alphabetically scannable.
 
 ## Business Direction
 
@@ -44,57 +48,49 @@ The product goal is a simple buyer workflow:
 
 ## Immediate Priorities
 
-1. Watch one weekday morning run after the latest Supabase/GitHub automation changes to confirm ingestion remains quiet after success.
-2. Spot-check True Available, On Order, and trend values against Mark's source spreadsheets.
-3. Apply the supplier-logistics and PO laid-in-cost migrations in Supabase, then seed suppliers from `importers.csv` in the Supplier Hub logistics tab.
-4. Validate Supplier Hub terminology, pricing rules, and request workflow with Mark before adding persistence for catalog wines/requests.
-5. Work through Mark's next Linear issues against the buyer workbench.
-6. Tighten the PO draft output around the actual QuickBooks entry workflow.
-7. Decide the first hosted release strategy.
+1. Retest `Create PO Drafts` after applying the PO line schema-cache migration.
+2. Confirm PO Drafts view shows Laid In Cost, Total Wine Cost, Total Laid In Cost, and Estimated Cost correctly.
+3. Commit the Streamlit V1 checkpoint and use it as the reference implementation for the migration.
+4. Begin migration to a standalone authenticated web app: Next.js + Supabase Auth/Data + Render.
+5. Keep the existing Python ingestion/calculation worker in place during the frontend migration.
 
-## Near-Term Product Work
+## Known Deferred Items
 
-- Continue replacing remaining user-facing `Importer` labels with `Supplier`.
-- Evaluate replacing Streamlit's table with AG Grid or a custom frontend table if frozen Wine column behavior becomes essential.
-- Decide the Supabase schema for Supplier Hub before moving it beyond session-state storage.
-- Add lightweight in-app operational visibility:
-  - latest report date
-  - latest ingest status
-  - source files used
-  - last successful automation time
-- Improve PO draft formatting for real operations:
-  - supplier header
-  - pickup location
-  - cases and bottles
-  - estimated cost
-  - status and entry notes
-- Add better saved-draft affordances:
-  - cancel draft
-  - copy/reopen draft
-  - clearer duplicate-draft message
-- Add pickup-location hierarchy:
-  - Pickup Location
-  - Supplier
-  - Producer
-- Add California truck optimization details:
-  - FTL progress
-  - bottles/cases needed to reach FTL
-  - estimated freight savings
-- Move supplier logistics out of tracked `importers.csv` and into a Supabase table with an app editing surface.
-- Add product/SKU pallet configuration table for future pallet-aware rounding.
+These should not block the Streamlit V1 checkpoint or migration start:
 
-## Hosting / Publication Questions
+- DI vs Stateside ordering mode.
+- Ant Moore full-container logic and container-mix recommendations.
+- Brand-level DI defaults, custom transit times, and freight-forwarder rules.
+- Weekly supplier cap logic beyond the current purchasing environment modifier.
+- Delete/edit individual SKUs directly inside an existing PO Draft.
+- More advanced draft lifecycle actions such as cancel/reopen/copy.
+- Moving navigation into the browser/Streamlit top chrome; this is better handled in the post-Streamlit app shell.
+- Frozen buyer-table columns and richer table interactions; these are primary reasons to move off Streamlit.
+- QuickBooks writeback/API sync.
 
-Current app is still Streamlit on localhost. Wix can be part of the access path, but it should not be treated as the runtime for the ordering application. Wix supports embedding an external HTTPS site or widget in an iframe, and Velo custom elements can be hosted on Wix or an external server. Those are useful integration points, but they do not make Wix a natural home for the Python ingestion/calculation worker, Supabase service-role operations, or a large buyer table UI.
+## V1 Migration Plan: Streamlit to Render
 
-For the first non-local release, likely options are:
+Current app is still Streamlit on localhost. The V1 deliverable target is a standalone authenticated web app hosted outside Streamlit, likely on Render.
 
-- Streamlit Community Cloud or another Streamlit host for fastest path.
-- A small hosted VM/container running Streamlit for more control.
-- A new web frontend backed by Supabase for a more durable app shape, with the Python worker retained for ingestion/calculation.
-- Link to the app from Stem's Wix site, or embed it only if iframe sizing/auth behavior is acceptable.
+Planned V1 production shape:
 
-Near-term recommendation: keep Streamlit while buyer workflow is still changing quickly, then publish it as a separate authenticated app or subdomain once the current feature scope settles. Treat Wix as the marketing-site shell or launch point, not the operational backend.
+- Frontend/app shell: Next.js.
+- Hosting: Render, not Vercel.
+- Auth: Supabase Auth, initially Google sign-in and/or email sign-in.
+- Database/storage: existing Supabase project and migrations.
+- Worker: keep the current Python GitHub Actions worker for daily RB6/RADs ingestion and recommendation persistence.
+- Wix: optional link or embed/entry point only; Wix is not the operational runtime.
+
+Migration sequence:
+
+1. Freeze the Streamlit app as the V1 reference workflow.
+2. Build a Next.js app shell with Supabase Auth.
+3. Read latest completed report run and recommendations from Supabase.
+4. Rebuild Order Review with a controlled editable table that preserves scroll, supports sticky columns, and has clear autosave behavior.
+5. Rebuild Supplier Hub logistics fields needed for V1, including TDM.
+6. Rebuild PO Drafts view/export actions against existing Supabase tables.
+7. Deploy to Render with environment-managed Supabase keys.
+8. Smoke test daily ingestion, login, recommendation approval, PO draft creation, and PO export.
 
 ## Data Roadmap
 

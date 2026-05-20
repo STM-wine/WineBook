@@ -6,6 +6,8 @@ WineBook should become a cloud app backed by Supabase. Vinosmith/RB6/RADs files 
 
 Terminology matters: Vinosmith calls the field `Importer`, but Stem's internal and user-facing term is `Supplier`. Keep compatibility mappings in ingest code, but use `Supplier` in product copy and user workflows.
 
+The Streamlit app is now the V1 reference workflow, but it should not be the final hosted V1 runtime. The production V1 target is a standalone Next.js app hosted on Render, using Supabase Auth and the existing Supabase data model.
+
 ## Target Flow
 
 1. Source files arrive from email/cloud automation or eventually QuickBooks.
@@ -68,7 +70,9 @@ This keeps the stack tight: GitHub for code and worker execution, Supabase for d
 
 Primary table fields should remain focused on buyer decisions:
 
-- Wine Name with importer rank and BTG/Core flags inline
+- Rank as its own column
+- Wine Name with BTG/Core flags inline
+- Item number/code
 - True Available Inventory
 - On Order Quantity
 - Last 30 Days Sales
@@ -94,6 +98,8 @@ Calculated headers in the buyer workbench should explain their formulas in hover
 - Estimated Cost = `Recommended Qty x FOB`.
 
 Supplier logistics are now expected to live in Supabase `suppliers`, including ETA, pickup location, freight forwarder, order frequency, notes, active status, and `trucking_cost_per_bottle`. `importers.csv` remains a seed/fallback source until the database table is fully populated.
+
+Brand Manager / TDM is sourced from RB6 `Wine: External ID (1)` and persisted on recommendations as `brand_manager`. Supplier Hub `TDM` is the editable supplier-level override used for filtering when present.
 
 ## Logistics Rollups
 
@@ -124,8 +130,18 @@ Future logistics work should add internal trucking cost per bottle, pallet confi
 8. Add logistics rollups and truck optimization summaries. Initial freight and California truck summaries exist; producer rollups and intelligent fill recommendations remain future work.
 9. Automate daily email ingestion with Supabase-triggered GitHub Actions. Current automation exists, searches Gmail All Mail so category sorting does not hide reports, and suppresses extra GitHub dispatches after a completed daily run.
 10. Refine PO drafts into buyer-ready exports and status workflows. Initial draft review, CSV/XLSX export, duplicate active-draft guard, and status changes exist.
-11. Decide the hosting path for the first non-local release.
+11. Migrate the buyer workflow to Next.js + Supabase Auth/Data and deploy on Render.
 12. Add QuickBooks sync/export once the internal PO workflow is stable.
+
+## Deferred Post-Migration Logic
+
+These are intentionally deferred until after the app moves off Streamlit because they require new product modeling and better table/UI affordances:
+
+- DI vs Stateside ordering mode.
+- Ant Moore full-container threshold and container-mix optimization.
+- Brand-level DI defaults, custom transit times, and freight-forwarder rules.
+- Weekly supplier cap logic beyond the current purchasing environment modifier.
+- Direct deletion/editing of individual SKUs inside existing PO Drafts.
 
 ## Supabase Setup Inputs Needed
 
