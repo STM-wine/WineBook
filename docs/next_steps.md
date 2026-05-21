@@ -26,6 +26,7 @@ WineBook is now a Supabase-backed ordering dashboard with automated daily ingest
 - PO draft review now shows per-bottle laid-in cost, total wine cost, total laid-in cost, and estimated total cost. Existing draft rows fall back to calculating laid-in totals from `trucking_cost_per_bottle x approved_qty` when newer stored totals are missing.
 - Brand Manager filtering is populated from RB6 `Wine: External ID (1)` / persisted recommendation `brand_manager`, with Supplier Hub `TDM` as the editable supplier-level override.
 - Supplier workbench ranking is shown as a separate `Rank` column so wine names can remain clean and alphabetically scannable.
+- The Next.js migration app now exists at `apps/web` with Supabase Auth login, an app-profile allowlist check, latest-run Supabase reads, top-level order metrics, supplier sections, supplier/TDM/search filters, suggested-only filtering, expand-all supplier workbenches, first-pass autosave for recommended quantity/approval state, and current-report PO Draft rollups.
 
 ## Business Direction
 
@@ -51,8 +52,10 @@ The product goal is a simple buyer workflow:
 1. Retest `Create PO Drafts` after applying the PO line schema-cache migration.
 2. Confirm PO Drafts view shows Laid In Cost, Total Wine Cost, Total Laid In Cost, and Estimated Cost correctly.
 3. Commit the Streamlit V1 checkpoint and use it as the reference implementation for the migration.
-4. Begin migration to a standalone authenticated web app: Next.js + Supabase Auth/Data + Render.
-5. Keep the existing Python ingestion/calculation worker in place during the frontend migration.
+4. Create/invite the first Supabase Auth users and run `supabase/seed_app_profiles.sql` for Junaid and the Stem admin account.
+5. Apply the recommendation buyer-update RLS migration before testing approval autosave in the hosted app.
+6. Continue the Next.js migration from first editable dashboard to full buyer workflow.
+7. Keep the existing Python ingestion/calculation worker in place during the frontend migration.
 
 ## Known Deferred Items
 
@@ -84,8 +87,8 @@ Planned V1 production shape:
 Migration sequence:
 
 1. Freeze the Streamlit app as the V1 reference workflow.
-2. Build a Next.js app shell with Supabase Auth.
-3. Read latest completed report run and recommendations from Supabase.
+2. Build a Next.js app shell with Supabase Auth. Initial scaffold exists in `apps/web`.
+3. Read latest completed report run and recommendations from Supabase. Initial read-only view exists.
 4. Rebuild Order Review with a controlled editable table that preserves scroll, supports sticky columns, and has clear autosave behavior.
 5. Rebuild Supplier Hub logistics fields needed for V1, including TDM.
 6. Rebuild PO Drafts view/export actions against existing Supabase tables.
@@ -124,4 +127,13 @@ source .venv/bin/activate
 python -m compileall app.py wine_calculator.py stem_order tests scripts
 python -m unittest discover -s tests
 python scripts/smoke_ordering_pipeline.py
+```
+
+Web app:
+
+```bash
+cd apps/web
+npm run typecheck
+npm run build
+npm audit --audit-level=moderate
 ```

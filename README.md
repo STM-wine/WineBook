@@ -42,6 +42,7 @@ Manual RB6/RADs upload is no longer part of the default app surface. For reruns 
 ```text
 WineBook/
 ├── app.py                         # Ordering Dashboard Streamlit app
+├── apps/web/                      # Next.js + Supabase Auth migration target
 ├── wine_calculator.py             # Current reorder calculation engine
 ├── grw_converter_app.py           # Separate GRW invoice converter utility
 ├── requirements.txt
@@ -83,6 +84,18 @@ Fill `.env` with local Supabase keys when you need database reads/writes. Never 
 
 ## Running
 
+Next.js migration app:
+
+```bash
+cd apps/web
+cp .env.example .env.local
+npm ci
+npm run dev
+```
+
+For local development, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+in `apps/web/.env.local`. Do not add the service-role key to the web app.
+
 Ordering Dashboard and Supplier Hub:
 
 ```bash
@@ -90,7 +103,7 @@ source .venv/bin/activate
 streamlit run app.py
 ```
 
-The app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. Supplier Hub is currently local/session-state only; it is a foundation for supplier wine search, manual wine entry, pricing, requests, pending product creation, and price-change tracking.
+The Streamlit app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. The Next.js app is now the migration target for those buyer workflows, including authenticated Order Review, Supplier Hub logistics editing, Freight rollups, PO Draft creation/status review, CSV export, and XLSX export using the STM PO template.
 
 Supplier logistics are managed in the Supplier Hub tab and stored in Supabase `suppliers` when the latest supplier-logistics migration has been applied. `importers.csv` remains a seed/fallback file, not the normal management workflow.
 
@@ -210,12 +223,19 @@ Streamlit exposed several buyer-workflow limits that are hard to solve cleanly i
 
 Planned production shape:
 
-- Next.js frontend/app shell.
+- Next.js frontend/app shell in `apps/web`.
 - Supabase Auth for Google/email login.
 - Supabase Postgres/Storage as the durable backend.
 - Render hosting for the app.
 - Existing Python/GitHub Actions worker remains responsible for daily Vinosmith email ingestion and calculation.
 - Wix may link to or embed the app, but it should not host the operational runtime.
+
+Render deployment notes:
+
+- `render.yaml` defines the web service with root directory `apps/web`.
+- The web app requires Node 20+.
+- Production env vars are `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+- The PO XLSX template is copied into `apps/web/templates/` so the export route works when Render deploys only the web app directory.
 
 Deferred until after the migration:
 
@@ -233,6 +253,15 @@ Run before pushing meaningful changes:
 python -m compileall app.py wine_calculator.py stem_order tests scripts
 python -m unittest discover -s tests
 python scripts/smoke_ordering_pipeline.py
+```
+
+For the web app:
+
+```bash
+cd apps/web
+npm run typecheck
+npm run build
+npm audit --audit-level=moderate
 ```
 
 ## Development Notes

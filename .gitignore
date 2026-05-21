@@ -55,6 +55,24 @@ Thumbs.db
 # Logs
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node / Next.js
+node_modules/
+apps/*/node_modules/
+apps/*/.next/
+apps/*/out/
+apps/*/.vercel/
+*.tsbuildinfo
+
+# Python's legacy lib/ ignore would otherwise hide Next.js source libraries.
+!apps/
+!apps/web/
+!apps/web/src/
+!apps/web/src/lib/
+!apps/web/src/lib/**
 
 # Database
 *.db
@@ -85,3 +103,5 @@ dmypy.json
 !/importers.csv
 !/templates/
 !/templates/*.xlsx
+!apps/web/templates/
+!apps/web/templates/*.xlsx
