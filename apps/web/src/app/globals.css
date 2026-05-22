@@ -34,7 +34,8 @@ a {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -285,9 +286,11 @@ input {
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--ink);
-  min-height: 44px;
+  height: 48px;
+  line-height: 1.2;
   padding: 11px 12px;
   text-transform: none;
+  width: 100%;
 }
 
 .filter-bar .search-field {
