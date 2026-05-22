@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { poTemplateXlsxBuffer } from "@/lib/po-export";
 import { poTimestamp } from "@/lib/po-utils";
 import { createClient } from "@/lib/supabase/server";
-import type { PurchaseOrderDraftWithLines } from "@/lib/types";
+import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
   const reportRunId = request.nextUrl.searchParams.get("reportRunId");
@@ -55,7 +55,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const buffer = await poTemplateXlsxBuffer(drafts || []);
+  const { data: suppliers } = await supabase
+    .from("suppliers")
+    .select("id,importer_id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,notes,active")
+    .returns<SupplierLogistics[]>();
+
+  const buffer = await poTemplateXlsxBuffer(drafts || [], suppliers || []);
   const filename = `POs ${poTimestamp()}.xlsx`;
 
   return new NextResponse(buffer, {

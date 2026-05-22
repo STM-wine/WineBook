@@ -1,5 +1,5 @@
 import { asNumber } from "./order-data";
-import type { PurchaseOrderDraftWithLines, PurchaseOrderLine } from "./types";
+import type { PurchaseOrderDraftWithLines, PurchaseOrderLine, SupplierLogistics } from "./types";
 
 export type PoExportLine = {
   supplier: string;
@@ -13,10 +13,25 @@ export type PoExportLine = {
   estimatedCost: number;
 };
 
-export function poLineCosts(line: PurchaseOrderLine) {
+function supplierKey(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
+}
+
+export function supplierLogisticsLookup(suppliers: SupplierLogistics[] = []) {
+  return new Map(suppliers.map((supplier) => [supplierKey(supplier.name), supplier]));
+}
+
+export function supplierLaidInForDraft(
+  draft: Pick<PurchaseOrderDraftWithLines, "supplier_name">,
+  suppliers: Map<string, SupplierLogistics>
+) {
+  return asNumber(suppliers.get(supplierKey(draft.supplier_name))?.trucking_cost_per_bottle);
+}
+
+export function poLineCosts(line: PurchaseOrderLine, fallbackLaidInPerBottle = 0) {
   const qty = asNumber(line.approved_qty);
   const fob = asNumber(line.fob);
-  const laidIn = asNumber(line.trucking_cost_per_bottle);
+  const laidIn = asNumber(line.trucking_cost_per_bottle) || fallbackLaidInPerBottle;
   const wineCost = asNumber(line.wine_cost || line.line_cost) || fob * qty;
   const laidInCost = asNumber(line.laid_in_cost) || laidIn * qty;
   const estimatedCost = asNumber(line.landed_cost) || wineCost + laidInCost;
@@ -24,11 +39,15 @@ export function poLineCosts(line: PurchaseOrderLine) {
   return { qty, fob, laidIn, wineCost, laidInCost, estimatedCost };
 }
 
-export function poExportLines(drafts: PurchaseOrderDraftWithLines[]): PoExportLine[] {
+export function poExportLines(drafts: PurchaseOrderDraftWithLines[], suppliers: SupplierLogistics[] = []): PoExportLine[] {
+  const supplierLookup = supplierLogisticsLookup(suppliers);
+
   return drafts
-    .flatMap((draft) =>
-      (draft.lines || []).map((line) => {
-        const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line);
+    .flatMap((draft) => {
+      const fallbackLaidIn = supplierLaidInForDraft(draft, supplierLookup);
+
+      return (draft.lines || []).map((line) => {
+        const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidIn);
 
         return {
           supplier: draft.supplier_name || "Unknown Supplier",
@@ -41,8 +60,8 @@ export function poExportLines(drafts: PurchaseOrderDraftWithLines[]): PoExportLi
           totalLaidInCost: laidInCost,
           estimatedCost
         };
-      })
-    )
+      });
+    })
     .sort(
       (a, b) =>
         a.supplier.localeCompare(b.supplier, undefined, { sensitivity: "base" }) ||

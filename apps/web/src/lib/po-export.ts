@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import type { PurchaseOrderDraftWithLines } from "./types";
+import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "./types";
 import { poExportLines, type PoExportLine } from "./po-utils";
 
 async function templatePath() {
@@ -67,8 +67,8 @@ function buildFallbackWorkbook(lines: PoExportLine[]) {
   return workbook;
 }
 
-export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[]) {
-  const lines = poExportLines(drafts);
+export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[], suppliers: SupplierLogistics[] = []) {
+  const lines = poExportLines(drafts, suppliers);
   const workbook = new ExcelJS.Workbook();
   const existingTemplate = await templatePath();
 

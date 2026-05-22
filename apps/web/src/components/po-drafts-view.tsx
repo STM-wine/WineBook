@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
-import { poLineCosts, poTimestamp } from "@/lib/po-utils";
+import { poLineCosts, poTimestamp, supplierLaidInForDraft, supplierLogisticsLookup } from "@/lib/po-utils";
 
 function csvEscape(value: string | number): string {
   const text = String(value ?? "");
@@ -11,7 +11,7 @@ function csvEscape(value: string | number): string {
   return text;
 }
 
-function poCsvHref(draft: PurchaseOrderDraftWithLines): string {
+function poCsvHref(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle = 0): string {
   const headers = [
     "Supplier",
     "Wine",
@@ -24,7 +24,7 @@ function poCsvHref(draft: PurchaseOrderDraftWithLines): string {
     "Estimated Cost"
   ];
   const rows = (draft.lines || []).map((line) => {
-    const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line);
+    const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidInPerBottle);
 
     return [
       draft.supplier_name || "Unknown Supplier",
@@ -71,15 +71,15 @@ export function PoDraftsView({
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+  const supplierMetadata = useMemo(() => supplierLogisticsLookup(suppliers), [suppliers]);
   const draftSummaries = useMemo(() => drafts.map((draft) => {
     const lines = draft.lines || [];
-    const approvedQty = lines.reduce((sum, line) => sum + asNumber(line.approved_qty), 0);
-    const wineCost = lines.reduce((sum, line) => sum + asNumber(line.wine_cost || line.line_cost), 0);
-    const laidInCost = lines.reduce(
-      (sum, line) => sum + (asNumber(line.laid_in_cost) || asNumber(line.trucking_cost_per_bottle) * asNumber(line.approved_qty)),
-      0
-    );
-    const estimatedCost = lines.reduce((sum, line) => sum + (asNumber(line.landed_cost) || asNumber(line.line_cost)), 0);
+    const fallbackLaidIn = supplierLaidInForDraft(draft, supplierMetadata);
+    const costs = lines.map((line) => poLineCosts(line, fallbackLaidIn));
+    const approvedQty = costs.reduce((sum, cost) => sum + cost.qty, 0);
+    const wineCost = costs.reduce((sum, cost) => sum + cost.wineCost, 0);
+    const laidInCost = costs.reduce((sum, cost) => sum + cost.laidInCost, 0);
+    const estimatedCost = costs.reduce((sum, cost) => sum + cost.estimatedCost, 0);
     return {
       draft,
       lineCount: lines.length,
@@ -88,7 +88,7 @@ export function PoDraftsView({
       laidInCost,
       estimatedCost
     };
-  }), [drafts]);
+  }), [drafts, supplierMetadata]);
   const filteredSummaries = useMemo(() => {
     const needle = search.trim().toLowerCase();
 
@@ -114,10 +114,6 @@ export function PoDraftsView({
   const totalWineCost = filteredSummaries.reduce((sum, summary) => sum + summary.wineCost, 0);
   const totalLaidInCost = filteredSummaries.reduce((sum, summary) => sum + summary.laidInCost, 0);
   const totalEstimatedCost = filteredSummaries.reduce((sum, summary) => sum + (summary.estimatedCost || summary.wineCost + summary.laidInCost), 0);
-  const supplierMetadata = useMemo(
-    () => new Map(suppliers.map((supplier) => [(supplier.name || "").trim().toLowerCase(), supplier])),
-    [suppliers]
-  );
 
   return (
     <section className="panel po-panel" id="po-drafts">
@@ -204,12 +200,21 @@ export function PoDraftsView({
               </summary>
               <div className="po-draft-actions">
                 <DraftStatusActions draft={draft} disabled={isPending} onStatusChange={onStatusChange} />
-                <a className="button button-tiny" download={poCsvFilename(draft)} href={poCsvHref(draft)}>
+                <a
+                  className="button button-tiny"
+                  download={poCsvFilename(draft)}
+                  href={poCsvHref(draft, supplierLaidInForDraft(draft, supplierMetadata))}
+                >
                   Download CSV
                 </a>
               </div>
               <SupplierDraftMetadata supplier={supplierMetadata.get((draft.supplier_name || "").trim().toLowerCase())} />
-              <PoDraftLinesTable draft={draft} disabled={isPending} onDeleteLine={onDeleteLine} />
+              <PoDraftLinesTable
+                draft={draft}
+                disabled={isPending}
+                fallbackLaidInPerBottle={supplierLaidInForDraft(draft, supplierMetadata)}
+                onDeleteLine={onDeleteLine}
+              />
             </details>
           ))}
           {filteredSummaries.length === 0 ? <div className="empty-inline">No PO drafts match the current filters.</div> : null}
@@ -239,10 +244,12 @@ function SupplierDraftMetadata({ supplier }: { supplier?: SupplierLogistics }) {
 function PoDraftLinesTable({
   draft,
   disabled,
+  fallbackLaidInPerBottle,
   onDeleteLine
 }: {
   draft: PurchaseOrderDraftWithLines;
   disabled: boolean;
+  fallbackLaidInPerBottle: number;
   onDeleteLine: (lineId: string, draftId: string) => void;
 }) {
   return (
@@ -263,7 +270,7 @@ function PoDraftLinesTable({
         </thead>
         <tbody>
           {(draft.lines || []).map((line) => {
-            const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line);
+            const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidInPerBottle);
 
             return (
               <tr key={line.id}>
