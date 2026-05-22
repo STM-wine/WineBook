@@ -1,8 +1,12 @@
 # WineBook Web App
 
-This is the Next.js migration target for the ordering dashboard. The Python ingestion/calculation
+This is the production Next.js app for the ordering dashboard. The Python ingestion/calculation
 pipeline stays in the repo and continues writing completed report runs to Supabase; this app reads
 those persisted snapshots through Supabase Auth and the public Data API.
+
+Production URL: `https://stmhq.com`
+
+Render service URL: `https://winebook.onrender.com`
 
 ## Local Setup
 
@@ -46,11 +50,24 @@ Buyer/admin profiles can autosave recommendation approvals after applying the
 
 ## Render
 
-Recommended Render settings:
+Current Render settings:
 
 - Root directory: `apps/web`
 - Build command: `npm ci && npm run build`
 - Start command: `npm run start`
-- Environment: Node
+- Runtime: Node
+- Node version: `20`
 
-Set `NEXT_PUBLIC_SITE_URL` to the Render URL and add that URL to Supabase Auth redirect URLs.
+Production environment variables:
+
+- `NODE_VERSION=20`
+- `NEXT_PUBLIC_SITE_URL=https://stmhq.com`
+- `NEXT_PUBLIC_SUPABASE_URL=https://hpnvlxvnzpojpfepcerl.supabase.co`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY=<Supabase anon key>`
+
+Required Supabase Auth redirect URLs:
+
+- `https://stmhq.com/auth/callback`
+- `https://www.stmhq.com/auth/callback`
+- `https://winebook.onrender.com/auth/callback`
+- `http://localhost:3000/auth/callback`

@@ -4,6 +4,8 @@ Last updated: 2026-05-21
 
 Target production domain: `https://stmhq.com`
 
+Current status: deployed on Render and reachable at `https://stmhq.com`. DNS is verified for both `stmhq.com` and `www.stmhq.com`; if Render still shows a certificate as pending, wait for certificate issuance to complete.
+
 ## 1. GitHub
 
 The Next.js app has been merged into `main`.
@@ -43,30 +45,43 @@ Do not add `SUPABASE_SERVICE_ROLE_KEY` to the web service.
 
 ## 3. Render Custom Domain
 
+The current Render service hostname is:
+
+```text
+winebook.onrender.com
+```
+
 After the service deploys successfully on its `*.onrender.com` URL:
 
 1. Open the Render service.
 2. Go to Settings -> Custom Domains.
 3. Add `stmhq.com`.
-4. Render will also account for the matching `www` subdomain behavior.
+4. Add or verify `www.stmhq.com` redirects to `stmhq.com`.
 5. Keep the Render `onrender.com` subdomain enabled until the custom domain is verified and Supabase Auth is updated.
 
 ## 4. GoDaddy DNS
 
 In GoDaddy DNS for `stmhq.com`:
 
-1. Remove any `AAAA` records for the domain.
-2. For the root/apex domain, use one of:
+1. Remove any old WebsiteBuilder or conflicting apex records.
+2. Remove any `AAAA` records for the domain.
+3. For the root/apex domain, use:
    - `A` record:
      - Host: `@`
      - Value: `216.24.57.1`
-   - If GoDaddy offers a supported `ALIAS` / flattened CNAME style record, point `@` to the Render service hostname instead.
-3. For `www`:
+4. For `www`:
    - Type: `CNAME`
    - Host: `www`
-   - Value: the Render service hostname, for example `winebook-web.onrender.com`
+   - Value: `winebook.onrender.com`
 
-After DNS propagates, return to Render and click Verify for the custom domain.
+Current GoDaddy records should include:
+
+```text
+A      @     216.24.57.1
+CNAME  www   winebook.onrender.com.
+```
+
+After DNS propagates, return to Render and click Verify for the custom domains.
 
 ## 5. Supabase Auth URL Configuration
 
@@ -84,7 +99,7 @@ https://stmhq.com
 ```text
 https://stmhq.com/auth/callback
 https://www.stmhq.com/auth/callback
-https://<render-service-hostname>.onrender.com/auth/callback
+https://winebook.onrender.com/auth/callback
 http://localhost:3000/auth/callback
 ```
 
@@ -119,3 +134,12 @@ After deploy and DNS verification:
 - Supplier Hub catalog subtabs need persistent schema before they are useful in hosted Next.js.
 - DI / Ant Moore logic remains post-migration.
 - QuickBooks writeback remains post-V1.
+
+## 9. Routine Deploys
+
+Render is connected to `main` and auto-deploys on push. For a routine release:
+
+1. Commit and push to `main`.
+2. Watch the Render deploy log until the service is live.
+3. Smoke test `https://stmhq.com/login`.
+4. Confirm a buyer can load Order Review and the latest report run.

@@ -4,6 +4,8 @@
 
 - Project URL: `https://hpnvlxvnzpojpfepcerl.supabase.co`
 - GitHub repo: `https://github.com/STM-wine/WineBook`
+- Production app: `https://stmhq.com`
+- Render service URL: `https://winebook.onrender.com`
 - Schema migrations:
   - `supabase/migrations/001_initial_ordering_schema.sql`
   - `supabase/migrations/002_manual_recommendation_ingest.sql`
@@ -14,6 +16,25 @@
   - `supabase/migrations/20260511161706_guard_github_ingest_dispatch.sql`
 
 Do not commit database passwords, service-role keys, or `.env` files. If the database password has been shared outside a password manager, rotate it in Supabase before production use.
+
+## Auth URL Configuration
+
+Production Site URL:
+
+```text
+https://stmhq.com
+```
+
+Allowed redirect URLs:
+
+```text
+https://stmhq.com/auth/callback
+https://www.stmhq.com/auth/callback
+https://winebook.onrender.com/auth/callback
+http://localhost:3000/auth/callback
+```
+
+The hosted Next.js app uses Supabase Auth and requires matching rows in `public.app_profiles` before a user can access the app.
 
 ## Local Environment
 
@@ -85,7 +106,7 @@ After migration, confirm these tables exist:
 
 ## Current Persistence Shape
 
-The app currently writes report runs and recommendations from manual upload runs. This is transitional: RB6/RADs and `importers.csv` still provide the source data, while Supabase stores durable run history and PO draft data.
+The Python worker writes report runs and recommendations from daily Vinosmith RB6/RADs email reports. RB6/RADs remain transitional source feeds, while Supabase stores durable run history, supplier logistics, approval state, and PO draft data.
 
 New recommendation rows default to an opt-in approval model:
 

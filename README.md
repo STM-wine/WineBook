@@ -4,23 +4,24 @@ Internal ordering tools for Stem Wine Company.
 
 **GitHub:** `https://github.com/STM-wine/WineBook`
 **Last updated:** May 2026
-**Current stack:** Python 3.11, Streamlit, pandas, openpyxl, Supabase
-**V1 deployment target:** Next.js + Supabase Auth/Data hosted on Render
+**Current stack:** Next.js, Supabase Auth/Data, Render, Python 3.11, pandas, openpyxl
+**Production app:** `https://stmhq.com`
 
 ## Overview
 
 WineBook is being productized from a local MVP into a Supabase-backed ordering dashboard. The near-term app uses Vinosmith/RB6/RADs exports, but the long-term direction is to make WineBook Stem's durable ordering layer: ingest source data, calculate daily reorder recommendations, let buyers approve supplier POs, and eventually push approved POs into QuickBooks.
 
-The repo currently contains two independent Streamlit tools:
+The repo currently contains the production Next.js app plus two Streamlit-era tools:
 
 | Tool | Entry Point | Status |
 | --- | --- | --- |
-| Ordering Dashboard | `app.py` | Active productization focus |
-| GRW Invoice Converter | `grw_converter_app.py` | Existing utility, not part of the current ordering-dashboard work |
+| WineBook Web App | `apps/web` | Production V1 runtime on Render |
+| Ordering Dashboard | `app.py` | Streamlit reference/fallback implementation |
+| GRW Invoice Converter | `grw_converter_app.py` | Existing utility, separate from ordering V1 |
 
 Keep the GRW converter separate unless the business explicitly decides to merge it into a future unified front end.
 
-The Ordering Dashboard Streamlit app is the current reference implementation, not the final hosted V1 runtime. The next production step is to migrate the buyer workflow to an authenticated Next.js app hosted on Render while keeping the existing Python ingestion/calculation worker.
+The Ordering Dashboard Streamlit app remains the historical reference implementation. The hosted buyer workflow now lives in `apps/web` as an authenticated Next.js app on Render, while the existing Python ingestion/calculation worker remains responsible for daily Vinosmith processing.
 
 ## Current Ordering Flow
 
@@ -42,7 +43,7 @@ Manual RB6/RADs upload is no longer part of the default app surface. For reruns 
 ```text
 WineBook/
 ├── app.py                         # Ordering Dashboard Streamlit app
-├── apps/web/                      # Next.js + Supabase Auth migration target
+├── apps/web/                      # Production Next.js + Supabase Auth app
 ├── wine_calculator.py             # Current reorder calculation engine
 ├── grw_converter_app.py           # Separate GRW invoice converter utility
 ├── requirements.txt
@@ -84,7 +85,7 @@ Fill `.env` with local Supabase keys when you need database reads/writes. Never 
 
 ## Running
 
-Next.js migration app:
+Production web app:
 
 ```bash
 cd apps/web
@@ -103,7 +104,7 @@ source .venv/bin/activate
 streamlit run app.py
 ```
 
-The Streamlit app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. The Next.js app is now the migration target for those buyer workflows, including authenticated Order Review, Supplier Hub logistics editing, Freight rollups, PO Draft creation/status review, CSV export, and XLSX export using the STM PO template.
+The Streamlit app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. The Next.js app is the current production home for those buyer workflows, including authenticated Order Review, Supplier Hub logistics editing, Freight rollups, PO Draft creation/status review, CSV export, and XLSX export using the STM PO template.
 
 Supplier logistics are managed in the Supplier Hub tab and stored in Supabase `suppliers` when the latest supplier-logistics migration has been applied. `importers.csv` remains a seed/fallback file, not the normal management workflow.
 
@@ -217,11 +218,11 @@ The dashboard now includes pickup-location rollups and a first California full-t
 - Non-FTL freight assumption from notes: $4.75 per case
 - Future work should use internal trucking-cost-per-bottle and pallet-configuration data to recommend incremental SKUs that efficiently fill trucks.
 
-## V1 Deployment Direction
+## V1 Deployment
 
-Streamlit exposed several buyer-workflow limits that are hard to solve cleanly in that framework: scroll position reset after table edits, awkward sticky/frozen table behavior, limited header/layout control, and constrained top navigation placement. V1 should therefore move to a standalone web app before final delivery.
+Streamlit exposed several buyer-workflow limits that are hard to solve cleanly in that framework: scroll position reset after table edits, awkward sticky/frozen table behavior, limited header/layout control, and constrained top navigation placement. V1 has moved to a standalone web app.
 
-Planned production shape:
+Production shape:
 
 - Next.js frontend/app shell in `apps/web`.
 - Supabase Auth for Google/email login.
@@ -232,12 +233,21 @@ Planned production shape:
 
 Render deployment notes:
 
+- Production URL: `https://stmhq.com`.
+- Render service URL: `https://winebook.onrender.com`.
 - `render.yaml` defines the web service with root directory `apps/web`.
 - The web app requires Node 20+.
 - Production env vars are `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 - The PO XLSX template is copied into `apps/web/templates/` so the export route works when Render deploys only the web app directory.
 
-Deferred until after the migration:
+Supabase Auth redirects currently required:
+
+- `https://stmhq.com/auth/callback`
+- `https://www.stmhq.com/auth/callback`
+- `https://winebook.onrender.com/auth/callback`
+- `http://localhost:3000/auth/callback`
+
+Deferred until after hosted V1 rollout:
 
 - DI vs Stateside ordering mode.
 - Ant Moore container-fill/container-mix logic.

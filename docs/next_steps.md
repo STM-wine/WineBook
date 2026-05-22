@@ -2,10 +2,12 @@
 
 ## Current Status
 
-WineBook is now a Supabase-backed ordering dashboard with automated daily ingestion.
+WineBook is now a hosted Supabase-backed ordering dashboard with automated daily ingestion.
 
 - GitHub repo: `https://github.com/STM-wine/WineBook`
-- Ordering Dashboard runs locally in Streamlit.
+- Production app: `https://stmhq.com`
+- Render service: `https://winebook.onrender.com`
+- Ordering Dashboard still runs locally in Streamlit as a reference/fallback app.
 - Supabase project is connected through local `.env`.
 - Numbered and timestamped schema migrations live in `supabase/migrations/`.
 - Daily Vinosmith email ingestion runs remotely: Supabase Cron triggers the GitHub Actions worker.
@@ -26,7 +28,7 @@ WineBook is now a Supabase-backed ordering dashboard with automated daily ingest
 - PO draft review now shows per-bottle laid-in cost, total wine cost, total laid-in cost, and estimated total cost. Existing draft rows fall back to calculating laid-in totals from `trucking_cost_per_bottle x approved_qty` when newer stored totals are missing.
 - Brand Manager filtering is populated from RB6 `Wine: External ID (1)` / persisted recommendation `brand_manager`, with Supplier Hub `TDM` as the editable supplier-level override.
 - Supplier workbench ranking is shown as a separate `Rank` column so wine names can remain clean and alphabetically scannable.
-- The Next.js migration app now exists at `apps/web` with Supabase Auth login, an app-profile allowlist check, latest-run Supabase reads, top-level order metrics, supplier sections, supplier/TDM/search filters, suggested-only filtering, expand-all supplier workbenches, first-pass autosave for recommended quantity/approval state, and current-report PO Draft rollups.
+- The Next.js app in `apps/web` is the production V1 runtime. It includes Supabase Auth login, an app-profile allowlist check, latest-run Supabase reads, top-level order metrics, supplier sections, supplier/TDM/search filters, suggested-only filtering, expand-all supplier workbenches, autosave for recommended quantity/approval state, Supplier Hub logistics editing, Freight rollups, PO Draft creation/review/status updates, CSV export, and XLSX export.
 
 ## Business Direction
 
@@ -49,33 +51,29 @@ The product goal is a simple buyer workflow:
 
 ## Immediate Priorities
 
-1. Retest `Create PO Drafts` after applying the PO line schema-cache migration.
-2. Confirm PO Drafts view shows Laid In Cost, Total Wine Cost, Total Laid In Cost, and Estimated Cost correctly.
-3. Commit the Streamlit V1 checkpoint and use it as the reference implementation for the migration.
-4. Create/invite the first Supabase Auth users and run `supabase/seed_app_profiles.sql` for Junaid and the Stem admin account.
-5. Apply the recommendation buyer-update RLS migration before testing approval autosave in the hosted app.
-6. Continue the Next.js migration from first editable dashboard to full buyer workflow.
-7. Keep the existing Python ingestion/calculation worker in place during the frontend migration.
+1. Wait for Render SSL certificate issuance to complete for any pending custom domain.
+2. Smoke test `https://stmhq.com`: login, latest report visibility, Order Review edits, approval autosave, PO draft creation, PO Draft review, XLSX export, and line/draft cleanup.
+3. Confirm PO Drafts view shows Laid In Cost, Total Wine Cost, Total Laid In Cost, and Estimated Cost correctly in production.
+4. Add any remaining Stem users in Supabase Auth and `app_profiles`.
+5. Keep the existing Python ingestion/calculation worker in place; it remains the production ingestion path.
 
 ## Known Deferred Items
 
-These should not block the Streamlit V1 checkpoint or migration start:
+These should not block hosted V1 rollout:
 
 - DI vs Stateside ordering mode.
 - Ant Moore full-container logic and container-mix recommendations.
 - Brand-level DI defaults, custom transit times, and freight-forwarder rules.
 - Weekly supplier cap logic beyond the current purchasing environment modifier.
-- Delete/edit individual SKUs directly inside an existing PO Draft.
-- More advanced draft lifecycle actions such as cancel/reopen/copy.
-- Moving navigation into the browser/Streamlit top chrome; this is better handled in the post-Streamlit app shell.
-- Frozen buyer-table columns and richer table interactions; these are primary reasons to move off Streamlit.
+- More advanced draft lifecycle actions such as reopen/copy.
+- Persistent Supplier Hub catalog/request/price-event subtabs.
 - QuickBooks writeback/API sync.
 
-## V1 Migration Plan: Streamlit to Render
+## V1 Runtime: Next.js on Render
 
-Current app is still Streamlit on localhost. The V1 deliverable target is a standalone authenticated web app hosted outside Streamlit, likely on Render.
+The V1 runtime is now a standalone authenticated web app hosted on Render.
 
-Planned V1 production shape:
+Production shape:
 
 - Frontend/app shell: Next.js.
 - Hosting: Render, not Vercel.
@@ -84,16 +82,12 @@ Planned V1 production shape:
 - Worker: keep the current Python GitHub Actions worker for daily RB6/RADs ingestion and recommendation persistence.
 - Wix: optional link or embed/entry point only; Wix is not the operational runtime.
 
-Migration sequence:
+Remaining launch sequence:
 
-1. Freeze the Streamlit app as the V1 reference workflow.
-2. Build a Next.js app shell with Supabase Auth. Initial scaffold exists in `apps/web`.
-3. Read latest completed report run and recommendations from Supabase. Initial read-only view exists.
-4. Rebuild Order Review with a controlled editable table that preserves scroll, supports sticky columns, and has clear autosave behavior.
-5. Rebuild Supplier Hub logistics fields needed for V1, including TDM.
-6. Rebuild PO Drafts view/export actions against existing Supabase tables.
-7. Deploy to Render with environment-managed Supabase keys.
-8. Smoke test daily ingestion, login, recommendation approval, PO draft creation, and PO export.
+1. Let Render finish certificate issuance if still pending.
+2. Smoke test daily ingestion, login, recommendation approval, PO draft creation, and PO export on `https://stmhq.com`.
+3. Gather Mark/Junaid feedback from real hosted use.
+4. Polish V1 issues only, then move DI/Ant Moore and deeper Supplier Hub catalog work into the continuation phase.
 
 ## Data Roadmap
 

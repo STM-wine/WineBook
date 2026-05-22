@@ -6,7 +6,7 @@ WineBook should become a cloud app backed by Supabase. Vinosmith/RB6/RADs files 
 
 Terminology matters: Vinosmith calls the field `Importer`, but Stem's internal and user-facing term is `Supplier`. Keep compatibility mappings in ingest code, but use `Supplier` in product copy and user workflows.
 
-The Streamlit app is now the V1 reference workflow, but it should not be the final hosted V1 runtime. The production V1 target is a standalone Next.js app hosted on Render, using Supabase Auth and the existing Supabase data model.
+The Streamlit app is now the historical V1 reference workflow, but it is not the hosted runtime. The production V1 app is a standalone Next.js app hosted on Render at `https://stmhq.com`, using Supabase Auth and the existing Supabase data model.
 
 ## Target Flow
 
@@ -32,6 +32,7 @@ The Streamlit app is now the V1 reference workflow, but it should not be the fin
 - `wine_calculator.py`: existing calculation engine during migration.
 - `supabase/migrations/`: database schema for the future cloud app.
 - `scripts/`: local smoke checks against sample export files.
+- `apps/web/`: hosted Next.js app for the buyer workflow.
 - `.github/workflows/daily-vinosmith-ingest.yml`: manually dispatchable GitHub Actions worker for remote email ingestion.
 
 ## Supabase Responsibilities
@@ -130,18 +131,18 @@ Future logistics work should add internal trucking cost per bottle, pallet confi
 8. Add logistics rollups and truck optimization summaries. Initial freight and California truck summaries exist; producer rollups and intelligent fill recommendations remain future work.
 9. Automate daily email ingestion with Supabase-triggered GitHub Actions. Current automation exists, searches Gmail All Mail so category sorting does not hide reports, and suppresses extra GitHub dispatches after a completed daily run.
 10. Refine PO drafts into buyer-ready exports and status workflows. Initial draft review, CSV/XLSX export, duplicate active-draft guard, and status changes exist.
-11. Migrate the buyer workflow to Next.js + Supabase Auth/Data and deploy on Render.
+11. Migrate the buyer workflow to Next.js + Supabase Auth/Data and deploy on Render. Done for V1 at `https://stmhq.com`.
 12. Add QuickBooks sync/export once the internal PO workflow is stable.
 
-## Deferred Post-Migration Logic
+## Deferred Post-V1 Logic
 
-These are intentionally deferred until after the app moves off Streamlit because they require new product modeling and better table/UI affordances:
+These are intentionally deferred until after the hosted V1 rollout because they require new product modeling and deeper workflow design:
 
 - DI vs Stateside ordering mode.
 - Ant Moore full-container threshold and container-mix optimization.
 - Brand-level DI defaults, custom transit times, and freight-forwarder rules.
 - Weekly supplier cap logic beyond the current purchasing environment modifier.
-- Direct deletion/editing of individual SKUs inside existing PO Drafts.
+- Persistent Supplier Hub catalog/request/price-event subtabs.
 
 ## Supabase Setup Inputs Needed
 
@@ -161,6 +162,6 @@ After the project exists:
 2. Install dependencies with `pip install -r requirements.txt`.
 3. Run `python scripts/check_supabase_connection.py` to verify credentials and table writes.
 4. Decide user roles for the first release: likely `admin`, `buyer`, and `viewer`.
-5. Decide whether the first hosted app is Streamlit-backed or a new authenticated web app backed by the same Supabase schema. Wix should be treated as a possible entry point, link, or embed surface rather than the main application runtime.
+5. Hosted V1 uses the Next.js app in `apps/web`. Wix should be treated as a possible entry point, link, or embed surface rather than the main application runtime.
 
 See `docs/supabase_setup.md` for the project-specific setup checklist.

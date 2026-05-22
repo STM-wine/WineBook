@@ -4,6 +4,8 @@ Last updated: 2026-05-21
 
 Purpose: track the migration from the Streamlit Ordering Dashboard to the Next.js app so V1 does not accidentally leave useful workflow behind.
 
+Deployment status: the Next.js app is live on Render at `https://stmhq.com`. Streamlit remains a reference/fallback app, not the production buyer runtime.
+
 ## Legend
 
 - `Done`: implemented in Next.js.
@@ -21,6 +23,7 @@ Purpose: track the migration from the Streamlit Ordering Dashboard to the Next.j
 | Create PO Drafts from top toolbar | Done | Global action remains available from the header. |
 | Data date visible | Done | Header data-date pill. |
 | User feedback after save/create | Done | Status message strip for saves, draft creation, and errors. |
+| Production hosting | Done | Render service with `stmhq.com` custom domain. |
 
 ## Order Review
 
@@ -104,11 +107,11 @@ Purpose: track the migration from the Streamlit Ordering Dashboard to the Next.j
 | Supplier logistics managed in Supabase | Done | Replaces normal `importers.csv` editing. |
 | Supabase Auth / profile access | Done | App profiles gate access. |
 | Purchasing environment fields surfaced | Gap | Logic is ported into pipeline, but fields are not yet visible in Next UI. |
-| DI / Ant Moore logic | Deferred | Explicitly planned after migration. |
+| DI / Ant Moore logic | Deferred | Explicitly planned after hosted V1 rollout. |
 
 ## Recommended Next Tasks
 
-1. Add per-supplier active-draft warning in Order Review.
-2. Decide whether Supplier Hub catalog subtabs are V1 or post-V1, because they require persistent supplier catalog/request/price-event schema to be useful in the hosted app.
-3. Run manual workflow testing in Next.js: approve lines, create drafts, remove a line, export XLSX, cancel a draft, mark draft ready/entered.
-4. Start Render deployment hardening after the remaining V1 gaps are resolved.
+1. Wait for Render certificate status to finish if either custom domain still shows certificate pending.
+2. Run manual workflow testing in Next.js: approve lines, create drafts, remove a line, export XLSX, cancel a draft, mark draft ready/entered.
+3. Add per-supplier active-draft warning in Order Review if Mark wants it before broader rollout.
+4. Decide whether Supplier Hub catalog subtabs are V1 or post-V1, because they require persistent supplier catalog/request/price-event schema to be useful in the hosted app.
