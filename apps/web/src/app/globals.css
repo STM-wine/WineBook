@@ -56,7 +56,7 @@ select {
   border-bottom: 1px solid var(--line);
   display: grid;
   gap: 24px;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(520px, 1.5fr) minmax(360px, auto);
+  grid-template-columns: minmax(390px, 0.9fr) minmax(520px, 1.4fr) minmax(360px, auto);
   left: 0;
   padding: 16px 32px;
   position: fixed;
@@ -79,18 +79,19 @@ select {
   border: 1px solid var(--line);
   border-radius: 8px;
   display: flex;
-  height: 46px;
+  height: 54px;
   justify-content: center;
-  overflow: hidden;
-  width: 62px;
+  overflow: visible;
+  padding: 5px 7px;
+  width: 136px;
 }
 
 .brand-mark img {
   display: block;
-  height: 100px;
-  max-width: none;
-  transform: translateY(-2px);
-  width: 130px;
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  width: 100%;
 }
 
 .brand strong {
@@ -1220,7 +1221,7 @@ tr.has-recommendation .sticky-name {
 
 .login-logo {
   display: block;
-  margin: -20px 0 6px -18px;
+  margin: -12px 0 12px;
   max-width: min(360px, 100%);
   width: 360px;
 }

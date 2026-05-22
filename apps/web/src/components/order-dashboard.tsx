@@ -250,7 +250,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">
-            <img alt="" src="/brand/stem-intelligence-logo.png" />
+            <img alt="" src="/brand/stem-intelligence-logo-cropped.png" />
           </div>
           <div>
             <strong>Stem Intelligence</strong>
