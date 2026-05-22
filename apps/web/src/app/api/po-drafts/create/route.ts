@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { asNumber } from "@/lib/order-data";
+import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { createClient } from "@/lib/supabase/server";
 import type { Recommendation, SupplierLogistics } from "@/lib/types";
 
@@ -90,7 +91,9 @@ export async function POST(request: Request) {
     .from("suppliers")
     .select("name,trucking_cost_per_bottle,pick_up_location,eta_days,freight_forwarder,notes")
     .returns<SupplierLogistics[]>();
-  const supplierMetadata = new Map((supplierRows || []).map((row) => [normalizeSupplier(row.name), row]));
+  const supplierDefaults = await loadImporterDefaults();
+  const suppliers = mergeSupplierDefaults(supplierRows || [], supplierDefaults);
+  const supplierMetadata = new Map(suppliers.map((row) => [normalizeSupplier(row.name), row]));
 
   for (const [supplier, rows] of grouped.entries()) {
     const metadata = supplierMetadata.get(normalizeSupplier(supplier));

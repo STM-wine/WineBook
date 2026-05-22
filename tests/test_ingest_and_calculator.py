@@ -19,6 +19,7 @@ from stem_order.ingest import (
     load_importers_csv,
     map_rads_columns,
     map_rb6_columns,
+    merge_supplier_logistics_with_csv,
     normalize_columns,
     supplier_logistics_rows_to_frame,
 )
@@ -153,6 +154,45 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(data.loc[0, "importer_name_clean"], "supplier a")
         self.assertEqual(data.loc[0, "trucking_cost_per_bottle"], 1.25)
         self.assertEqual(data.loc[0, "tdm"], "Mark")
+
+    def test_supplier_logistics_merge_fills_zero_cost_from_csv(self):
+        supplier_data = supplier_logistics_rows_to_frame(
+            [
+                {
+                    "name": "Giuliana Imports",
+                    "eta_days": 0,
+                    "pick_up_location": "",
+                    "trucking_cost_per_bottle": 0,
+                    "tdm": "Rojo",
+                    "active": True,
+                }
+            ]
+        )
+        csv_data = pd.DataFrame(
+            [
+                {
+                    "importer_name": "Giuliana Imports",
+                    "importer_name_clean": "giuliana imports",
+                    "importer_id": "2474",
+                    "eta_days": 7,
+                    "pick_up_location": "Colorado",
+                    "freight_forwarder": "Advantage",
+                    "order_frequency": "weekly",
+                    "trucking_cost_per_bottle": 0.88,
+                    "tdm": None,
+                    "notes": None,
+                }
+            ]
+        )
+
+        merged = merge_supplier_logistics_with_csv(supplier_data, csv_data)
+
+        self.assertEqual(merged.loc[0, "importer_id"], "2474")
+        self.assertEqual(merged.loc[0, "eta_days"], 7)
+        self.assertEqual(merged.loc[0, "pick_up_location"], "Colorado")
+        self.assertEqual(merged.loc[0, "freight_forwarder"], "Advantage")
+        self.assertEqual(merged.loc[0, "trucking_cost_per_bottle"], 0.88)
+        self.assertEqual(merged.loc[0, "tdm"], "Rojo")
 
 
 class CalculatorTests(unittest.TestCase):

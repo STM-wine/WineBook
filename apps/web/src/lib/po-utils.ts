@@ -34,7 +34,7 @@ export function poLineCosts(line: PurchaseOrderLine, fallbackLaidInPerBottle = 0
   const laidIn = asNumber(line.trucking_cost_per_bottle) || fallbackLaidInPerBottle;
   const wineCost = asNumber(line.wine_cost || line.line_cost) || fob * qty;
   const laidInCost = asNumber(line.laid_in_cost) || laidIn * qty;
-  const estimatedCost = asNumber(line.landed_cost) || wineCost + laidInCost;
+  const estimatedCost = wineCost + laidInCost;
 
   return { qty, fob, laidIn, wineCost, laidInCost, estimatedCost };
 }

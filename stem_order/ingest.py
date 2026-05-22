@@ -348,6 +348,62 @@ def supplier_logistics_rows_to_frame(rows: list[dict]) -> pd.DataFrame:
     return data[IMPORTER_LOGISTICS_COLUMNS].copy()
 
 
+def merge_supplier_logistics_with_csv(
+    supplier_logistics: pd.DataFrame,
+    csv_importers: pd.DataFrame,
+) -> pd.DataFrame:
+    """Use editable Supabase supplier rows, filling blanks from importers.csv.
+
+    Supplier Hub is the operational source of truth once populated, but older
+    supplier rows can exist with blank logistics or zero laid-in cost. In that
+    case, the checked-in importer seed should still provide ETA, pickup, and
+    trucking cost defaults instead of silently turning landed-cost math into $0.
+    """
+    if supplier_logistics is None or supplier_logistics.empty:
+        return csv_importers.copy() if csv_importers is not None else empty_importers_frame()
+    if csv_importers is None or csv_importers.empty:
+        return supplier_logistics.copy()
+
+    suppliers = supplier_logistics.copy()
+    csv_data = csv_importers.copy()
+    for frame in [suppliers, csv_data]:
+        if "importer_name_clean" not in frame.columns and "importer_name" in frame.columns:
+            frame["importer_name_clean"] = frame["importer_name"].apply(clean_importer_name)
+
+    merged = suppliers.merge(
+        csv_data[IMPORTER_LOGISTICS_COLUMNS],
+        on="importer_name_clean",
+        how="left",
+        suffixes=("", "_csv"),
+    )
+
+    text_columns = ["importer_id", "pick_up_location", "freight_forwarder", "order_frequency", "notes"]
+    for column in text_columns:
+        csv_column = f"{column}_csv"
+        if csv_column in merged.columns:
+            current = merged[column].fillna("").astype(str).str.strip()
+            merged[column] = merged[column].where(current != "", merged[csv_column])
+
+    for column in ["eta_days", "trucking_cost_per_bottle"]:
+        csv_column = f"{column}_csv"
+        if csv_column in merged.columns:
+            current = pd.to_numeric(merged[column], errors="coerce").fillna(0)
+            fallback = pd.to_numeric(merged[csv_column], errors="coerce")
+            merged[column] = merged[column].where(current > 0, fallback)
+
+    if "tdm_csv" in merged.columns:
+        current_tdm = merged["tdm"].fillna("").astype(str).str.strip()
+        merged["tdm"] = merged["tdm"].where(current_tdm != "", merged["tdm_csv"])
+
+    merged = merged[[column for column in merged.columns if not column.endswith("_csv")]]
+    csv_only = csv_data[~csv_data["importer_name_clean"].isin(merged["importer_name_clean"])].copy()
+    combined = pd.concat([merged, csv_only], ignore_index=True, sort=False)
+    for column in IMPORTER_LOGISTICS_COLUMNS:
+        if column not in combined.columns:
+            combined[column] = None
+    return combined[IMPORTER_LOGISTICS_COLUMNS].copy()
+
+
 __all__ = [
     "IMPORTER_LOGISTICS_COLUMNS",
     "clean_importer_name",
@@ -355,6 +411,7 @@ __all__ = [
     "detect_rb6_header",
     "empty_importers_frame",
     "load_importers_csv",
+    "merge_supplier_logistics_with_csv",
     "map_rads_columns",
     "map_rb6_columns",
     "normalize_columns",

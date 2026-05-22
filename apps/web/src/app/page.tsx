@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { OrderDashboard } from "@/components/order-dashboard";
+import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import type {
   AppProfile,
   PurchaseOrderDraftWithLines,
@@ -118,6 +119,8 @@ export default async function HomePage() {
     `)
     .order("name", { ascending: true })
     .returns<SupplierLogistics[]>();
+  const supplierDefaults = await loadImporterDefaults();
+  const mergedSuppliers = mergeSupplierDefaults(suppliers || [], supplierDefaults);
 
   return (
     <OrderDashboard
@@ -125,7 +128,7 @@ export default async function HomePage() {
       reportRun={latestRun}
       recommendations={recommendations || []}
       poDrafts={poDraftRows || []}
-      suppliers={suppliers || []}
+      suppliers={mergedSuppliers}
     />
   );
 }

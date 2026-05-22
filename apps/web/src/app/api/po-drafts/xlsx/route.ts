@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { poTemplateXlsxBuffer } from "@/lib/po-export";
 import { poTimestamp } from "@/lib/po-utils";
+import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { createClient } from "@/lib/supabase/server";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 
@@ -59,8 +60,10 @@ export async function GET(request: NextRequest) {
     .from("suppliers")
     .select("id,importer_id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,notes,active")
     .returns<SupplierLogistics[]>();
+  const supplierDefaults = await loadImporterDefaults();
+  const mergedSuppliers = mergeSupplierDefaults(suppliers || [], supplierDefaults);
 
-  const buffer = await poTemplateXlsxBuffer(drafts || [], suppliers || []);
+  const buffer = await poTemplateXlsxBuffer(drafts || [], mergedSuppliers);
   const filename = `POs ${poTimestamp()}.xlsx`;
 
   return new NextResponse(buffer, {

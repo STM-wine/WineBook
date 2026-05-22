@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 from stem_order.pipeline import build_ordering_pipeline
 from stem_order.supabase_repository import SupabaseRepository, load_dotenv
-from stem_order.ingest import supplier_logistics_rows_to_frame
+from stem_order.ingest import load_importers_csv, merge_supplier_logistics_with_csv, supplier_logistics_rows_to_frame
 
 
 DEFAULT_RB6_KEYWORDS = ["inventory", "velocity", "rb6"]
@@ -336,7 +336,10 @@ def main() -> None:
             email_message_id=reports.rads_candidate.message_id,
         )
 
+        csv_importers, csv_loaded, _ = load_importers_csv(ROOT / "importers.csv")
         supplier_logistics = supplier_logistics_rows_to_frame(repo.get_supplier_logistics())
+        if csv_loaded:
+            supplier_logistics = merge_supplier_logistics_with_csv(supplier_logistics, csv_importers)
         result = build_ordering_pipeline(
             reports.rb6,
             reports.rads,
