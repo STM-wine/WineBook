@@ -19,7 +19,7 @@ Deployment status: the Next.js app is live on Render at `https://stmhq.com`. Str
 | Streamlit capability | Next.js status | Notes |
 | --- | --- | --- |
 | Local-only app shell | Improved | Next.js app uses Supabase Auth and profile allowlist. |
-| Top navigation: Order Review, Supplier Hub, Supplier Board, Freight, PO Drafts | Done | URL-backed views instead of one long scroll. |
+| Top navigation: Order Review, Supplier Hub, Freight, PO Drafts | Done | URL-backed views instead of one long scroll. Supplier Board is hidden for V1 because it overlaps with Order Summary. |
 | Create PO Drafts from top toolbar | Done | Global action remains available from the header. |
 | Data date visible | Done | Header data-date pill. |
 | User feedback after save/create | Done | Status message strip for saves, draft creation, and errors. |
@@ -41,7 +41,7 @@ Deployment status: the Next.js app is live on Render at `https://stmhq.com`. Str
 | Wine column pinned during horizontal scroll | Improved | AG Grid pins wine column. |
 | Table edit does not reset scroll position | Improved | AG Grid avoids Streamlit rerun jumpiness. |
 | Item # column | Done | Present in workbench grid. |
-| TDM column | Done | Present in workbench grid. |
+| TDM supplier context | Done | Shown in supplier workbench header rather than as a table column. |
 | Rank | Patched | Restored supplier-level velocity rank in the workbench grid. |
 | Core / BTG flags next to wine name | Done | Uses star / wine-glass flags in wine display. |
 | Optional 60/90 day sales toggles per supplier | Patched | Added per-supplier workbench toggles. |
@@ -69,9 +69,9 @@ Deployment status: the Next.js app is live on Render at `https://stmhq.com`. Str
 
 | Streamlit capability | Next.js status | Notes |
 | --- | --- | --- |
-| Supplier-level queue table | Improved | Added queue metrics, search, sorting, status pills, and progress bars. |
-| Sort by urgency / value | Improved | Sort modes include priority, supplier A-Z, suggested value, approved value. |
-| Show approved-progress context | Improved | Added progress visualization. |
+| Supplier-level queue table | Deferred | Hidden for V1 because Order Summary now serves this supplier-level workflow. |
+| Sort by urgency / value | Deferred | Revisit only if buyers need a separate supplier queue. |
+| Show approved-progress context | Deferred | Revisit only if buyers need a separate supplier queue. |
 
 ## Freight
 

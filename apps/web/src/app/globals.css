@@ -1007,6 +1007,32 @@ td {
   font-weight: 700;
 }
 
+.summary-table-actions {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  justify-content: space-between;
+  margin: 8px 0 10px;
+  text-transform: uppercase;
+}
+
+.summary-table-actions div {
+  display: flex;
+  gap: 8px;
+}
+
+.workbench-control-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.supplier-chip-muted {
+  background: #f4f1eb;
+  color: var(--muted);
+}
+
 .supplier-metrics {
   grid-template-columns: repeat(5, minmax(150px, 1fr));
   margin: 22px 0;
@@ -1172,6 +1198,42 @@ td {
 
 .workbench-grid .editable-cell {
   background: #fbfaf7;
+}
+
+.workbench-grid .approval-cell .ag-checkbox-input-wrapper {
+  font-size: 23px;
+  height: 23px;
+  line-height: 23px;
+  width: 23px;
+}
+
+.workbench-grid .approval-cell .ag-checkbox-input-wrapper.ag-checked::after {
+  color: var(--green);
+}
+
+.workbench-grid .ag-pinned-left-cols-container,
+.workbench-grid .ag-pinned-left-header {
+  box-shadow: 8px 0 14px rgba(26, 23, 18, 0.08);
+  z-index: 3;
+}
+
+.po-draft-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.po-draft-metadata span {
+  background: #f4f1eb;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 7px 10px;
+  text-transform: uppercase;
 }
 
 .workbench-grid .ag-cell-edit-input,

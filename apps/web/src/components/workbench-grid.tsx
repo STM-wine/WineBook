@@ -133,38 +133,79 @@ export function WorkbenchGrid({
         autoHeight: true
       },
       {
-        headerName: "Item #",
-        field: "product_code",
-        width: 110,
-        cellClass: "center-cell",
-        cellStyle: CENTER_CELL_STYLE,
-        cellRenderer: centeredRenderer,
-        headerClass: "center-header"
+        headerName: "Approval",
+        field: "approved",
+        pinned: "left",
+        lockPinned: true,
+        width: 92,
+        editable: true,
+        headerTooltip: "Check to include this wine in the next PO draft. The approved quantity is saved automatically.",
+        headerClass: "center-header",
+        cellRenderer: "agCheckboxCellRenderer",
+        cellEditor: "agCheckboxCellEditor",
+        cellClass: "editable-cell center-cell approval-cell",
+        cellStyle: CENTER_CELL_STYLE
       },
       {
-        headerName: "Rank",
-        field: "importer_rank",
-        width: 92,
-        headerTooltip: "Supplier-level velocity rank using 12-month sales when available, otherwise 90/60/30-day sales.",
+        headerName: "Weeks w/ On Order",
+        field: "weeks_on_hand_with_on_order",
+        pinned: "left",
+        lockPinned: true,
+        width: 128,
+        headerTooltip: "Formula: (True Available + On Order) / Weekly Velocity.",
+        headerClass: "number-header",
         cellClass: "center-cell",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
-        headerClass: "center-header",
+        valueFormatter: decimalFormatter
+      },
+      {
+        headerName: "Weeks Recommended",
+        field: "working_weeks",
+        pinned: "left",
+        lockPinned: true,
+        width: 138,
+        editable: true,
+        headerTooltip: "Formula: (True Available + On Order + Recommended Qty) / Weekly Velocity. Editing this recalculates Recommended Qty.",
+        headerClass: "number-header",
+        cellClass: "editable-cell center-cell",
+        cellStyle: CENTER_CELL_STYLE,
+        cellRenderer: centeredRenderer,
+        valueParser: (params) => Math.max(0, Number(params.newValue) || 0),
+        valueFormatter: decimalFormatter
+      },
+      {
+        headerName: "Recommended Qty",
+        field: "working_qty",
+        pinned: "left",
+        lockPinned: true,
+        width: 118,
+        editable: true,
+        headerTooltip: "Suggested bottles needed to reach target coverage after available inventory and open orders.",
+        headerClass: "number-header",
+        cellClass: "editable-cell center-cell",
+        cellStyle: CENTER_CELL_STYLE,
+        cellRenderer: centeredRenderer,
+        valueParser: (params) => Math.max(0, Math.round(Number(params.newValue) || 0)),
         valueFormatter: integerFormatter
       },
       {
-        headerName: "TDM",
-        field: "brand_manager",
-        width: 135,
+        headerName: "Cost",
+        field: "estimated_cost",
+        pinned: "left",
+        lockPinned: true,
+        width: 112,
+        headerTooltip: "Formula: Recommended Qty x bottle cost, including available landed-cost data where present.",
+        headerClass: "number-header",
         cellClass: "center-cell",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
-        headerClass: "center-header"
+        valueFormatter: currencyFormatter
       },
       {
         headerName: "True Available",
         field: "true_available",
-        width: 135,
+        width: 126,
         headerTooltip:
           "Formula: Available Inventory - Unconfirmed Line Item Qty. This estimates bottles actually available for buying decisions.",
         headerClass: "number-header",
@@ -175,7 +216,7 @@ export function WorkbenchGrid({
       {
         headerName: "On Order",
         field: "on_order",
-        width: 115,
+        width: 104,
         headerTooltip: "From RB6 On Order. Bottles already ordered but not yet received.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -185,7 +226,7 @@ export function WorkbenchGrid({
       {
         headerName: "30d Sales",
         field: "last_30_day_sales",
-        width: 115,
+        width: 108,
         headerTooltip: "Trailing 30-day bottle sales anchored to the latest RADs sales date.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -197,7 +238,7 @@ export function WorkbenchGrid({
             {
               headerName: "60d Sales",
               field: "last_60_day_sales" as const,
-              width: 115,
+              width: 108,
               headerTooltip: "Trailing 60-day bottle sales anchored to the latest RADs sales date.",
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
@@ -207,7 +248,7 @@ export function WorkbenchGrid({
             {
               headerName: "90d Sales",
               field: "last_90_day_sales" as const,
-              width: 115,
+              width: 108,
               headerTooltip: "Trailing 90-day bottle sales anchored to the latest RADs sales date.",
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
@@ -219,7 +260,7 @@ export function WorkbenchGrid({
       {
         headerName: "Next 30d Forecast",
         field: "next_30_day_forecast",
-        width: 150,
+        width: 138,
         headerTooltip: "Same upcoming 30-day calendar window last year. This is a seasonal reference, not a predictive model.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -231,7 +272,7 @@ export function WorkbenchGrid({
             {
               headerName: "LY Next 60d Forecast",
               field: "next_60_day_forecast" as const,
-              width: 170,
+              width: 150,
               headerTooltip: "Same upcoming 60-day calendar window last year.",
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
@@ -241,7 +282,7 @@ export function WorkbenchGrid({
             {
               headerName: "LY Next 90d Forecast",
               field: "next_90_day_forecast" as const,
-              width: 170,
+              width: 150,
               headerTooltip: "Same upcoming 90-day calendar window last year.",
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
@@ -253,7 +294,7 @@ export function WorkbenchGrid({
       {
         headerName: "Weekly Velocity",
         field: "weekly_velocity",
-        width: 135,
+        width: 128,
         headerTooltip: "Formula: 30d Sales / 4.345. Converts recent monthly bottle sales into weekly pace.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -271,61 +312,24 @@ export function WorkbenchGrid({
         cellRenderer: centeredRenderer
       },
       {
-        headerName: "Weeks w/ On Order",
-        field: "weeks_on_hand_with_on_order",
-        width: 150,
-        headerTooltip: "Formula: (True Available + On Order) / Weekly Velocity.",
-        headerClass: "number-header",
+        headerName: "Item #",
+        field: "product_code",
+        width: 110,
+        cellClass: "center-cell",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
-        valueFormatter: decimalFormatter
+        headerClass: "center-header"
       },
       {
-        headerName: "Weeks w/ Recommended",
-        field: "working_weeks",
-        width: 170,
-        editable: true,
-        headerTooltip: "Formula: (True Available + On Order + Recommended Qty) / Weekly Velocity. Editing this recalculates Recommended Qty.",
-        headerClass: "number-header",
-        cellClass: "editable-cell center-cell",
+        headerName: "Rank",
+        field: "importer_rank",
+        width: 82,
+        headerTooltip: "Supplier-level velocity rank using 12-month sales when available, otherwise 90/60/30-day sales.",
+        cellClass: "center-cell",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
-        valueParser: (params) => Math.max(0, Number(params.newValue) || 0),
-        valueFormatter: decimalFormatter
-      },
-      {
-        headerName: "Recommended Qty",
-        field: "working_qty",
-        width: 145,
-        editable: true,
-        headerTooltip: "Suggested bottles needed to reach target coverage after available inventory and open orders.",
-        headerClass: "number-header",
-        cellClass: "editable-cell center-cell",
-        cellStyle: CENTER_CELL_STYLE,
-        cellRenderer: centeredRenderer,
-        valueParser: (params) => Math.max(0, Math.round(Number(params.newValue) || 0)),
-        valueFormatter: integerFormatter
-      },
-      {
-        headerName: "Approval",
-        field: "approved",
-        width: 105,
-        editable: true,
         headerClass: "center-header",
-        cellRenderer: "agCheckboxCellRenderer",
-        cellEditor: "agCheckboxCellEditor",
-        cellClass: "editable-cell center-cell",
-        cellStyle: CENTER_CELL_STYLE
-      },
-      {
-        headerName: "Est. Cost",
-        field: "estimated_cost",
-        width: 125,
-        headerTooltip: "Formula: Recommended Qty x bottle cost, including available landed-cost data where present.",
-        headerClass: "number-header",
-        cellStyle: CENTER_CELL_STYLE,
-        cellRenderer: centeredRenderer,
-        valueFormatter: currencyFormatter
+        valueFormatter: integerFormatter
       }
     ];
       return columns;
@@ -383,6 +387,8 @@ export function WorkbenchGrid({
         stopEditingWhenCellsLoseFocus
         suppressDragLeaveHidesColumns
         animateRows={false}
+        enableBrowserTooltips
+        tooltipShowDelay={0}
       />
     </div>
   );

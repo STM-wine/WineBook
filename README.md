@@ -104,7 +104,7 @@ source .venv/bin/activate
 streamlit run app.py
 ```
 
-The Streamlit app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. The Next.js app is the current production home for those buyer workflows, including authenticated Order Review, Supplier Hub logistics editing, Freight rollups, PO Draft creation/status review, CSV export, and XLSX export using the STM PO template.
+The Streamlit app tabs are Order Review, Supplier Hub, Supplier Board, Freight, and PO Drafts. The Next.js app is the current production home for the buyer workflows, including authenticated Order Review, Supplier Hub logistics editing, Freight rollups, PO Draft creation/status review, CSV export, and XLSX export using the STM PO template. Supplier Board is hidden in V1 because Order Summary now covers that supplier-level view.
 
 Supplier logistics are managed in the Supplier Hub tab and stored in Supabase `suppliers` when the latest supplier-logistics migration has been applied. `importers.csv` remains a seed/fallback file, not the normal management workflow.
 

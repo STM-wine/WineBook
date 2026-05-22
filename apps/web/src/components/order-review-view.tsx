@@ -103,6 +103,14 @@ export function OrderReviewView({
           <input type="checkbox" checked={expandAll} onChange={(event) => setExpandAll(event.target.checked)} />
           Expand all supplier workbenches
         </label>
+        <div className="workbench-control-buttons">
+          <button className="ghost-button" onClick={() => setExpandAll(true)} type="button">
+            Expand All
+          </button>
+          <button className="ghost-button" onClick={() => setExpandAll(false)} type="button">
+            Collapse All
+          </button>
+        </div>
         <span>{formatInteger(visibleCount)} visible SKUs</span>
       </div>
 
@@ -123,35 +131,53 @@ export function OrderReviewView({
 }
 
 function SummaryTable({ groups }: { groups: SupplierGroup[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const visibleGroups = showAll ? groups : groups.slice(0, 7);
+
   return (
-    <div className="table-shell">
-      <table>
-        <thead>
-          <tr>
-            <th>Supplier</th>
-            <th>SKUs</th>
-            <th>Urgent</th>
-            <th>Suggested Qty</th>
-            <th>Suggested Value</th>
-            <th>Approved Qty</th>
-            <th>Approved Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {groups.map((group) => (
-            <tr key={group.supplier}>
-              <td>{group.supplier}</td>
-              <td>{formatInteger(group.skuCount)}</td>
-              <td>{formatInteger(group.urgentCount)}</td>
-              <td>{formatInteger(group.recommendedBottles)}</td>
-              <td>{formatCurrency(group.suggestedValue)}</td>
-              <td>{formatInteger(group.approvedBottles)}</td>
-              <td>{formatCurrency(group.approvedValue)}</td>
+    <>
+      <div className="summary-table-actions">
+        <span>
+          Showing {formatInteger(visibleGroups.length)} of {formatInteger(groups.length)} suppliers
+        </span>
+        <div>
+          <button className="ghost-button" onClick={() => setShowAll(true)} type="button">
+            Expand All
+          </button>
+          <button className="ghost-button" onClick={() => setShowAll(false)} type="button">
+            Collapse All
+          </button>
+        </div>
+      </div>
+      <div className="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>Supplier</th>
+              <th>SKUs</th>
+              <th>Urgent</th>
+              <th>Suggested Qty</th>
+              <th>Suggested Value</th>
+              <th>Approved Qty</th>
+              <th>Approved Value</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {visibleGroups.map((group) => (
+              <tr key={group.supplier}>
+                <td>{group.supplier}</td>
+                <td>{formatInteger(group.skuCount)}</td>
+                <td>{formatInteger(group.urgentCount)}</td>
+                <td>{formatInteger(group.recommendedBottles)}</td>
+                <td>{formatCurrency(group.suggestedValue)}</td>
+                <td>{formatInteger(group.approvedBottles)}</td>
+                <td>{formatCurrency(group.approvedValue)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -170,12 +196,15 @@ function SupplierSection({
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
+  const tdmNames = Array.from(new Set(group.rows.map((row) => row.brand_manager?.trim() || "").filter(Boolean)));
+  const tdmLabel = tdmNames.length === 0 ? "TDM unassigned" : tdmNames.length === 1 ? `TDM ${tdmNames[0]}` : "Multiple TDMs";
 
   return (
     <details className="supplier-section" open={expandAll || undefined}>
       <summary>
         <div>
           <span className="supplier-chip">{group.supplier}</span>
+          <span className="supplier-chip supplier-chip-muted">{tdmLabel}</span>
           <strong>{formatInteger(group.recommendedBottles)} bottles</strong>
           <span>{formatCurrency(group.suggestedValue)} suggested</span>
         </div>

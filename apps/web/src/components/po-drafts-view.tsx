@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { PurchaseOrderDraftWithLines } from "@/lib/types";
+import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
 import { poLineCosts, poTimestamp } from "@/lib/po-utils";
 
@@ -56,6 +56,7 @@ export function PoDraftsView({
   drafts,
   isPending,
   reportRunId,
+  suppliers,
   onCreateDrafts,
   onDeleteLine,
   onStatusChange
@@ -63,6 +64,7 @@ export function PoDraftsView({
   drafts: PurchaseOrderDraftWithLines[];
   isPending: boolean;
   reportRunId: string;
+  suppliers: SupplierLogistics[];
   onCreateDrafts: () => void;
   onDeleteLine: (lineId: string, draftId: string) => void;
   onStatusChange: (draftId: string, status: string) => void;
@@ -112,6 +114,10 @@ export function PoDraftsView({
   const totalWineCost = filteredSummaries.reduce((sum, summary) => sum + summary.wineCost, 0);
   const totalLaidInCost = filteredSummaries.reduce((sum, summary) => sum + summary.laidInCost, 0);
   const totalEstimatedCost = filteredSummaries.reduce((sum, summary) => sum + (summary.estimatedCost || summary.wineCost + summary.laidInCost), 0);
+  const supplierMetadata = useMemo(
+    () => new Map(suppliers.map((supplier) => [(supplier.name || "").trim().toLowerCase(), supplier])),
+    [suppliers]
+  );
 
   return (
     <section className="panel po-panel" id="po-drafts">
@@ -202,6 +208,7 @@ export function PoDraftsView({
                   Download CSV
                 </a>
               </div>
+              <SupplierDraftMetadata supplier={supplierMetadata.get((draft.supplier_name || "").trim().toLowerCase())} />
               <PoDraftLinesTable draft={draft} disabled={isPending} onDeleteLine={onDeleteLine} />
             </details>
           ))}
@@ -210,6 +217,23 @@ export function PoDraftsView({
       )}
     </section>
   );
+}
+
+function SupplierDraftMetadata({ supplier }: { supplier?: SupplierLogistics }) {
+  if (!supplier) return null;
+
+  const details = [
+    supplier.pick_up_location ? `Pickup: ${supplier.pick_up_location}` : "",
+    supplier.eta_days ? `ETA: ${supplier.eta_days} days` : "",
+    supplier.freight_forwarder ? `Forwarder: ${supplier.freight_forwarder}` : "",
+    asNumber(supplier.trucking_cost_per_bottle) > 0
+      ? `Laid In: ${formatCurrency(asNumber(supplier.trucking_cost_per_bottle))}/bottle`
+      : ""
+  ].filter(Boolean);
+
+  if (details.length === 0) return null;
+
+  return <div className="po-draft-metadata">{details.map((detail) => <span key={detail}>{detail}</span>)}</div>;
 }
 
 function PoDraftLinesTable({

@@ -23,7 +23,7 @@ import {
   rowRecommendedQty,
   uniqueSorted
 } from "@/lib/order-data";
-import { ActiveView, isActiveView, VIEW_LABELS } from "./dashboard-types";
+import { ActiveView, isActiveView, NAV_VIEW_LABELS } from "./dashboard-types";
 import { FreightView } from "./freight-view";
 import { OrderReviewView } from "./order-review-view";
 import { PoDraftsView } from "./po-drafts-view";
@@ -258,7 +258,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
           </div>
         </div>
         <nav className="nav-tabs" aria-label="Primary">
-          {VIEW_LABELS.map((view) => (
+          {NAV_VIEW_LABELS.map((view) => (
             <button
               key={view.id}
               className={activeView === view.id ? "active" : ""}
@@ -316,6 +316,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
           drafts={poDrafts}
           isPending={isPending}
           reportRunId={reportRun.id}
+          suppliers={suppliers}
           onCreateDrafts={createDrafts}
           onDeleteLine={removeDraftLine}
           onStatusChange={changeDraftStatus}

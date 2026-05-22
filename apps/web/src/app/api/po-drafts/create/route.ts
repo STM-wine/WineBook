@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { asNumber } from "@/lib/order-data";
 import { createClient } from "@/lib/supabase/server";
-import type { Recommendation } from "@/lib/types";
+import type { Recommendation, SupplierLogistics } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 const ACTIVE_PO_STATUSES = ["draft", "ready_for_entry"];
+
+function normalizeSupplier(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
+}
 
 async function requireWriteAccess() {
   const supabase = await createClient();
@@ -82,15 +86,27 @@ export async function POST(request: Request) {
   const created: string[] = [];
   const skipped = Array.from(activeSuppliers).map((supplier) => `${supplier}: active draft already exists`);
   const errors: string[] = [];
+  const { data: supplierRows } = await supabase
+    .from("suppliers")
+    .select("name,trucking_cost_per_bottle,pick_up_location,eta_days,freight_forwarder,notes")
+    .returns<SupplierLogistics[]>();
+  const supplierMetadata = new Map((supplierRows || []).map((row) => [normalizeSupplier(row.name), row]));
 
   for (const [supplier, rows] of grouped.entries()) {
+    const metadata = supplierMetadata.get(normalizeSupplier(supplier));
     const { data: draft, error: draftError } = await supabase
       .from("purchase_order_drafts")
       .insert({
         supplier_name: supplier,
         report_run_id: reportRunId,
         status: "draft",
-        notes: "Created from global PO Drafts action.",
+        notes: [
+          "Created from global PO Drafts action.",
+          metadata?.pick_up_location ? `Pickup: ${metadata.pick_up_location}.` : "",
+          metadata?.eta_days ? `ETA: ${metadata.eta_days} days.` : ""
+        ]
+          .filter(Boolean)
+          .join(" "),
         created_by: user.id
       })
       .select("id")
@@ -105,7 +121,8 @@ export async function POST(request: Request) {
       const approvedQty = Math.max(0, Math.round(asNumber(row.approved_qty)));
       const recommendedQty = Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)));
       const fob = asNumber(row.fob);
-      const trucking = asNumber(row.trucking_cost_per_bottle);
+      const supplierTrucking = asNumber(metadata?.trucking_cost_per_bottle);
+      const trucking = asNumber(row.trucking_cost_per_bottle) || supplierTrucking;
       const wineCost = fob * approvedQty;
       const laidInCost = trucking * approvedQty;
 

@@ -1,4 +1,4 @@
-# WineBook Web App
+# Stem Intelligence Web App
 
 This is the production Next.js app for the ordering dashboard. The Python ingestion/calculation
 pipeline stays in the repo and continues writing completed report runs to Supabase; this app reads
