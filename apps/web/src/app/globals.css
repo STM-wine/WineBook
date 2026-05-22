@@ -1,6 +1,12 @@
 @import "ag-grid-community/styles/ag-grid.css";
 @import "ag-grid-community/styles/ag-theme-quartz.css";
 
+@font-face {
+  font-family: "Nixie One";
+  font-display: swap;
+  src: url("/brand/NixieOne-Regular.ttf") format("truetype");
+}
+
 :root {
   --bg: #faf8f4;
   --surface: #ffffff;
@@ -63,20 +69,37 @@ select {
 .brand {
   align-items: center;
   display: flex;
-  gap: 12px;
+  gap: 14px;
+  min-width: 0;
 }
 
 .brand-mark {
   align-items: center;
-  background: var(--ink);
+  background: white;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  color: white;
   display: flex;
-  font-size: 12px;
-  font-weight: 800;
-  height: 36px;
+  height: 46px;
   justify-content: center;
-  width: 36px;
+  overflow: hidden;
+  width: 62px;
+}
+
+.brand-mark img {
+  display: block;
+  height: 100px;
+  max-width: none;
+  transform: translateY(-2px);
+  width: 130px;
+}
+
+.brand strong {
+  display: block;
+  font-family: "Nixie One", Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .brand span {
@@ -1193,6 +1216,13 @@ tr.has-recommendation .sticky-name {
 
 .login-panel {
   grid-template-columns: 1fr 360px;
+}
+
+.login-logo {
+  display: block;
+  margin: -20px 0 6px -18px;
+  max-width: min(360px, 100%);
+  width: 360px;
 }
 
 .eyebrow {

@@ -29,10 +29,10 @@ export default async function HomePage() {
     return (
       <main className="empty-state">
         <section>
-          <p className="eyebrow">WineBook</p>
+          <p className="eyebrow">Stem Intelligence</p>
           <h1>Account pending</h1>
           <p className="muted">
-            You are signed in as {user.email}, but this account is not enabled in WineBook yet.
+            You are signed in as {user.email}, but this account is not enabled in Stem Intelligence yet.
             Add a matching row to Supabase app_profiles to grant access.
           </p>
         </section>
@@ -54,7 +54,7 @@ export default async function HomePage() {
     return (
       <main className="empty-state">
         <section>
-          <p className="eyebrow">WineBook</p>
+          <p className="eyebrow">Stem Intelligence</p>
           <h1>No completed reports yet</h1>
           <p className="muted">The app is connected, but Supabase does not have a completed report run to display.</p>
         </section>

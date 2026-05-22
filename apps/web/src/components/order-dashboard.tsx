@@ -249,9 +249,11 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
     <main className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark">WB</div>
+          <div className="brand-mark">
+            <img alt="" src="/brand/stem-intelligence-logo.png" />
+          </div>
           <div>
-            <strong>WineBook</strong>
+            <strong>Stem Intelligence</strong>
             <span>{profile.full_name || profile.email}</span>
           </div>
         </div>
