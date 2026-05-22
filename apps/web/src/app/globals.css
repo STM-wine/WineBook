@@ -602,8 +602,10 @@ td {
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--ink);
-  min-height: 44px;
+  height: 48px;
+  line-height: 1.2;
   padding: 11px 12px;
+  width: 100%;
 }
 
 .po-draft-card {
@@ -730,8 +732,10 @@ td {
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--ink);
-  min-height: 44px;
+  height: 48px;
+  line-height: 1.2;
   padding: 11px 12px;
+  width: 100%;
 }
 
 .supplier-hub-toolbar .check-control {
@@ -776,8 +780,10 @@ td {
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--ink);
-  min-height: 44px;
+  height: 48px;
+  line-height: 1.2;
   padding: 11px 12px;
+  width: 100%;
 }
 
 .segmented-control {

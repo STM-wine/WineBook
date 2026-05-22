@@ -197,7 +197,7 @@ function SupplierSection({
   const [showHistory, setShowHistory] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
   const tdmNames = Array.from(new Set(group.rows.map((row) => row.brand_manager?.trim() || "").filter(Boolean)));
-  const tdmLabel = tdmNames.length === 0 ? "TDM unassigned" : tdmNames.length === 1 ? `TDM ${tdmNames[0]}` : "Multiple TDMs";
+  const tdmLabel = tdmNames.length === 0 ? "Unassigned" : tdmNames.length === 1 ? tdmNames[0] : "Multiple";
 
   return (
     <details className="supplier-section" open={expandAll || undefined}>

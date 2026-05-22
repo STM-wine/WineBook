@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
-import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
+import { asNumber, formatCurrency, formatCurrencyCents, formatInteger } from "@/lib/order-data";
 import { poLineCosts, poTimestamp, supplierLaidInForDraft, supplierLogisticsLookup } from "@/lib/po-utils";
 
 function csvEscape(value: string | number): string {
@@ -232,7 +232,7 @@ function SupplierDraftMetadata({ supplier }: { supplier?: SupplierLogistics }) {
     supplier.eta_days ? `ETA: ${supplier.eta_days} days` : "",
     supplier.freight_forwarder ? `Forwarder: ${supplier.freight_forwarder}` : "",
     asNumber(supplier.trucking_cost_per_bottle) > 0
-      ? `Laid In: ${formatCurrency(asNumber(supplier.trucking_cost_per_bottle))}/bottle`
+      ? `Laid In: ${formatCurrencyCents(asNumber(supplier.trucking_cost_per_bottle))}/bottle`
       : ""
   ].filter(Boolean);
 
@@ -278,7 +278,7 @@ function PoDraftLinesTable({
                 <td>{line.product_code || ""}</td>
                 <td>{formatInteger(qty)}</td>
                 <td>{formatCurrency(fob)}</td>
-                <td>{formatCurrency(laidIn)}</td>
+                <td>{formatCurrencyCents(laidIn)}</td>
                 <td>{formatCurrency(wineCost)}</td>
                 <td>{formatCurrency(laidInCost)}</td>
                 <td>{formatCurrency(estimatedCost)}</td>

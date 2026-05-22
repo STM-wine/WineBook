@@ -18,6 +18,15 @@ export function formatCurrency(value: number): string {
   }).format(value);
 }
 
+export function formatCurrencyCents(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2
+  }).format(value);
+}
+
 export function formatDecimal(value: number, digits = 1): string {
   return value.toLocaleString("en-US", {
     maximumFractionDigits: digits,
