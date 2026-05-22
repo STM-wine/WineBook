@@ -1,0 +1,139 @@
+import { NextResponse } from "next/server";
+import { asNumber } from "@/lib/order-data";
+import { createClient } from "@/lib/supabase/server";
+import type { Recommendation } from "@/lib/types";
+
+const WRITE_ROLES = new Set(["buyer", "admin"]);
+const ACTIVE_PO_STATUSES = ["draft", "ready_for_entry"];
+
+async function requireWriteAccess() {
+  const supabase = await createClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Sign in required.", status: 401 as const };
+  }
+
+  const { data: profile } = await supabase
+    .from("app_profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle<{ role: string }>();
+
+  if (!profile || !WRITE_ROLES.has(profile.role)) {
+    return { error: "Buyer or admin access required.", status: 403 as const };
+  }
+
+  return { supabase, user };
+}
+
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => null)) as { reportRunId?: string } | null;
+  const reportRunId = body?.reportRunId;
+
+  if (!reportRunId) {
+    return NextResponse.json({ error: "Missing report run id." }, { status: 400 });
+  }
+
+  const access = await requireWriteAccess();
+  if ("error" in access) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
+  const { supabase, user } = access;
+
+  const { data: activeDrafts, error: activeDraftsError } = await supabase
+    .from("purchase_order_drafts")
+    .select("supplier_name")
+    .eq("report_run_id", reportRunId)
+    .in("status", ACTIVE_PO_STATUSES);
+
+  if (activeDraftsError) {
+    return NextResponse.json({ error: activeDraftsError.message }, { status: 500 });
+  }
+
+  const activeSuppliers = new Set(
+    (activeDrafts || []).map((draft) => draft.supplier_name?.trim()).filter(Boolean)
+  );
+
+  const { data: recommendations, error: recommendationsError } = await supabase
+    .from("reorder_recommendations")
+    .select("*")
+    .eq("report_run_id", reportRunId)
+    .in("recommendation_status", ["approved", "edited"])
+    .gt("approved_qty", 0)
+    .returns<Recommendation[]>();
+
+  if (recommendationsError) {
+    return NextResponse.json({ error: recommendationsError.message }, { status: 500 });
+  }
+
+  const grouped = new Map<string, Recommendation[]>();
+  for (const row of recommendations || []) {
+    const supplier = row.supplier_name?.trim() || "Unassigned";
+    if (activeSuppliers.has(supplier)) continue;
+    const rows = grouped.get(supplier) || [];
+    rows.push(row);
+    grouped.set(supplier, rows);
+  }
+
+  const created: string[] = [];
+  const skipped = Array.from(activeSuppliers).map((supplier) => `${supplier}: active draft already exists`);
+  const errors: string[] = [];
+
+  for (const [supplier, rows] of grouped.entries()) {
+    const { data: draft, error: draftError } = await supabase
+      .from("purchase_order_drafts")
+      .insert({
+        supplier_name: supplier,
+        report_run_id: reportRunId,
+        status: "draft",
+        notes: "Created from global PO Drafts action.",
+        created_by: user.id
+      })
+      .select("id")
+      .single<{ id: string }>();
+
+    if (draftError || !draft) {
+      errors.push(`${supplier}: ${draftError?.message || "Could not create draft."}`);
+      continue;
+    }
+
+    const linePayloads = rows.map((row) => {
+      const approvedQty = Math.max(0, Math.round(asNumber(row.approved_qty)));
+      const recommendedQty = Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)));
+      const fob = asNumber(row.fob);
+      const trucking = asNumber(row.trucking_cost_per_bottle);
+      const wineCost = fob * approvedQty;
+      const laidInCost = trucking * approvedQty;
+
+      return {
+        purchase_order_draft_id: draft.id,
+        recommendation_id: row.id,
+        product_name: row.product_name,
+        product_code: row.product_code,
+        planning_sku: row.planning_sku,
+        recommended_qty: recommendedQty,
+        approved_qty: approvedQty,
+        fob,
+        trucking_cost_per_bottle: trucking,
+        wine_cost: wineCost,
+        laid_in_cost: laidInCost,
+        landed_cost: wineCost + laidInCost,
+        line_cost: wineCost
+      };
+    });
+
+    const { error: linesError } = await supabase.from("purchase_order_lines").insert(linePayloads);
+    if (linesError) {
+      errors.push(`${supplier}: ${linesError.message}`);
+      continue;
+    }
+
+    created.push(supplier);
+  }
+
+  return NextResponse.json({ created, skipped, errors });
+}

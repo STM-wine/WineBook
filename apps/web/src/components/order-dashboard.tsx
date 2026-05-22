@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  createPurchaseOrderDrafts,
   deletePurchaseOrderLine,
   saveSupplierLogistics,
   updatePurchaseOrderDraftStatus,
@@ -145,13 +144,31 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
 
     startTransition(async () => {
       try {
-        const result = await createPurchaseOrderDrafts(reportRun.id);
-        const created = result.created.length;
-        const skipped = result.skipped.length;
-        const errors = result.errors.length;
+        const response = await fetch("/api/po-drafts/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reportRunId: reportRun.id })
+        });
+        const result = (await response.json()) as {
+          created?: string[];
+          skipped?: string[];
+          errors?: string[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(result.error || "Could not create PO drafts.");
+        }
+
+        const createdList = result.created || [];
+        const skippedList = result.skipped || [];
+        const errorList = result.errors || [];
+        const created = createdList.length;
+        const skipped = skippedList.length;
+        const errors = errorList.length;
 
         if (errors) {
-          setErrorMessage(result.errors.join("; "));
+          setErrorMessage(errorList.join("; "));
         }
         if (created) {
           setPendingMessage(`Draft created: ${created.toLocaleString()} supplier PO draft(s).`);
