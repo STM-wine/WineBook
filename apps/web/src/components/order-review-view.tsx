@@ -21,6 +21,7 @@ export function OrderReviewView({
   supplierOptions,
   visibleCount,
   onSaveApproval,
+  onSaveOrderPath,
   onSaveWorkingQty,
   onSetWorkingQty
 }: {
@@ -40,6 +41,7 @@ export function OrderReviewView({
   supplierOptions: string[];
   visibleCount: number;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
+  onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
 }) {
@@ -121,6 +123,7 @@ export function OrderReviewView({
             group={group}
             expandAll={expandAll || supplier !== "All"}
             onSaveApproval={onSaveApproval}
+            onSaveOrderPath={onSaveOrderPath}
             onSetWorkingQty={onSetWorkingQty}
             onSaveWorkingQty={onSaveWorkingQty}
           />
@@ -185,12 +188,14 @@ function SupplierSection({
   group,
   expandAll,
   onSaveApproval,
+  onSaveOrderPath,
   onSetWorkingQty,
   onSaveWorkingQty
 }: {
   group: SupplierGroup;
   expandAll: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
+  onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
 }) {
@@ -232,6 +237,7 @@ function SupplierSection({
         showForecast={showForecast}
         showHistory={showHistory}
         onSaveApproval={onSaveApproval}
+        onSaveOrderPath={onSaveOrderPath}
         onSetWorkingQty={onSetWorkingQty}
         onSaveWorkingQty={onSaveWorkingQty}
       />

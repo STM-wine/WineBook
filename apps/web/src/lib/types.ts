@@ -48,6 +48,7 @@ export type Recommendation = {
   pack_size?: number | string | null;
   trucking_cost_per_bottle: number | string | null;
   landed_cost: number | string | null;
+  order_path?: "stateside" | "di" | string | null;
 };
 
 export type SupplierGroup = {

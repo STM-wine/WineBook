@@ -12,6 +12,7 @@ import {
   type ValueFormatterParams
 } from "ag-grid-community";
 import type { Recommendation } from "@/lib/types";
+import { diEligibility, isDiOpportunity, orderPath } from "@/lib/di-planning";
 import {
   asNumber,
   displayWineName,
@@ -29,6 +30,7 @@ type WorkbenchGridProps = {
   showForecast: boolean;
   showHistory: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
+  onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
 };
@@ -46,11 +48,37 @@ const integerFormatter = (params: ValueFormatterParams<WorkbenchRow, number>) =>
 const decimalFormatter = (params: ValueFormatterParams<WorkbenchRow, number>) => formatDecimal(asNumber(params.value));
 const currencyFormatter = (params: ValueFormatterParams<WorkbenchRow, number>) => formatCurrency(asNumber(params.value));
 const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
-  <span className="wine-cell-value">{params.valueFormatted ?? params.value ?? ""}</span>
+  <span className="wine-cell-value">
+    <span>{params.valueFormatted ?? params.value ?? ""}</span>
+    {params.data && isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}
+  </span>
 );
 const centeredRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
   <span className="grid-center-value">{params.valueFormatted ?? params.value ?? ""}</span>
 );
+const OrderPathRenderer = (params: ICellRendererParams<WorkbenchRow>) => {
+  const row = params.data;
+  if (!row) return <span className="grid-center-value">Stateside</span>;
+  const eligibility = diEligibility(row);
+  const current = orderPath(row);
+
+  if (!eligibility.eligible) {
+    return <span className="order-path-static">Stateside</span>;
+  }
+
+  return (
+    <select
+      aria-label="Order path"
+      className={current === "di" ? "order-path-select is-di" : "order-path-select"}
+      value={current}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => params.context.onSaveOrderPath(row, event.target.value as "stateside" | "di")}
+    >
+      <option value="stateside">Stateside</option>
+      <option value="di">DI</option>
+    </select>
+  );
+};
 const rowHeightForWineName = (name: string) => {
   const lines = Math.max(1, Math.ceil(name.length / 42));
   return Math.max(42, Math.min(112, 22 + lines * 18));
@@ -92,6 +120,7 @@ export function WorkbenchGrid({
   showForecast,
   showHistory,
   onSaveApproval,
+  onSaveOrderPath,
   onSetWorkingQty,
   onSaveWorkingQty
 }: WorkbenchGridProps) {
@@ -144,6 +173,18 @@ export function WorkbenchGrid({
         cellRenderer: "agCheckboxCellRenderer",
         cellEditor: "agCheckboxCellEditor",
         cellClass: "editable-cell center-cell approval-cell",
+        cellStyle: CENTER_CELL_STYLE
+      },
+      {
+        headerName: "Order Path",
+        field: "order_path",
+        pinned: "left",
+        lockPinned: true,
+        width: 118,
+        headerTooltip: "Buyer-controlled procurement path. DI is available only for seeded eligible brands and is never selected automatically.",
+        headerClass: "center-header",
+        cellClass: "editable-cell center-cell",
+        cellRenderer: OrderPathRenderer,
         cellStyle: CENTER_CELL_STYLE
       },
       {
@@ -334,7 +375,7 @@ export function WorkbenchGrid({
     ];
       return columns;
     },
-    [showForecast, showHistory]
+    [onSaveOrderPath, showForecast, showHistory]
   );
 
   const defaultColDef = useMemo<ColDef<WorkbenchRow>>(
@@ -389,6 +430,7 @@ export function WorkbenchGrid({
         animateRows={false}
         enableBrowserTooltips
         tooltipShowDelay={0}
+        context={{ onSaveOrderPath }}
       />
     </div>
   );

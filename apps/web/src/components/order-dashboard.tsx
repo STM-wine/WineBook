@@ -6,6 +6,7 @@ import {
   deletePurchaseOrderLine,
   saveSupplierLogistics,
   updatePurchaseOrderDraftStatus,
+  updateRecommendationOrderPath,
   updateRecommendationApproval
 } from "@/app/actions";
 import type {
@@ -136,6 +137,22 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
     if (checked) {
       saveApproval({ ...row, approved_qty: qty }, true, qty);
     }
+  }
+
+  function saveOrderPath(row: Recommendation, orderPath: "stateside" | "di") {
+    patchRow(row.id, { order_path: orderPath });
+    setPendingMessage("Saving order path...");
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        await updateRecommendationOrderPath({ id: row.id, orderPath });
+        setPendingMessage("Order path saved");
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not save order path.");
+        setPendingMessage("");
+      }
+    });
   }
 
   function createDrafts() {
@@ -298,6 +315,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
           supplierOptions={supplierOptions}
           visibleCount={visibleRecommendations.length}
           onSaveApproval={saveApproval}
+          onSaveOrderPath={saveOrderPath}
           onSaveWorkingQty={saveWorkingQty}
           onSetWorkingQty={setWorkingQty}
         />

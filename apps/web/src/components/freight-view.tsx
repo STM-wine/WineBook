@@ -7,6 +7,7 @@ import {
   formatInteger,
   isApproved
 } from "@/lib/order-data";
+import { buildDiContainerPlans, formatDiPlanRange } from "@/lib/di-planning";
 import { MetricCard } from "./metric-card";
 
 type FreightMode = "suggested" | "approved";
@@ -146,6 +147,7 @@ export function FreightView({
   const totalQuantity = visibleRows.reduce((sum, row) => sum + row.quantity, 0);
   const totalEstimatedCost = visibleRows.reduce((sum, row) => sum + row.estimatedCost, 0);
   const totalLaidInCost = visibleRows.reduce((sum, row) => sum + row.laidInCost, 0);
+  const diPlans = useMemo(() => buildDiContainerPlans(rows), [rows]);
 
   return (
     <section className="panel freight-panel" id="freight">
@@ -184,6 +186,7 @@ export function FreightView({
       <div className="freight-progress" aria-label="California full-truck progress">
         <span style={{ width: `${progressPct}%` }} />
       </div>
+      <DiContainerPlans plans={diPlans} />
       <div className="table-shell freight-location-shell">
         <table>
           <thead>
@@ -267,6 +270,65 @@ export function FreightView({
           </details>
         ))}
       </div>
+    </section>
+  );
+}
+
+function DiContainerPlans({ plans }: { plans: ReturnType<typeof buildDiContainerPlans> }) {
+  return (
+    <section className="di-plan-panel" aria-label="Direct Import container plans">
+      <div className="section-heading compact-heading">
+        <div>
+          <h2>DI Container Plans</h2>
+          <p>Buyer-selected DI rows only. Containers are grouped by origin port and never mixed across ports.</p>
+        </div>
+      </div>
+      {plans.length === 0 ? (
+        <div className="empty-inline">No rows are currently selected for Direct Import planning.</div>
+      ) : (
+        <div className="di-plan-stack">
+          {plans.map((plan) => (
+            <details className="di-plan-card" key={plan.containerGroup} open>
+              <summary>
+                <div>
+                  <span className="supplier-chip">{plan.containerGroup}</span>
+                  <strong>{plan.originPort}</strong>
+                  <span>{formatInteger(plan.totalAllocated)} bottles allocated</span>
+                </div>
+                <span>Target {formatInteger(plan.targetBottles)} | tolerance {formatDiPlanRange(plan)}</span>
+              </summary>
+              <div className="table-shell di-plan-table-shell">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Wine</th>
+                      <th>Brand</th>
+                      <th>Share</th>
+                      <th>Pack</th>
+                      <th>Allocated Qty</th>
+                      <th>30d Sales</th>
+                      <th>90d Sales</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {plan.rows.map((row) => (
+                      <tr key={row.row.id}>
+                        <td>{row.row.product_name || row.row.planning_sku || "Unnamed wine"}</td>
+                        <td>{row.brand}</td>
+                        <td>{formatDecimal(row.share * 100, 1)}%</td>
+                        <td>{formatInteger(row.packSize)}</td>
+                        <td>{formatInteger(row.allocatedQty)}</td>
+                        <td>{formatInteger(asNumber(row.row.last_30_day_sales))}</td>
+                        <td>{formatInteger(asNumber(row.row.last_90_day_sales))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

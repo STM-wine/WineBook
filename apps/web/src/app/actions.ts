@@ -7,6 +7,7 @@ import type { Recommendation } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 const VALID_STATUSES = new Set(["rejected", "approved", "edited", "deferred"]);
+const VALID_ORDER_PATHS = new Set(["stateside", "di"]);
 const ACTIVE_PO_STATUSES = ["draft", "ready_for_entry"];
 const VALID_PO_STATUSES = new Set(["draft", "ready_for_entry", "entered_in_quickbooks", "cancelled"]);
 
@@ -56,6 +57,31 @@ export async function updateRecommendationApproval(input: {
       recommendation_status: recommendationStatus,
       approved_qty: approvedQty
     })
+    .eq("id", input.id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/");
+}
+
+export async function updateRecommendationOrderPath(input: {
+  id: string;
+  orderPath: "stateside" | "di";
+}) {
+  if (!input.id) {
+    throw new Error("Missing recommendation id.");
+  }
+  if (!VALID_ORDER_PATHS.has(input.orderPath)) {
+    throw new Error("Unsupported order path.");
+  }
+
+  const { supabase } = await requireWriteAccess();
+
+  const { error } = await supabase
+    .from("reorder_recommendations")
+    .update({ order_path: input.orderPath })
     .eq("id", input.id);
 
   if (error) {

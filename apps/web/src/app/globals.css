@@ -834,6 +834,66 @@ td {
   min-width: 3px;
 }
 
+.di-plan-panel {
+  border-top: 1px solid var(--line);
+  margin: 24px 0;
+  padding-top: 22px;
+}
+
+.compact-heading {
+  margin-bottom: 14px;
+}
+
+.compact-heading h2 {
+  font-size: 22px;
+  line-height: 1.1;
+  margin: 0 0 8px;
+}
+
+.di-plan-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.di-plan-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.di-plan-card summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+}
+
+.di-plan-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.di-plan-card summary div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.di-plan-card summary > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.di-plan-table-shell {
+  margin-top: 14px;
+}
+
+.di-plan-table-shell table {
+  min-width: 980px;
+}
+
 .freight-location-shell {
   margin-bottom: 20px;
 }
@@ -1170,10 +1230,51 @@ td {
 }
 
 .workbench-grid .wine-cell-value {
-  display: block;
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   overflow: visible;
   white-space: normal;
   width: 100%;
+}
+
+.di-opportunity-badge {
+  background: #fff0d3;
+  border: 1px solid #e5bd6a;
+  border-radius: 999px;
+  color: #805315;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  padding: 3px 7px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.order-path-static {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.order-path-select {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+  height: 34px;
+  padding: 6px 10px;
+  text-transform: uppercase;
+  width: 100%;
+}
+
+.order-path-select.is-di {
+  background: #e8f1e7;
+  border-color: #bfd4bb;
+  color: var(--green);
 }
 
 .workbench-grid .center-cell {
