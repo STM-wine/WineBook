@@ -369,6 +369,11 @@ def merge_supplier_logistics_with_csv(
     for frame in [suppliers, csv_data]:
         if "importer_name_clean" not in frame.columns and "importer_name" in frame.columns:
             frame["importer_name_clean"] = frame["importer_name"].apply(clean_importer_name)
+        if "trucking_cost_per_bottle" not in frame.columns and "laid_in_per_bottle" in frame.columns:
+            frame["trucking_cost_per_bottle"] = frame["laid_in_per_bottle"]
+        for column in IMPORTER_LOGISTICS_COLUMNS:
+            if column not in frame.columns:
+                frame[column] = None
 
     merged = suppliers.merge(
         csv_data[IMPORTER_LOGISTICS_COLUMNS],

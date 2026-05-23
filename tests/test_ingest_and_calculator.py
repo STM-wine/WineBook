@@ -178,8 +178,7 @@ class IngestTests(unittest.TestCase):
                     "pick_up_location": "Colorado",
                     "freight_forwarder": "Advantage",
                     "order_frequency": "weekly",
-                    "trucking_cost_per_bottle": 0.88,
-                    "tdm": None,
+                    "laid_in_per_bottle": 0.88,
                     "notes": None,
                 }
             ]
