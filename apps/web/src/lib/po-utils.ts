@@ -1,4 +1,5 @@
 import { asNumber } from "./order-data";
+import type { OrderPath } from "./di-planning";
 import type { PurchaseOrderDraftWithLines, PurchaseOrderLine, SupplierLogistics } from "./types";
 
 export type PoExportLine = {
@@ -15,6 +16,20 @@ export type PoExportLine = {
 
 function supplierKey(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
+}
+
+export function poOrderPathLabel(path: OrderPath) {
+  return path === "di" ? "DI" : "Stateside";
+}
+
+export function poDraftOrderPath(draft: Pick<PurchaseOrderDraftWithLines, "notes">): OrderPath {
+  return /order path:\s*(direct import|di)/i.test(draft.notes || "") ? "di" : "stateside";
+}
+
+export function poDraftSupplierLabel(draft: Pick<PurchaseOrderDraftWithLines, "supplier_name" | "notes">) {
+  const supplier = draft.supplier_name || "Unknown Supplier";
+  const path = poDraftOrderPath(draft);
+  return path === "di" ? `${supplier} - DI` : supplier;
 }
 
 export function supplierLogisticsLookup(suppliers: SupplierLogistics[] = []) {
@@ -50,7 +65,7 @@ export function poExportLines(drafts: PurchaseOrderDraftWithLines[], suppliers: 
         const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidIn);
 
         return {
-          supplier: draft.supplier_name || "Unknown Supplier",
+          supplier: poDraftSupplierLabel(draft),
           wine: line.product_name || "",
           code: line.product_code || "",
           quantity: qty,

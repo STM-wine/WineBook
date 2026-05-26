@@ -32,7 +32,7 @@ export type DiContainerPlan = {
   rows: DiPlanRow[];
 };
 
-const CONTAINER_TARGET_BOTTLES = 13440;
+export const DI_CONTAINER_TARGET_BOTTLES = 13440;
 const CONTAINER_TOLERANCE_PCT = 0.05;
 
 const DI_BRANDS: Array<Omit<DiEligibility, "eligible">> = [
@@ -148,24 +148,28 @@ export function buildDiContainerPlans(rows: Recommendation[]): DiContainerPlan[]
       const demand = demandValues[index] || 0;
       const share = totalDemand > 0 ? demand / totalDemand : equalShare;
       const pack = packSize(row);
+      const defaultAllocation = Math.max(pack, roundToPack(DI_CONTAINER_TARGET_BOTTLES * share, pack));
+      const approvedQty = Math.max(0, Math.round(asNumber(row.approved_qty)));
       return {
         row,
         brand: eligibility.brand,
         weightedDemand: demand,
         share,
-        allocatedQty: Math.max(pack, roundToPack(CONTAINER_TARGET_BOTTLES * share, pack)),
+        allocatedQty: isApprovedForPo(row) && approvedQty > 0 ? approvedQty : defaultAllocation,
         packSize: pack
       };
     });
-    const toleranceBottles = CONTAINER_TARGET_BOTTLES * CONTAINER_TOLERANCE_PCT;
-    const lowTolerance = CONTAINER_TARGET_BOTTLES - toleranceBottles;
-    const highTolerance = CONTAINER_TARGET_BOTTLES + toleranceBottles;
-    const totalAllocated = adjustToTolerance(planRows, lowTolerance, highTolerance);
+    const toleranceBottles = DI_CONTAINER_TARGET_BOTTLES * CONTAINER_TOLERANCE_PCT;
+    const lowTolerance = DI_CONTAINER_TARGET_BOTTLES - toleranceBottles;
+    const highTolerance = DI_CONTAINER_TARGET_BOTTLES + toleranceBottles;
+    const totalAllocated = planRows.some(({ row }) => isApprovedForPo(row) && asNumber(row.approved_qty) > 0)
+      ? planRows.reduce((sum, row) => sum + row.allocatedQty, 0)
+      : adjustToTolerance(planRows, lowTolerance, highTolerance);
 
     return {
       containerGroup,
       originPort,
-      targetBottles: CONTAINER_TARGET_BOTTLES,
+      targetBottles: DI_CONTAINER_TARGET_BOTTLES,
       toleranceBottles,
       lowTolerance,
       highTolerance,
@@ -201,11 +205,41 @@ export function applyDiContainerRecommendations(rows: Recommendation[]): Recomme
     return {
       ...row,
       recommended_qty_rounded: allocatedQty,
-      ...(isApprovedForPo(row) ? { approved_qty: allocatedQty, recommendation_status: "approved" } : {}),
       order_cost: orderCost,
       landed_cost: orderCost + trucking * allocatedQty
     };
   });
+}
+
+export function diCapacityViolations(rows: Recommendation[]) {
+  const groups = new Map<
+    "NZ_AKL" | "IT_LIV",
+    { containerGroup: "NZ_AKL" | "IT_LIV"; originPort: "Auckland" | "Livorno"; totalBottles: number }
+  >();
+
+  rows.forEach((row) => {
+    const eligibility = diEligibility(row);
+    if (!eligibility.eligible || orderPath(row) !== "di" || !isApprovedForPo(row)) return;
+    const qty = Math.max(0, Math.round(asNumber(row.approved_qty)));
+    if (qty <= 0) return;
+
+    const containerGroup = eligibility.containerGroup as "NZ_AKL" | "IT_LIV";
+    const current = groups.get(containerGroup) || {
+      containerGroup,
+      originPort: eligibility.originPort as "Auckland" | "Livorno",
+      totalBottles: 0
+    };
+    current.totalBottles += qty;
+    groups.set(containerGroup, current);
+  });
+
+  return Array.from(groups.values())
+    .filter((group) => group.totalBottles > DI_CONTAINER_TARGET_BOTTLES)
+    .map((group) => ({
+      ...group,
+      capacityBottles: DI_CONTAINER_TARGET_BOTTLES,
+      overByBottles: group.totalBottles - DI_CONTAINER_TARGET_BOTTLES
+    }));
 }
 
 export function formatDiPlanRange(plan: DiContainerPlan) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { applyDiContainerRecommendations } from "@/lib/di-planning";
+import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from "@/lib/di-planning";
 import { asNumber } from "@/lib/order-data";
+import { formatInteger } from "@/lib/order-data";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { createClient } from "@/lib/supabase/server";
 import type { Recommendation, SupplierLogistics } from "@/lib/types";
@@ -10,6 +11,18 @@ const ACTIVE_PO_STATUSES = ["draft", "ready_for_entry"];
 
 function normalizeSupplier(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
+}
+
+function draftOrderPathFromNotes(notes: string | null | undefined) {
+  return /order path:\s*(direct import|di)/i.test(notes || "") ? "di" : "stateside";
+}
+
+function draftGroupKey(supplier: string, path: "stateside" | "di") {
+  return `${normalizeSupplier(supplier)}::${path}`;
+}
+
+function orderPathLabel(path: "stateside" | "di") {
+  return path === "di" ? "Direct Import" : "Stateside";
 }
 
 async function requireWriteAccess() {
@@ -52,7 +65,7 @@ export async function POST(request: Request) {
 
   const { data: activeDrafts, error: activeDraftsError } = await supabase
     .from("purchase_order_drafts")
-    .select("supplier_name")
+    .select("supplier_name,notes")
     .eq("report_run_id", reportRunId)
     .in("status", ACTIVE_PO_STATUSES);
 
@@ -60,8 +73,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: activeDraftsError.message }, { status: 500 });
   }
 
-  const activeSuppliers = new Set(
-    (activeDrafts || []).map((draft) => draft.supplier_name?.trim()).filter(Boolean)
+  const activeDraftsBySupplierPath = new Set(
+    (activeDrafts || []).map((draft) =>
+      draftGroupKey(draft.supplier_name?.trim() || "Unassigned", draftOrderPathFromNotes(draft.notes))
+    )
   );
 
   const { data: recommendations, error: recommendationsError } = await supabase
@@ -74,23 +89,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: recommendationsError.message }, { status: 500 });
   }
 
-  const grouped = new Map<string, Recommendation[]>();
   const poRows = applyDiContainerRecommendations(recommendations || []).filter(
     (row) =>
       ["approved", "edited"].includes(row.recommendation_status || "") &&
       Math.round(asNumber(row.approved_qty)) > 0
   );
+  const capacityViolations = diCapacityViolations(poRows);
+  if (capacityViolations.length > 0) {
+    return NextResponse.json(
+      {
+        error: capacityViolations
+          .map(
+            (violation) =>
+              `Unable to submit ${violation.containerGroup} / ${violation.originPort}: ${formatInteger(violation.totalBottles)} bottles exceeds ${formatInteger(violation.capacityBottles)} bottle container capacity by ${formatInteger(violation.overByBottles)}.`
+          )
+          .join(" ")
+      },
+      { status: 400 }
+    );
+  }
 
+  const grouped = new Map<string, { supplier: string; orderPath: "stateside" | "di"; rows: Recommendation[] }>();
   for (const row of poRows) {
     const supplier = row.supplier_name?.trim() || "Unassigned";
-    if (activeSuppliers.has(supplier)) continue;
-    const rows = grouped.get(supplier) || [];
-    rows.push(row);
-    grouped.set(supplier, rows);
+    const path = orderPath(row);
+    const key = draftGroupKey(supplier, path);
+    if (activeDraftsBySupplierPath.has(key)) continue;
+    const group = grouped.get(key) || { supplier, orderPath: path, rows: [] };
+    group.rows.push(row);
+    grouped.set(key, group);
   }
 
   const created: string[] = [];
-  const skipped = Array.from(activeSuppliers).map((supplier) => `${supplier}: active draft already exists`);
+  const skipped = Array.from(activeDraftsBySupplierPath).map((key) => `${key}: active draft already exists`);
   const errors: string[] = [];
   const { data: supplierRows } = await supabase
     .from("suppliers")
@@ -100,7 +131,7 @@ export async function POST(request: Request) {
   const suppliers = mergeSupplierDefaults(supplierRows || [], supplierDefaults);
   const supplierMetadata = new Map(suppliers.map((row) => [normalizeSupplier(row.name), row]));
 
-  for (const [supplier, rows] of grouped.entries()) {
+  for (const { supplier, orderPath: path, rows } of grouped.values()) {
     const metadata = supplierMetadata.get(normalizeSupplier(supplier));
     const { data: draft, error: draftError } = await supabase
       .from("purchase_order_drafts")
@@ -110,6 +141,7 @@ export async function POST(request: Request) {
         status: "draft",
         notes: [
           "Created from global PO Drafts action.",
+          `Order path: ${orderPathLabel(path)}.`,
           metadata?.pick_up_location ? `Pickup: ${metadata.pick_up_location}.` : "",
           metadata?.eta_days ? `ETA: ${metadata.eta_days} days.` : ""
         ]
@@ -157,7 +189,7 @@ export async function POST(request: Request) {
       continue;
     }
 
-    created.push(supplier);
+    created.push(`${supplier} (${orderPathLabel(path)})`);
   }
 
   return NextResponse.json({ created, skipped, errors });

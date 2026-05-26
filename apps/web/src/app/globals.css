@@ -154,6 +154,25 @@ select {
   text-transform: uppercase;
 }
 
+.order-path-chip {
+  background: #f7f3ec;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  padding: 8px 12px;
+  text-transform: uppercase;
+}
+
+.order-path-chip.is-di {
+  background: #e8f1e7;
+  border-color: #bfd4bb;
+  color: var(--green);
+}
+
 .button,
 .ghost-button {
   border: 0;

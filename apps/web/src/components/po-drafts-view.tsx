@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 import { asNumber, formatCurrency, formatCurrencyCents, formatInteger } from "@/lib/order-data";
-import { poLineCosts, poTimestamp, supplierLaidInForDraft, supplierLogisticsLookup } from "@/lib/po-utils";
+import {
+  poDraftOrderPath,
+  poLineCosts,
+  poOrderPathLabel,
+  poTimestamp,
+  supplierLaidInForDraft,
+  supplierLogisticsLookup
+} from "@/lib/po-utils";
 
 function csvEscape(value: string | number): string {
   const text = String(value ?? "");
@@ -191,6 +198,9 @@ export function PoDraftsView({
               <summary>
                 <div>
                   <span className="supplier-chip">{draft.supplier_name || "Unknown Supplier"}</span>
+                  <span className={poDraftOrderPath(draft) === "di" ? "order-path-chip is-di" : "order-path-chip"}>
+                    {poOrderPathLabel(poDraftOrderPath(draft))}
+                  </span>
                   <strong>{formatInteger(approvedQty)} bottles</strong>
                   <span>{formatCurrency(estimatedCost || wineCost + laidInCost)} estimated</span>
                 </div>
