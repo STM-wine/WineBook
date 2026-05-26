@@ -172,6 +172,37 @@ export function buildDiContainerPlans(rows: Recommendation[]): DiContainerPlan[]
   });
 }
 
+export function buildDiAllocationMap(rows: Recommendation[]) {
+  const allocations = new Map<string, number>();
+  buildDiContainerPlans(rows).forEach((plan) => {
+    plan.rows.forEach((row) => {
+      allocations.set(row.row.id, row.allocatedQty);
+    });
+  });
+  return allocations;
+}
+
+export function applyDiContainerRecommendations(rows: Recommendation[]): Recommendation[] {
+  const allocations = buildDiAllocationMap(rows);
+  if (allocations.size === 0) return rows;
+
+  return rows.map((row) => {
+    const allocatedQty = allocations.get(row.id);
+    if (allocatedQty === undefined) return row;
+
+    const fob = asNumber(row.fob);
+    const trucking = asNumber(row.trucking_cost_per_bottle);
+    const orderCost = fob * allocatedQty;
+
+    return {
+      ...row,
+      recommended_qty_rounded: allocatedQty,
+      order_cost: orderCost,
+      landed_cost: orderCost + trucking * allocatedQty
+    };
+  });
+}
+
 export function formatDiPlanRange(plan: DiContainerPlan) {
   return `${formatInteger(plan.lowTolerance)}-${formatInteger(plan.highTolerance)} bottles`;
 }

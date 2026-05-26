@@ -16,6 +16,7 @@ import type {
   ReportRun,
   SupplierLogistics
 } from "@/lib/types";
+import { applyDiContainerRecommendations } from "@/lib/di-planning";
 import {
   asNumber,
   buildMetrics,
@@ -69,21 +70,22 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
     return () => window.removeEventListener("popstate", syncViewFromUrl);
   }, []);
 
+  const displayRows = useMemo(() => applyDiContainerRecommendations(rows), [rows]);
   const supplierOptions = useMemo(
-    () => ["All", ...uniqueSorted(rows.map((row) => row.supplier_name || "Unknown Supplier"))],
-    [rows]
+    () => ["All", ...uniqueSorted(displayRows.map((row) => row.supplier_name || "Unknown Supplier"))],
+    [displayRows]
   );
   const brandManagerOptions = useMemo(
-    () => ["All", ...uniqueSorted(rows.map((row) => row.brand_manager))],
-    [rows]
+    () => ["All", ...uniqueSorted(displayRows.map((row) => row.brand_manager))],
+    [displayRows]
   );
   const visibleRecommendations = useMemo(
-    () => filterRecommendations(rows, { supplier, brandManager, search, suggestedOnly }),
-    [rows, supplier, brandManager, search, suggestedOnly]
+    () => filterRecommendations(displayRows, { supplier, brandManager, search, suggestedOnly }),
+    [displayRows, supplier, brandManager, search, suggestedOnly]
   );
   const metrics = useMemo(() => buildMetrics(visibleRecommendations), [visibleRecommendations]);
   const supplierGroups = useMemo(() => buildSupplierGroups(visibleRecommendations), [visibleRecommendations]);
-  const allSupplierGroups = useMemo(() => buildSupplierGroups(rows), [rows]);
+  const allSupplierGroups = useMemo(() => buildSupplierGroups(displayRows), [displayRows]);
   const dataDate = reportRun.report_date || "Latest run";
 
   function selectView(view: ActiveView) {
@@ -327,7 +329,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
 
       {activeView === "supplier-board" ? <SupplierBoardView groups={allSupplierGroups} /> : null}
 
-      {activeView === "freight" ? <FreightView rows={rows} suppliers={suppliers} /> : null}
+      {activeView === "freight" ? <FreightView rows={displayRows} suppliers={suppliers} /> : null}
 
       {activeView === "po-drafts" ? (
         <PoDraftsView
