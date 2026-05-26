@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from "@/lib/di-planning";
 import { asNumber, formatInteger } from "@/lib/order-data";
+import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import { createClient } from "@/lib/supabase/server";
 import type { Recommendation } from "@/lib/types";
 
@@ -149,17 +150,9 @@ export async function createPurchaseOrderDrafts(reportRunId: string) {
     )
   );
 
-  const { data: recommendations, error: recommendationsError } = await supabase
-    .from("reorder_recommendations")
-    .select("*")
-    .eq("report_run_id", reportRunId)
-    .returns<Recommendation[]>();
+  const recommendations = await fetchAllRecommendationsForRun(supabase, reportRunId);
 
-  if (recommendationsError) {
-    throw new Error(recommendationsError.message);
-  }
-
-  const poRows = applyDiContainerRecommendations(recommendations || []).filter(
+  const poRows = applyDiContainerRecommendations(recommendations).filter(
     (row) =>
       ["approved", "edited"].includes(row.recommendation_status || "") &&
       Math.round(asNumber(row.approved_qty)) > 0

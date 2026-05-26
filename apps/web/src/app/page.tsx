@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { OrderDashboard } from "@/components/order-dashboard";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
+import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import type {
   AppProfile,
   PurchaseOrderDraftWithLines,
@@ -63,13 +64,9 @@ export default async function HomePage() {
     );
   }
 
-  const { data: recommendations } = await supabase
-    .from("reorder_recommendations")
-    .select("*")
-    .eq("report_run_id", latestRun.id)
-    .order("last_30_day_sales", { ascending: false })
-    .limit(5000)
-    .returns<Recommendation[]>();
+  const recommendations = (await fetchAllRecommendationsForRun(supabase, latestRun.id)).sort(
+    (a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0)
+  );
 
   const { data: poDraftRows } = await supabase
     .from("purchase_order_drafts")

@@ -3,6 +3,7 @@ import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from
 import { asNumber } from "@/lib/order-data";
 import { formatInteger } from "@/lib/order-data";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
+import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import { createClient } from "@/lib/supabase/server";
 import type { Recommendation, SupplierLogistics } from "@/lib/types";
 
@@ -80,17 +81,17 @@ export async function POST(request: Request) {
     ])
   );
 
-  const { data: recommendations, error: recommendationsError } = await supabase
-    .from("reorder_recommendations")
-    .select("*")
-    .eq("report_run_id", reportRunId)
-    .returns<Recommendation[]>();
-
-  if (recommendationsError) {
-    return NextResponse.json({ error: recommendationsError.message }, { status: 500 });
+  let recommendations: Recommendation[];
+  try {
+    recommendations = await fetchAllRecommendationsForRun(supabase, reportRunId);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Could not load recommendations." },
+      { status: 500 }
+    );
   }
 
-  const poRows = applyDiContainerRecommendations(recommendations || []).filter(
+  const poRows = applyDiContainerRecommendations(recommendations).filter(
     (row) =>
       ["approved", "edited"].includes(row.recommendation_status || "") &&
       Math.round(asNumber(row.approved_qty)) > 0
