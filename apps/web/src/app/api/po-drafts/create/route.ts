@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { applyDiContainerRecommendations } from "@/lib/di-planning";
 import { asNumber } from "@/lib/order-data";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { createClient } from "@/lib/supabase/server";
@@ -67,8 +68,6 @@ export async function POST(request: Request) {
     .from("reorder_recommendations")
     .select("*")
     .eq("report_run_id", reportRunId)
-    .in("recommendation_status", ["approved", "edited"])
-    .gt("approved_qty", 0)
     .returns<Recommendation[]>();
 
   if (recommendationsError) {
@@ -76,7 +75,13 @@ export async function POST(request: Request) {
   }
 
   const grouped = new Map<string, Recommendation[]>();
-  for (const row of recommendations || []) {
+  const poRows = applyDiContainerRecommendations(recommendations || []).filter(
+    (row) =>
+      ["approved", "edited"].includes(row.recommendation_status || "") &&
+      Math.round(asNumber(row.approved_qty)) > 0
+  );
+
+  for (const row of poRows) {
     const supplier = row.supplier_name?.trim() || "Unassigned";
     if (activeSuppliers.has(supplier)) continue;
     const rows = grouped.get(supplier) || [];

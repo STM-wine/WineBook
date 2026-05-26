@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { applyDiContainerRecommendations } from "@/lib/di-planning";
 import { asNumber } from "@/lib/order-data";
 import { createClient } from "@/lib/supabase/server";
 import type { Recommendation } from "@/lib/types";
@@ -69,6 +70,8 @@ export async function updateRecommendationApproval(input: {
 export async function updateRecommendationOrderPath(input: {
   id: string;
   orderPath: "stateside" | "di";
+  approvedQty?: number;
+  recommendationStatus?: string;
 }) {
   if (!input.id) {
     throw new Error("Missing recommendation id.");
@@ -76,12 +79,27 @@ export async function updateRecommendationOrderPath(input: {
   if (!VALID_ORDER_PATHS.has(input.orderPath)) {
     throw new Error("Unsupported order path.");
   }
+  if (input.recommendationStatus && !VALID_STATUSES.has(input.recommendationStatus)) {
+    throw new Error("Unsupported recommendation status.");
+  }
 
   const { supabase } = await requireWriteAccess();
+  const payload: {
+    order_path: "stateside" | "di";
+    approved_qty?: number;
+    recommendation_status?: string;
+  } = { order_path: input.orderPath };
+
+  if (input.approvedQty !== undefined) {
+    payload.approved_qty = Math.max(0, Math.round(Number(input.approvedQty) || 0));
+  }
+  if (input.recommendationStatus) {
+    payload.recommendation_status = input.recommendationStatus;
+  }
 
   const { error } = await supabase
     .from("reorder_recommendations")
-    .update({ order_path: input.orderPath })
+    .update(payload)
     .eq("id", input.id);
 
   if (error) {
@@ -116,8 +134,6 @@ export async function createPurchaseOrderDrafts(reportRunId: string) {
     .from("reorder_recommendations")
     .select("*")
     .eq("report_run_id", reportRunId)
-    .in("recommendation_status", ["approved", "edited"])
-    .gt("approved_qty", 0)
     .returns<Recommendation[]>();
 
   if (recommendationsError) {
@@ -125,7 +141,13 @@ export async function createPurchaseOrderDrafts(reportRunId: string) {
   }
 
   const grouped = new Map<string, Recommendation[]>();
-  for (const row of recommendations || []) {
+  const poRows = applyDiContainerRecommendations(recommendations || []).filter(
+    (row) =>
+      ["approved", "edited"].includes(row.recommendation_status || "") &&
+      Math.round(asNumber(row.approved_qty)) > 0
+  );
+
+  for (const row of poRows) {
     const supplier = row.supplier_name?.trim() || "Unassigned";
     if (activeSuppliers.has(supplier)) continue;
     const rows = grouped.get(supplier) || [];

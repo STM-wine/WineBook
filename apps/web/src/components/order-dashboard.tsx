@@ -142,13 +142,27 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
   }
 
   function saveOrderPath(row: Recommendation, orderPath: "stateside" | "di") {
-    patchRow(row.id, { order_path: orderPath });
+    const nextRows = rows.map((current) => (current.id === row.id ? { ...current, order_path: orderPath } : current));
+    const nextDisplayRow = applyDiContainerRecommendations(nextRows).find((current) => current.id === row.id);
+    const isApprovedRow = row.recommendation_status === "approved" || row.recommendation_status === "edited";
+    const approvedQty = isApprovedRow ? Math.max(0, Math.round(asNumber(nextDisplayRow?.recommended_qty_rounded))) : undefined;
+    const recommendationStatus = isApprovedRow ? "approved" : undefined;
+
+    patchRow(row.id, {
+      order_path: orderPath,
+      ...(approvedQty !== undefined ? { approved_qty: approvedQty, recommendation_status: recommendationStatus } : {})
+    });
     setPendingMessage("Saving order path...");
     setErrorMessage("");
 
     startTransition(async () => {
       try {
-        await updateRecommendationOrderPath({ id: row.id, orderPath });
+        await updateRecommendationOrderPath({
+          id: row.id,
+          orderPath,
+          approvedQty,
+          recommendationStatus
+        });
         setPendingMessage("Order path saved");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save order path.");

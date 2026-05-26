@@ -64,6 +64,10 @@ function roundToPack(qty: number, pack: number) {
   return Math.max(0, Math.round(qty / pack) * pack);
 }
 
+function isApprovedForPo(row: Recommendation) {
+  return row.recommendation_status === "approved" || row.recommendation_status === "edited";
+}
+
 export function orderPath(row: Recommendation): OrderPath {
   return row.order_path === "di" ? "di" : "stateside";
 }
@@ -197,6 +201,7 @@ export function applyDiContainerRecommendations(rows: Recommendation[]): Recomme
     return {
       ...row,
       recommended_qty_rounded: allocatedQty,
+      ...(isApprovedForPo(row) ? { approved_qty: allocatedQty, recommendation_status: "approved" } : {}),
       order_cost: orderCost,
       landed_cost: orderCost + trucking * allocatedQty
     };
