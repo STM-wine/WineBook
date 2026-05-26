@@ -19,11 +19,13 @@ export function OrderReviewView({
   supplier,
   supplierGroups,
   supplierOptions,
+  supplierTargetWeeks,
   visibleCount,
   onSaveApproval,
   onSaveOrderPath,
   onSaveWorkingQty,
-  onSetWorkingQty
+  onSetWorkingQty,
+  onSetSupplierTargetWeeks
 }: {
   brandManager: string;
   brandManagerOptions: string[];
@@ -39,11 +41,13 @@ export function OrderReviewView({
   supplier: string;
   supplierGroups: SupplierGroup[];
   supplierOptions: string[];
+  supplierTargetWeeks: Record<string, string>;
   visibleCount: number;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
+  onSetSupplierTargetWeeks: (supplierName: string, value: string) => void;
 }) {
   return (
     <>
@@ -126,6 +130,8 @@ export function OrderReviewView({
             onSaveOrderPath={onSaveOrderPath}
             onSetWorkingQty={onSetWorkingQty}
             onSaveWorkingQty={onSaveWorkingQty}
+            targetWeeks={supplierTargetWeeks[group.supplier] || ""}
+            onSetTargetWeeks={(value) => onSetSupplierTargetWeeks(group.supplier, value)}
           />
         ))}
       </section>
@@ -190,7 +196,9 @@ function SupplierSection({
   onSaveApproval,
   onSaveOrderPath,
   onSetWorkingQty,
-  onSaveWorkingQty
+  onSaveWorkingQty,
+  targetWeeks,
+  onSetTargetWeeks
 }: {
   group: SupplierGroup;
   expandAll: boolean;
@@ -198,6 +206,8 @@ function SupplierSection({
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
+  targetWeeks: string;
+  onSetTargetWeeks: (value: string) => void;
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
@@ -223,6 +233,17 @@ function SupplierSection({
         <MetricCard label="Value" value={formatCurrency(group.suggestedValue)} detail="Suggested order" tone="gold" />
       </div>
       <div className="supplier-workbench-options">
+        <label className="target-weeks-control">
+          Target weeks
+          <input
+            min="0"
+            step="0.1"
+            inputMode="decimal"
+            value={targetWeeks}
+            onChange={(event) => onSetTargetWeeks(event.target.value)}
+            placeholder="Default"
+          />
+        </label>
         <label className="check-control">
           <input type="checkbox" checked={showHistory} onChange={(event) => setShowHistory(event.target.checked)} />
           Show 60/90d sales

@@ -55,6 +55,46 @@ export function rowApprovedEstimate(row: Recommendation): number {
   return qty * (fob + trucking);
 }
 
+function roundUpToPack(qty: number, packSize: number): number {
+  const pack = Math.max(1, Math.round(packSize || 1));
+  return Math.ceil(Math.max(0, qty) / pack) * pack;
+}
+
+function recommendationForTargetWeeks(row: Recommendation, targetWeeks: number): number {
+  const velocity = asNumber(row.weekly_velocity);
+  if (velocity <= 0) return 0;
+
+  const currentSupply = asNumber(row.true_available) + asNumber(row.on_order);
+  const rawQty = targetWeeks * velocity - currentSupply;
+  return roundUpToPack(rawQty, asNumber(row.pack_size) || 1);
+}
+
+export function applySupplierTargetWeeks(
+  rows: Recommendation[],
+  supplierTargetWeeks: Record<string, number>
+): Recommendation[] {
+  if (Object.keys(supplierTargetWeeks).length === 0) return rows;
+
+  return rows.map((row) => {
+    const supplier = row.supplier_name?.trim() || "Unknown Supplier";
+    const targetWeeks = supplierTargetWeeks[supplier];
+    if (!targetWeeks || targetWeeks <= 0 || row.order_path === "di") return row;
+
+    const qty = recommendationForTargetWeeks(row, targetWeeks);
+    const fob = asNumber(row.fob);
+    const trucking = asNumber(row.trucking_cost_per_bottle);
+    const orderCost = qty * fob;
+    const landedCost = qty * (fob + trucking);
+
+    return {
+      ...row,
+      recommended_qty_rounded: qty,
+      order_cost: orderCost,
+      landed_cost: landedCost
+    };
+  });
+}
+
 export function isApproved(row: Recommendation): boolean {
   return row.recommendation_status === "approved" || row.recommendation_status === "edited";
 }

@@ -38,7 +38,7 @@ function buildFallbackWorkbook(lines: PoExportLine[]) {
   const sheet = workbook.addWorksheet("POs");
   sheet.columns = [
     { header: "Supplier", key: "supplier", width: 28 },
-    { header: "", key: "blank", width: 8 },
+    { header: "Producer", key: "producer", width: 28 },
     { header: "Quantity", key: "quantity", width: 10 },
     { header: "Code", key: "code", width: 14 },
     { header: "Wine", key: "wine", width: 48 },
@@ -55,7 +55,7 @@ function buildFallbackWorkbook(lines: PoExportLine[]) {
     previousSupplier = line.supplier;
     sheet.addRow({
       supplier: line.supplier,
-      blank: "",
+      producer: line.producer,
       quantity: line.quantity,
       code: line.code,
       wine: line.wine,
@@ -79,7 +79,8 @@ export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[]
 
   await workbook.xlsx.readFile(existingTemplate);
   const sheet = workbook.worksheets[0] || workbook.addWorksheet("POs");
-  const startRow = 4;
+  const startRow = 3;
+  const templateStyleRow = 4;
   const maxColumn = Math.max(sheet.columnCount, 23);
 
   if (sheet.rowCount >= startRow) {
@@ -96,13 +97,13 @@ export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[]
 
   for (const line of lines) {
     if (previousSupplier !== null && line.supplier !== previousSupplier) {
-      copyRowStyle(sheet, startRow, excelRow, maxColumn);
+      copyRowStyle(sheet, templateStyleRow, excelRow, maxColumn);
       excelRow += 1;
     }
     previousSupplier = line.supplier;
-    copyRowStyle(sheet, startRow, excelRow, maxColumn);
+    copyRowStyle(sheet, templateStyleRow, excelRow, maxColumn);
     sheet.getCell(excelRow, 1).value = line.supplier;
-    sheet.getCell(excelRow, 2).value = "";
+    sheet.getCell(excelRow, 2).value = line.producer;
     sheet.getCell(excelRow, 3).value = line.quantity;
     sheet.getCell(excelRow, 4).value = line.code;
     sheet.getCell(excelRow, 5).value = line.wine;

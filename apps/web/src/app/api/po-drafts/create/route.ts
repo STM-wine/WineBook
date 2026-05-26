@@ -65,7 +65,7 @@ export async function POST(request: Request) {
 
   const { data: activeDrafts, error: activeDraftsError } = await supabase
     .from("purchase_order_drafts")
-    .select("supplier_name,notes")
+    .select("id,supplier_name,notes")
     .eq("report_run_id", reportRunId)
     .in("status", ACTIVE_PO_STATUSES);
 
@@ -73,10 +73,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: activeDraftsError.message }, { status: 500 });
   }
 
-  const activeDraftsBySupplierPath = new Set(
-    (activeDrafts || []).map((draft) =>
-      draftGroupKey(draft.supplier_name?.trim() || "Unassigned", draftOrderPathFromNotes(draft.notes))
-    )
+  const activeDraftsBySupplierPath = new Map(
+    (activeDrafts || []).map((draft) => [
+      draftGroupKey(draft.supplier_name?.trim() || "Unassigned", draftOrderPathFromNotes(draft.notes)),
+      draft.id as string
+    ])
   );
 
   const { data: recommendations, error: recommendationsError } = await supabase
@@ -114,14 +115,14 @@ export async function POST(request: Request) {
     const supplier = row.supplier_name?.trim() || "Unassigned";
     const path = orderPath(row);
     const key = draftGroupKey(supplier, path);
-    if (activeDraftsBySupplierPath.has(key)) continue;
     const group = grouped.get(key) || { supplier, orderPath: path, rows: [] };
     group.rows.push(row);
     grouped.set(key, group);
   }
 
   const created: string[] = [];
-  const skipped = Array.from(activeDraftsBySupplierPath).map((key) => `${key}: active draft already exists`);
+  const updated: string[] = [];
+  const skipped: string[] = [];
   const errors: string[] = [];
   const { data: supplierRows } = await supabase
     .from("suppliers")
@@ -133,30 +134,68 @@ export async function POST(request: Request) {
 
   for (const { supplier, orderPath: path, rows } of grouped.values()) {
     const metadata = supplierMetadata.get(normalizeSupplier(supplier));
-    const { data: draft, error: draftError } = await supabase
-      .from("purchase_order_drafts")
-      .insert({
-        supplier_name: supplier,
-        report_run_id: reportRunId,
-        status: "draft",
-        notes: [
-          "Created from global PO Drafts action.",
-          `Order path: ${orderPathLabel(path)}.`,
-          metadata?.pick_up_location ? `Pickup: ${metadata.pick_up_location}.` : "",
-          metadata?.eta_days ? `ETA: ${metadata.eta_days} days.` : ""
-        ]
-          .filter(Boolean)
-          .join(" "),
-        created_by: user.id
-      })
-      .select("id")
-      .single<{ id: string }>();
+    const groupKey = draftGroupKey(supplier, path);
+    let draft = activeDraftsBySupplierPath.get(groupKey) ? { id: activeDraftsBySupplierPath.get(groupKey) as string } : null;
 
-    if (draftError || !draft) {
-      errors.push(`${supplier}: ${draftError?.message || "Could not create draft."}`);
+    if (!draft) {
+      const { data: createdDraft, error: draftError } = await supabase
+        .from("purchase_order_drafts")
+        .insert({
+          supplier_name: supplier,
+          report_run_id: reportRunId,
+          status: "draft",
+          notes: [
+            "Created from global PO Drafts action.",
+            `Order path: ${orderPathLabel(path)}.`,
+            metadata?.pick_up_location ? `Pickup: ${metadata.pick_up_location}.` : "",
+            metadata?.eta_days ? `ETA: ${metadata.eta_days} days.` : ""
+          ]
+            .filter(Boolean)
+            .join(" "),
+          created_by: user.id
+        })
+        .select("id")
+        .single<{ id: string }>();
+
+      if (draftError || !createdDraft) {
+        errors.push(`${supplier}: ${draftError?.message || "Could not create draft."}`);
+        continue;
+      }
+      draft = createdDraft;
+    }
+
+    const { data: existingLines, error: existingLinesError } = await supabase
+      .from("purchase_order_lines")
+      .select("id,recommendation_id")
+      .eq("purchase_order_draft_id", draft.id)
+      .returns<Array<{ id: string; recommendation_id: string | null }>>();
+
+    if (existingLinesError) {
+      errors.push(`${supplier}: ${existingLinesError.message}`);
       continue;
     }
 
+    const approvedRecommendationIds = new Set(rows.map((row) => row.id));
+    const staleLineIds = (existingLines || [])
+      .filter((line) => line.recommendation_id && !approvedRecommendationIds.has(line.recommendation_id))
+      .map((line) => line.id);
+
+    if (staleLineIds.length > 0) {
+      const { error: deleteError } = await supabase.from("purchase_order_lines").delete().in("id", staleLineIds);
+      if (deleteError) {
+        errors.push(`${supplier}: ${deleteError.message}`);
+        continue;
+      }
+    }
+
+    const existingLineIds = new Map(
+      (existingLines || [])
+        .filter(
+          (line): line is { id: string; recommendation_id: string } =>
+            typeof line.recommendation_id === "string" && approvedRecommendationIds.has(line.recommendation_id)
+        )
+        .map((line) => [line.recommendation_id, line.id])
+    );
     const linePayloads = rows.map((row) => {
       const approvedQty = Math.max(0, Math.round(asNumber(row.approved_qty)));
       const recommendedQty = Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)));
@@ -183,14 +222,37 @@ export async function POST(request: Request) {
       };
     });
 
-    const { error: linesError } = await supabase.from("purchase_order_lines").insert(linePayloads);
+    const insertPayloads = linePayloads.filter((line) => !existingLineIds.has(line.recommendation_id));
+    const updatePayloads = linePayloads.filter((line) => existingLineIds.has(line.recommendation_id));
+
+    for (const line of updatePayloads) {
+      const lineId = existingLineIds.get(line.recommendation_id);
+      if (!lineId) continue;
+      const { error: updateError } = await supabase.from("purchase_order_lines").update(line).eq("id", lineId);
+      if (updateError) {
+        errors.push(`${supplier}: ${updateError.message}`);
+      }
+    }
+
+    const { error: linesError } = insertPayloads.length
+      ? await supabase.from("purchase_order_lines").insert(insertPayloads)
+      : { error: null };
     if (linesError) {
       errors.push(`${supplier}: ${linesError.message}`);
       continue;
     }
 
-    created.push(`${supplier} (${orderPathLabel(path)})`);
+    if (insertPayloads.length || updatePayloads.length || staleLineIds.length) {
+      const summary = `${supplier} (${orderPathLabel(path)})`;
+      if (activeDraftsBySupplierPath.has(groupKey)) {
+        updated.push(summary);
+      } else {
+        created.push(summary);
+      }
+    } else {
+      skipped.push(`${supplier} (${orderPathLabel(path)}): no approved lines changed`);
+    }
   }
 
-  return NextResponse.json({ created, skipped, errors });
+  return NextResponse.json({ created, updated, skipped, errors });
 }

@@ -80,7 +80,8 @@ export async function updateRecommendationApproval(input: {
     throw new Error(error.message);
   }
 
-  revalidatePath("/");
+  // Order Review keeps approval state optimistically in the client. Avoid a
+  // full route revalidation here so rapid checkbox work does not freeze.
 }
 
 export async function updateRecommendationOrderPath(input: {

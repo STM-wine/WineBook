@@ -1131,6 +1131,26 @@ td {
   margin: 0 0 12px;
 }
 
+.target-weeks-control {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 6px;
+  letter-spacing: 0.08em;
+  min-width: 160px;
+  text-transform: uppercase;
+}
+
+.target-weeks-control input {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  height: 44px;
+  padding: 10px 12px;
+}
+
 .workbench-table table {
   min-width: 1500px;
 }

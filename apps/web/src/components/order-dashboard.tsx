@@ -18,6 +18,7 @@ import type {
 } from "@/lib/types";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
 import {
+  applySupplierTargetWeeks,
   asNumber,
   buildMetrics,
   buildSupplierGroups,
@@ -51,6 +52,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
   const [search, setSearch] = useState("");
   const [suggestedOnly, setSuggestedOnly] = useState(false);
   const [expandAll, setExpandAll] = useState(false);
+  const [supplierTargetWeeks, setSupplierTargetWeeks] = useState<Record<string, string>>({});
   const [pendingMessage, setPendingMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -70,7 +72,19 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
     return () => window.removeEventListener("popstate", syncViewFromUrl);
   }, []);
 
-  const displayRows = useMemo(() => applyDiContainerRecommendations(rows), [rows]);
+  const parsedSupplierTargetWeeks = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(supplierTargetWeeks)
+          .map(([supplierName, value]) => [supplierName, Number(value)] as const)
+          .filter(([, value]) => Number.isFinite(value) && value > 0)
+      ),
+    [supplierTargetWeeks]
+  );
+  const displayRows = useMemo(
+    () => applySupplierTargetWeeks(applyDiContainerRecommendations(rows), parsedSupplierTargetWeeks),
+    [parsedSupplierTargetWeeks, rows]
+  );
   const supplierOptions = useMemo(
     () => ["All", ...uniqueSorted(displayRows.map((row) => row.supplier_name || "Unknown Supplier"))],
     [displayRows]
@@ -103,6 +117,18 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   }
 
+  function setSupplierTargetWeeksValue(supplierName: string, value: string) {
+    setSupplierTargetWeeks((current) => {
+      const next = { ...current };
+      if (!value.trim()) {
+        delete next[supplierName];
+      } else {
+        next[supplierName] = value;
+      }
+      return next;
+    });
+  }
+
   function saveApproval(row: Recommendation, approved: boolean, qtyOverride?: number) {
     const suggestedQty = asNumber(row.recommended_qty_rounded);
     const qty = approved ? Math.max(0, Math.round(qtyOverride ?? rowRecommendedQty(row))) : 0;
@@ -112,7 +138,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
       recommendation_status: status,
       approved_qty: qty
     });
-    setPendingMessage("Saving...");
+    setPendingMessage("");
     setErrorMessage("");
 
     startTransition(async () => {
@@ -122,7 +148,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
           recommendationStatus: status,
           approvedQty: qty
         });
-        setPendingMessage("Saved");
+        setPendingMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save recommendation.");
         setPendingMessage("");
@@ -184,6 +210,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
         });
         const result = (await response.json()) as {
           created?: string[];
+          updated?: string[];
           skipped?: string[];
           errors?: string[];
           error?: string;
@@ -194,9 +221,11 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
         }
 
         const createdList = result.created || [];
+        const updatedList = result.updated || [];
         const skippedList = result.skipped || [];
         const errorList = result.errors || [];
         const created = createdList.length;
+        const updated = updatedList.length;
         const skipped = skippedList.length;
         const errors = errorList.length;
 
@@ -205,8 +234,10 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
         }
         if (created) {
           setPendingMessage(`Draft created: ${created.toLocaleString()} supplier PO draft(s).`);
+        } else if (updated) {
+          setPendingMessage(`Draft updated: ${updated.toLocaleString()} supplier PO draft(s).`);
         } else if (skipped && !errors) {
-          setPendingMessage("PO drafts already exist for approved supplier lines.");
+          setPendingMessage("PO drafts are already current for approved supplier lines.");
         } else {
           setPendingMessage("No approved quantities are ready for PO drafts.");
         }
@@ -329,11 +360,13 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
           supplier={supplier}
           supplierGroups={supplierGroups}
           supplierOptions={supplierOptions}
+          supplierTargetWeeks={supplierTargetWeeks}
           visibleCount={visibleRecommendations.length}
           onSaveApproval={saveApproval}
           onSaveOrderPath={saveOrderPath}
           onSaveWorkingQty={saveWorkingQty}
           onSetWorkingQty={setWorkingQty}
+          onSetSupplierTargetWeeks={setSupplierTargetWeeksValue}
         />
       ) : null}
 
@@ -351,7 +384,6 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
           isPending={isPending}
           reportRunId={reportRun.id}
           suppliers={suppliers}
-          onCreateDrafts={createDrafts}
           onDeleteLine={removeDraftLine}
           onStatusChange={changeDraftStatus}
         />

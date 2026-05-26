@@ -4,6 +4,7 @@ import type { PurchaseOrderDraftWithLines, PurchaseOrderLine, SupplierLogistics 
 
 export type PoExportLine = {
   supplier: string;
+  producer: string;
   wine: string;
   code: string;
   quantity: number;
@@ -16,6 +17,25 @@ export type PoExportLine = {
 
 function supplierKey(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
+}
+
+export function producerFromDescription(value: string | null | undefined) {
+  const wine = (value || "").replace(/[⭐🍷]/g, "").replace(/\s+/g, " ").trim();
+  if (!wine) return "";
+
+  const vintageIndex = wine.search(/\b(?:19|20)\d{2}\b|\bNV\b/i);
+  const preVintage = vintageIndex > 0 ? wine.slice(0, vintageIndex).trim() : wine;
+  const words = preVintage.split(" ").filter(Boolean);
+  if (words.length <= 2) return preVintage;
+
+  if (words[1] === "&" && words.length >= 3) {
+    return words.slice(0, 3).join(" ");
+  }
+  if (/^(domaine|chateau|château|tenuta|azienda|cantina|gd|la|le|il|i)$/i.test(words[0])) {
+    return words.slice(0, 2).join(" ");
+  }
+
+  return words[0];
 }
 
 export function poOrderPathLabel(path: OrderPath) {
@@ -66,6 +86,7 @@ export function poExportLines(drafts: PurchaseOrderDraftWithLines[], suppliers: 
 
         return {
           supplier: poDraftSupplierLabel(draft),
+          producer: producerFromDescription(line.product_name),
           wine: line.product_name || "",
           code: line.product_code || "",
           quantity: qty,

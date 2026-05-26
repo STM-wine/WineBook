@@ -64,7 +64,6 @@ export function PoDraftsView({
   isPending,
   reportRunId,
   suppliers,
-  onCreateDrafts,
   onDeleteLine,
   onStatusChange
 }: {
@@ -72,7 +71,6 @@ export function PoDraftsView({
   isPending: boolean;
   reportRunId: string;
   suppliers: SupplierLogistics[];
-  onCreateDrafts: () => void;
   onDeleteLine: (lineId: string, draftId: string) => void;
   onStatusChange: (draftId: string, status: string) => void;
 }) {
@@ -128,18 +126,6 @@ export function PoDraftsView({
         <div>
           <h1>PO Drafts</h1>
           <p>Drafts created from approved lines in the current report run.</p>
-        </div>
-        <div className="section-actions">
-          <button className="button button-small" onClick={onCreateDrafts} disabled={isPending}>
-            Create PO Drafts
-          </button>
-          <a
-            className="button button-small"
-            download={`POs ${poTimestamp()}.xlsx`}
-            href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}`}
-          >
-            Download XLSX
-          </a>
         </div>
       </div>
       <div className="po-summary-grid">
@@ -210,6 +196,13 @@ export function PoDraftsView({
               </summary>
               <div className="po-draft-actions">
                 <DraftStatusActions draft={draft} disabled={isPending} onStatusChange={onStatusChange} />
+                <a
+                  className="button button-tiny"
+                  download={`POs ${poTimestamp()}.xlsx`}
+                  href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}`}
+                >
+                  Download XLSX
+                </a>
                 <a
                   className="button button-tiny"
                   download={poCsvFilename(draft)}

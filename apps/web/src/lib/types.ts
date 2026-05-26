@@ -99,6 +99,7 @@ export type PurchaseOrderDraft = {
 export type PurchaseOrderLine = {
   id: string;
   purchase_order_draft_id: string;
+  recommendation_id?: string | null;
   product_name: string | null;
   product_code: string | null;
   planning_sku: string | null;

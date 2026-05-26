@@ -85,6 +85,7 @@ export default async function HomePage() {
       lines:purchase_order_lines (
         id,
         purchase_order_draft_id,
+        recommendation_id,
         product_name,
         product_code,
         planning_sku,
