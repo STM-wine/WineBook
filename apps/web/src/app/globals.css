@@ -116,7 +116,8 @@ select {
   gap: 8px;
 }
 
-.nav-tabs button {
+.nav-tabs button,
+.nav-tabs > a {
   background: transparent;
   border-bottom: 3px solid transparent;
   border-left: 0;
@@ -129,8 +130,64 @@ select {
   padding: 14px 16px 13px;
 }
 
-.nav-tabs button.active {
+.nav-tabs button.active,
+.nav-tabs > a.active {
   border-color: var(--red);
+  color: var(--ink);
+}
+
+.nav-dropdown {
+  position: relative;
+}
+
+.nav-dropdown-trigger {
+  display: block;
+  white-space: nowrap;
+}
+
+.nav-dropdown-menu {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: none;
+  left: 0;
+  min-width: 190px;
+  padding: 8px;
+  position: absolute;
+  top: 100%;
+  z-index: 30;
+}
+
+.nav-dropdown:focus-within .nav-dropdown-menu,
+.nav-dropdown:hover .nav-dropdown-menu {
+  display: grid;
+}
+
+.nav-dropdown-menu::before {
+  bottom: 100%;
+  content: "";
+  height: 8px;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.nav-dropdown-menu a {
+  align-items: center;
+  border-radius: 7px;
+  color: #3c3934;
+  display: flex;
+  font-size: 14px;
+  font-weight: 750;
+  min-height: 42px;
+  padding: 11px 12px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.nav-dropdown-menu a:hover {
+  background: var(--surface-soft);
   color: var(--ink);
 }
 
@@ -271,6 +328,34 @@ select {
 .section-heading p,
 .muted {
   color: var(--muted);
+}
+
+.module-page {
+  display: grid;
+  gap: 24px;
+}
+
+.module-header {
+  max-width: 760px;
+}
+
+.module-header .muted {
+  font-size: 18px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.placeholder-card {
+  align-items: center;
+  display: flex;
+  min-height: 180px;
+}
+
+.placeholder-card p {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 750;
+  margin: 0;
 }
 
 .panel,
@@ -1511,17 +1596,22 @@ tr.has-recommendation .sticky-name {
 
 @media (max-width: 1100px) {
   .app-shell {
-    padding-top: 160px;
+    padding-top: 248px;
   }
 
   .topbar {
     grid-template-columns: 1fr;
   }
 
-  .topbar-actions,
-  .nav-tabs {
+  .topbar-actions {
     justify-content: flex-start;
     overflow-x: auto;
+  }
+
+  .nav-tabs {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    overflow: visible;
   }
 
   .metric-grid,
