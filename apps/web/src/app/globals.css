@@ -1124,9 +1124,17 @@ td {
   color: var(--muted);
 }
 
+.supplier-workbench-header {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 42px;
+  margin-top: 14px;
+}
+
 .supplier-metrics {
   grid-template-columns: repeat(5, minmax(150px, 1fr));
-  margin: 22px 0;
+  margin: 12px 0 22px;
 }
 
 .supplier-workbench-options {
@@ -1159,7 +1167,6 @@ td {
 
 .clear-approvals-button {
   color: #b54336;
-  margin-left: auto;
 }
 
 .clear-approvals-button:disabled {

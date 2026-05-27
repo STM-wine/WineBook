@@ -231,14 +231,7 @@ function SupplierSection({
         </div>
         <span>{formatInteger(group.skuCount)} SKUs</span>
       </summary>
-      <div className="supplier-metrics">
-        <MetricCard label="SKUs" value={formatInteger(group.skuCount)} detail="In this supplier" tone="ink" />
-        <MetricCard label="Urgent" value={formatInteger(group.urgentCount)} detail="Need review" tone="red" />
-        <MetricCard label="Suggested" value={formatInteger(group.recommendedBottles)} detail="Bottles" tone="green" />
-        <MetricCard label="Approved" value={formatInteger(group.approvedBottles)} detail="Bottles" tone="blue" />
-        <MetricCard label="Value" value={formatCurrency(group.suggestedValue)} detail="Suggested order" tone="gold" />
-      </div>
-      <div className="supplier-workbench-options">
+      <div className="supplier-workbench-header">
         <button
           className="ghost-button clear-approvals-button"
           disabled={!hasApprovedOrders}
@@ -247,6 +240,15 @@ function SupplierSection({
         >
           Clear Approved Orders
         </button>
+      </div>
+      <div className="supplier-metrics">
+        <MetricCard label="SKUs" value={formatInteger(group.skuCount)} detail="In this supplier" tone="ink" />
+        <MetricCard label="Urgent" value={formatInteger(group.urgentCount)} detail="Need review" tone="red" />
+        <MetricCard label="Suggested" value={formatInteger(group.recommendedBottles)} detail="Bottles" tone="green" />
+        <MetricCard label="Approved" value={formatInteger(group.approvedBottles)} detail="Bottles" tone="blue" />
+        <MetricCard label="Value" value={formatCurrency(group.suggestedValue)} detail="Suggested order" tone="gold" />
+      </div>
+      <div className="supplier-workbench-options">
         <label className="target-weeks-control">
           Target weeks
           <input
