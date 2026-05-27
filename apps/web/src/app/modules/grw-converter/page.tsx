@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppTopbar } from "@/components/app-topbar";
+import { GrwConverterUploader } from "@/components/grw-converter-uploader";
 import { createClient } from "@/lib/supabase/server";
 import type { AppProfile } from "@/lib/types";
 
@@ -44,9 +45,7 @@ export default async function GrwConverterPage() {
         <p className="muted">Convert GRW invoice PDFs into Stem-ready PO import files.</p>
       </section>
 
-      <section className="panel placeholder-card" aria-label="GRW Converter migration status">
-        <p>Streamlit converter migration in progress.</p>
-      </section>
+      <GrwConverterUploader />
     </main>
   );
 }

@@ -345,17 +345,116 @@ select {
   margin: 0;
 }
 
-.placeholder-card {
-  align-items: center;
-  display: flex;
-  min-height: 180px;
+.grw-converter-grid {
+  display: grid;
+  gap: 18px;
 }
 
-.placeholder-card p {
+.grw-upload-card,
+.grw-output-card {
+  margin-top: 0;
+}
+
+.grw-upload-card h2,
+.grw-output-card h2 {
+  font-size: 22px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.grw-dropzone {
+  align-items: center;
+  background: #fbfaf7;
+  border: 2px dashed #cfc8bc;
+  border-radius: 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 9px;
+  justify-items: center;
+  margin-top: 20px;
+  min-height: 230px;
+  padding: 32px;
+  text-align: center;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.grw-dropzone:hover,
+.grw-dropzone.is-dragging {
+  background: #f4f0e8;
+  border-color: var(--green);
+  transform: translateY(-1px);
+}
+
+.grw-dropzone input {
+  display: none;
+}
+
+.grw-dropzone-icon {
+  align-items: center;
+  background: #e8f1e7;
+  border: 1px solid #bfd4bb;
+  border-radius: 8px;
+  color: var(--green);
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 850;
+  height: 58px;
+  justify-content: center;
+  letter-spacing: 0.08em;
+  width: 58px;
+}
+
+.grw-dropzone strong {
   color: var(--ink);
-  font-size: 18px;
+  font-size: 20px;
+  line-height: 1.25;
+  max-width: 560px;
+  overflow-wrap: anywhere;
+}
+
+.grw-dropzone span:last-child {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.grw-status-message {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #3c3934;
+  font-weight: 700;
+  margin: 16px 0 0;
+  padding: 12px 14px;
+}
+
+.grw-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.grw-output-card {
+  display: grid;
+  gap: 12px;
+  min-height: 150px;
+}
+
+.grw-output-card .muted {
+  font-size: 16px;
+  margin: 0;
+}
+
+.grw-migration-note {
+  color: var(--muted);
+  font-size: 14px;
   font-weight: 750;
   margin: 0;
+}
+
+.status-danger {
+  background: #fde8e5;
+  color: #8f2c26;
 }
 
 .panel,
