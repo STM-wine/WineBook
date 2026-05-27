@@ -85,6 +85,47 @@ export async function updateRecommendationApproval(input: {
   // full route revalidation here so rapid checkbox work does not freeze.
 }
 
+export async function updateRecommendationApprovals(input: {
+  updates: Array<{
+    id: string;
+    recommendationStatus: string;
+    approvedQty: number;
+  }>;
+}) {
+  const updates = input.updates
+    .filter((update) => update.id)
+    .map((update) => ({
+      id: update.id,
+      recommendationStatus: update.recommendationStatus,
+      approvedQty: Math.max(0, Math.round(Number(update.approvedQty) || 0))
+    }));
+
+  if (updates.length === 0) return;
+
+  const invalid = updates.find((update) => !VALID_STATUSES.has(update.recommendationStatus));
+  if (invalid) {
+    throw new Error("Unsupported recommendation status.");
+  }
+
+  const { supabase } = await requireWriteAccess();
+  const results = await Promise.all(
+    updates.map((update) =>
+      supabase
+        .from("reorder_recommendations")
+        .update({
+          recommendation_status: update.recommendationStatus,
+          approved_qty: update.approvedQty
+        })
+        .eq("id", update.id)
+    )
+  );
+  const failed = results.find((result) => result.error);
+
+  if (failed?.error) {
+    throw new Error(failed.error.message);
+  }
+}
+
 export async function updateRecommendationOrderPath(input: {
   id: string;
   orderPath: "stateside" | "di";

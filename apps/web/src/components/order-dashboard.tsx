@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   deletePurchaseOrderLine,
   saveSupplierLogistics,
   updatePurchaseOrderDraftStatus,
   updateRecommendationOrderPath,
-  updateRecommendationApproval
+  updateRecommendationApprovals
 } from "@/app/actions";
 import type {
   AppProfile,
@@ -55,6 +55,9 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
   const [supplierTargetWeeks, setSupplierTargetWeeks] = useState<Record<string, string>>({});
   const [pendingMessage, setPendingMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const approvalQueueRef = useRef(new Map<string, { recommendationStatus: string; approvedQty: number }>());
+  const approvalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const approvalFlushRef = useRef<Promise<void> | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -117,6 +120,42 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   }
 
+  async function flushApprovalQueue() {
+    if (approvalTimerRef.current) {
+      clearTimeout(approvalTimerRef.current);
+      approvalTimerRef.current = null;
+    }
+    if (approvalFlushRef.current) {
+      await approvalFlushRef.current;
+      return;
+    }
+
+    const updates = Array.from(approvalQueueRef.current.entries()).map(([id, value]) => ({ id, ...value }));
+    approvalQueueRef.current.clear();
+    if (updates.length === 0) return;
+
+    approvalFlushRef.current = updateRecommendationApprovals({ updates })
+      .catch((error) => {
+        setErrorMessage(error instanceof Error ? error.message : "Could not save approvals.");
+        throw error;
+      })
+      .finally(() => {
+        approvalFlushRef.current = null;
+      });
+
+    await approvalFlushRef.current;
+  }
+
+  function queueApprovalSave(id: string, recommendationStatus: string, approvedQty: number) {
+    approvalQueueRef.current.set(id, { recommendationStatus, approvedQty });
+    if (approvalTimerRef.current) {
+      clearTimeout(approvalTimerRef.current);
+    }
+    approvalTimerRef.current = setTimeout(() => {
+      void flushApprovalQueue();
+    }, 650);
+  }
+
   function setSupplierTargetWeeksValue(supplierName: string, value: string) {
     setSupplierTargetWeeks((current) => {
       const next = { ...current };
@@ -141,19 +180,24 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
     setPendingMessage("");
     setErrorMessage("");
 
-    startTransition(async () => {
-      try {
-        await updateRecommendationApproval({
-          id: row.id,
-          recommendationStatus: status,
-          approvedQty: qty
-        });
-        setPendingMessage("");
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Could not save recommendation.");
-        setPendingMessage("");
-      }
-    });
+    queueApprovalSave(row.id, status, qty);
+  }
+
+  function clearSupplierApprovals(supplierName: string) {
+    const supplierRows = displayRows.filter((row) => (row.supplier_name?.trim() || "Unknown Supplier") === supplierName);
+    const approvedRows = supplierRows.filter((row) => row.recommendation_status === "approved" || row.recommendation_status === "edited");
+    if (approvedRows.length === 0) return;
+
+    setRows((current) =>
+      current.map((row) =>
+        (row.supplier_name?.trim() || "Unknown Supplier") === supplierName &&
+        (row.recommendation_status === "approved" || row.recommendation_status === "edited")
+          ? { ...row, recommendation_status: "rejected", approved_qty: 0 }
+          : row
+      )
+    );
+    setErrorMessage("");
+    approvedRows.forEach((row) => queueApprovalSave(row.id, "rejected", 0));
   }
 
   function setWorkingQty(row: Recommendation, qty: number) {
@@ -203,6 +247,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
 
     startTransition(async () => {
       try {
+        await flushApprovalQueue();
         const response = await fetch("/api/po-drafts/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -363,6 +408,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
           supplierTargetWeeks={supplierTargetWeeks}
           visibleCount={visibleRecommendations.length}
           onSaveApproval={saveApproval}
+          onClearSupplierApprovals={clearSupplierApprovals}
           onSaveOrderPath={saveOrderPath}
           onSaveWorkingQty={saveWorkingQty}
           onSetWorkingQty={setWorkingQty}

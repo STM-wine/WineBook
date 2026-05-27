@@ -201,13 +201,13 @@ export function WorkbenchGrid({
         valueFormatter: decimalFormatter
       },
       {
-        headerName: "Weeks Recommended",
+        headerName: "Target Weeks",
         field: "working_weeks",
         pinned: "left",
         lockPinned: true,
         width: 138,
         editable: true,
-        headerTooltip: "Formula: (True Available + On Order + Recommended Qty) / Weekly Velocity. Editing this recalculates Recommended Qty.",
+        headerTooltip: "Formula: (True Available + On Order + New PO Qty) / Weekly Velocity. Editing this recalculates New PO Qty.",
         headerClass: "number-header",
         cellClass: "editable-cell center-cell",
         cellStyle: CENTER_CELL_STYLE,
@@ -216,7 +216,7 @@ export function WorkbenchGrid({
         valueFormatter: decimalFormatter
       },
       {
-        headerName: "Recommended Qty",
+        headerName: "New PO Qty",
         field: "working_qty",
         pinned: "left",
         lockPinned: true,

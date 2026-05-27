@@ -22,6 +22,7 @@ export function OrderReviewView({
   supplierTargetWeeks,
   visibleCount,
   onSaveApproval,
+  onClearSupplierApprovals,
   onSaveOrderPath,
   onSaveWorkingQty,
   onSetWorkingQty,
@@ -44,6 +45,7 @@ export function OrderReviewView({
   supplierTargetWeeks: Record<string, string>;
   visibleCount: number;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
+  onClearSupplierApprovals: (supplierName: string) => void;
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
@@ -127,6 +129,7 @@ export function OrderReviewView({
             group={group}
             expandAll={expandAll || supplier !== "All"}
             onSaveApproval={onSaveApproval}
+            onClearSupplierApprovals={onClearSupplierApprovals}
             onSaveOrderPath={onSaveOrderPath}
             onSetWorkingQty={onSetWorkingQty}
             onSaveWorkingQty={onSaveWorkingQty}
@@ -194,6 +197,7 @@ function SupplierSection({
   group,
   expandAll,
   onSaveApproval,
+  onClearSupplierApprovals,
   onSaveOrderPath,
   onSetWorkingQty,
   onSaveWorkingQty,
@@ -203,6 +207,7 @@ function SupplierSection({
   group: SupplierGroup;
   expandAll: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
+  onClearSupplierApprovals: (supplierName: string) => void;
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
@@ -213,6 +218,7 @@ function SupplierSection({
   const [showForecast, setShowForecast] = useState(false);
   const tdmNames = Array.from(new Set(group.rows.map((row) => row.brand_manager?.trim() || "").filter(Boolean)));
   const tdmLabel = tdmNames.length === 0 ? "Unassigned" : tdmNames.length === 1 ? tdmNames[0] : "Multiple";
+  const hasApprovedOrders = group.approvedBottles > 0;
 
   return (
     <details className="supplier-section" open={expandAll || undefined}>
@@ -233,6 +239,14 @@ function SupplierSection({
         <MetricCard label="Value" value={formatCurrency(group.suggestedValue)} detail="Suggested order" tone="gold" />
       </div>
       <div className="supplier-workbench-options">
+        <button
+          className="ghost-button clear-approvals-button"
+          disabled={!hasApprovedOrders}
+          onClick={() => onClearSupplierApprovals(group.supplier)}
+          type="button"
+        >
+          Clear Approved Orders
+        </button>
         <label className="target-weeks-control">
           Target weeks
           <input

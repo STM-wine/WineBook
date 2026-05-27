@@ -671,6 +671,12 @@ td {
   justify-content: center;
 }
 
+.po-draft-actions button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
 .po-lines-shell {
   max-height: 440px;
 }
@@ -1149,6 +1155,16 @@ td {
   color: var(--ink);
   height: 44px;
   padding: 10px 12px;
+}
+
+.clear-approvals-button {
+  color: #b54336;
+  margin-left: auto;
+}
+
+.clear-approvals-button:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 .workbench-table table {

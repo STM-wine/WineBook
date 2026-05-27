@@ -18,7 +18,7 @@ function csvEscape(value: string | number): string {
   return text;
 }
 
-function poCsvHref(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle = 0): string {
+function poCsvText(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle = 0): string {
   const headers = [
     "Supplier",
     "Wine",
@@ -47,7 +47,7 @@ function poCsvHref(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle =
   });
 
   const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
-  return `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+  return csv;
 }
 
 function poCsvFilename(draft: PurchaseOrderDraftWithLines): string {
@@ -119,6 +119,20 @@ export function PoDraftsView({
   const totalWineCost = filteredSummaries.reduce((sum, summary) => sum + summary.wineCost, 0);
   const totalLaidInCost = filteredSummaries.reduce((sum, summary) => sum + summary.laidInCost, 0);
   const totalEstimatedCost = filteredSummaries.reduce((sum, summary) => sum + (summary.estimatedCost || summary.wineCost + summary.laidInCost), 0);
+
+  function downloadCsv(draft: PurchaseOrderDraftWithLines) {
+    const blob = new Blob([poCsvText(draft, supplierLaidInForDraft(draft, supplierMetadata))], {
+      type: "text/csv;charset=utf-8"
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = poCsvFilename(draft);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <section className="panel po-panel" id="po-drafts">
@@ -203,13 +217,13 @@ export function PoDraftsView({
                 >
                   Download XLSX
                 </a>
-                <a
+                <button
                   className="button button-tiny"
-                  download={poCsvFilename(draft)}
-                  href={poCsvHref(draft, supplierLaidInForDraft(draft, supplierMetadata))}
+                  onClick={() => downloadCsv(draft)}
+                  type="button"
                 >
                   Download CSV
-                </a>
+                </button>
               </div>
               <SupplierDraftMetadata supplier={supplierMetadata.get((draft.supplier_name || "").trim().toLowerCase())} />
               <PoDraftLinesTable
