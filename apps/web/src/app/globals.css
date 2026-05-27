@@ -1092,7 +1092,14 @@ td {
   gap: 14px;
 }
 
-.supplier-section summary span:last-child {
+.supplier-summary-actions {
+  align-items: center;
+  display: flex;
+  gap: 28px;
+  margin-left: auto;
+}
+
+.supplier-summary-actions span {
   color: var(--muted);
   font-size: 14px;
   font-weight: 700;
@@ -1124,17 +1131,9 @@ td {
   color: var(--muted);
 }
 
-.supplier-workbench-header {
-  align-items: center;
-  display: flex;
-  justify-content: flex-end;
-  min-height: 42px;
-  margin-top: 14px;
-}
-
 .supplier-metrics {
   grid-template-columns: repeat(5, minmax(150px, 1fr));
-  margin: 12px 0 22px;
+  margin: 22px 0;
 }
 
 .supplier-workbench-options {

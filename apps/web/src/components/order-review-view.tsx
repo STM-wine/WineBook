@@ -229,18 +229,22 @@ function SupplierSection({
           <strong>{formatInteger(group.recommendedBottles)} bottles</strong>
           <span>{formatCurrency(group.suggestedValue)} suggested</span>
         </div>
-        <span>{formatInteger(group.skuCount)} SKUs</span>
+        <div className="supplier-summary-actions">
+          <button
+            className="ghost-button clear-approvals-button"
+            disabled={!hasApprovedOrders}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onClearSupplierApprovals(group.supplier);
+            }}
+            type="button"
+          >
+            Clear Approved Orders
+          </button>
+          <span>{formatInteger(group.skuCount)} SKUs</span>
+        </div>
       </summary>
-      <div className="supplier-workbench-header">
-        <button
-          className="ghost-button clear-approvals-button"
-          disabled={!hasApprovedOrders}
-          onClick={() => onClearSupplierApprovals(group.supplier)}
-          type="button"
-        >
-          Clear Approved Orders
-        </button>
-      </div>
       <div className="supplier-metrics">
         <MetricCard label="SKUs" value={formatInteger(group.skuCount)} detail="In this supplier" tone="ink" />
         <MetricCard label="Urgent" value={formatInteger(group.urgentCount)} detail="Need review" tone="red" />
