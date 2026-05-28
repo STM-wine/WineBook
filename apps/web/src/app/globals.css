@@ -338,6 +338,7 @@ select {
 .module-page {
   display: grid;
   gap: 24px;
+  padding-top: 120px;
 }
 
 .module-header {
@@ -353,6 +354,59 @@ select {
 .grw-converter-grid {
   display: grid;
   gap: 18px;
+}
+
+.grw-upload-card {
+  order: 1;
+}
+
+.grw-summary-card {
+  order: 2;
+}
+
+.grw-output-card {
+  order: 3;
+}
+
+.grw-results-card {
+  order: 4;
+}
+
+.grw-upload-card.is-compact {
+  order: 5;
+  padding: 18px;
+}
+
+.grw-upload-card.is-compact .section-heading {
+  margin-bottom: 12px;
+}
+
+.grw-upload-card.is-compact .grw-dropzone {
+  align-items: center;
+  gap: 10px 14px;
+  grid-template-columns: auto minmax(0, 1fr);
+  justify-items: start;
+  margin-top: 0;
+  min-height: 78px;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.grw-upload-card.is-compact .grw-dropzone-icon {
+  height: 42px;
+  width: 42px;
+}
+
+.grw-upload-card.is-compact .grw-dropzone strong {
+  font-size: 16px;
+}
+
+.grw-upload-card.is-compact .grw-dropzone span:last-child {
+  font-size: 13px;
+}
+
+.grw-upload-card.is-compact .grw-parse-summary {
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
 }
 
 .grw-upload-card,
@@ -587,6 +641,11 @@ select {
   min-width: 1240px;
 }
 
+.grw-results-table-shell th:first-child,
+.grw-results-table-shell td:first-child {
+  min-width: 140px;
+}
+
 .grw-results-table-shell td:nth-child(2) {
   max-width: 420px;
   min-width: 320px;
@@ -603,6 +662,25 @@ select {
   color: var(--muted);
   font-size: 12px;
   margin-top: 4px;
+}
+
+.grw-item-number-input {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.2;
+  min-height: 34px;
+  padding: 7px 9px;
+  width: 13ch;
+}
+
+.grw-item-number-input:focus {
+  border-color: var(--green);
+  outline: 2px solid rgba(89, 113, 90, 0.18);
+  outline-offset: 1px;
 }
 
 .status-danger {

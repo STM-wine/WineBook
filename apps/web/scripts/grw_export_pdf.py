@@ -101,13 +101,55 @@ def resolve_file_details(pdf_path: Path, original_filename: str | None) -> FileR
     )
 
 
-def build_export_rows(priced_items: list[dict[str, Any]], resolution: FileResolution) -> list[dict[str, Any]]:
+def load_item_number_overrides(item_numbers_path: str | None) -> list[dict[str, Any]]:
+    if not item_numbers_path:
+        return []
+
+    path = Path(item_numbers_path)
+    if not path.exists():
+        return []
+
+    try:
+        overrides = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(overrides, list):
+        return []
+
+    return [override for override in overrides if isinstance(override, dict)]
+
+
+def resolve_item_number(
+    item: dict[str, Any],
+    row_index: int,
+    overrides: list[dict[str, Any]],
+) -> str:
+    line_number = item.get("line_number")
+
+    for override in overrides:
+        if override.get("lineNumber") == line_number:
+            return str(override.get("itemNumber") or "NEW").strip() or "NEW"
+
+    for override in overrides:
+        if override.get("index") == row_index:
+            return str(override.get("itemNumber") or "NEW").strip() or "NEW"
+
+    return "NEW"
+
+
+def build_export_rows(
+    priced_items: list[dict[str, Any]],
+    resolution: FileResolution,
+    item_number_overrides: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     export_rows: list[dict[str, Any]] = []
-    for item in priced_items:
+    overrides = item_number_overrides or []
+    for row_index, item in enumerate(priced_items):
         markup = 0.15 if item.get("sku_prefix") == "BDX" else 0.10
         export_rows.append(
             {
-                "Item Number": "NEW",
+                "Item Number": resolve_item_number(item, row_index, overrides),
                 "Item Description": item.get("description", ""),
                 "Description": item.get("description", ""),
                 "Supplier": item.get("supplier", ""),
@@ -163,6 +205,7 @@ def build_export(
     export_format: str,
     output_dir: Path,
     original_filename: str | None = None,
+    item_numbers_path: str | None = None,
 ) -> dict[str, Any]:
     if export_format not in {"xlsx", "csv"}:
         raise ValueError("Export format must be xlsx or csv.")
@@ -180,7 +223,8 @@ def build_export(
     validation_result = validate_invoice(priced_items, expected_subtotal)
 
     resolution = resolve_file_details(pdf_path, original_filename)
-    export_rows = build_export_rows(priced_items, resolution)
+    item_number_overrides = load_item_number_overrides(item_numbers_path)
+    export_rows = build_export_rows(priced_items, resolution, item_number_overrides)
     base_stem = build_base_output_stem(resolution)
 
     if export_format == "xlsx":
@@ -219,21 +263,27 @@ def build_export(
 
 
 def main() -> int:
-    if len(sys.argv) not in {4, 5}:
-        print(json.dumps({"error": "Expected PDF path, export format, output directory, and optional filename."}), file=sys.stderr)
+    if len(sys.argv) not in {4, 5, 6}:
+        print(
+            json.dumps(
+                {"error": "Expected PDF path, export format, output directory, optional filename, and optional item numbers path."}
+            ),
+            file=sys.stderr,
+        )
         return 2
 
     pdf_path = Path(sys.argv[1])
     export_format = sys.argv[2].lower()
     output_dir = Path(sys.argv[3])
-    original_filename = sys.argv[4] if len(sys.argv) == 5 else None
+    original_filename = sys.argv[4] if len(sys.argv) >= 5 else None
+    item_numbers_path = sys.argv[5] if len(sys.argv) == 6 else None
 
     if not pdf_path.exists():
         print(json.dumps({"error": f"PDF not found: {pdf_path}"}), file=sys.stderr)
         return 2
 
     try:
-        print(json.dumps(build_export(pdf_path, export_format, output_dir, original_filename)))
+        print(json.dumps(build_export(pdf_path, export_format, output_dir, original_filename, item_numbers_path)))
     except Exception as exc:
         print(json.dumps({"error": str(exc)}), file=sys.stderr)
         return 1

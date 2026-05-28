@@ -70,14 +70,14 @@ type ParseResponse = {
 const STATUS_LABELS: Record<UploadStatus, string> = {
   ready: "Ready to upload",
   selected: "PDF selected",
-  parsing: "Parsing invoice",
-  success: "Parse complete",
-  failure: "Parse failed",
+  parsing: "Loading invoice",
+  success: "Invoice loaded",
+  failure: "Invoice could not load",
   invalid: "Invalid file type"
 };
 
 const EXPORT_LABELS: Record<ExportStatus, string> = {
-  idle: "Ready after parsing",
+  idle: "Upload invoice first",
   exporting: "Preparing download",
   success: "Download ready",
   failure: "Export failed"
@@ -182,17 +182,17 @@ export function GrwConverterUploader() {
       const result = (await response.json()) as ParseResponse | { error?: string };
 
       if (!response.ok || "error" in result) {
-        throw new Error("error" in result && result.error ? result.error : "Could not parse GRW invoice.");
+        throw new Error("error" in result && result.error ? result.error : "Could not load GRW invoice.");
       }
 
       const parseResult = result as ParseResponse;
       if (parseRun !== parseRunRef.current) return;
-      setParsedItems(parseResult.items || []);
+      setParsedItems((parseResult.items || []).map((item) => ({ ...item, itemNumber: item.itemNumber || "NEW" })));
       setMetadata(parseResult.metadata || null);
       setStatus("success");
     } catch (error) {
       if (parseRun !== parseRunRef.current) return;
-      setErrorMessage(error instanceof Error ? error.message : "Could not parse GRW invoice.");
+      setErrorMessage(error instanceof Error ? error.message : "Could not load GRW invoice.");
       setStatus("failure");
     }
   }
@@ -205,6 +205,16 @@ export function GrwConverterUploader() {
 
     const formData = new FormData();
     formData.append("file", file.file);
+    formData.append(
+      "itemNumbers",
+      JSON.stringify(
+        parsedItems.map((item, index) => ({
+          index,
+          itemNumber: item.itemNumber || "NEW",
+          lineNumber: item.lineNumber
+        }))
+      )
+    );
 
     try {
       const response = await fetch(`/api/modules/grw-converter/export?format=${format}`, {
@@ -238,6 +248,14 @@ export function GrwConverterUploader() {
     }
   }
 
+  function handleItemNumberChange(rowIndex: number, nextValue: string) {
+    setParsedItems((currentItems) =>
+      currentItems.map((item, index) => (index === rowIndex ? { ...item, itemNumber: nextValue } : item))
+    );
+    setExportStatus("idle");
+    setExportErrorMessage("");
+  }
+
   const hasValidPdf = Boolean(file);
   const canDownload = Boolean(file && status === "success" && parsedItems.length > 0);
   const invoiceSummary = metadata?.invoiceSummary;
@@ -248,7 +266,7 @@ export function GrwConverterUploader() {
 
   return (
     <div className="grw-converter-grid">
-      <section className="panel grw-upload-card" aria-labelledby="grw-upload-title">
+      <section className={status === "success" ? "panel grw-upload-card is-compact" : "panel grw-upload-card"} aria-labelledby="grw-upload-title">
         <div className="section-heading">
           <div>
             <p className="eyebrow">Invoice PDF</p>
@@ -287,11 +305,11 @@ export function GrwConverterUploader() {
         ) : null}
 
         {status === "failure" ? (
-          <p className="grw-status-message grw-status-error">{errorMessage || "Could not parse GRW invoice."}</p>
+          <p className="grw-status-message grw-status-error">{errorMessage || "Could not load GRW invoice."}</p>
         ) : null}
 
         {status === "success" && metadata ? (
-          <div className="grw-parse-summary" aria-label="GRW parse summary">
+          <div className="grw-parse-summary" aria-label="GRW invoice summary">
             <div>
               <span>Order</span>
               <strong>{metadata.orderNumber || "Unknown"}</strong>
@@ -303,10 +321,6 @@ export function GrwConverterUploader() {
             <div>
               <span>Line Items</span>
               <strong>{metadata.totalItems ?? parsedItems.length}</strong>
-            </div>
-            <div>
-              <span>Unparsed Blocks</span>
-              <strong>{metadata.unparsedBlocksCount || 0}</strong>
             </div>
           </div>
         ) : null}
@@ -384,7 +398,7 @@ export function GrwConverterUploader() {
           </span>
         </div>
         <p className="muted">
-          Export the parsed GRW invoice as the Stem-ready workbook, or as the SaasAnt / QuickBooks CSV.
+          Export this GRW invoice as the Stem-ready workbook, or as the SaasAnt / QuickBooks CSV.
         </p>
         <div className="grw-download-actions">
           <button
@@ -413,13 +427,13 @@ export function GrwConverterUploader() {
         <section className="panel grw-results-card" aria-labelledby="grw-results-title">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Parsed Lines</p>
-              <h2 id="grw-results-title">Extracted line items</h2>
+              <p className="eyebrow">Line Items</p>
+              <h2 id="grw-results-title">Line items</h2>
             </div>
             {metadata?.missingItemNumbers?.length ? (
               <span className="status-pill status-danger">Missing lines {metadata.missingItemNumbers.join(", ")}</span>
             ) : (
-              <span className="status-pill status-good">Validated sequence</span>
+              <span className="status-pill status-good">Lines ready</span>
             )}
           </div>
 
@@ -441,9 +455,16 @@ export function GrwConverterUploader() {
                 </tr>
               </thead>
               <tbody>
-                {parsedItems.map((item) => (
+                {parsedItems.map((item, index) => (
                   <tr key={`${item.lineNumber}-${item.description}`}>
-                    <td>{item.itemNumber || "NEW"}</td>
+                    <td>
+                      <input
+                        aria-label={`Item number for ${item.description}`}
+                        className="grw-item-number-input"
+                        onChange={(event) => handleItemNumberChange(index, event.target.value)}
+                        value={item.itemNumber}
+                      />
+                    </td>
                     <td>
                       <strong>{item.description}</strong>
                       <span>{item.wineName}</span>

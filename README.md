@@ -115,6 +115,53 @@ source .venv/bin/activate
 streamlit run grw_converter_app.py --server.port 8502
 ```
 
+## GRW Converter Next.js Module
+
+The GRW Converter module brings the existing GRW invoice workflow into the authenticated Next.js app at:
+
+```text
+/modules/grw-converter
+```
+
+It converts GRW sales order PDFs into Stem-ready PO import outputs while keeping the existing Streamlit converter and Python parser/export files as the production reference. The Streamlit entry point remains `grw_converter_app.py`, and the core reference files remain under `modules/po_tools/grw_invoice_converter/`.
+
+Current architecture:
+
+- Next.js UI lives in `apps/web/src/components/grw-converter-uploader.tsx`.
+- Authenticated parse and export routes live under `apps/web/src/app/api/modules/grw-converter/`.
+- Python bridge scripts live in `apps/web/scripts/` and call the existing GRW parser, pricing, validation, and template writer modules.
+- XLSX and CSV generation run server-side; the browser only sends the selected PDF and any edited item numbers.
+- The XLSX export uses `modules/po_tools/grw_invoice_converter/templates/GRW_Template_Updated.xlsx`.
+
+Current Next.js UI flow:
+
+1. User opens the module from the Modules nav dropdown.
+2. User drags/drops or selects a GRW invoice PDF.
+3. The invoice auto-converts on upload.
+4. The page displays invoice summary, credits/balance, download actions, and parsed line items.
+5. Item Number defaults to `NEW` and can be edited inline.
+6. Download actions generate XLSX and CSV outputs server-side.
+
+Implemented features:
+
+- Auto-convert on upload.
+- Parsed line-item display with wine name, vintage, pack, quantity, FOB bottle/case, frontline, ext cost, markup, and ext price.
+- Invoice summary / credits & balance display when those values are present in the PDF.
+- Editable Item Number values in the app table.
+- Edited Item Number values persist into XLSX and CSV exports.
+- XLSX export using the existing GRW template writer.
+- SaasAnt / QuickBooks CSV export.
+- Filename generation based on the uploaded invoice/account/order pattern, matching the Streamlit behavior where filenames like `Account Name #59041.pdf` resolve to `Account_Name_S59041.xlsx`.
+
+Important implementation notes:
+
+- Do not remove, rename, or rewrite the Streamlit GRW converter files; they are still the production reference.
+- Keep GRW migration work isolated on feature branches until reviewed and merged by ownership.
+- Export generation is server-side and should not move pricing/template logic into the browser.
+- The Next.js export route re-parses the uploaded PDF and applies any frontend-edited Item Number overrides before writing XLSX/CSV.
+- Local development requires the Next.js app env in `apps/web/.env.local` plus the Python dependencies from `requirements.txt`/the local virtualenv.
+- Useful local checks include `npm run build` from `apps/web`, direct bridge testing with a known GRW PDF, and opening `/modules/grw-converter` on localhost.
+
 ## Supabase
 
 Project URL:

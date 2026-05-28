@@ -36,10 +36,16 @@ function contentDisposition(filename: string) {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
-async function exportWithPython(pdfPath: string, format: string, outputDir: string, originalFilename: string) {
+async function exportWithPython(
+  pdfPath: string,
+  format: string,
+  outputDir: string,
+  originalFilename: string,
+  itemNumbersPath: string
+) {
   const root = repoRoot();
   const scriptPath = path.join(root, "apps", "web", "scripts", "grw_export_pdf.py");
-  const child = spawn(pythonBinary(root), [scriptPath, pdfPath, format, outputDir, originalFilename], {
+  const child = spawn(pythonBinary(root), [scriptPath, pdfPath, format, outputDir, originalFilename, itemNumbersPath], {
     cwd: root,
     env: process.env
   });
@@ -112,11 +118,14 @@ export async function POST(request: Request) {
   const tempDir = path.join(tmpdir(), "stem-grw-export", randomUUID());
   const outputDir = path.join(tempDir, "outputs");
   const pdfPath = path.join(tempDir, file.name.replace(/[^A-Za-z0-9_.-]/g, "_") || "invoice.pdf");
+  const itemNumbersPath = path.join(tempDir, "item-numbers.json");
 
   try {
     await mkdir(outputDir, { recursive: true });
     await writeFile(pdfPath, Buffer.from(await file.arrayBuffer()));
-    const exportResult = await exportWithPython(pdfPath, format, outputDir, file.name);
+    const itemNumbers = formData?.get("itemNumbers");
+    await writeFile(itemNumbersPath, typeof itemNumbers === "string" ? itemNumbers : "[]");
+    const exportResult = await exportWithPython(pdfPath, format, outputDir, file.name, itemNumbersPath);
     const exportBytes = await readFile(exportResult.path);
 
     return new NextResponse(new Uint8Array(exportBytes), {
