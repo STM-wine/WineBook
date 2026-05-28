@@ -262,6 +262,11 @@ select {
   opacity: 0.65;
 }
 
+.ghost-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .button-secondary {
   background: #171717;
   box-shadow: none;
@@ -482,6 +487,85 @@ select {
   margin: 0;
 }
 
+.grw-summary-card {
+  display: grid;
+  gap: 16px;
+}
+
+.grw-summary-card h2 {
+  font-size: 22px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.grw-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+.grw-summary-grid div,
+.grw-payment-list div {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.grw-summary-grid span,
+.grw-payment-list span {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  margin-bottom: 7px;
+  text-transform: uppercase;
+}
+
+.grw-summary-grid strong,
+.grw-payment-list strong {
+  color: var(--ink);
+  display: block;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.grw-payment-list {
+  display: grid;
+  gap: 10px;
+}
+
+.grw-payment-list div {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(120px, 1fr) minmax(120px, 0.7fr);
+}
+
+.grw-payment-list div span {
+  margin: 0;
+}
+
+.grw-payment-list div span:last-child {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 850;
+  text-align: right;
+}
+
+.grw-download-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.grw-download-actions .button,
+.grw-download-actions .ghost-button {
+  min-width: 170px;
+}
+
 .grw-migration-note {
   color: var(--muted);
   font-size: 14px;
@@ -500,7 +584,7 @@ select {
 }
 
 .grw-results-table-shell table {
-  min-width: 1080px;
+  min-width: 1240px;
 }
 
 .grw-results-table-shell td:nth-child(2) {
@@ -519,12 +603,6 @@ select {
   color: var(--muted);
   font-size: 12px;
   margin-top: 4px;
-}
-
-.grw-results-table-shell td:last-child {
-  color: var(--muted);
-  font-size: 12px;
-  text-align: left;
 }
 
 .status-danger {
@@ -1806,8 +1884,17 @@ tr.has-recommendation .sticky-name {
   .po-filter-bar,
   .supplier-board-controls,
   .supplier-hub-summary,
-  .supplier-hub-toolbar {
+  .supplier-hub-toolbar,
+  .grw-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .grw-payment-list div {
+    grid-template-columns: 1fr;
+  }
+
+  .grw-payment-list div span:last-child {
+    text-align: left;
   }
 
   .login-panel {
