@@ -420,12 +420,14 @@ export function WorkbenchGrid({
         rowData={rowData}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}
+        theme="legacy"
         getRowId={(params) => params.data.id}
         getRowHeight={(params) => rowHeightForWineName(params.data?.wine_display ?? "")}
         onCellValueChanged={onCellValueChanged}
         headerHeight={64}
         singleClickEdit
         stopEditingWhenCellsLoseFocus
+        suppressClipboardApi
         suppressDragLeaveHidesColumns
         animateRows={false}
         enableBrowserTooltips

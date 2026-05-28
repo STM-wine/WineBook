@@ -26,11 +26,11 @@ import {
   rowRecommendedQty,
   uniqueSorted
 } from "@/lib/order-data";
-import { ActiveView, isActiveView, NAV_VIEW_LABELS } from "./dashboard-types";
+import { AppTopbar } from "./app-topbar";
+import { ActiveView, isActiveView } from "./dashboard-types";
 import { FreightView } from "./freight-view";
 import { OrderReviewView } from "./order-review-view";
 import { PoDraftsView } from "./po-drafts-view";
-import { SignOutButton } from "./sign-out-button";
 import { StatusMessages } from "./status-messages";
 import { SupplierBoardView } from "./supplier-board-view";
 import { SupplierHubView } from "./supplier-hub-view";
@@ -356,36 +356,14 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark">
-            <img alt="" src="/brand/stem-intelligence-logo-cropped.png" />
-          </div>
-          <div>
-            <strong>Stem Intelligence</strong>
-            <span>{profile.full_name || profile.email}</span>
-          </div>
-        </div>
-        <nav className="nav-tabs" aria-label="Primary">
-          {NAV_VIEW_LABELS.map((view) => (
-            <button
-              key={view.id}
-              className={activeView === view.id ? "active" : ""}
-              onClick={() => selectView(view.id)}
-              type="button"
-            >
-              {view.label}
-            </button>
-          ))}
-        </nav>
-        <div className="topbar-actions">
-          <span className="data-pill">Data Date {dataDate}</span>
-          <button className="button button-small" onClick={createDrafts} disabled={isPending}>
-            Create PO Drafts
-          </button>
-          <SignOutButton />
-        </div>
-      </header>
+      <AppTopbar
+        activeView={activeView}
+        dataDate={dataDate}
+        isPending={isPending}
+        profileLabel={profile.full_name || profile.email}
+        onCreateDrafts={createDrafts}
+        onSelectView={selectView}
+      />
 
       <StatusMessages errorMessage={errorMessage} pendingMessage={isPending ? pendingMessage || "Working..." : pendingMessage} />
 
