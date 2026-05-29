@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "postinstall": "python3 -m pip install -r ../../requirements.txt",
+    "postinstall": "python3 -m pip install -r requirements-grw.txt",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit"

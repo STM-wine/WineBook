@@ -4,7 +4,7 @@ services:
     runtime: node
     rootDir: apps/web
     plan: starter
-    buildCommand: npm ci && python3 -m pip install -r ../../requirements.txt && npm run build
+    buildCommand: npm ci && python3 -m pip install -r requirements-grw.txt && npm run build
     startCommand: npm run start
     autoDeploy: false
     envVars:
