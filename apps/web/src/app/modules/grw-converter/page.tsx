@@ -37,7 +37,7 @@ export default async function GrwConverterPage() {
 
   return (
     <main className="app-shell module-page">
-      <AppTopbar activeModule="grw-converter" profileLabel={profile.full_name || profile.email} />
+      <AppTopbar activeModule="grw-converter" />
 
       <section className="module-header">
         <p className="eyebrow">Modules</p>

@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { poTemplateXlsxBuffer } from "@/lib/po-export";
-import { poTimestamp } from "@/lib/po-utils";
+import { poDraftSupplierLabel, poTimestamp } from "@/lib/po-utils";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { createClient } from "@/lib/supabase/server";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
   const reportRunId = request.nextUrl.searchParams.get("reportRunId");
+  const draftId = request.nextUrl.searchParams.get("draftId");
   if (!reportRunId) {
     return NextResponse.json({ error: "Missing reportRunId." }, { status: 400 });
   }
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Sign in required." }, { status: 401 });
   }
 
-  const { data: drafts, error } = await supabase
+  let draftsQuery = supabase
     .from("purchase_order_drafts")
     .select(`
       id,
@@ -50,8 +51,13 @@ export async function GET(request: NextRequest) {
     `)
     .eq("report_run_id", reportRunId)
     .neq("status", "cancelled")
-    .order("supplier_name", { ascending: true })
-    .returns<PurchaseOrderDraftWithLines[]>();
+    .order("supplier_name", { ascending: true });
+
+  if (draftId) {
+    draftsQuery = draftsQuery.eq("id", draftId);
+  }
+
+  const { data: drafts, error } = await draftsQuery.returns<PurchaseOrderDraftWithLines[]>();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -65,7 +71,14 @@ export async function GET(request: NextRequest) {
   const mergedSuppliers = mergeSupplierDefaults(suppliers || [], supplierDefaults);
 
   const buffer = await poTemplateXlsxBuffer(drafts || [], mergedSuppliers);
-  const filename = `POs ${poTimestamp()}.xlsx`;
+  const supplierFilenamePart =
+    draftId && drafts?.[0]
+      ? poDraftSupplierLabel(drafts[0])
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)/g, "") || "supplier"
+      : "all";
+  const filename = draftId ? `PO ${supplierFilenamePart} ${poTimestamp()}.xlsx` : `POs ${poTimestamp()}.xlsx`;
 
   return new NextResponse(buffer, {
     headers: {

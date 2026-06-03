@@ -1,5 +1,7 @@
 import type { DashboardMetrics, Recommendation, SupplierGroup } from "./types";
 
+export type SupplierGroupSortMode = "default" | "az" | "za";
+
 export function asNumber(value: number | string | null | undefined): number {
   if (value === null || value === undefined || value === "") return 0;
   const parsed = Number(value);
@@ -111,6 +113,64 @@ export function uniqueSorted(values: Array<string | null | undefined>): string[]
   ).sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeSearchText(value: string | null | undefined): string {
+  return (value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = Array.from({ length: b.length + 1 }, () => 0);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + cost
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[b.length];
+}
+
+function fuzzyTokenMatches(searchToken: string, candidateToken: string): boolean {
+  if (!searchToken || !candidateToken) return false;
+  if (candidateToken.includes(searchToken) || searchToken.includes(candidateToken)) return true;
+  if (searchToken.length <= 2) return false;
+
+  const maxDistance = searchToken.length <= 4 ? 1 : searchToken.length <= 7 ? 2 : 3;
+  return levenshteinDistance(searchToken, candidateToken) <= maxDistance;
+}
+
+function fuzzyTextMatches(search: string, values: Array<string | null | undefined>): boolean {
+  const searchText = normalizeSearchText(search);
+  if (!searchText) return true;
+
+  const haystackText = normalizeSearchText(values.filter(Boolean).join(" "));
+  if (!haystackText) return false;
+  if (haystackText.includes(searchText)) return true;
+
+  const searchTokens = searchText.split(/\s+/).filter(Boolean);
+  const haystackTokens = haystackText.split(/\s+/).filter(Boolean);
+
+  return searchTokens.every((searchToken) =>
+    haystackTokens.some((candidateToken) => fuzzyTokenMatches(searchToken, candidateToken))
+  );
+}
+
 export function filterRecommendations(
   rows: Recommendation[],
   filters: {
@@ -134,18 +194,13 @@ export function filterRecommendations(
     }
     if (!search) return true;
 
-    const haystack = [
+    return fuzzyTextMatches(search, [
       row.product_name,
       row.planning_sku,
       row.product_code,
       row.supplier_name,
       row.brand_manager
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    return haystack.includes(search);
+    ]);
   });
 }
 
@@ -213,4 +268,17 @@ export function buildSupplierGroups(rows: Recommendation[]): SupplierGroup[] {
       };
     })
     .sort((a, b) => b.suggestedValue - a.suggestedValue || a.supplier.localeCompare(b.supplier));
+}
+
+export function sortSupplierGroups(groups: SupplierGroup[], sortMode: SupplierGroupSortMode): SupplierGroup[] {
+  const sorted = [...groups];
+
+  if (sortMode === "az") {
+    return sorted.sort((a, b) => a.supplier.localeCompare(b.supplier));
+  }
+  if (sortMode === "za") {
+    return sorted.sort((a, b) => b.supplier.localeCompare(a.supplier));
+  }
+
+  return sorted.sort((a, b) => b.suggestedValue - a.suggestedValue || a.supplier.localeCompare(b.supplier));
 }

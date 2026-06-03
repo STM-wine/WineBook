@@ -10,7 +10,6 @@ import {
   updateRecommendationApprovals
 } from "@/app/actions";
 import type {
-  AppProfile,
   PurchaseOrderDraftWithLines,
   Recommendation,
   ReportRun,
@@ -23,6 +22,8 @@ import {
   buildMetrics,
   buildSupplierGroups,
   filterRecommendations,
+  sortSupplierGroups,
+  type SupplierGroupSortMode,
   rowRecommendedQty,
   uniqueSorted
 } from "@/lib/order-data";
@@ -36,22 +37,23 @@ import { SupplierBoardView } from "./supplier-board-view";
 import { SupplierHubView } from "./supplier-hub-view";
 
 type Props = {
-  profile: AppProfile;
   reportRun: ReportRun;
   recommendations: Recommendation[];
   poDrafts: PurchaseOrderDraftWithLines[];
   suppliers: SupplierLogistics[];
 };
 
-export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, suppliers }: Props) {
+export function OrderDashboard({ reportRun, recommendations, poDrafts, suppliers }: Props) {
   const router = useRouter();
   const [rows, setRows] = useState(recommendations);
+  const [draftRows, setDraftRows] = useState(poDrafts);
   const [activeView, setActiveView] = useState<ActiveView>("order-review");
   const [supplier, setSupplier] = useState("All");
   const [brandManager, setBrandManager] = useState("All");
   const [search, setSearch] = useState("");
   const [suggestedOnly, setSuggestedOnly] = useState(false);
   const [expandAll, setExpandAll] = useState(false);
+  const [supplierSort, setSupplierSort] = useState<SupplierGroupSortMode>("default");
   const [supplierTargetWeeks, setSupplierTargetWeeks] = useState<Record<string, string>>({});
   const [pendingMessage, setPendingMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -63,6 +65,10 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
   useEffect(() => {
     setRows(recommendations);
   }, [recommendations]);
+
+  useEffect(() => {
+    setDraftRows(poDrafts);
+  }, [poDrafts]);
 
   useEffect(() => {
     const syncViewFromUrl = () => {
@@ -101,7 +107,10 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
     [displayRows, supplier, brandManager, search, suggestedOnly]
   );
   const metrics = useMemo(() => buildMetrics(visibleRecommendations), [visibleRecommendations]);
-  const supplierGroups = useMemo(() => buildSupplierGroups(visibleRecommendations), [visibleRecommendations]);
+  const supplierGroups = useMemo(
+    () => sortSupplierGroups(buildSupplierGroups(visibleRecommendations), supplierSort),
+    [supplierSort, visibleRecommendations]
+  );
   const allSupplierGroups = useMemo(() => buildSupplierGroups(displayRows), [displayRows]);
   const dataDate = reportRun.report_date || "Latest run";
 
@@ -297,13 +306,22 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
   function changeDraftStatus(draftId: string, status: string) {
     setPendingMessage("Updating PO draft...");
     setErrorMessage("");
+    const previousDraft = draftRows.find((draft) => draft.id === draftId);
+
+    setDraftRows((current) =>
+      current.map((draft) =>
+        draft.id === draftId ? { ...draft, status, updated_at: new Date().toISOString() } : draft
+      )
+    );
 
     startTransition(async () => {
       try {
         await updatePurchaseOrderDraftStatus({ id: draftId, status });
         setPendingMessage("PO draft updated");
-        router.refresh();
       } catch (error) {
+        if (previousDraft) {
+          setDraftRows((current) => current.map((draft) => (draft.id === draftId ? previousDraft : draft)));
+        }
         setErrorMessage(error instanceof Error ? error.message : "Could not update PO draft.");
         setPendingMessage("");
       }
@@ -360,7 +378,6 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
         activeView={activeView}
         dataDate={dataDate}
         isPending={isPending}
-        profileLabel={profile.full_name || profile.email}
         onCreateDrafts={createDrafts}
         onSelectView={selectView}
       />
@@ -379,9 +396,11 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
           setSearch={setSearch}
           setSuggestedOnly={setSuggestedOnly}
           setSupplier={setSupplier}
+          setSupplierSort={setSupplierSort}
           suggestedOnly={suggestedOnly}
           supplier={supplier}
           supplierGroups={supplierGroups}
+          supplierSort={supplierSort}
           supplierOptions={supplierOptions}
           supplierTargetWeeks={supplierTargetWeeks}
           visibleCount={visibleRecommendations.length}
@@ -404,7 +423,7 @@ export function OrderDashboard({ profile, reportRun, recommendations, poDrafts, 
 
       {activeView === "po-drafts" ? (
         <PoDraftsView
-          drafts={poDrafts}
+          drafts={draftRows}
           isPending={isPending}
           reportRunId={reportRun.id}
           suppliers={suppliers}

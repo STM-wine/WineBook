@@ -9,7 +9,6 @@ type AppTopbarProps = {
   activeView?: ActiveView;
   dataDate?: string;
   isPending?: boolean;
-  profileLabel: string;
   onCreateDrafts?: () => void;
   onSelectView?: (view: ActiveView) => void;
 };
@@ -23,21 +22,26 @@ export function AppTopbar({
   activeView,
   dataDate,
   isPending,
-  profileLabel,
   onCreateDrafts,
   onSelectView
 }: AppTopbarProps) {
+  const brandContent = (
+    <div className="brand-mark">
+      <img alt="Stem home" src="/brand/stem-intelligence-logo-cropped.png" />
+    </div>
+  );
+
   return (
     <header className="topbar">
-      <div className="brand">
-        <div className="brand-mark">
-          <img alt="" src="/brand/stem-intelligence-logo-cropped.png" />
-        </div>
-        <div>
-          <strong>Stem Intelligence</strong>
-          <span>{profileLabel}</span>
-        </div>
-      </div>
+      {onSelectView ? (
+        <button className="brand brand-home-button" onClick={() => onSelectView("order-review")} type="button">
+          {brandContent}
+        </button>
+      ) : (
+        <Link className="brand brand-home-button" href="/">
+          {brandContent}
+        </Link>
+      )}
       <nav className="nav-tabs" aria-label="Primary">
         {NAV_VIEW_LABELS.map((view) =>
           onSelectView ? (

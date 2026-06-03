@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DashboardMetrics, Recommendation, SupplierGroup } from "@/lib/types";
-import { formatCurrency, formatInteger } from "@/lib/order-data";
+import { formatCurrency, formatInteger, type SupplierGroupSortMode } from "@/lib/order-data";
 import { MetricCard } from "./metric-card";
 import { WorkbenchGrid } from "./workbench-grid";
 
@@ -15,9 +15,11 @@ export function OrderReviewView({
   setSearch,
   setSuggestedOnly,
   setSupplier,
+  setSupplierSort,
   suggestedOnly,
   supplier,
   supplierGroups,
+  supplierSort,
   supplierOptions,
   supplierTargetWeeks,
   visibleCount,
@@ -38,9 +40,11 @@ export function OrderReviewView({
   setSearch: (value: string) => void;
   setSuggestedOnly: (value: boolean) => void;
   setSupplier: (value: string) => void;
+  setSupplierSort: (value: SupplierGroupSortMode) => void;
   suggestedOnly: boolean;
   supplier: string;
   supplierGroups: SupplierGroup[];
+  supplierSort: SupplierGroupSortMode;
   supplierOptions: string[];
   supplierTargetWeeks: Record<string, string>;
   visibleCount: number;
@@ -107,17 +111,19 @@ export function OrderReviewView({
       </section>
 
       <div className="workbench-controls">
-        <label className="check-control">
-          <input type="checkbox" checked={expandAll} onChange={(event) => setExpandAll(event.target.checked)} />
-          Expand all supplier workbenches
-        </label>
-        <div className="workbench-control-buttons">
-          <button className="ghost-button" onClick={() => setExpandAll(true)} type="button">
-            Expand All
-          </button>
-          <button className="ghost-button" onClick={() => setExpandAll(false)} type="button">
-            Collapse All
-          </button>
+        <div className="workbench-control-group">
+          <label className="check-control">
+            <input type="checkbox" checked={expandAll} onChange={(event) => setExpandAll(event.target.checked)} />
+            Expand all supplier workbenches
+          </label>
+          <label className="compact-select-control">
+            Sort
+            <select value={supplierSort} onChange={(event) => setSupplierSort(event.target.value as SupplierGroupSortMode)}>
+              <option value="default">Default: Needs</option>
+              <option value="az">A-Z</option>
+              <option value="za">Z-A</option>
+            </select>
+          </label>
         </div>
         <span>{formatInteger(visibleCount)} visible SKUs</span>
       </div>
@@ -216,12 +222,17 @@ function SupplierSection({
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
+  const [isOpen, setIsOpen] = useState(expandAll);
   const tdmNames = Array.from(new Set(group.rows.map((row) => row.brand_manager?.trim() || "").filter(Boolean)));
   const tdmLabel = tdmNames.length === 0 ? "Unassigned" : tdmNames.length === 1 ? tdmNames[0] : "Multiple";
   const hasApprovedOrders = group.approvedBottles > 0;
 
+  useEffect(() => {
+    setIsOpen(expandAll);
+  }, [expandAll]);
+
   return (
-    <details className="supplier-section" open={expandAll || undefined}>
+    <details className="supplier-section" open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)}>
       <summary>
         <div>
           <span className="supplier-chip">{group.supplier}</span>
@@ -245,43 +256,47 @@ function SupplierSection({
           <span>{formatInteger(group.skuCount)} SKUs</span>
         </div>
       </summary>
-      <div className="supplier-metrics">
-        <MetricCard label="SKUs" value={formatInteger(group.skuCount)} detail="In this supplier" tone="ink" />
-        <MetricCard label="Urgent" value={formatInteger(group.urgentCount)} detail="Need review" tone="red" />
-        <MetricCard label="Suggested" value={formatInteger(group.recommendedBottles)} detail="Bottles" tone="green" />
-        <MetricCard label="Approved" value={formatInteger(group.approvedBottles)} detail="Bottles" tone="blue" />
-        <MetricCard label="Value" value={formatCurrency(group.suggestedValue)} detail="Suggested order" tone="gold" />
-      </div>
-      <div className="supplier-workbench-options">
-        <label className="target-weeks-control">
-          Target weeks
-          <input
-            min="0"
-            step="0.1"
-            inputMode="decimal"
-            value={targetWeeks}
-            onChange={(event) => onSetTargetWeeks(event.target.value)}
-            placeholder="Default"
+      {isOpen ? (
+        <>
+          <div className="supplier-metrics">
+            <MetricCard label="SKUs" value={formatInteger(group.skuCount)} detail="In this supplier" tone="ink" />
+            <MetricCard label="Urgent" value={formatInteger(group.urgentCount)} detail="Need review" tone="red" />
+            <MetricCard label="Suggested" value={formatInteger(group.recommendedBottles)} detail="Bottles" tone="green" />
+            <MetricCard label="Approved" value={formatInteger(group.approvedBottles)} detail="Bottles" tone="blue" />
+            <MetricCard label="Value" value={formatCurrency(group.suggestedValue)} detail="Suggested order" tone="gold" />
+          </div>
+          <div className="supplier-workbench-options">
+            <label className="target-weeks-control">
+              Target weeks
+              <input
+                min="0"
+                step="0.1"
+                inputMode="decimal"
+                value={targetWeeks}
+                onChange={(event) => onSetTargetWeeks(event.target.value)}
+                placeholder="Default"
+              />
+            </label>
+            <label className="check-control">
+              <input type="checkbox" checked={showHistory} onChange={(event) => setShowHistory(event.target.checked)} />
+              Show 60/90d sales
+            </label>
+            <label className="check-control">
+              <input type="checkbox" checked={showForecast} onChange={(event) => setShowForecast(event.target.checked)} />
+              Show LY 60/90d forecast
+            </label>
+          </div>
+          <WorkbenchGrid
+            rows={group.rows}
+            showForecast={showForecast}
+            showHistory={showHistory}
+            onSaveApproval={onSaveApproval}
+            onSaveOrderPath={onSaveOrderPath}
+            onSetWorkingQty={onSetWorkingQty}
+            onSaveWorkingQty={onSaveWorkingQty}
           />
-        </label>
-        <label className="check-control">
-          <input type="checkbox" checked={showHistory} onChange={(event) => setShowHistory(event.target.checked)} />
-          Show 60/90d sales
-        </label>
-        <label className="check-control">
-          <input type="checkbox" checked={showForecast} onChange={(event) => setShowForecast(event.target.checked)} />
-          Show LY 60/90d forecast
-        </label>
-      </div>
-      <WorkbenchGrid
-        rows={group.rows}
-        showForecast={showForecast}
-        showHistory={showHistory}
-        onSaveApproval={onSaveApproval}
-        onSaveOrderPath={onSaveOrderPath}
-        onSetWorkingQty={onSetWorkingQty}
-        onSaveWorkingQty={onSaveWorkingQty}
-      />
+        </>
+      ) : null}
     </details>
   );
 }

@@ -188,6 +188,7 @@ function SupplierLogisticsRow({
 
   const isNew = row.id.startsWith("new-");
   const isDirty = JSON.stringify(row) !== JSON.stringify(supplier);
+  const isActive = row.active ?? true;
   const rowClassName = [
     row.active === false ? "inactive-row" : "",
     isNew ? "draft-row" : "",
@@ -254,6 +255,16 @@ function SupplierLogisticsRow({
           <button className="button button-tiny" disabled={disabled || !row.name.trim() || (!isNew && !isDirty)} onClick={() => onSaveSupplier(row)}>
             {isNew ? "Add" : "Save"}
           </button>
+          {!isNew ? (
+            <button
+              className={isActive ? "ghost-button supplier-delete-button" : "ghost-button supplier-reset-button"}
+              disabled={disabled}
+              onClick={() => onSaveSupplier({ ...row, active: !isActive })}
+              type="button"
+            >
+              {isActive ? "Delete" : "Restore"}
+            </button>
+          ) : null}
           {isNew ? (
             <button className="ghost-button supplier-reset-button" disabled={disabled} onClick={() => onDiscardDraft(row.id)}>
               Cancel

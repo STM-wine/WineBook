@@ -122,7 +122,6 @@ export default async function HomePage() {
 
   return (
     <OrderDashboard
-      profile={profile}
       reportRun={latestRun}
       recommendations={recommendations || []}
       poDrafts={poDraftRows || []}

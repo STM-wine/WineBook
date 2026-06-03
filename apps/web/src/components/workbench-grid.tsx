@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
 import {
   AllCommunityModule,
@@ -43,6 +43,8 @@ type WorkbenchRow = Recommendation & {
   approved: boolean;
   estimated_cost: number;
 };
+
+type ManualEditState = Record<string, { qty?: boolean; weeks?: boolean }>;
 
 const integerFormatter = (params: ValueFormatterParams<WorkbenchRow, number>) => formatInteger(asNumber(params.value));
 const decimalFormatter = (params: ValueFormatterParams<WorkbenchRow, number>) => formatDecimal(asNumber(params.value));
@@ -124,6 +126,13 @@ export function WorkbenchGrid({
   onSetWorkingQty,
   onSaveWorkingQty
 }: WorkbenchGridProps) {
+  const [isMounted, setIsMounted] = useState(false);
+  const [manualEditedCells, setManualEditedCells] = useState<ManualEditState>({});
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const rowData = useMemo<WorkbenchRow[]>(
     () => {
       const sortedRankValues = Array.from(new Set(rows.map(rankBasis))).sort((a, b) => b - a);
@@ -209,7 +218,10 @@ export function WorkbenchGrid({
         editable: true,
         headerTooltip: "Formula: (True Available + On Order + New PO Qty) / Weekly Velocity. Editing this recalculates New PO Qty.",
         headerClass: "number-header",
-        cellClass: "editable-cell center-cell",
+        cellClass: (params: CellClassParams<WorkbenchRow>) =>
+          manualEditedCells[params.data?.id || ""]?.weeks
+            ? "editable-cell center-cell manual-edit-cell"
+            : "editable-cell center-cell",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
         valueParser: (params) => Math.max(0, Number(params.newValue) || 0),
@@ -224,7 +236,10 @@ export function WorkbenchGrid({
         editable: true,
         headerTooltip: "Suggested bottles needed to reach target coverage after available inventory and open orders.",
         headerClass: "number-header",
-        cellClass: "editable-cell center-cell",
+        cellClass: (params: CellClassParams<WorkbenchRow>) =>
+          manualEditedCells[params.data?.id || ""]?.qty
+            ? "editable-cell center-cell manual-edit-cell"
+            : "editable-cell center-cell",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
         valueParser: (params) => Math.max(0, Math.round(Number(params.newValue) || 0)),
@@ -375,7 +390,7 @@ export function WorkbenchGrid({
     ];
       return columns;
     },
-    [onSaveOrderPath, showForecast, showHistory]
+    [manualEditedCells, onSaveOrderPath, showForecast, showHistory]
   );
 
   const defaultColDef = useMemo<ColDef<WorkbenchRow>>(
@@ -394,6 +409,10 @@ export function WorkbenchGrid({
 
     if (event.colDef.field === "working_qty") {
       const qty = Math.max(0, Math.round(Number(event.newValue) || 0));
+      setManualEditedCells((current) => ({
+        ...current,
+        [row.id]: { ...current[row.id], qty: true }
+      }));
       onSetWorkingQty(row, qty);
       onSaveWorkingQty(row, qty);
       return;
@@ -401,6 +420,10 @@ export function WorkbenchGrid({
 
     if (event.colDef.field === "working_weeks") {
       const qty = qtyFromWeeks(row, Math.max(0, Number(event.newValue) || 0));
+      setManualEditedCells((current) => ({
+        ...current,
+        [row.id]: { ...current[row.id], weeks: true }
+      }));
       onSetWorkingQty(row, qty);
       onSaveWorkingQty(row, qty);
       return;
@@ -413,6 +436,14 @@ export function WorkbenchGrid({
 
   const totalRowHeight = rowData.reduce((sum, row) => sum + rowHeightForWineName(row.wine_display), 0);
   const gridHeight = Math.min(620, Math.max(240, 96 + totalRowHeight));
+
+  if (!isMounted) {
+    return (
+      <div className="workbench-grid ag-theme-quartz workbench-grid-loading" style={{ height: gridHeight }}>
+        Loading wines...
+      </div>
+    );
+  }
 
   return (
     <div className="workbench-grid ag-theme-quartz" style={{ height: gridHeight }}>

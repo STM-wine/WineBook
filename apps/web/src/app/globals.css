@@ -56,7 +56,7 @@ select {
   border-bottom: 1px solid var(--line);
   display: grid;
   gap: 24px;
-  grid-template-columns: minmax(390px, 0.9fr) minmax(520px, 1.4fr) minmax(360px, auto);
+  grid-template-columns: auto minmax(520px, 1fr) minmax(360px, auto);
   left: 0;
   padding: 16px 32px;
   position: fixed;
@@ -69,8 +69,15 @@ select {
 .brand {
   align-items: center;
   display: flex;
-  gap: 14px;
   min-width: 0;
+  text-decoration: none;
+}
+
+.brand-home-button {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
 }
 
 .brand-mark {
@@ -92,22 +99,6 @@ select {
   max-width: 100%;
   object-fit: contain;
   width: 100%;
-}
-
-.brand strong {
-  display: block;
-  font-family: "Nixie One", Inter, ui-sans-serif, system-ui, sans-serif;
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.brand span {
-  color: var(--muted);
-  display: block;
-  font-size: 12px;
-  margin-top: 2px;
 }
 
 .nav-tabs {
@@ -785,10 +776,38 @@ select {
   margin: 22px 0 10px;
 }
 
+.workbench-control-group {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
 .workbench-controls span {
   color: var(--muted);
   font-size: 14px;
   font-weight: 750;
+}
+
+.compact-select-control {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compact-select-control select {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  height: 40px;
+  min-width: 150px;
+  padding: 8px 10px;
 }
 
 .supplier-board-panel {
@@ -1040,6 +1059,19 @@ td {
   line-height: 1.2;
   padding: 11px 12px;
   width: 100%;
+}
+
+.po-export-all-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.disabled-link {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .po-draft-card {
@@ -1476,6 +1508,13 @@ td {
   padding: 8px 10px;
 }
 
+.supplier-delete-button {
+  border: 1px solid #e0b4aa;
+  border-radius: 8px;
+  color: #b54336;
+  padding: 8px 10px;
+}
+
 .empty-inline {
   background: var(--surface-soft);
   border: 1px solid var(--line);
@@ -1779,8 +1818,20 @@ td {
   width: 100%;
 }
 
+.workbench-grid-loading {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-weight: 800;
+  justify-content: center;
+}
+
 .workbench-grid .editable-cell {
   background: #fbfaf7;
+}
+
+.workbench-grid .manual-edit-cell {
+  background: #fff0a8;
 }
 
 .workbench-grid .approval-cell .ag-checkbox-input-wrapper {

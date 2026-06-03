@@ -3,6 +3,7 @@ import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types
 import { asNumber, formatCurrency, formatCurrencyCents, formatInteger } from "@/lib/order-data";
 import {
   poDraftOrderPath,
+  poDraftSupplierLabel,
   poLineCosts,
   poOrderPathLabel,
   poTimestamp,
@@ -34,7 +35,7 @@ function poCsvText(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle =
     const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidInPerBottle);
 
     return [
-      draft.supplier_name || "Unknown Supplier",
+      poDraftSupplierLabel(draft),
       line.product_name || "",
       line.product_code || "",
       qty,
@@ -50,13 +51,56 @@ function poCsvText(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle =
   return csv;
 }
 
+function allPoCsvText(drafts: PurchaseOrderDraftWithLines[], suppliers: Map<string, SupplierLogistics>): string {
+  const headers = [
+    "Supplier",
+    "Wine",
+    "Code",
+    "Quantity",
+    "FOB",
+    "Laid In Cost",
+    "Total Wine Cost",
+    "Total Laid In Cost",
+    "Estimated Cost"
+  ];
+  const rows = drafts.flatMap((draft) => {
+    const fallbackLaidInPerBottle = supplierLaidInForDraft(draft, suppliers);
+
+    return (draft.lines || []).map((line) => {
+      const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidInPerBottle);
+
+      return [
+        poDraftSupplierLabel(draft),
+        line.product_name || "",
+        line.product_code || "",
+        qty,
+        fob.toFixed(2),
+        laidIn.toFixed(4),
+        wineCost.toFixed(2),
+        laidInCost.toFixed(2),
+        estimatedCost.toFixed(2)
+      ];
+    });
+  });
+
+  return [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
+}
+
 function poCsvFilename(draft: PurchaseOrderDraftWithLines): string {
-  const supplier = (draft.supplier_name || "supplier")
+  const supplier = poDraftSupplierLabel(draft)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "");
   return `PO ${supplier || "supplier"} ${stamp}.csv`;
+}
+
+function poXlsxFilename(draft: PurchaseOrderDraftWithLines): string {
+  const supplier = poDraftSupplierLabel(draft)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  return `PO ${supplier || "supplier"} ${poTimestamp()}.xlsx`;
 }
 
 export function PoDraftsView({
@@ -119,6 +163,10 @@ export function PoDraftsView({
   const totalWineCost = filteredSummaries.reduce((sum, summary) => sum + summary.wineCost, 0);
   const totalLaidInCost = filteredSummaries.reduce((sum, summary) => sum + summary.laidInCost, 0);
   const totalEstimatedCost = filteredSummaries.reduce((sum, summary) => sum + (summary.estimatedCost || summary.wineCost + summary.laidInCost), 0);
+  const exportableDrafts = useMemo(
+    () => draftSummaries.map(({ draft }) => draft).filter((draft) => draft.status !== "cancelled"),
+    [draftSummaries]
+  );
 
   function downloadCsv(draft: PurchaseOrderDraftWithLines) {
     const blob = new Blob([poCsvText(draft, supplierLaidInForDraft(draft, supplierMetadata))], {
@@ -134,12 +182,39 @@ export function PoDraftsView({
     URL.revokeObjectURL(url);
   }
 
+  function downloadAllCsv() {
+    const blob = new Blob([allPoCsvText(exportableDrafts, supplierMetadata)], {
+      type: "text/csv;charset=utf-8"
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `POs ${poTimestamp()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="panel po-panel" id="po-drafts">
       <div className="section-heading">
         <div>
           <h1>PO Drafts</h1>
           <p>Drafts created from approved lines in the current report run.</p>
+        </div>
+        <div className="po-export-all-actions">
+          <a
+            className={exportableDrafts.length === 0 ? "button button-small disabled-link" : "button button-small"}
+            download={`POs ${poTimestamp()}.xlsx`}
+            href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}`}
+            aria-disabled={exportableDrafts.length === 0}
+          >
+            Export ALL PO XLSX
+          </a>
+          <button className="button button-small" disabled={exportableDrafts.length === 0} onClick={downloadAllCsv} type="button">
+            Export ALL PO CSV
+          </button>
         </div>
       </div>
       <div className="po-summary-grid">
@@ -212,17 +287,17 @@ export function PoDraftsView({
                 <DraftStatusActions draft={draft} disabled={isPending} onStatusChange={onStatusChange} />
                 <a
                   className="button button-tiny"
-                  download={`POs ${poTimestamp()}.xlsx`}
-                  href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}`}
+                  download={poXlsxFilename(draft)}
+                  href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}&draftId=${encodeURIComponent(draft.id)}`}
                 >
-                  Download XLSX
+                  Export XLSX
                 </a>
                 <button
                   className="button button-tiny"
                   onClick={() => downloadCsv(draft)}
                   type="button"
                 >
-                  Download CSV
+                  Export CSV
                 </button>
               </div>
               <SupplierDraftMetadata supplier={supplierMetadata.get((draft.supplier_name || "").trim().toLowerCase())} />
