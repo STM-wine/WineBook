@@ -3,15 +3,34 @@
 import { revalidatePath } from "next/cache";
 import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from "@/lib/di-planning";
 import { asNumber, formatInteger } from "@/lib/order-data";
+import {
+  APPROVAL_DECISIONS,
+  APPROVER_NAMES,
+  AVAILABILITY_STATUSES,
+  CONVERSION_STATUSES,
+  PLACEMENT_TYPES,
+  buildOrderingWorkflowPayload,
+  buildSupplierCatalogWine,
+  decisionToRequestStatus,
+  detectPriceChange,
+  type ApprovalDecision,
+  type AvailabilityStatus,
+  type ConversionStatus
+} from "@/lib/supplier-catalog";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import { createClient } from "@/lib/supabase/server";
-import type { Recommendation } from "@/lib/types";
+import type { Recommendation, SupplierCatalogWine, WineRequest } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 const VALID_STATUSES = new Set(["rejected", "approved", "edited", "deferred"]);
 const VALID_ORDER_PATHS = new Set(["stateside", "di"]);
 const ACTIVE_PO_STATUSES = ["draft", "ready_for_entry"];
 const VALID_PO_STATUSES = new Set(["draft", "ready_for_entry", "entered_in_quickbooks", "cancelled"]);
+const VALID_AVAILABILITY_STATUSES = new Set<string>(AVAILABILITY_STATUSES);
+const VALID_CONVERSION_STATUSES = new Set<string>(CONVERSION_STATUSES);
+const VALID_PLACEMENT_TYPES = new Set<string>(PLACEMENT_TYPES);
+const VALID_APPROVERS = new Set<string>(APPROVER_NAMES);
+const VALID_APPROVAL_DECISIONS = new Set<string>(APPROVAL_DECISIONS);
 
 function normalizeSupplier(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
@@ -370,6 +389,227 @@ export async function saveSupplierLogistics(input: {
     : supabase.from("suppliers").insert(payload);
 
   const { error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/");
+}
+
+export async function saveSupplierCatalogWine(input: {
+  supplierId?: string | null;
+  supplierName: string;
+  producer: string;
+  wineName: string;
+  vintage?: string;
+  packSize?: number;
+  bottleSize?: string;
+  fobBottle?: number | null;
+  fobCase?: number | null;
+  laidInPerBottle?: number | null;
+  frontlineOverride?: number | null;
+  bestPriceOverride?: number | null;
+  availabilityStatus?: string;
+  conversionStatus?: string;
+  priceChangeReason?: string;
+}) {
+  if (!input.producer.trim()) {
+    throw new Error("Producer is required.");
+  }
+  if (!input.wineName.trim()) {
+    throw new Error("Wine / fantasy name is required.");
+  }
+  if (Number(input.packSize || 12) < 1) {
+    throw new Error("Pack size must be at least 1.");
+  }
+  for (const [label, value] of [
+    ["Bottle FOB", input.fobBottle],
+    ["Case FOB", input.fobCase],
+    ["Laid-in per bottle", input.laidInPerBottle],
+    ["Frontline override", input.frontlineOverride],
+    ["Best price override", input.bestPriceOverride]
+  ] as const) {
+    if (value !== null && value !== undefined && Number(value) < 0) {
+      throw new Error(`${label} cannot be negative.`);
+    }
+  }
+
+  const availabilityStatus = input.availabilityStatus || "available";
+  const conversionStatus = input.conversionStatus || "net_new_product";
+  if (!VALID_AVAILABILITY_STATUSES.has(availabilityStatus)) {
+    throw new Error("Unsupported availability status.");
+  }
+  if (!VALID_CONVERSION_STATUSES.has(conversionStatus)) {
+    throw new Error("Unsupported conversion status.");
+  }
+
+  const { supabase } = await requireWriteAccess();
+  const payload = buildSupplierCatalogWine({
+    supplierId: input.supplierId || null,
+    supplierName: input.supplierName,
+    producer: input.producer,
+    wineName: input.wineName,
+    vintage: input.vintage || "NV",
+    packSize: input.packSize || 12,
+    bottleSize: input.bottleSize || "750ml",
+    fobBottle: input.fobBottle,
+    fobCase: input.fobCase,
+    laidInPerBottle: input.laidInPerBottle,
+    frontlineOverride: input.frontlineOverride,
+    bestPriceOverride: input.bestPriceOverride,
+    availabilityStatus: availabilityStatus as AvailabilityStatus,
+    conversionStatus: conversionStatus as ConversionStatus,
+    priceChangeReason: input.priceChangeReason
+  });
+
+  const { data: existing, error: existingError } = await supabase
+    .from("supplier_catalog_wines")
+    .select("*")
+    .eq("planning_sku", payload.planning_sku)
+    .maybeSingle<SupplierCatalogWine>();
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const now = new Date().toISOString();
+  const writePayload = {
+    ...payload,
+    quickbooks_item_id: existing?.quickbooks_item_id || null,
+    quickbooks_item_name: existing?.quickbooks_item_name || null,
+    quickbooks_sync_status: existing?.quickbooks_sync_status === "linked" ? "linked" : payload.quickbooks_sync_status,
+    product_lifecycle_status:
+      existing?.product_lifecycle_status === "active_product" ? "active_product" : payload.product_lifecycle_status,
+    updated_at: now
+  };
+
+  const savedQuery = existing
+    ? supabase.from("supplier_catalog_wines").update(writePayload).eq("id", existing.id).select("*").single<SupplierCatalogWine>()
+    : supabase.from("supplier_catalog_wines").insert(writePayload).select("*").single<SupplierCatalogWine>();
+  const { data: saved, error: saveError } = await savedQuery;
+
+  if (saveError || !saved) {
+    throw new Error(saveError?.message || "Could not save supplier wine.");
+  }
+
+  const event = detectPriceChange(existing || null, saved, input.priceChangeReason || "Manual catalog update");
+  if (event) {
+    const { error: eventError } = await supabase.from("price_change_events").insert(event);
+    if (eventError) {
+      throw new Error(eventError.message);
+    }
+  }
+
+  revalidatePath("/");
+  return {
+    mode: existing ? "updated" : "created",
+    displayName: saved.display_name,
+    planningSku: saved.planning_sku,
+    priceChangeCreated: Boolean(event)
+  };
+}
+
+export async function createSupplierWineRequest(input: {
+  sourceType: "net_new_wine" | "supplier_available_wine";
+  supplierCatalogWineId?: string | null;
+  supplierName: string;
+  wineDisplayName: string;
+  accountCustomer: string;
+  requestedQuantity: number;
+  neededByDate?: string | null;
+  placementType: string;
+  requesterName: string;
+  notes?: string;
+}) {
+  if (!input.accountCustomer.trim()) {
+    throw new Error("Account/customer is required.");
+  }
+  if (!input.wineDisplayName.trim()) {
+    throw new Error("Wine is required.");
+  }
+  if (!VALID_PLACEMENT_TYPES.has(input.placementType)) {
+    throw new Error("Select a valid placement type.");
+  }
+  if (input.placementType === "Other" && !input.notes?.trim()) {
+    throw new Error("Notes are required when placement is Other.");
+  }
+  const requestedQuantity = Math.max(0, Math.round(Number(input.requestedQuantity) || 0));
+  if (requestedQuantity <= 0) {
+    throw new Error("Requested quantity must be greater than zero.");
+  }
+
+  const { supabase } = await requireWriteAccess();
+  const requestId = `REQ-${crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+  const { error } = await supabase.from("wine_requests").insert({
+    request_id: requestId,
+    account_customer: input.accountCustomer.trim(),
+    requested_quantity: requestedQuantity,
+    needed_by_date: input.neededByDate || null,
+    placement_type: input.placementType,
+    source_type: input.sourceType,
+    supplier_catalog_wine_id: input.sourceType === "supplier_available_wine" ? input.supplierCatalogWineId || null : null,
+    wine_display_name: input.wineDisplayName.trim(),
+    supplier_name: input.supplierName.trim(),
+    requester_name: input.requesterName.trim(),
+    notes: input.notes?.trim() || null,
+    request_status: "pending_review",
+    fulfillment_status: "waiting_for_next_order",
+    ordering_workflow_payload: {}
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/");
+  return { requestId };
+}
+
+export async function updateSupplierWineRequestApproval(input: {
+  id: string;
+  approverName: string;
+  approvalDecision: string;
+}) {
+  if (!input.id) {
+    throw new Error("Missing request id.");
+  }
+  if (!VALID_APPROVERS.has(input.approverName)) {
+    throw new Error("Only Mark, Ryan, or John can approve Supplier Hub requests in the MVP.");
+  }
+  if (!VALID_APPROVAL_DECISIONS.has(input.approvalDecision)) {
+    throw new Error("Unsupported approval decision.");
+  }
+
+  const { supabase } = await requireWriteAccess();
+  const { data: request, error: requestError } = await supabase
+    .from("wine_requests")
+    .select("*")
+    .eq("id", input.id)
+    .single<WineRequest>();
+
+  if (requestError || !request) {
+    throw new Error(requestError?.message || "Request not found.");
+  }
+
+  const requestStatus = decisionToRequestStatus(input.approvalDecision as ApprovalDecision);
+  const fulfillmentStatus = requestStatus === "approved" ? "waiting_for_next_order" : request.fulfillment_status;
+  const orderingPayload =
+    requestStatus === "approved"
+      ? buildOrderingWorkflowPayload({ ...request, fulfillment_status: fulfillmentStatus })
+      : request.ordering_workflow_payload || {};
+
+  const { error } = await supabase
+    .from("wine_requests")
+    .update({
+      request_status: requestStatus,
+      fulfillment_status: fulfillmentStatus,
+      approval_decision: input.approvalDecision,
+      approver_name: input.approverName,
+      ordering_workflow_payload: orderingPayload,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", input.id);
+
   if (error) {
     throw new Error(error.message);
   }

@@ -3,16 +3,22 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  createSupplierWineRequest,
   deletePurchaseOrderLine,
+  saveSupplierCatalogWine,
   saveSupplierLogistics,
+  updateSupplierWineRequestApproval,
   updatePurchaseOrderDraftStatus,
   updateRecommendationOrderPath,
   updateRecommendationApprovals
 } from "@/app/actions";
 import type {
+  PriceChangeEvent,
   PurchaseOrderDraftWithLines,
   Recommendation,
   ReportRun,
+  SupplierCatalogWine,
+  WineRequest,
   SupplierLogistics
 } from "@/lib/types";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
@@ -41,9 +47,20 @@ type Props = {
   recommendations: Recommendation[];
   poDrafts: PurchaseOrderDraftWithLines[];
   suppliers: SupplierLogistics[];
+  supplierCatalogWines: SupplierCatalogWine[];
+  wineRequests: WineRequest[];
+  priceChangeEvents: PriceChangeEvent[];
 };
 
-export function OrderDashboard({ reportRun, recommendations, poDrafts, suppliers }: Props) {
+export function OrderDashboard({
+  reportRun,
+  recommendations,
+  poDrafts,
+  suppliers,
+  supplierCatalogWines,
+  wineRequests,
+  priceChangeEvents
+}: Props) {
   const router = useRouter();
   const [rows, setRows] = useState(recommendations);
   const [draftRows, setDraftRows] = useState(poDrafts);
@@ -372,6 +389,57 @@ export function OrderDashboard({ reportRun, recommendations, poDrafts, suppliers
     });
   }
 
+  function saveCatalogWine(input: Parameters<typeof saveSupplierCatalogWine>[0]) {
+    setPendingMessage("Saving supplier wine...");
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        const result = await saveSupplierCatalogWine(input);
+        const changeText = result.priceChangeCreated ? " Price-change draft created." : "";
+        setPendingMessage(
+          `${result.mode === "updated" ? "Updated" : "Created"} supplier wine: ${result.displayName}.${changeText}`
+        );
+        router.refresh();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not save supplier wine.");
+        setPendingMessage("");
+      }
+    });
+  }
+
+  function createWineRequest(input: Parameters<typeof createSupplierWineRequest>[0]) {
+    setPendingMessage("Saving wine request...");
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        const result = await createSupplierWineRequest(input);
+        setPendingMessage(`Request created: ${result.requestId}`);
+        router.refresh();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not save wine request.");
+        setPendingMessage("");
+      }
+    });
+  }
+
+  function updateWineRequestApproval(input: Parameters<typeof updateSupplierWineRequestApproval>[0]) {
+    setPendingMessage("Updating request approval...");
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        await updateSupplierWineRequestApproval(input);
+        setPendingMessage("Request approval updated");
+        router.refresh();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not update request approval.");
+        setPendingMessage("");
+      }
+    });
+  }
+
   return (
     <main className="app-shell">
       <AppTopbar
@@ -414,7 +482,17 @@ export function OrderDashboard({ reportRun, recommendations, poDrafts, suppliers
       ) : null}
 
       {activeView === "supplier-hub" ? (
-        <SupplierHubView suppliers={suppliers} isPending={isPending} onSaveSupplier={saveSupplier} />
+        <SupplierHubView
+          suppliers={suppliers}
+          supplierCatalogWines={supplierCatalogWines}
+          wineRequests={wineRequests}
+          priceChangeEvents={priceChangeEvents}
+          isPending={isPending}
+          onCreateWineRequest={createWineRequest}
+          onSaveCatalogWine={saveCatalogWine}
+          onSaveSupplier={saveSupplier}
+          onUpdateWineRequestApproval={updateWineRequestApproval}
+        />
       ) : null}
 
       {activeView === "supplier-board" ? <SupplierBoardView groups={allSupplierGroups} /> : null}

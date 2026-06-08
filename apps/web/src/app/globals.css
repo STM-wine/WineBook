@@ -41,7 +41,8 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -1152,7 +1153,7 @@ td {
 .supplier-hub-summary {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
   margin-bottom: 18px;
 }
 
@@ -1222,6 +1223,200 @@ td {
   font-weight: 850;
   padding: 12px 0;
   white-space: nowrap;
+}
+
+.supplier-hub-tabs {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.supplier-hub-tabs button {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 850;
+  padding: 10px 8px;
+  white-space: nowrap;
+}
+
+.supplier-hub-tabs button.active {
+  border-color: var(--red);
+  color: var(--ink);
+}
+
+.supplier-hub-workspace {
+  display: grid;
+  gap: 18px;
+}
+
+.supplier-form-grid,
+.request-form-grid {
+  align-items: end;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+}
+
+.supplier-form-grid label,
+.request-form-grid label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 7px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.supplier-form-grid input,
+.supplier-form-grid select,
+.request-form-grid input,
+.request-form-grid select,
+.request-form-grid textarea {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  line-height: 1.2;
+  min-height: 46px;
+  padding: 11px 12px;
+  text-transform: none;
+  width: 100%;
+}
+
+.request-form-grid textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.wide-field {
+  grid-column: span 2;
+}
+
+.catalog-preview-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+}
+
+.catalog-preview-grid div {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.catalog-preview-grid span {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  margin-bottom: 7px;
+  text-transform: uppercase;
+}
+
+.catalog-preview-grid strong {
+  color: var(--ink);
+  display: block;
+  font-size: 18px;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.inline-warning,
+.inline-info {
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 750;
+  padding: 12px 14px;
+}
+
+.inline-warning {
+  background: #fde8e5;
+  border: 1px solid #f5c7c1;
+  color: #8f2c26;
+}
+
+.inline-info {
+  background: #eef5ed;
+  border: 1px solid #bfd4bb;
+  color: var(--green);
+}
+
+.form-actions {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.catalog-table-shell table,
+.request-table-shell table,
+.pending-table-shell table,
+.price-change-table-shell table {
+  min-width: 1180px;
+}
+
+.catalog-table-shell td:first-child,
+.request-table-shell td:nth-child(1),
+.request-table-shell td:nth-child(2),
+.pending-table-shell td:first-child,
+.price-change-table-shell td:first-child {
+  min-width: 280px;
+  text-align: left;
+  white-space: normal;
+}
+
+.catalog-table-shell td:first-child strong,
+.catalog-table-shell td:first-child span,
+.request-table-shell td strong,
+.request-table-shell td span,
+.pending-table-shell td:first-child strong,
+.pending-table-shell td:first-child span,
+.price-change-table-shell td:first-child strong,
+.price-change-table-shell td:first-child span {
+  display: block;
+}
+
+.catalog-table-shell td:first-child span,
+.request-table-shell td span,
+.pending-table-shell td:first-child span,
+.price-change-table-shell td:first-child span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.approval-controls {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(180px, 1.3fr) auto;
+  min-width: 390px;
+}
+
+.approval-controls select {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  min-height: 36px;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.logistics-summary {
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
 }
 
 .freight-panel {
@@ -2014,8 +2209,15 @@ tr.has-recommendation .sticky-name {
   .supplier-board-controls,
   .supplier-hub-summary,
   .supplier-hub-toolbar,
+  .supplier-form-grid,
+  .request-form-grid,
+  .catalog-preview-grid,
   .grw-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .wide-field {
+    grid-column: span 1;
   }
 
   .grw-payment-list div {

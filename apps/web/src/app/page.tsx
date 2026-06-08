@@ -4,9 +4,12 @@ import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defa
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import type {
   AppProfile,
+  PriceChangeEvent,
   PurchaseOrderDraftWithLines,
   Recommendation,
   ReportRun,
+  SupplierCatalogWine,
+  WineRequest,
   SupplierLogistics
 } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
@@ -42,13 +45,39 @@ export default async function HomePage() {
     );
   }
 
-  const { data: reportRuns } = await supabase
+  const reportRunsPromise = supabase
     .from("report_runs")
     .select("id,report_date,completed_at,diagnostics")
     .eq("status", "completed")
     .order("completed_at", { ascending: false })
     .limit(10)
     .returns<ReportRun[]>();
+
+  const supplierCatalogPromise = supabase
+    .from("supplier_catalog_wines")
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .returns<SupplierCatalogWine[]>();
+
+  const wineRequestsPromise = supabase
+    .from("wine_requests")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .returns<WineRequest[]>();
+
+  const priceChangeEventsPromise = supabase
+    .from("price_change_events")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(100)
+    .returns<PriceChangeEvent[]>();
+
+  const [
+    { data: reportRuns },
+    { data: supplierCatalogWines },
+    { data: wineRequests },
+    { data: priceChangeEvents }
+  ] = await Promise.all([reportRunsPromise, supplierCatalogPromise, wineRequestsPromise, priceChangeEventsPromise]);
 
   const latestRun = reportRuns?.[0] || null;
 
@@ -126,6 +155,9 @@ export default async function HomePage() {
       recommendations={recommendations || []}
       poDrafts={poDraftRows || []}
       suppliers={mergedSuppliers}
+      supplierCatalogWines={supplierCatalogWines || []}
+      wineRequests={wineRequests || []}
+      priceChangeEvents={priceChangeEvents || []}
     />
   );
 }

@@ -76,6 +76,81 @@ export type SupplierLogistics = {
   active: boolean | null;
 };
 
+export type SupplierCatalogWine = {
+  id: string;
+  supplier_id: string | null;
+  supplier_name: string;
+  producer: string;
+  wine_name: string;
+  vintage: string;
+  pack_size: number | string;
+  bottle_size: string;
+  pricing_basis: string;
+  fob_bottle: number | string;
+  fob_case: number | string;
+  laid_in_per_bottle: number | string;
+  landed_bottle_cost: number | string;
+  frontline_bottle_price: number | string;
+  best_price: number | string | null;
+  gross_profit_margin: number | string;
+  availability_status: string;
+  conversion_status: string;
+  display_name: string;
+  planning_sku: string;
+  planning_sku_without_vintage: string;
+  diagnostics: Record<string, unknown> | null;
+  quickbooks_item_id: string | null;
+  quickbooks_item_name: string | null;
+  quickbooks_sync_status: string;
+  product_lifecycle_status: string;
+  accounting_create_payload: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WineRequest = {
+  id: string;
+  request_id: string;
+  account_customer: string;
+  requested_quantity: number | string;
+  needed_by_date: string | null;
+  placement_type: string;
+  source_type: string;
+  supplier_catalog_wine_id: string | null;
+  wine_display_name: string;
+  supplier_name: string;
+  requester_name: string;
+  notes: string | null;
+  request_status: string;
+  fulfillment_status: string;
+  approval_decision: string | null;
+  approver_name: string | null;
+  ordering_workflow_payload: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PriceChangeEvent = {
+  id: string;
+  supplier_catalog_wine_id: string | null;
+  supplier: string;
+  wine: string;
+  vintage: string;
+  old_fob: number | string | null;
+  new_fob: number | string | null;
+  old_frontline: number | string | null;
+  new_frontline: number | string | null;
+  old_best_price: number | string | null;
+  new_best_price: number | string | null;
+  margin_before: number | string | null;
+  margin_after: number | string | null;
+  effective_date: string | null;
+  reason: string | null;
+  status: string;
+  fob_increase: boolean;
+  created_at: string;
+};
+
 export type DashboardMetrics = {
   urgent: number;
   low: number;
