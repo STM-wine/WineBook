@@ -284,7 +284,8 @@ Render deployment notes:
 - Render service URL: `https://winebook.onrender.com`.
 - `render.yaml` defines the web service with root directory `apps/web`.
 - The web app requires Node 20+.
-- Production env vars are `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+- Production env vars are `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `GITHUB_WORKFLOW_DISPATCH_TOKEN`.
+- Optional workflow override env vars are `GITHUB_WORKFLOW_REPO`, `GITHUB_WORKFLOW_REF`, and `VINOSMITH_INGEST_WORKFLOW_ID`.
 - The PO XLSX template is copied into `apps/web/templates/` so the export route works when Render deploys only the web app directory.
 
 Supabase Auth redirects currently required:

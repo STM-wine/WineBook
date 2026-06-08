@@ -22,6 +22,7 @@ Required environment variables:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_SITE_URL`
+- `GITHUB_WORKFLOW_DISPATCH_TOKEN` with Actions write access for the ingest workflow dispatch
 
 Never put `SUPABASE_SERVICE_ROLE_KEY` in this app. Service-role access belongs only in trusted
 Python workers, migrations, and server-side maintenance scripts.
@@ -64,6 +65,10 @@ Production environment variables:
 - `NEXT_PUBLIC_SITE_URL=https://stmhq.com`
 - `NEXT_PUBLIC_SUPABASE_URL=https://hpnvlxvnzpojpfepcerl.supabase.co`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY=<Supabase anon key>`
+- `GITHUB_WORKFLOW_DISPATCH_TOKEN=<GitHub fine-grained token with Actions write access>`
+- `GITHUB_WORKFLOW_REPO=STM-wine/WineBook`
+- `GITHUB_WORKFLOW_REF=main`
+- `VINOSMITH_INGEST_WORKFLOW_ID=daily-vinosmith-ingest.yml`
 
 Required Supabase Auth redirect URLs:
 

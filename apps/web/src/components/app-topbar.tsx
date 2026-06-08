@@ -8,9 +8,11 @@ import { SignOutButton } from "./sign-out-button";
 type AppTopbarProps = {
   activeModule?: "grw-converter";
   activeView?: ActiveView;
-  dataDate?: string;
+  dataLabel?: string;
+  dataTitle?: string;
   isPending?: boolean;
   onCreateDrafts?: () => void;
+  onRefreshReports?: () => void;
   onSelectView?: (view: ActiveView) => void;
 };
 
@@ -21,9 +23,11 @@ function viewHref(view: ActiveView) {
 export function AppTopbar({
   activeModule,
   activeView,
-  dataDate,
+  dataLabel,
+  dataTitle,
   isPending,
   onCreateDrafts,
+  onRefreshReports,
   onSelectView
 }: AppTopbarProps) {
   const brandContent = (
@@ -76,9 +80,18 @@ export function AppTopbar({
         </div>
       </nav>
       <div className="topbar-actions">
-        {dataDate ? <span className="data-pill">Data Date {dataDate}</span> : null}
+        {dataLabel ? (
+          <span className="data-pill" title={dataTitle}>
+            {dataLabel}
+          </span>
+        ) : null}
+        {onRefreshReports ? (
+          <button className="button button-small button-outline" onClick={onRefreshReports} disabled={isPending} type="button">
+            Refresh Reports
+          </button>
+        ) : null}
         {onCreateDrafts ? (
-          <button className="button button-small" onClick={onCreateDrafts} disabled={isPending}>
+          <button className="button button-small" onClick={onCreateDrafts} disabled={isPending} type="button">
             Create PO Drafts
           </button>
         ) : null}

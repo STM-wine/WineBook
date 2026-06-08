@@ -7,7 +7,7 @@ mailbox and Supabase environment variables are present.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
@@ -80,6 +80,19 @@ def score_filename(filename: str, keywords: list[str]) -> int:
     return sum(1 for keyword in keywords if keyword.lower() in haystack)
 
 
+def candidate_message_timestamp(candidate: AttachmentCandidate) -> float:
+    if candidate.message_date is None:
+        return 0
+    message_date = candidate.message_date
+    if message_date.tzinfo is None:
+        message_date = message_date.replace(tzinfo=timezone.utc)
+    return message_date.timestamp()
+
+
+def attachment_rank(candidate: AttachmentCandidate, keywords: list[str]) -> tuple[int, float]:
+    return (score_filename(candidate.filename, keywords), candidate_message_timestamp(candidate))
+
+
 def classify_attachments(
     attachments: list[AttachmentCandidate],
     rb6_keywords: list[str] | None = None,
@@ -96,8 +109,8 @@ def classify_attachments(
     if not spreadsheet_attachments:
         raise RuntimeError("No spreadsheet attachments found in matching Vinosmith emails.")
 
-    rb6 = max(spreadsheet_attachments, key=lambda item: score_filename(item.filename, rb6_keywords))
-    rads = max(spreadsheet_attachments, key=lambda item: score_filename(item.filename, rads_keywords))
+    rb6 = max(spreadsheet_attachments, key=lambda item: attachment_rank(item, rb6_keywords))
+    rads = max(spreadsheet_attachments, key=lambda item: attachment_rank(item, rads_keywords))
 
     if score_filename(rb6.filename, rb6_keywords) == 0:
         raise RuntimeError(

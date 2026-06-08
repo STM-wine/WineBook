@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   createSupplierWineRequest,
   deletePurchaseOrderLine,
+  refreshVinosmithReports,
   saveSupplierCatalogWine,
   saveSupplierLogistics,
   updateSupplierWineRequestApproval,
@@ -51,6 +52,19 @@ type Props = {
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
 };
+
+function formatReportUpdatedAt(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Denver",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
 
 export function OrderDashboard({
   reportRun,
@@ -129,7 +143,11 @@ export function OrderDashboard({
     [supplierSort, visibleRecommendations]
   );
   const allSupplierGroups = useMemo(() => buildSupplierGroups(displayRows), [displayRows]);
-  const dataDate = reportRun.report_date || "Latest run";
+  const dataUpdatedAt = formatReportUpdatedAt(reportRun.completed_at);
+  const dataLabel = dataUpdatedAt ? `Data Updated ${dataUpdatedAt}` : `Data Date ${reportRun.report_date || "Latest run"}`;
+  const dataTitle = reportRun.report_date
+    ? `Report date ${reportRun.report_date}${dataUpdatedAt ? `, completed ${dataUpdatedAt}` : ""}`
+    : undefined;
 
   function selectView(view: ActiveView) {
     setActiveView(view);
@@ -320,6 +338,24 @@ export function OrderDashboard({
     });
   }
 
+  function refreshReports() {
+    setPendingMessage("Queueing Vinosmith report refresh...");
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        await flushApprovalQueue();
+        const result = await refreshVinosmithReports();
+        setPendingMessage(
+          `Refresh queued for ${result.reportDate}. New report emails will be ingested as soon as GitHub Actions runs.`
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not queue Vinosmith report refresh.");
+        setPendingMessage("");
+      }
+    });
+  }
+
   function changeDraftStatus(draftId: string, status: string) {
     setPendingMessage("Updating PO draft...");
     setErrorMessage("");
@@ -444,9 +480,11 @@ export function OrderDashboard({
     <main className="app-shell">
       <AppTopbar
         activeView={activeView}
-        dataDate={dataDate}
+        dataLabel={dataLabel}
+        dataTitle={dataTitle}
         isPending={isPending}
         onCreateDrafts={createDrafts}
+        onRefreshReports={refreshReports}
         onSelectView={selectView}
       />
 

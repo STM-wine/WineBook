@@ -31,6 +31,10 @@ const VALID_CONVERSION_STATUSES = new Set<string>(CONVERSION_STATUSES);
 const VALID_PLACEMENT_TYPES = new Set<string>(PLACEMENT_TYPES);
 const VALID_APPROVERS = new Set<string>(APPROVER_NAMES);
 const VALID_APPROVAL_DECISIONS = new Set<string>(APPROVAL_DECISIONS);
+const DEFAULT_GITHUB_WORKFLOW_REPO = "STM-wine/WineBook";
+const DEFAULT_GITHUB_WORKFLOW_REF = "main";
+const DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID = "daily-vinosmith-ingest.yml";
+const REPORT_TIMEZONE = "America/Denver";
 
 function normalizeSupplier(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
@@ -46,6 +50,17 @@ function draftGroupKey(supplier: string, path: "stateside" | "di") {
 
 function orderPathLabel(path: "stateside" | "di") {
   return path === "di" ? "Direct Import" : "Stateside";
+}
+
+function reportDateForTimezone(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: REPORT_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(value);
+  const partMap = new Map(parts.map((part) => [part.type, part.value]));
+  return `${partMap.get("year")}-${partMap.get("month")}-${partMap.get("day")}`;
 }
 
 async function requireWriteAccess() {
@@ -69,6 +84,48 @@ async function requireWriteAccess() {
   }
 
   return { supabase, user };
+}
+
+export async function refreshVinosmithReports() {
+  const { user } = await requireWriteAccess();
+  const token = process.env.GITHUB_WORKFLOW_DISPATCH_TOKEN;
+  const repo = process.env.GITHUB_WORKFLOW_REPO || DEFAULT_GITHUB_WORKFLOW_REPO;
+  const ref = process.env.GITHUB_WORKFLOW_REF || DEFAULT_GITHUB_WORKFLOW_REF;
+  const workflowId = process.env.VINOSMITH_INGEST_WORKFLOW_ID || DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID;
+  const reportDate = reportDateForTimezone();
+
+  if (!token) {
+    throw new Error("Missing GITHUB_WORKFLOW_DISPATCH_TOKEN in the web app environment.");
+  }
+
+  const response = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflowId}/dispatches`, {
+    method: "POST",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    body: JSON.stringify({
+      ref,
+      inputs: {
+        report_date: reportDate,
+        force: "true"
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`GitHub workflow dispatch failed (${response.status}): ${body || response.statusText}`);
+  }
+
+  console.info(`Vinosmith refresh requested by ${user.email || user.id} for ${reportDate}.`);
+
+  return {
+    reportDate,
+    workflowUrl: `https://github.com/${repo}/actions/workflows/${workflowId}`
+  };
 }
 
 export async function updateRecommendationApproval(input: {

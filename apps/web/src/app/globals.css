@@ -57,7 +57,7 @@ textarea {
   border-bottom: 1px solid var(--line);
   display: grid;
   gap: 24px;
-  grid-template-columns: auto minmax(520px, 1fr) minmax(360px, auto);
+  grid-template-columns: auto max-content minmax(0, 1fr);
   left: 0;
   padding: 16px 32px;
   position: fixed;
@@ -256,6 +256,7 @@ textarea {
   letter-spacing: 0.08em;
   padding: 9px 14px;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .order-path-chip {
@@ -292,9 +293,45 @@ textarea {
   box-shadow: 0 14px 30px rgba(89, 113, 90, 0.24);
 }
 
+.button-outline {
+  background: #f7f3ec;
+  border: 1px solid var(--line);
+  box-shadow: none;
+  color: var(--ink);
+}
+
 .button-small {
   min-width: 170px;
   padding: 13px 18px;
+}
+
+.topbar-actions .button {
+  white-space: nowrap;
+}
+
+.topbar-actions .button-small {
+  min-width: 150px;
+}
+
+@media (max-width: 1400px) and (min-width: 1101px) {
+  .app-shell {
+    padding-top: 158px;
+  }
+
+  .topbar {
+    grid-template-columns: auto 1fr;
+    row-gap: 14px;
+  }
+
+  .nav-tabs {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .topbar-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
 
 .button-tiny {
@@ -2253,7 +2290,7 @@ tr.has-recommendation .sticky-name {
 
 @media (max-width: 1100px) {
   .app-shell {
-    padding-top: 248px;
+    padding-top: 492px;
   }
 
   .topbar {

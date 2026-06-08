@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from tempfile import TemporaryDirectory
 from io import BytesIO
 
@@ -1243,6 +1244,22 @@ class DailyEmailIngestTests(unittest.TestCase):
 
         self.assertEqual(rb6.filename, "inventory_velocity.xlsx")
         self.assertEqual(rads.filename, "vinosmith_rads.xlsx")
+
+    def test_classify_attachments_prefers_newest_same_day_report_on_keyword_tie(self):
+        morning = datetime(2026, 6, 8, 8, 15, tzinfo=timezone.utc)
+        afternoon = datetime(2026, 6, 8, 20, 45, tzinfo=timezone.utc)
+
+        rb6, rads = classify_attachments(
+            [
+                AttachmentCandidate("inventory_velocity.xlsx", b"morning-rb6", None, "m1", morning),
+                AttachmentCandidate("vinosmith_rads.xlsx", b"morning-rads", None, "m2", morning),
+                AttachmentCandidate("inventory_velocity.xlsx", b"afternoon-rb6", None, "m3", afternoon),
+                AttachmentCandidate("vinosmith_rads.xlsx", b"afternoon-rads", None, "m4", afternoon),
+            ]
+        )
+
+        self.assertEqual(rb6.message_id, "m3")
+        self.assertEqual(rads.message_id, "m4")
 
     def test_storage_path_sanitizes_filename(self):
         self.assertEqual(safe_filename("../Inventory:Velocity.xlsx"), "Inventory_Velocity.xlsx")
