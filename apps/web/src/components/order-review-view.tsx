@@ -189,7 +189,14 @@ function SummaryTable({ groups }: { groups: SupplierGroup[] }) {
                 <td>{formatInteger(group.recommendedBottles)}</td>
                 <td>{formatCurrency(group.suggestedValue)}</td>
                 <td>{formatInteger(group.approvedBottles)}</td>
-                <td>{formatCurrency(group.approvedValue)}</td>
+                <td>
+                  <strong className={group.approvedValue > 0 ? "approved-value-strong" : undefined}>
+                    {formatCurrency(group.approvedValue)}
+                  </strong>
+                  <span className="value-comparison">
+                    {approvedValueComparison(group.approvedValue, group.suggestedValue)}
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -226,6 +233,7 @@ function SupplierSection({
   const tdmNames = Array.from(new Set(group.rows.map((row) => row.brand_manager?.trim() || "").filter(Boolean)));
   const tdmLabel = tdmNames.length === 0 ? "Unassigned" : tdmNames.length === 1 ? tdmNames[0] : "Multiple";
   const hasApprovedOrders = group.approvedBottles > 0;
+  const approvedPercent = group.suggestedValue > 0 ? Math.round((group.approvedValue / group.suggestedValue) * 100) : 0;
 
   useEffect(() => {
     setIsOpen(expandAll);
@@ -239,6 +247,9 @@ function SupplierSection({
           <span className="supplier-chip supplier-chip-muted">{tdmLabel}</span>
           <strong>{formatInteger(group.recommendedBottles)} bottles</strong>
           <span>{formatCurrency(group.suggestedValue)} suggested</span>
+          <span className={hasApprovedOrders ? "supplier-approved-value" : "supplier-approved-value is-empty"}>
+            {formatCurrency(group.approvedValue)} approved
+          </span>
         </div>
         <div className="supplier-summary-actions">
           <button
@@ -263,7 +274,13 @@ function SupplierSection({
             <MetricCard label="Urgent" value={formatInteger(group.urgentCount)} detail="Need review" tone="red" />
             <MetricCard label="Suggested" value={formatInteger(group.recommendedBottles)} detail="Bottles" tone="green" />
             <MetricCard label="Approved" value={formatInteger(group.approvedBottles)} detail="Bottles" tone="blue" />
-            <MetricCard label="Value" value={formatCurrency(group.suggestedValue)} detail="Suggested order" tone="gold" />
+            <MetricCard label="Suggested Value" value={formatCurrency(group.suggestedValue)} detail="Full recommended order" tone="gold" />
+            <MetricCard
+              label="Approved Value"
+              value={formatCurrency(group.approvedValue)}
+              detail={hasApprovedOrders ? `${formatInteger(approvedPercent)}% of suggested` : "No approved lines yet"}
+              tone="plum"
+            />
           </div>
           <div className="supplier-workbench-options">
             <label className="target-weeks-control">
@@ -299,4 +316,10 @@ function SupplierSection({
       ) : null}
     </details>
   );
+}
+
+function approvedValueComparison(approvedValue: number, suggestedValue: number) {
+  if (suggestedValue <= 0) return "No suggested value";
+  if (approvedValue <= 0) return "No approved value";
+  return `${formatInteger(Math.round((approvedValue / suggestedValue) * 100))}% of suggested`;
 }

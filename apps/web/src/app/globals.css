@@ -190,6 +190,61 @@ textarea {
   justify-content: flex-end;
 }
 
+.account-menu {
+  position: relative;
+}
+
+.account-menu-trigger {
+  white-space: nowrap;
+}
+
+.account-menu-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 12px;
+  min-width: 320px;
+  padding: 16px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 35;
+}
+
+.account-menu-panel h2 {
+  font-size: 18px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.account-password-form {
+  display: grid;
+  gap: 12px;
+}
+
+.account-password-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 7px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.account-password-form input {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  min-height: 42px;
+  padding: 10px 12px;
+  text-transform: none;
+  width: 100%;
+}
+
 .data-pill,
 .supplier-chip {
   background: var(--surface-soft);
@@ -1754,6 +1809,15 @@ td {
   font-weight: 700;
 }
 
+.supplier-approved-value {
+  color: var(--plum);
+  font-weight: 850;
+}
+
+.supplier-approved-value.is-empty {
+  color: var(--muted);
+}
+
 .summary-table-actions {
   align-items: center;
   color: var(--muted);
@@ -1770,6 +1834,18 @@ td {
   gap: 8px;
 }
 
+.approved-value-strong {
+  color: var(--plum);
+}
+
+.value-comparison {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 750;
+  margin-top: 4px;
+}
+
 .workbench-control-buttons {
   display: flex;
   gap: 8px;
@@ -1781,7 +1857,7 @@ td {
 }
 
 .supplier-metrics {
-  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
   margin: 22px 0;
 }
 
@@ -2170,6 +2246,11 @@ tr.has-recommendation .sticky-name {
   padding: 12px;
 }
 
+.form-message-success {
+  background: #e8f1e7;
+  color: var(--green);
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     padding-top: 248px;
@@ -2180,8 +2261,14 @@ tr.has-recommendation .sticky-name {
   }
 
   .topbar-actions {
+    flex-wrap: wrap;
     justify-content: flex-start;
-    overflow-x: auto;
+    overflow: visible;
+  }
+
+  .account-menu-panel {
+    left: 0;
+    right: auto;
   }
 
   .nav-tabs {

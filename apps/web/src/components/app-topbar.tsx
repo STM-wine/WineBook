@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AccountMenu } from "./account-menu";
 import { ActiveView, NAV_VIEW_LABELS } from "./dashboard-types";
 import { SignOutButton } from "./sign-out-button";
 
@@ -81,6 +82,7 @@ export function AppTopbar({
             Create PO Drafts
           </button>
         ) : null}
+        <AccountMenu />
         <SignOutButton />
       </div>
     </header>
