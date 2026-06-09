@@ -346,6 +346,11 @@ export function OrderDashboard({
       try {
         await flushApprovalQueue();
         const result = await refreshVinosmithReports();
+        if (!result.ok) {
+          setErrorMessage(result.error);
+          setPendingMessage("");
+          return;
+        }
         setPendingMessage(
           `Refresh queued for ${result.reportDate}. New report emails will be ingested as soon as GitHub Actions runs.`
         );

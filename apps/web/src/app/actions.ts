@@ -36,6 +36,17 @@ const DEFAULT_GITHUB_WORKFLOW_REF = "main";
 const DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID = "daily-vinosmith-ingest.yml";
 const REPORT_TIMEZONE = "America/Denver";
 
+type RefreshVinosmithReportsResult =
+  | {
+      ok: true;
+      reportDate: string;
+      workflowUrl: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 function normalizeSupplier(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
 }
@@ -86,46 +97,69 @@ async function requireWriteAccess() {
   return { supabase, user };
 }
 
-export async function refreshVinosmithReports() {
-  const { user } = await requireWriteAccess();
-  const token = process.env.GITHUB_WORKFLOW_DISPATCH_TOKEN;
-  const repo = process.env.GITHUB_WORKFLOW_REPO || DEFAULT_GITHUB_WORKFLOW_REPO;
-  const ref = process.env.GITHUB_WORKFLOW_REF || DEFAULT_GITHUB_WORKFLOW_REF;
-  const workflowId = process.env.VINOSMITH_INGEST_WORKFLOW_ID || DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID;
-  const reportDate = reportDateForTimezone();
+export async function refreshVinosmithReports(): Promise<RefreshVinosmithReportsResult> {
+  try {
+    const { user } = await requireWriteAccess();
+    const token = process.env.GITHUB_WORKFLOW_DISPATCH_TOKEN;
+    const repo = process.env.GITHUB_WORKFLOW_REPO || DEFAULT_GITHUB_WORKFLOW_REPO;
+    const ref = process.env.GITHUB_WORKFLOW_REF || DEFAULT_GITHUB_WORKFLOW_REF;
+    const workflowId = process.env.VINOSMITH_INGEST_WORKFLOW_ID || DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID;
+    const reportDate = reportDateForTimezone();
 
-  if (!token) {
-    throw new Error("Missing GITHUB_WORKFLOW_DISPATCH_TOKEN in the web app environment.");
+    if (!token) {
+      return {
+        ok: false,
+        error: "Report refresh is not configured yet. Add GITHUB_WORKFLOW_DISPATCH_TOKEN in Render, then redeploy."
+      };
+    }
+
+    const response = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflowId}/dispatches`, {
+      method: "POST",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28"
+      },
+      body: JSON.stringify({
+        ref,
+        inputs: {
+          report_date: reportDate,
+          force: "true"
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.error("GitHub workflow dispatch failed.", {
+        status: response.status,
+        statusText: response.statusText,
+        body
+      });
+      return {
+        ok: false,
+        error:
+          response.status === 401 || response.status === 403
+            ? "GitHub rejected the refresh request. Check that GITHUB_WORKFLOW_DISPATCH_TOKEN has Actions write access."
+            : `GitHub could not queue the refresh request (${response.status}). Check the workflow configuration.`
+      };
+    }
+
+    console.info(`Vinosmith refresh requested by ${user.email || user.id} for ${reportDate}.`);
+
+    return {
+      ok: true,
+      reportDate,
+      workflowUrl: `https://github.com/${repo}/actions/workflows/${workflowId}`
+    };
+  } catch (error) {
+    console.error("Vinosmith refresh request failed.", error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not queue Vinosmith report refresh."
+    };
   }
-
-  const response = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflowId}/dispatches`, {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28"
-    },
-    body: JSON.stringify({
-      ref,
-      inputs: {
-        report_date: reportDate,
-        force: "true"
-      }
-    })
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`GitHub workflow dispatch failed (${response.status}): ${body || response.statusText}`);
-  }
-
-  console.info(`Vinosmith refresh requested by ${user.email || user.id} for ${reportDate}.`);
-
-  return {
-    reportDate,
-    workflowUrl: `https://github.com/${repo}/actions/workflows/${workflowId}`
-  };
 }
 
 export async function updateRecommendationApproval(input: {
