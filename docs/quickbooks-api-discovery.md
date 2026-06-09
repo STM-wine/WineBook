@@ -29,130 +29,109 @@ The repository has no live QuickBooks Desktop integration:
 These are useful integration boundaries, but they do not prove what the actual
 Desktop company file contains or which Desktop edition/features are available.
 
+## Confirmed local environment
+
+Confirmed on the remote desktop:
+
+- QuickBooks is **QuickBooks Accountant Desktop Plus 2024, Release R20P, 64-bit**.
+- QuickBooks Web Connector is installed and working.
+- Multiple QBWC applications are already listed, including Vinosmith and Melio.
+- **Add Application** is available and opens a `.qwc` file picker.
+- Integrated Applications are allowed; **Don't allow any applications to access
+  this company file** is unchecked.
+- Vinosmith-related integrated applications show a valid status.
+- Vinosmith's properties permit it to read and modify the company file, access
+  QuickBooks while QuickBooks is not running, and sign in as Admin.
+- Melio auto-runs every one minute.
+- Vinosmith is manual and is not configured to auto-run.
+- Purchase Orders are enabled and actively used.
+- Inventory is enabled.
+
+This environment is ready for a separate Stem Intelligence QBWC proof of concept.
+The POC still requires its own application identity, authorization, service-side
+read-only safeguards, and a controlled manual test.
+
 ## QuickBooks Desktop integration path
 
-### QuickBooks Web Connector
+The recommended path is **QuickBooks Web Connector (QBWC)** using **qbXML**.
+QBWC runs in the same Windows environment as QuickBooks Desktop and initiates
+outbound calls to a Stem-controlled HTTPS web service. The service returns qbXML
+requests, QuickBooks processes them against the authorized local company file, and
+QBWC sends the qbXML responses back to the service.
 
-The recommended integration path is **QuickBooks Web Connector (QBWC)**. QBWC is a
-Windows application installed on the same machine as QuickBooks Desktop, or in the
-same local environment. It acts as a bridge between the local QuickBooks company
-file and a remote web service.
+QuickBooks Online is not part of this plan. QBO OAuth, `realmId`, REST endpoints,
+online access/refresh tokens, and a QBO sandbox are not applicable to Stem's
+QuickBooks Desktop environment.
 
-QBWC initiates communication outbound. Our service does not directly connect into
-the remote desktop or open inbound firewall access to QuickBooks.
+### Connector isolation
 
-### Existing Vinosmith connector
+The existing Vinosmith and Melio connectors are production infrastructure and must
+not be modified, removed, reused, disabled, repointed, or reconfigured. Their
+presence confirms that the environment supports QBWC, multiple applications, and
+integrated-app authorization.
 
-QBWC is already installed and working on Stem's remote desktop for Vinosmith. That
-existing connector is production infrastructure and must not be removed, edited,
-reconfigured, repointed, or reused for Stem Intelligence.
+Stem Intelligence needs a separate QBWC application and `.qwc` file. Its first
+connector must use a test/staging service, run manually, and have auto-run disabled.
+It must operate independently of Vinosmith and Melio.
 
-Its successful operation is useful evidence that:
+### Stem `.qwc` requirements
 
-- the hosted desktop environment supports QBWC;
-- the QuickBooks company file permits at least one integrated application; and
-- the remote desktop can likely reach an external web service.
+A `.qwc` file is the XML configuration used by QBWC to add and connect a web
+service. The Stem file must be created only after the minimal test service exists
+and must define:
 
-Those facts reduce transport risk, but they do not establish that a second app is
-permitted or that it can receive read-only authorization. A Stem Intelligence
-integration should be a separate QBWC application with its own `.qwc` file, app
-name, credentials, schedule, OwnerID, FileID, and Stem-controlled HTTPS service.
+- `AppName`: `Stem Intelligence`;
+- `AppURL`: a Stem-controlled test/staging HTTPS endpoint;
+- `AppDescription`;
+- an application support URL when available;
+- `UserName`;
+- unique GUIDs for `OwnerID` and `FileID`;
+- `QBType`: `QBFS`;
+- credentials and manual-run schedule behavior; and
+- `IsReadOnly` when supported and appropriate.
 
-The expected flow is:
+None of these values should reuse Vinosmith's connector details. Do not create the
+`.qwc` file or service during this documentation phase.
 
-1. QBWC runs beside QuickBooks Desktop on Stem's remote Windows desktop.
-2. On a manual or scheduled run, QBWC calls an HTTPS web service that Stem controls.
-3. The service authenticates the connector and returns a read-only qbXML query.
-4. QBWC passes that qbXML to the local QuickBooks Desktop request processor.
-5. QuickBooks processes the request against the authorized company file.
-6. QBWC sends the qbXML response back to the Stem service.
-7. The service stores the raw response and later normalizes it into Stem-owned
-   tables.
+### Read-only safety boundary
 
-### qbXML
+QuickBooks may display broad **read and modify this company file** permission, as
+it does for Vinosmith. The first Stem POC must therefore enforce read-only behavior
+inside the Stem service:
 
-QuickBooks Desktop exchanges XML messages defined by the Desktop SDK, called
-**qbXML**. Examples of read requests include:
+- allowlist reviewed query/report requests only;
+- start with `CustomerQueryRq` or a narrow `InvoiceQueryRq`;
+- never generate or accept `AddRq`, `ModRq`, or `DelRq`;
+- do not expose a generic qbXML passthrough;
+- log request type and response status without credentials; and
+- stop the session if an unapproved request type appears.
 
-- `CustomerQueryRq`
-- `ItemQueryRq` and `ItemInventoryQueryRq`
-- `InvoiceQueryRq`
-- `CreditMemoQueryRq`
-- `ReceivePaymentQueryRq`
-- `VendorQueryRq`
-- `BillQueryRq`
-- `PurchaseOrderQueryRq`
-- report queries such as inventory valuation and transaction detail
+Raw POC responses must be stored only under ignored
+`tmp/quickbooks-desktop/`. The first POC must not write to QuickBooks, Stem
+production tables, or Supabase.
 
-The exact supported qbXML version and available fields depend on the installed
-QuickBooks Desktop product, year, edition, country, company-file settings, and
-enabled features.
+### qbXML discovery scope
 
-### Difference from QuickBooks Online
+Relevant read requests include `CustomerQueryRq`, item and inventory queries,
+`InvoiceQueryRq`, `CreditMemoQueryRq`, `ReceivePaymentQueryRq`, `VendorQueryRq`,
+`BillQueryRq`, `PurchaseOrderQueryRq`, and supported report queries. The exact
+qbXML version and response fields depend on the Desktop release, country edition,
+company-file configuration, and enabled features.
 
-| QuickBooks Online | QuickBooks Desktop |
-| --- | --- |
-| Hosted REST API | Local Desktop SDK/qbXML request processor |
-| OAuth 2.0 and company realm ID | QuickBooks company-file authorization and QBWC credentials |
-| Cloud service receives direct HTTPS requests | QBWC polls/calls our service from the Windows machine |
-| JSON entities | qbXML requests and responses |
-| No local QuickBooks process required | QuickBooks/QBWC must run in the authorized Desktop environment |
+## Remaining environment checks
 
-Do not design the Desktop integration around QBO OAuth tokens, realm IDs, or QBO
-REST endpoints.
+The local review resolved most initial environment questions. Before the POC,
+confirm only:
 
-## Recommended first path
-
-Use a separate Stem Intelligence QBWC application as a read-only extraction bridge:
-
-1. Deploy a minimal HTTPS QBWC-compatible web service.
-2. Create a new `.qwc` connector with a unique Stem Intelligence app name, OwnerID,
-   FileID, service URL, and authentication/schedule configuration.
-3. Add the new `.qwc` file through QBWC's application-add flow without modifying
-   the existing Vinosmith entry.
-4. Have a QuickBooks administrator authorize the integrated application for the
-   correct company file.
-5. Request read-only/no-write access if the installed version and authorization
-   flow support it.
-6. Configure an independent schedule that does not overlap or interfere with the
-   Vinosmith connector.
-7. Start with one narrow query, such as a small customer sample or invoices for a
-   short date range.
-8. Save returned qbXML only under ignored `tmp/quickbooks-desktop/`.
-9. Do not send any `AddRq`, `ModRq`, or `DelRq` messages.
-
-## Remote desktop checks for Mark and Junaid
-
-Before implementation, confirm:
-
-1. Exact QuickBooks Desktop year/version.
-2. Product edition: Pro, Premier, Enterprise, or Accountant.
-3. Country/locale edition.
-4. Remote desktop or hosting provider.
-5. Open QuickBooks Web Connector and confirm the existing Vinosmith connector is
-   listed and working. Do not remove, edit, or disable it.
-6. Record the installed QBWC version and confirm an **Add Application** option is
-   available.
-7. Confirm a second QBWC application can be added for the same company file.
-8. Confirm Mark/Junaid have QuickBooks company-file administrator access.
-9. Confirm the hosting provider permits additional third-party integrated
-   applications.
-10. Open QuickBooks Integrated Applications settings, confirm Vinosmith is listed,
-    and confirm additional applications are allowed.
-11. Confirm whether a second app requires a unique OwnerID/FileID pair and whether
-    the app can be authorized read-only.
-12. Confirm whether the Stem connector can have its own schedule without
-    interfering with Vinosmith.
-13. Confirm QuickBooks Desktop supports both Vinosmith and Stem Intelligence
-    integrations concurrently.
-14. Confirm whether unattended/scheduled access is allowed while the company file
-    is open, and whether access is allowed when QuickBooks is not running.
-15. Confirm the remote desktop can make outbound HTTPS requests to a
-    Stem-controlled endpoint using modern TLS.
-16. Confirm whether the company file runs in single-user or multi-user mode during the
-    intended sync window.
-17. Confirm backups and an administrator-approved test window are available before
-    connector authorization.
+1. QuickBooks country/locale edition.
+2. Remote desktop/hosting provider and its third-party integration policies.
+3. Exact installed QBWC version.
+4. Mark/Junaid's company-file administrator access.
+5. Whether a new Stem app can receive a less-permissive/read-only authorization or
+   whether QuickBooks presents only broad read/modify permission.
+6. Whether the remote desktop can reach the Stem HTTPS endpoint using modern TLS.
+7. Whether the company file runs in single-user or multi-user mode during testing.
+8. Whether a backup and administrator-approved test window are available.
 
 ## Source-of-truth strategy
 
@@ -271,74 +250,24 @@ validation against Stem's product version and company-file population.
 | Wine descriptive metadata | Not standard accounting data | Rich metadata | Vinosmith current; Stem long term | Do not overload QuickBooks. |
 | Ordering logic/overrides/forecasting | Not accounting fields | Limited inputs | Stem app | Stem is the intelligence layer. |
 
-## First safe proof of concept
-
-The first POC should prove transport and read access, not data completeness:
-
-1. Confirm the existing Vinosmith connector remains healthy and unchanged.
-2. Deploy a minimal QBWC-compatible HTTPS web service implementing the required
-   Web Connector methods.
-3. Generate a separate Stem Intelligence `.qwc` connector with a unique app name,
-   OwnerID, and FileID that points to a Stem test HTTPS endpoint.
-4. Add the Stem connector beside Vinosmith through QBWC's Add Application flow.
-5. Authorize only the new Stem app in QuickBooks Desktop with a company-file
-   administrator; do not alter Vinosmith's authorization.
-6. Give the Stem connector its own manual/test schedule so it cannot overlap with
-   or disrupt the Vinosmith connector.
-7. Select read-only/no-write access where available.
-8. Return one small qbXML request:
-   - a limited customer query, or
-   - an invoice query for a short date range.
-9. Receive and validate the qbXML response.
-10. Save the raw request/response only beneath ignored
-   `tmp/quickbooks-desktop/`.
-11. Confirm repeated runs do not change QuickBooks data or affect Vinosmith syncs.
-12. Stop before normalization or Supabase writes.
-
-The service must reject or never generate mutation requests. Initial supported
-request types should be an explicit allowlist of read-only `*QueryRq` and report
-queries.
-
 ## Questions the POC must answer
 
 1. Which qbXML version does the installed QuickBooks version support?
-2. Can QuickBooks Desktop authorize both Vinosmith and Stem Intelligence at the
-   same time?
-3. Are unique OwnerID and FileID values required, and are the proposed Stem values
-   accepted?
-4. Can the Stem app receive read-only authorization?
-5. Can the Stem connector run independently without blocking, changing, or
+2. Are the proposed unique Stem AppName, OwnerID, and FileID accepted?
+3. Can the Stem app receive read-only authorization, or must the service operate
+   safely under broad read/modify permission?
+4. Can the Stem connector run independently without blocking, changing, or
    delaying Vinosmith?
-6. Can QBWC authenticate to the Stem HTTPS service from the hosted desktop?
-7. Can the connector run manually and on its own schedule?
-8. Does authorization remain read-only and persist across sessions?
-9. Must QuickBooks and the company file remain open?
-10. Can the connector run unattended under the hosting provider's policies?
-11. What stable IDs, edit sequences, and modified timestamps support upserts?
-12. How much data can each query return before iterator/pagination is required?
-13. Which custom fields contain rep, SKU, vintage, pack, delivery, or other Stem
+5. Can QBWC authenticate to the Stem HTTPS service from the hosted desktop?
+6. Does the manual Stem run coexist cleanly with Melio's one-minute auto-run?
+7. Does authorization persist across sessions?
+8. Must QuickBooks and the company file remain open?
+9. What stable IDs, edit sequences, and modified timestamps support upserts?
+10. How much data can each query return before iterator/pagination is required?
+11. Which custom fields contain rep, SKU, vintage, pack, delivery, or other Stem
    metadata?
-14. Do Desktop quantities and financial totals match Vinosmith and emailed reports
+12. Do Desktop quantities and financial totals match Vinosmith and emailed reports
     for the same windows?
-
-## Recommended next step
-
-Mark/Junaid should complete the remote-desktop checklist and provide screenshots or
-notes for:
-
-- Help/About QuickBooks version and edition;
-- QuickBooks Web Connector showing the existing Vinosmith app and the available
-  Add Application action;
-- File > App Management or Integrated Applications preferences showing Vinosmith
-  and whether additional apps are allowed;
-- installed QBWC version;
-- hosting-provider restrictions; and
-- whether an admin can authorize a read-only integrated application.
-
-Do not remove or edit the Vinosmith connector during these checks. After the facts
-are known, design a separate minimal Stem QBWC service and `.qwc` file with unique
-application identity values. Do not build a broad extractor until the one-query
-read-only POC works alongside Vinosmith.
 
 ## Official references
 
@@ -350,3 +279,85 @@ read-only POC works alongside Vinosmith.
 - [ItemQuery](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/itemquery)
 - [ItemInventoryQuery](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/iteminventoryquery)
 - [QuickBooks Web Connector Programmer's Guide](https://static.developer.intuit.com/qbSDK-current/doc/pdf/QBWC_proguide.pdf)
+
+## Recommended implementation phases
+
+This is the recommended delivery plan for Junaid. Each phase should be reviewed and
+accepted before work begins on the next phase.
+
+### Phase 1: Read-only QBWC proof of concept
+
+- Create a minimal Stem-controlled HTTPS QBWC web service.
+- Create a separate Stem Intelligence `.qwc` file.
+- Use unique AppName, AppURL, OwnerID, FileID, credentials, and schedule.
+- Authorize the new application in QuickBooks Desktop without modifying Vinosmith
+  or Melio.
+- Run the Stem connector manually only.
+- Query a tiny `CustomerQueryRq` or `InvoiceQueryRq` sample.
+- Save raw qbXML responses only under ignored `tmp/quickbooks-desktop/`.
+- Do not enable auto-run.
+- Do not write anything to QuickBooks.
+
+### Phase 2: Read-only data discovery
+
+- Query customers.
+- Query items.
+- Query invoices and invoice lines.
+- Query credit memos.
+- Query payments.
+- Query vendors.
+- Query purchase orders.
+- Query inventory items when available.
+- Identify stable `ListID`, `TxnID`, and `EditSequence` keys for upsert and
+  de-duplication.
+- Compare fields and same-date totals against Vinosmith and current emailed
+  RB6/RADs reports.
+
+### Phase 3: Normalized financial tables
+
+- Design local normalized tables for QuickBooks financial data.
+- Keep QuickBooks Desktop as the financial source of truth.
+- Keep Vinosmith as the current operational and wine-metadata source.
+- Keep the Stem app as the logic and intelligence layer.
+- Do not replace any production source until parity is proven.
+
+### Phase 4: Draft PO workflow inside Stem
+
+- Generate recommended PO drafts inside Stem only.
+- Do not write purchase orders to QuickBooks yet.
+- Add an explicit approval flow.
+- Add an immutable audit log.
+- Validate QuickBooks vendor and item mappings.
+
+### Phase 5: Controlled QuickBooks PO write-back
+
+- Treat QuickBooks purchase orders as non-posting transactions, but still gate
+  every write as a financial-system change.
+- Begin only after accountant and leadership approval.
+- Use `PurchaseOrderAdd`.
+- Test first in a backup/test company file or with a tightly controlled test
+  vendor/item.
+- Prevent duplicate purchase orders and make retries idempotent.
+- Require explicit approval immediately before every write.
+- Log every qbXML request and response with actor and resulting QuickBooks IDs.
+- Handle errors, partial failures, and rollback/cleanup manually during validation.
+- Keep auto-run disabled until the workflow is fully validated.
+
+### Phase 6: Future receiving workflow
+
+- Evaluate whether `ItemReceiptAdd` should eventually receive inventory against
+  QuickBooks purchase orders.
+- Keep receiving separate from purchase-order creation.
+- Do not include receiving in the first build.
+
+### Accountant questions before write-back
+
+1. Should Stem create actual QuickBooks purchase orders or only draft POs for
+   accounting review?
+2. Who must approve before a PO is pushed into QuickBooks?
+3. Should QuickBooks or Stem assign PO numbers?
+4. What should happen when a vendor or item does not exist in QuickBooks?
+5. Are Item Receipts used when inventory arrives?
+6. Should Stem ever modify or cancel QuickBooks POs, or only create them?
+7. What audit trail is required?
+8. Is there a test company file or safe test vendor/item?
