@@ -5,6 +5,7 @@ import unittest
 
 from stem_order.supabase_repository import (
     SupabaseRepository,
+    dedupe_payloads_for_conflict,
     vinosmith_inventory_snapshot_payload,
     vinosmith_order_header_payload,
     vinosmith_order_line_payload,
@@ -243,6 +244,25 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["end_of_stock"], False)
         self.assertEqual(vinosmith_order_header_payload(order)["supplier_order_id"], "supplier-order-1")
         self.assertEqual(vinosmith_order_line_payload(line, "supplier-order-1")["quantity_bottles"], 12)
+
+    def test_dedupe_payloads_for_conflict_keeps_last_duplicate_key(self):
+        payloads = [
+            {"wine_id": "wine-1", "name": "First"},
+            {"wine_id": "wine-2", "name": "Second"},
+            {"wine_id": "wine-1", "name": "Updated"},
+            {"wine_id": None, "name": "No key"},
+        ]
+
+        deduped = dedupe_payloads_for_conflict(payloads, on_conflict="wine_id")
+
+        self.assertEqual(
+            deduped,
+            [
+                {"wine_id": None, "name": "No key"},
+                {"wine_id": "wine-1", "name": "Updated"},
+                {"wine_id": "wine-2", "name": "Second"},
+            ],
+        )
 
 
 if __name__ == "__main__":

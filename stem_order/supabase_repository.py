@@ -814,7 +814,10 @@ class SupabaseRepository:
         batch_size: int = 500,
     ) -> list[dict[str, Any]]:
         saved: list[dict[str, Any]] = []
-        cleaned_payloads = [payload for payload in payloads if payload]
+        cleaned_payloads = dedupe_payloads_for_conflict(
+            [payload for payload in payloads if payload],
+            on_conflict=on_conflict,
+        )
         for start in range(0, len(cleaned_payloads), batch_size):
             batch = cleaned_payloads[start : start + batch_size]
             result = self.client.table(table).upsert(batch, on_conflict=on_conflict).execute()
@@ -994,6 +997,22 @@ def nullable_bool_value(value):
     if text in {"0", "false", "no", "n"}:
         return False
     return None
+
+
+def dedupe_payloads_for_conflict(payloads: list[dict[str, Any]], on_conflict: str) -> list[dict[str, Any]]:
+    conflict_columns = [column.strip() for column in on_conflict.split(",") if column.strip()]
+    if not conflict_columns:
+        return payloads
+
+    deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    passthrough: list[dict[str, Any]] = []
+    for payload in payloads:
+        key = tuple(payload.get(column) for column in conflict_columns)
+        if any(value is None for value in key):
+            passthrough.append(payload)
+            continue
+        deduped[key] = payload
+    return [*passthrough, *deduped.values()]
 
 
 def named_entity_id(value):
