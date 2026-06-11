@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 import unittest
 
-from stem_order.supabase_repository import SupabaseRepository
+from stem_order.supabase_repository import (
+    SupabaseRepository,
+    vinosmith_inventory_snapshot_payload,
+    vinosmith_order_header_payload,
+    vinosmith_order_line_payload,
+    vinosmith_price_payload,
+    vinosmith_wine_payload,
+)
 
 
 class FakeResult:
@@ -50,6 +57,13 @@ class FakeQuery:
                 "filters": self.filters,
             }
         )
+        if isinstance(self.payload, list):
+            rows = []
+            for index, payload in enumerate(self.payload):
+                data = dict(payload or {})
+                data.setdefault("id", f"fake-id-{index}")
+                rows.append(data)
+            return FakeResult(rows)
         data = dict(self.payload or {})
         data.setdefault("id", "fake-id")
         return FakeResult([data])
@@ -160,6 +174,75 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(client.calls[-1]["on_conflict"], "source_system,source_entity_type,source_id")
         self.assertEqual(payload["confidence"], 1)
         self.assertEqual(payload["match_status"], "candidate")
+
+    def test_upsert_vinosmith_wines_maps_cache_and_source_link_rows(self):
+        client = FakeClient()
+        repo = SupabaseRepository(client)
+
+        repo.upsert_vinosmith_wines(
+            [
+                {
+                    "id": "wine-1",
+                    "code": "ABC123",
+                    "name": "Example Wine",
+                    "vintage": "2022",
+                    "unit_set": "12",
+                    "importer": {"id": "supplier-1", "name": "Supplier"},
+                    "producer": {"name": "Producer"},
+                    "active": True,
+                    "core": False,
+                }
+            ],
+            raw_response_id="response-1",
+        )
+
+        wine_call = client.calls[-2]
+        link_call = client.calls[-1]
+        self.assertEqual(wine_call["table"], "vinosmith_wines")
+        self.assertEqual(wine_call["operation"], "upsert")
+        self.assertEqual(wine_call["on_conflict"], "wine_id")
+        self.assertEqual(wine_call["payload"][0]["wine_id"], "wine-1")
+        self.assertEqual(wine_call["payload"][0]["unit_set"], 12)
+        self.assertEqual(wine_call["payload"][0]["importer_name"], "Supplier")
+        self.assertEqual(wine_call["payload"][0]["raw_response_id"], "response-1")
+        self.assertEqual(link_call["table"], "product_source_links")
+        self.assertEqual(link_call["payload"][0]["source_system"], "vinosmith")
+        self.assertEqual(link_call["payload"][0]["source_entity_type"], "wine")
+
+    def test_vinosmith_payload_helpers_map_orders_inventory_and_prices(self):
+        wine = {"id": "wine-1", "code": "ABC", "name": "Wine", "unit_set": "6"}
+        price_record = {"price": {"id": "price-1", "price_cents": "1999", "default": "true"}, "wine": wine}
+        inventory_record = {
+            "wine": wine,
+            "warehouse": {"id": "wh-1", "name": "Stem"},
+            "inventory": {"available": "10.5", "end_of_stock": "false"},
+        }
+        order = {
+            "account": {"id": "acct-1", "name": "Account"},
+            "user": {"id": "user-1", "email": "rep@example.com", "full_name": "Rep"},
+            "order": {"id": "order-1"},
+            "supplier_order": {
+                "id": "supplier-order-1",
+                "delivery_at": "2026-05-10T12:00:00Z",
+                "delivery_status": "sent-to-warehouse",
+                "warehouse": {"id": "wh-1", "name": "Stem"},
+                "total_cents": "24000",
+            },
+        }
+        line = {
+            "id": "line-1",
+            "wine": wine,
+            "quantity": "2",
+            "price_cents": "12000",
+            "total_cents": "24000",
+        }
+
+        self.assertEqual(vinosmith_wine_payload(wine)["wine_id"], "wine-1")
+        self.assertEqual(vinosmith_price_payload(price_record)["is_default"], True)
+        self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["available"], 10.5)
+        self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["end_of_stock"], False)
+        self.assertEqual(vinosmith_order_header_payload(order)["supplier_order_id"], "supplier-order-1")
+        self.assertEqual(vinosmith_order_line_payload(line, "supplier-order-1")["quantity_bottles"], 12)
 
 
 if __name__ == "__main__":

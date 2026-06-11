@@ -298,6 +298,133 @@ class SupabaseRepository:
             raise RuntimeError("Supabase upsert into product_source_links returned no data")
         return result.data[0]
 
+    def upsert_vinosmith_wines(
+        self,
+        wines: list[dict[str, Any]],
+        raw_response_id: str | None = None,
+        sync_product_links: bool = True,
+    ) -> list[dict[str, Any]]:
+        payloads = [vinosmith_wine_payload(wine, raw_response_id=raw_response_id) for wine in wines]
+        saved = self._upsert_many("vinosmith_wines", payloads, on_conflict="wine_id")
+        if sync_product_links:
+            self.upsert_vinosmith_product_links(wines)
+        return saved
+
+    def upsert_vinosmith_prices(
+        self,
+        price_records: list[dict[str, Any]],
+        raw_response_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        embedded_wines = [
+            record.get("wine")
+            for record in price_records
+            if isinstance(record.get("wine"), dict) and record["wine"].get("id")
+        ]
+        if embedded_wines:
+            self.upsert_vinosmith_wines(embedded_wines, raw_response_id=raw_response_id)
+        payloads = [vinosmith_price_payload(record, raw_response_id=raw_response_id) for record in price_records]
+        return self._upsert_many("vinosmith_prices", payloads, on_conflict="price_id")
+
+    def insert_vinosmith_inventory_snapshots(
+        self,
+        inventory_records: list[dict[str, Any]],
+        source_sync_run_id: str | None = None,
+        raw_response_id: str | None = None,
+        snapshot_at: datetime | str | None = None,
+    ) -> list[dict[str, Any]]:
+        embedded_wines = [
+            record.get("wine")
+            for record in inventory_records
+            if isinstance(record.get("wine"), dict) and record["wine"].get("id")
+        ]
+        if embedded_wines:
+            self.upsert_vinosmith_wines(embedded_wines, raw_response_id=raw_response_id)
+        payloads = [
+            vinosmith_inventory_snapshot_payload(
+                record,
+                source_sync_run_id=source_sync_run_id,
+                raw_response_id=raw_response_id,
+                snapshot_at=snapshot_at,
+            )
+            for record in inventory_records
+        ]
+        return self._upsert_many(
+            "vinosmith_inventory_snapshots",
+            payloads,
+            on_conflict="source_sync_run_id,wine_id,warehouse_id",
+        )
+
+    def upsert_vinosmith_supplier_orders(
+        self,
+        supplier_orders: list[dict[str, Any]],
+        raw_response_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        header_payloads = [
+            vinosmith_order_header_payload(order, raw_response_id=raw_response_id)
+            for order in supplier_orders
+        ]
+        saved_headers = self._upsert_many(
+            "vinosmith_order_headers",
+            header_payloads,
+            on_conflict="supplier_order_id",
+        )
+
+        line_payloads: list[dict[str, Any]] = []
+        line_wines: list[dict[str, Any]] = []
+        for order in supplier_orders:
+            supplier_order = order.get("supplier_order") if isinstance(order.get("supplier_order"), dict) else {}
+            supplier_order_id = clean_value(supplier_order.get("id"))
+            if not supplier_order_id:
+                continue
+            for line_item in order.get("line_items") or []:
+                if not isinstance(line_item, dict):
+                    continue
+                line_payloads.append(vinosmith_order_line_payload(line_item, supplier_order_id=supplier_order_id))
+                wine = line_item.get("wine")
+                if isinstance(wine, dict) and wine.get("id"):
+                    line_wines.append(wine)
+
+        if line_wines:
+            self.upsert_vinosmith_product_links(line_wines)
+        saved_lines = self._upsert_many(
+            "vinosmith_order_lines",
+            line_payloads,
+            on_conflict="line_item_id",
+        )
+        return saved_headers, saved_lines
+
+    def upsert_vinosmith_product_links(self, wines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        payloads = []
+        now = datetime.now(timezone.utc).isoformat()
+        for wine in wines:
+            if not isinstance(wine, dict) or not clean_value(wine.get("id")):
+                continue
+            payloads.append(
+                {
+                    "source_system": "vinosmith",
+                    "source_entity_type": "wine",
+                    "source_id": str(wine["id"]),
+                    "source_code": clean_value(wine.get("code")),
+                    "source_name": clean_value(wine.get("name")),
+                    "match_status": "unmapped",
+                    "confidence": 0,
+                    "is_primary": False,
+                    "metadata": {
+                        "vintage": clean_value(wine.get("vintage")),
+                        "unit_set": clean_numeric(wine.get("unit_set")),
+                        "importer_name": named_entity_name(wine.get("importer")),
+                        "producer_name": named_entity_name(wine.get("producer")),
+                    },
+                    "last_seen_at": now,
+                    "updated_at": now,
+                }
+            )
+        return self._upsert_many(
+            "product_source_links",
+            payloads,
+            on_conflict="source_system,source_entity_type,source_id",
+        )
+
     def save_recommendations(
         self,
         report_run_id: str,
@@ -658,6 +785,21 @@ class SupabaseRepository:
             raise RuntimeError(f"Supabase update on {table}:{row_id} returned no data")
         return result.data[0]
 
+    def _upsert_many(
+        self,
+        table: str,
+        payloads: list[dict[str, Any]],
+        on_conflict: str,
+        batch_size: int = 500,
+    ) -> list[dict[str, Any]]:
+        saved: list[dict[str, Any]] = []
+        cleaned_payloads = [payload for payload in payloads if payload]
+        for start in range(0, len(cleaned_payloads), batch_size):
+            batch = cleaned_payloads[start : start + batch_size]
+            result = self.client.table(table).upsert(batch, on_conflict=on_conflict).execute()
+            saved.extend(result.data or [])
+        return saved
+
     def _recommendation_payload(self, report_run_id: str, row: dict[str, Any]) -> dict[str, Any]:
         return {
             "report_run_id": report_run_id,
@@ -794,6 +936,13 @@ def datetime_value(value):
     return clean_value(value)
 
 
+def int_value(value, default=None):
+    numeric = clean_numeric(value, default)
+    if numeric is None:
+        return default
+    return int(numeric)
+
+
 def bool_value(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -808,6 +957,205 @@ def bool_value(value) -> bool:
     return text in {"1", "true", "yes", "y"}
 
 
+def nullable_bool_value(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    return None
+
+
+def named_entity_id(value):
+    if isinstance(value, dict):
+        return clean_value(value.get("id"))
+    return None
+
+
+def named_entity_name(value):
+    if isinstance(value, dict):
+        return clean_value(value.get("name"))
+    if isinstance(value, str):
+        return clean_value(value)
+    return None
+
+
+def vinosmith_wine_payload(wine: dict[str, Any], raw_response_id: str | None = None) -> dict[str, Any]:
+    wine_id = clean_value(wine.get("id"))
+    if not wine_id:
+        return {}
+    return {
+        "wine_id": str(wine_id),
+        "code": clean_value(wine.get("code")),
+        "name": clean_value(wine.get("name")),
+        "vintage": clean_value(wine.get("vintage")),
+        "supplier_id": clean_value(wine.get("supplier_id")),
+        "importer_name": named_entity_name(wine.get("importer")),
+        "producer_name": named_entity_name(wine.get("producer")),
+        "product_family": named_entity_name(wine.get("product_family")),
+        "unit_set": clean_numeric(wine.get("unit_set")),
+        "bottle_size": clean_value(wine.get("bottle_size")),
+        "bottle_size_label": clean_value(wine.get("bottle_size_label")),
+        "fob_price": clean_numeric(wine.get("fob_price")),
+        "external_identifier_1": clean_value(wine.get("external_identifier_1")),
+        "category": clean_value(wine.get("category")),
+        "country": clean_value(wine.get("country")),
+        "region": clean_value(wine.get("region")),
+        "appellation": clean_value(wine.get("appellation")),
+        "vineyard": clean_value(wine.get("vineyard")),
+        "about_info": clean_value(wine.get("about_info")),
+        "active": nullable_bool_value(wine.get("active")),
+        "orderable": nullable_bool_value(wine.get("orderable")),
+        "core": nullable_bool_value(wine.get("core")),
+        "admin_only": nullable_bool_value(wine.get("admin_only")),
+        "inventory_item": nullable_bool_value(wine.get("inventory_item")),
+        "source_created_at": datetime_value(wine.get("created_at")),
+        "source_updated_at": datetime_value(wine.get("updated_at")),
+        "raw_response_id": raw_response_id,
+        "raw_data": wine,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def vinosmith_price_payload(record: dict[str, Any], raw_response_id: str | None = None) -> dict[str, Any]:
+    price = record.get("price") if isinstance(record.get("price"), dict) else record
+    wine = record.get("wine") if isinstance(record.get("wine"), dict) else {}
+    price_id = clean_value(price.get("id"))
+    if not price_id:
+        return {}
+    return {
+        "price_id": str(price_id),
+        "wine_id": clean_value(wine.get("id") or price.get("wine_id")),
+        "label": clean_value(price.get("label")),
+        "price_type": clean_value(price.get("type")),
+        "price_cents": int_value(price.get("price_cents")),
+        "bill_back_price_cents": int_value(price.get("bill_back_price_cents")),
+        "bill_back_at": datetime_value(price.get("bill_back_at")),
+        "effective_start_at": datetime_value(price.get("effective_start_at")),
+        "effective_end_at": datetime_value(price.get("effective_end_at")),
+        "active": nullable_bool_value(price.get("active")),
+        "disabled": nullable_bool_value(price.get("disabled")),
+        "is_default": nullable_bool_value(price.get("default")),
+        "premise": clean_value(price.get("premise")),
+        "marketplace": clean_value(price.get("marketplace")),
+        "minimum_quantity": clean_numeric(price.get("minimum_quantity")),
+        "maximum_quantity": clean_numeric(price.get("maximum_quantity")),
+        "reference_discount": clean_numeric(price.get("reference_discount")),
+        "external_identifier": clean_value(price.get("external_identifier")),
+        "raw_response_id": raw_response_id,
+        "raw_data": record,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def vinosmith_inventory_snapshot_payload(
+    record: dict[str, Any],
+    source_sync_run_id: str | None = None,
+    raw_response_id: str | None = None,
+    snapshot_at: datetime | str | None = None,
+) -> dict[str, Any]:
+    wine = record.get("wine") if isinstance(record.get("wine"), dict) else {}
+    inventory = record.get("inventory") if isinstance(record.get("inventory"), dict) else {}
+    warehouse = record.get("warehouse") if isinstance(record.get("warehouse"), dict) else {}
+    wine_id = clean_value(wine.get("id"))
+    if not wine_id:
+        return {}
+    snapshot_value = datetime_value(snapshot_at) if snapshot_at is not None else datetime.now(timezone.utc).isoformat()
+    snapshot_date = str(snapshot_value)[:10]
+    return {
+        "source_sync_run_id": source_sync_run_id,
+        "raw_response_id": raw_response_id,
+        "snapshot_at": snapshot_value,
+        "snapshot_date": snapshot_date,
+        "wine_id": str(wine_id),
+        "warehouse_id": clean_value(warehouse.get("id")),
+        "warehouse_name": clean_value(warehouse.get("name")),
+        "available": clean_numeric(inventory.get("available")),
+        "on_hand": clean_numeric(inventory.get("on_hand")),
+        "on_hold": clean_numeric(inventory.get("on_hold")),
+        "on_order": clean_numeric(inventory.get("on_order")),
+        "on_future": clean_numeric(inventory.get("on_future")),
+        "on_pending_sync": clean_numeric(inventory.get("on_pending_sync")),
+        "end_of_stock": nullable_bool_value(inventory.get("end_of_stock")),
+        "raw_data": record,
+    }
+
+
+def vinosmith_order_header_payload(order: dict[str, Any], raw_response_id: str | None = None) -> dict[str, Any]:
+    account = order.get("account") if isinstance(order.get("account"), dict) else {}
+    user = order.get("user") if isinstance(order.get("user"), dict) else {}
+    parent_order = order.get("order") if isinstance(order.get("order"), dict) else {}
+    supplier_order = order.get("supplier_order") if isinstance(order.get("supplier_order"), dict) else {}
+    warehouse = supplier_order.get("warehouse") if isinstance(supplier_order.get("warehouse"), dict) else {}
+    supplier_order_id = clean_value(supplier_order.get("id"))
+    if not supplier_order_id:
+        return {}
+    return {
+        "supplier_order_id": str(supplier_order_id),
+        "order_id": clean_value(parent_order.get("id")),
+        "account_id": clean_value(account.get("id")),
+        "account_name": clean_value(account.get("name")),
+        "user_id": clean_value(user.get("id")),
+        "user_email": clean_value(user.get("email")),
+        "user_full_name": clean_value(user.get("full_name")),
+        "invoice_number": clean_value(supplier_order.get("invoice_number")),
+        "po_number": clean_value(supplier_order.get("po_number")),
+        "order_at": datetime_value(supplier_order.get("order_at")),
+        "confirmed_at": datetime_value(supplier_order.get("confirmed_at")),
+        "delivery_at": datetime_value(supplier_order.get("delivery_at")),
+        "due_at": datetime_value(supplier_order.get("due_at")),
+        "paid_at": datetime_value(supplier_order.get("paid_at")),
+        "delivery_status": clean_value(supplier_order.get("delivery_status")),
+        "payment_status": clean_value(supplier_order.get("payment_status")),
+        "warehouse_id": clean_value(warehouse.get("id")),
+        "warehouse_name": clean_value(warehouse.get("name")),
+        "total_cents": int_value(supplier_order.get("total_cents")),
+        "balance_cents": int_value(supplier_order.get("balance_cents")),
+        "raw_response_id": raw_response_id,
+        "raw_data": order,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def vinosmith_order_line_payload(line_item: dict[str, Any], supplier_order_id: str) -> dict[str, Any]:
+    wine = line_item.get("wine") if isinstance(line_item.get("wine"), dict) else {}
+    line_item_id = clean_value(line_item.get("id"))
+    if not line_item_id:
+        return {}
+    quantity_cases = clean_numeric(line_item.get("quantity"), 0) or 0
+    unit_set = clean_numeric(wine.get("unit_set"), 1) or 1
+    return {
+        "line_item_id": str(line_item_id),
+        "supplier_order_id": supplier_order_id,
+        "wine_id": clean_value(wine.get("id")),
+        "wine_code": clean_value(wine.get("code")),
+        "wine_name": clean_value(wine.get("name")),
+        "vintage": clean_value(wine.get("vintage")),
+        "importer_name": named_entity_name(wine.get("importer")),
+        "producer_name": named_entity_name(wine.get("producer")),
+        "quantity_cases": quantity_cases,
+        "unit_set": unit_set,
+        "quantity_bottles": quantity_cases * unit_set,
+        "price_cents": int_value(line_item.get("price_cents")),
+        "total_cents": int_value(line_item.get("total_cents")),
+        "discount": clean_numeric(line_item.get("discount")),
+        "manual_price": nullable_bool_value(line_item.get("manual_price")),
+        "commission_rate": clean_numeric(line_item.get("commission_rate")),
+        "notes": clean_value(line_item.get("notes")),
+        "raw_data": line_item,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 __all__ = [
     "SupabaseConfig",
     "SupabaseRepository",
@@ -816,4 +1164,9 @@ __all__ = [
     "date_value",
     "datetime_value",
     "load_dotenv",
+    "vinosmith_inventory_snapshot_payload",
+    "vinosmith_order_header_payload",
+    "vinosmith_order_line_payload",
+    "vinosmith_price_payload",
+    "vinosmith_wine_payload",
 ]

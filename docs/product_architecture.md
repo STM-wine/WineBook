@@ -86,6 +86,25 @@ Current ownership direction:
   buyer approvals, forecasting, recommendations, ID crosswalks, parity diagnostics,
   and learned intelligence.
 
+The first Vinosmith rescue worker is `scripts/sync_vinosmith_rescue.py`. With
+`VINOSMITH_API_TOKEN`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` available
+in the server environment, it can fetch the Distributor API, save ignored raw JSON
+under `tmp/vinosmith-rescue/`, record `source_sync_*` metadata, update checkpoints,
+populate `product_source_links`, and write the Vinosmith cache tables. The safest
+first production-style run is the non-ordering catalog slice:
+
+```bash
+python scripts/sync_vinosmith_rescue.py --resource wines --resource prices --resource inventory --sync-type manual_poc --require-supabase
+```
+
+Supplier-order rescue should run in month-sized windows because Vinosmith may
+return a broader date range than requested. The worker filters returned orders
+locally by `supplier_order.delivery_at` and defaults to `sent-to-warehouse` only:
+
+```bash
+python scripts/sync_vinosmith_rescue.py --resource supplier_orders --delivery-start-date 2026-05-01 --delivery-end-date 2026-05-31 --sync-type historical_backfill --require-supabase
+```
+
 ## Automation Strategy
 
 The current remote automation path uses Supabase as the clock and GitHub Actions as the worker:
