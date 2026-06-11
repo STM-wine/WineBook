@@ -44,6 +44,48 @@ The Streamlit app is now the historical V1 reference workflow, but it is not the
 
 Heavy spreadsheet parsing and pandas calculation should remain in Python workers rather than Supabase Edge Functions.
 
+## Source-System Data Foundation
+
+Stem should become the durable working layer even while QuickBooks and Vinosmith
+remain upstream systems. API data should therefore land in source-specific cache
+tables first, then be reconciled into Stem-owned products, inventory, sales
+history, recommendations, and purchase-order workflows.
+
+The source-system foundation contains:
+
+- `source_sync_runs`: one row per QuickBooks, Vinosmith, parity, or discovery run.
+- `source_api_responses`: raw-response metadata, checksums, storage paths, counts,
+  and status details.
+- `source_sync_checkpoints`: restartable windows and cursors for historical
+  backfill and daily refresh.
+- `product_source_links`: the cross-system product spine connecting Stem products,
+  QuickBooks items, Vinosmith wines, source codes, names, and match confidence.
+- `quickbooks_*` tables: normalized read-only Desktop facts for customers,
+  vendors, items, inventory snapshots, invoices, credit memos, payments, and
+  purchase orders.
+- `vinosmith_*` tables: normalized operational/wine metadata for wines, prices,
+  inventory snapshots, supplier-order headers, and supplier-order lines.
+
+These tables are private to trusted server-side workers at creation time. They
+enable data rescue, parity checks, and cross-system mapping without exposing raw
+financial/customer/source payloads to the app UI prematurely. A future Integration
+Health surface should expose curated run status, counts, freshness, unmapped
+products, and parity warnings through deliberate admin policies or app-facing
+views.
+
+Current ownership direction:
+
+- QuickBooks Desktop: item identity, customer/account identity, invoices, credits,
+  delivered bottle quantities, financial totals, payments, accounting inventory
+  on hand, inventory on order, vendors, and purchase orders.
+- Vinosmith: wine metadata and operational overlay, including Core, region,
+  country, appellation, vineyard, producer, importer, about-info, vintage,
+  bottle/pack enrichment, on-hold inventory, unconfirmed commitments, and pending
+  allocations.
+- Stem: BTG, Brand Manager/TDM, ordering logic, logic settings, manual overrides,
+  buyer approvals, forecasting, recommendations, ID crosswalks, parity diagnostics,
+  and learned intelligence.
+
 ## Automation Strategy
 
 The current remote automation path uses Supabase as the clock and GitHub Actions as the worker:
