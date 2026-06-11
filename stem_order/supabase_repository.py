@@ -19,6 +19,11 @@ import pandas as pd
 
 PO_DRAFT_STATUSES = {"draft", "ready_for_entry", "entered_in_quickbooks", "cancelled"}
 ACTIVE_PO_DRAFT_STATUSES = {"draft", "ready_for_entry"}
+SOURCE_SYSTEMS = {"quickbooks_desktop", "vinosmith", "email", "manual", "stem"}
+SOURCE_SYNC_TYPES = {"discovery", "historical_backfill", "daily_refresh", "parity_check", "manual_poc"}
+SOURCE_SYNC_STATUSES = {"pending", "running", "completed", "failed", "cancelled"}
+SOURCE_CHECKPOINT_STATUSES = {"pending", "running", "completed", "failed", "needs_repair"}
+PRODUCT_SOURCE_MATCH_STATUSES = {"unmapped", "candidate", "matched", "ignored", "conflict"}
 
 
 def load_dotenv(path: str | Path = ".env") -> None:
@@ -120,6 +125,178 @@ class SupabaseRepository:
                 "error_message": error_message,
             },
         )
+
+    def create_source_sync_run(
+        self,
+        source_system: str,
+        sync_type: str,
+        requested_start_date: date | str | None = None,
+        requested_end_date: date | str | None = None,
+        triggered_by: str | None = None,
+        worker_name: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if source_system not in SOURCE_SYSTEMS:
+            raise ValueError(f"Unsupported source system: {source_system}")
+        if sync_type not in SOURCE_SYNC_TYPES:
+            raise ValueError(f"Unsupported source sync type: {sync_type}")
+        payload = {
+            "source_system": source_system,
+            "sync_type": sync_type,
+            "status": "running",
+            "requested_start_date": date_value(requested_start_date),
+            "requested_end_date": date_value(requested_end_date),
+            "triggered_by": triggered_by,
+            "worker_name": worker_name,
+            "parameters": parameters or {},
+            "diagnostics": diagnostics or {},
+        }
+        return self._insert_one("source_sync_runs", payload)
+
+    def complete_source_sync_run(
+        self,
+        source_sync_run_id: str,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "status": "completed",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if diagnostics is not None:
+            payload["diagnostics"] = diagnostics
+        return self._update_one("source_sync_runs", source_sync_run_id, payload)
+
+    def fail_source_sync_run(self, source_sync_run_id: str, error_message: str) -> dict[str, Any]:
+        return self._update_one(
+            "source_sync_runs",
+            source_sync_run_id,
+            {
+                "status": "failed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": error_message,
+            },
+        )
+
+    def record_source_api_response(
+        self,
+        source_system: str,
+        endpoint: str,
+        source_sync_run_id: str | None = None,
+        request_method: str = "GET",
+        request_identifier: str | None = None,
+        requested_params: dict[str, Any] | None = None,
+        returned_metadata: dict[str, Any] | None = None,
+        response_status: int | None = None,
+        response_status_text: str | None = None,
+        content_type: str | None = None,
+        byte_size: int | None = None,
+        checksum: str | None = None,
+        raw_storage_path: str | None = None,
+        record_count: int | None = None,
+        fetched_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        if source_system not in SOURCE_SYSTEMS:
+            raise ValueError(f"Unsupported source system: {source_system}")
+        payload = {
+            "source_sync_run_id": source_sync_run_id,
+            "source_system": source_system,
+            "endpoint": endpoint,
+            "request_method": request_method,
+            "request_identifier": request_identifier,
+            "requested_params": requested_params or {},
+            "returned_metadata": returned_metadata or {},
+            "response_status": response_status,
+            "response_status_text": response_status_text,
+            "content_type": content_type,
+            "byte_size": byte_size,
+            "checksum": checksum,
+            "raw_storage_path": raw_storage_path,
+            "record_count": record_count,
+            "fetched_at": datetime_value(fetched_at) if fetched_at is not None else None,
+        }
+        return self._insert_one("source_api_responses", payload)
+
+    def upsert_source_sync_checkpoint(
+        self,
+        source_system: str,
+        resource_name: str,
+        checkpoint_key: str,
+        status: str = "pending",
+        requested_start_date: date | str | None = None,
+        requested_end_date: date | str | None = None,
+        completed_through: datetime | str | None = None,
+        cursor_data: dict[str, Any] | None = None,
+        last_source_sync_run_id: str | None = None,
+        diagnostics: dict[str, Any] | None = None,
+        last_synced_at: datetime | str | None = None,
+    ) -> dict[str, Any]:
+        if source_system not in SOURCE_SYSTEMS:
+            raise ValueError(f"Unsupported source system: {source_system}")
+        if status not in SOURCE_CHECKPOINT_STATUSES:
+            raise ValueError(f"Unsupported source checkpoint status: {status}")
+        payload = {
+            "source_system": source_system,
+            "resource_name": resource_name,
+            "checkpoint_key": checkpoint_key,
+            "status": status,
+            "requested_start_date": date_value(requested_start_date),
+            "requested_end_date": date_value(requested_end_date),
+            "completed_through": datetime_value(completed_through) if completed_through is not None else None,
+            "cursor_data": cursor_data or {},
+            "last_source_sync_run_id": last_source_sync_run_id,
+            "diagnostics": diagnostics or {},
+            "last_synced_at": datetime_value(last_synced_at) if last_synced_at is not None else None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        result = (
+            self.client.table("source_sync_checkpoints")
+            .upsert(payload, on_conflict="source_system,resource_name,checkpoint_key")
+            .execute()
+        )
+        if not result.data:
+            raise RuntimeError("Supabase upsert into source_sync_checkpoints returned no data")
+        return result.data[0]
+
+    def upsert_product_source_link(
+        self,
+        source_system: str,
+        source_entity_type: str,
+        source_id: str,
+        product_id: str | None = None,
+        source_code: str | None = None,
+        source_name: str | None = None,
+        match_status: str = "unmapped",
+        confidence: float = 0,
+        is_primary: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if source_system not in SOURCE_SYSTEMS:
+            raise ValueError(f"Unsupported source system: {source_system}")
+        if match_status not in PRODUCT_SOURCE_MATCH_STATUSES:
+            raise ValueError(f"Unsupported product source match status: {match_status}")
+        payload = {
+            "product_id": product_id,
+            "source_system": source_system,
+            "source_entity_type": source_entity_type,
+            "source_id": source_id,
+            "source_code": source_code,
+            "source_name": source_name,
+            "match_status": match_status,
+            "confidence": max(0, min(1, float(confidence or 0))),
+            "is_primary": bool(is_primary),
+            "metadata": metadata or {},
+            "last_seen_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        result = (
+            self.client.table("product_source_links")
+            .upsert(payload, on_conflict="source_system,source_entity_type,source_id")
+            .execute()
+        )
+        if not result.data:
+            raise RuntimeError("Supabase upsert into product_source_links returned no data")
+        return result.data[0]
 
     def save_recommendations(
         self,
@@ -605,6 +782,18 @@ def clean_numeric(value, default=None):
         return default
 
 
+def date_value(value):
+    if isinstance(value, date):
+        return value.isoformat()
+    return clean_value(value)
+
+
+def datetime_value(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return clean_value(value)
+
+
 def bool_value(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -619,4 +808,12 @@ def bool_value(value) -> bool:
     return text in {"1", "true", "yes", "y"}
 
 
-__all__ = ["SupabaseConfig", "SupabaseRepository", "bool_value", "clean_value", "load_dotenv"]
+__all__ = [
+    "SupabaseConfig",
+    "SupabaseRepository",
+    "bool_value",
+    "clean_value",
+    "date_value",
+    "datetime_value",
+    "load_dotenv",
+]
