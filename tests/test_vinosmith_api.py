@@ -4,6 +4,8 @@ from datetime import date
 import unittest
 
 from stem_order.vinosmith_api import (
+    analyze_vintage_values,
+    collect_wine_snapshots,
     filter_supplier_orders_by_delivery_status,
     filter_supplier_orders_by_delivery_window,
     records_for_resource,
@@ -59,6 +61,28 @@ class VinosmithApiHelperTests(unittest.TestCase):
             supplier_order_line_bottle_quantity({"quantity": "3", "wine": {"unit_set": "12"}}),
             36,
         )
+
+    def test_analyze_vintage_values_counts_missing_odd_and_future_values(self):
+        wines = [
+            {"id": "wine-1", "code": "A", "name": "No Vintage", "vintage": None},
+            {"id": "wine-2", "code": "B", "name": "NV Wine", "vintage": "NV"},
+            {"id": "wine-3", "code": "C", "name": "Current Wine", "vintage": "2026"},
+            {"id": "wine-4", "code": "D", "name": "Future Wine", "vintage": "2027"},
+        ]
+
+        diagnostics = analyze_vintage_values(wines, current_year=2026)
+
+        self.assertEqual(diagnostics["missing_count"], 1)
+        self.assertEqual(diagnostics["non_year_count"], 1)
+        self.assertEqual(diagnostics["current_or_future_year_count"], 2)
+        self.assertEqual(diagnostics["future_year_count"], 1)
+        self.assertEqual(diagnostics["recent_year_count"], 2)
+        self.assertEqual(diagnostics["current_or_future_samples"][0]["code"], "C")
+
+    def test_collect_wine_snapshots_from_supplier_orders(self):
+        records = [{"line_items": [{"wine": {"id": "wine-1"}}, {"wine": None}]}]
+
+        self.assertEqual(collect_wine_snapshots("supplier_orders", records), [{"id": "wine-1"}])
 
 
 if __name__ == "__main__":

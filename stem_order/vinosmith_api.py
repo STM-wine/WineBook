@@ -199,6 +199,81 @@ def supplier_order_line_bottle_quantity(line_item: dict[str, Any]) -> float:
     return quantity * unit_set
 
 
+def collect_wine_snapshots(resource: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if resource == "wines":
+        return records
+    if resource in {"prices", "inventory"}:
+        return [
+            record["wine"]
+            for record in records
+            if isinstance(record.get("wine"), dict)
+        ]
+    if resource == "supplier_orders":
+        wines = []
+        for order in records:
+            for line_item in order.get("line_items") or []:
+                if isinstance(line_item, dict) and isinstance(line_item.get("wine"), dict):
+                    wines.append(line_item["wine"])
+        return wines
+    return []
+
+
+def analyze_vintage_values(
+    wines: list[dict[str, Any]],
+    current_year: int | None = None,
+    sample_limit: int = 10,
+) -> dict[str, Any]:
+    current_year = current_year or datetime.now(timezone.utc).year
+    missing_count = 0
+    non_year_count = 0
+    future_year_count = 0
+    current_or_future_year_count = 0
+    recent_year_count = 0
+    value_counts: dict[str, int] = {}
+    sample_wines: list[dict[str, Any]] = []
+
+    for wine in wines:
+        raw_vintage = wine.get("vintage")
+        vintage = str(raw_vintage).strip() if raw_vintage is not None else ""
+        if vintage:
+            value_counts[vintage] = value_counts.get(vintage, 0) + 1
+        if not vintage:
+            missing_count += 1
+            continue
+
+        parsed_year = int(vintage) if vintage.isdigit() and len(vintage) == 4 else None
+        if parsed_year is None:
+            non_year_count += 1
+            continue
+        if parsed_year > current_year:
+            future_year_count += 1
+        if parsed_year >= current_year:
+            current_or_future_year_count += 1
+        if parsed_year >= current_year - 1:
+            recent_year_count += 1
+        if parsed_year >= current_year and len(sample_wines) < sample_limit:
+            sample_wines.append(
+                {
+                    "id": wine.get("id"),
+                    "code": wine.get("code"),
+                    "name": wine.get("name"),
+                    "vintage": vintage,
+                }
+            )
+
+    top_values = sorted(value_counts.items(), key=lambda item: (-item[1], item[0]))[:sample_limit]
+    return {
+        "wine_snapshot_count": len(wines),
+        "missing_count": missing_count,
+        "non_year_count": non_year_count,
+        "future_year_count": future_year_count,
+        "current_or_future_year_count": current_or_future_year_count,
+        "recent_year_count": recent_year_count,
+        "top_values": [{"vintage": vintage, "count": count} for vintage, count in top_values],
+        "current_or_future_samples": sample_wines,
+    }
+
+
 def numeric_value(value: Any, default: float | None = None) -> float | None:
     if value in (None, ""):
         return default

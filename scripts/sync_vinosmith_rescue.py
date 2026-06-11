@@ -27,6 +27,8 @@ from stem_order.vinosmith_api import (
     VINOSMITH_DISTRIBUTOR_ENDPOINTS,
     VinosmithDistributorClient,
     VinosmithFetchResult,
+    analyze_vintage_values,
+    collect_wine_snapshots,
     filter_supplier_orders_by_delivery_status,
     filter_supplier_orders_by_delivery_window,
     records_for_resource,
@@ -49,6 +51,7 @@ class ResourceSummary:
     raw_file: str | None
     response_id: str | None
     checkpoint_key: str | None
+    diagnostics: dict[str, Any]
     error: str | None = None
 
 
@@ -210,6 +213,7 @@ def sync_resource(
     raw_file = save_raw_payload(output_dir, resource, payload) if result.body else None
     records = records_for_resource(resource, payload)
     accepted_records = accepted_resource_records(resource, records, order_window, delivery_statuses)
+    resource_diagnostics = diagnostics_for_resource(resource, accepted_records, result.fetched_at)
 
     response_id = None
     checkpoint_key = None
@@ -227,6 +231,7 @@ def sync_resource(
                 record_count=len(records),
                 accepted_count=len(accepted_records),
                 response_id=response_id,
+                resource_diagnostics=resource_diagnostics,
             )
 
     return ResourceSummary(
@@ -237,6 +242,7 @@ def sync_resource(
         raw_file=str(raw_file.relative_to(ROOT)) if raw_file else None,
         response_id=response_id,
         checkpoint_key=checkpoint_key,
+        diagnostics=resource_diagnostics,
         error=result.error,
     )
 
@@ -315,6 +321,19 @@ def write_resource_records(
         raise ValueError(f"Unsupported Vinosmith resource: {resource}")
 
 
+def diagnostics_for_resource(
+    resource: str,
+    records: list[dict[str, Any]],
+    fetched_at: datetime,
+) -> dict[str, Any]:
+    wines = collect_wine_snapshots(resource, records)
+    if not wines:
+        return {}
+    return {
+        "vintage": analyze_vintage_values(wines, current_year=fetched_at.year),
+    }
+
+
 def upsert_checkpoint(
     repo: SupabaseRepository,
     source_sync_run_id: str | None,
@@ -324,6 +343,7 @@ def upsert_checkpoint(
     record_count: int,
     accepted_count: int,
     response_id: str | None,
+    resource_diagnostics: dict[str, Any] | None = None,
 ) -> str:
     if resource == "supplier_orders" and order_window:
         checkpoint_key = f"{order_window[0].isoformat()}:{order_window[1].isoformat()}"
@@ -356,6 +376,7 @@ def upsert_checkpoint(
         diagnostics={
             "returned_metadata": returned_metadata(result.json_payload() if result.body else {}),
             "known_endpoint": VINOSMITH_DISTRIBUTOR_ENDPOINTS.get(resource),
+            **(resource_diagnostics or {}),
         },
         last_synced_at=result.fetched_at,
     )
