@@ -288,6 +288,35 @@ class SourceSyncRepositoryTests(unittest.TestCase):
             ),
             "2027",
         )
+        self.assertEqual(
+            normalized_vinosmith_vintage(
+                {
+                    "name": "Masseria Cuturi 1881 Negroamaro Zacinto 2017 12/750ml",
+                    "vintage": "1881",
+                },
+                current_year=2026,
+            ),
+            "2017",
+        )
+        self.assertEqual(
+            normalized_vinosmith_vintage(
+                {
+                    "name": "Illahe 1899 Pinot Noir 2021 6/750ml",
+                    "vintage": "1899",
+                },
+                current_year=2026,
+            ),
+            "2021",
+        )
+        self.assertIsNone(
+            normalized_vinosmith_vintage(
+                {
+                    "name": "Benten Sawane Junmai Ginjo Sake 6/1800ml",
+                    "vintage": "1800",
+                },
+                current_year=2026,
+            )
+        )
 
     def test_dedupe_payloads_for_conflict_keeps_last_duplicate_key(self):
         payloads = [

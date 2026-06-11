@@ -1080,7 +1080,7 @@ def normalized_vinosmith_vintage(wine: dict[str, Any], current_year: int | None 
         return "NV"
     if re.fullmatch(r"\d{4}", source_text):
         year = int(source_text)
-        if 1800 <= year <= current_year + 1:
+        if 1900 <= year <= current_year + 1:
             return source_text
         return None
     return source_text
@@ -1088,11 +1088,12 @@ def normalized_vinosmith_vintage(wine: dict[str, Any], current_year: int | None 
 
 def vintage_year_from_text(value: str, current_year: int | None = None):
     current_year = current_year or datetime.now(timezone.utc).year
-    for match in re.finditer(r"(?<!\d)(18\d{2}|19\d{2}|20\d{2})(?!\d)", value):
+    candidates = []
+    for match in re.finditer(r"(?<![A-Za-z0-9/])(18\d{2}|19\d{2}|20\d{2})(?![A-Za-z0-9])", value):
         year = int(match.group(1))
         if 1800 <= year <= current_year + 1:
-            return match.group(1)
-    return None
+            candidates.append(match.group(1))
+    return candidates[-1] if candidates else None
 
 
 def non_vintage_from_text(value: str) -> bool:
