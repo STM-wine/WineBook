@@ -91,9 +91,12 @@ The first Vinosmith rescue worker is `scripts/sync_vinosmith_rescue.py`. With
 in the server environment, it can fetch the Distributor API, save ignored raw JSON
 under `tmp/vinosmith-rescue/`, record `source_sync_*` metadata, update checkpoints,
 populate `product_source_links`, and write the Vinosmith cache tables. The safest
-first production-style run is the non-ordering catalog slice:
+first production-style run is the non-ordering catalog slice. In Render Shell,
+install only the sync dependencies first to avoid compiling the full spreadsheet
+stack:
 
 ```bash
+python -m pip install -r requirements-source-sync.txt
 python scripts/sync_vinosmith_rescue.py --resource wines --resource prices --resource inventory --sync-type manual_poc --require-supabase
 ```
 

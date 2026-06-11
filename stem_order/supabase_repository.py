@@ -14,7 +14,28 @@ import os
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    class _PandasFallback:
+        DataFrame = Any
+
+        @staticmethod
+        def isna(value):
+            try:
+                return value != value
+            except Exception:
+                return False
+
+        @staticmethod
+        def to_numeric(*_args, **_kwargs):
+            raise RuntimeError("pandas is required for spreadsheet recommendation writes.")
+
+        @staticmethod
+        def Series(*_args, **_kwargs):
+            raise RuntimeError("pandas is required for spreadsheet recommendation writes.")
+
+    pd = _PandasFallback()
 
 
 PO_DRAFT_STATUSES = {"draft", "ready_for_entry", "entered_in_quickbooks", "cancelled"}
