@@ -100,6 +100,29 @@ The live responses use these structures:
 - `inventory`: `data.inventory[]` containing `wine`, warehouse-level `inventory`,
   and `warehouse`.
 
+Official markdown docs also expose these query parameters:
+
+- `GET /api/distributor/wines`: `created_since`, `updated_since`, and `include`.
+  `include` is documented as a comma-delimited expansion list; the currently
+  documented value is `producer:logo`, which adds `logo_url` to the producer
+  substructure.
+- `GET /api/distributor/supplier_orders`: `delivery_start_date`,
+  `delivery_end_date`, and optional `account_id`.
+- `GET /api/distributor/prices`: no documented query parameters.
+- `GET /api/distributor/inventory`: no documented query parameters.
+
+The rescue runner supports safe parameter probing with `--query-param`. Use
+`--no-normalized-writes` for experiments so new parameter combinations save raw
+JSON and response metadata without mutating cache tables:
+
+```bash
+python scripts/sync_vinosmith_rescue.py \
+  --resource wines \
+  --query-param wines.include=producer:logo \
+  --no-normalized-writes \
+  --require-supabase
+```
+
 Important live-account differences from the examples:
 
 - Entity and line IDs are strings.

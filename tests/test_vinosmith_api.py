@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 import unittest
 
+from scripts.sync_vinosmith_rescue import parse_query_params, resource_query_params
 from stem_order.vinosmith_api import (
     analyze_vintage_values,
     collect_wine_snapshots,
@@ -83,6 +84,27 @@ class VinosmithApiHelperTests(unittest.TestCase):
         records = [{"line_items": [{"wine": {"id": "wine-1"}}, {"wine": None}]}]
 
         self.assertEqual(collect_wine_snapshots("supplier_orders", records), [{"id": "wine-1"}])
+
+    def test_parse_query_params_supports_global_and_resource_specific_values(self):
+        parsed = parse_query_params(
+            [
+                "include=producer:logo",
+                "wines.updated_since=2026-06-01T00:00:00Z",
+                "supplier_orders.account_id=123",
+            ]
+        )
+
+        self.assertEqual(parsed["*"], {"include": "producer:logo"})
+        self.assertEqual(parsed["wines"], {"updated_since": "2026-06-01T00:00:00Z"})
+        self.assertEqual(parsed["supplier_orders"], {"account_id": "123"})
+        self.assertEqual(
+            resource_query_params("wines", parsed),
+            {"include": "producer:logo", "updated_since": "2026-06-01T00:00:00Z"},
+        )
+
+    def test_parse_query_params_rejects_unknown_resource(self):
+        with self.assertRaises(SystemExit):
+            parse_query_params(["winery.secret=true"])
 
 
 if __name__ == "__main__":

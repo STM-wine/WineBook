@@ -68,6 +68,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--delivery-end-date", help="YYYY-MM-DD; required for supplier_orders.")
     parser.add_argument("--account-id", help="Optional Vinosmith account ID for supplier_orders.")
     parser.add_argument(
+        "--query-param",
+        action="append",
+        default=[],
+        metavar="RESOURCE.KEY=VALUE",
+        help=(
+            "Extra Vinosmith query parameter. Use key=value for all resources or "
+            "resource.key=value for one resource, e.g. wines.updated_since=2026-01-01."
+        ),
+    )
+    parser.add_argument(
         "--delivery-status",
         action="append",
         default=[],
@@ -94,6 +104,7 @@ def main() -> int:
     resources = selected_resources(args)
     order_window = supplier_order_window(args, resources)
     statuses = tuple(args.delivery_status or DEFAULT_VINOSMITH_DELIVERY_STATUSES)
+    extra_query_params = parse_query_params(args.query_param)
 
     load_dotenv(ROOT / ".env")
     load_dotenv(ROOT / ".env.local")
@@ -120,6 +131,7 @@ def main() -> int:
                 "resources": resources,
                 "delivery_statuses": statuses,
                 "account_id_supplied": bool(args.account_id),
+                "extra_query_params": extra_query_params,
                 "normalized_writes": not args.no_normalized_writes,
             },
         )
@@ -135,6 +147,7 @@ def main() -> int:
                 output_dir=output_dir,
                 order_window=order_window,
                 account_id=args.account_id,
+                extra_query_params=extra_query_params,
                 delivery_statuses=statuses,
                 write_normalized=not args.no_normalized_writes,
             )
@@ -163,6 +176,29 @@ def selected_resources(args: argparse.Namespace) -> list[str]:
     if args.all:
         return list(RESOURCE_CHOICES)
     return args.resource or ["wines", "prices", "inventory"]
+
+
+def parse_query_params(raw_params: list[str]) -> dict[str, dict[str, str]]:
+    parsed: dict[str, dict[str, str]] = {"*": {}}
+    for raw_param in raw_params:
+        if "=" not in raw_param:
+            raise SystemExit(f"Invalid --query-param {raw_param!r}; expected key=value or resource.key=value.")
+        raw_key, value = raw_param.split("=", 1)
+        raw_key = raw_key.strip()
+        if not raw_key:
+            raise SystemExit(f"Invalid --query-param {raw_param!r}; parameter key cannot be blank.")
+        if "." in raw_key:
+            resource, key = raw_key.split(".", 1)
+        else:
+            resource, key = "*", raw_key
+        resource = resource.strip()
+        key = key.strip()
+        if resource != "*" and resource not in RESOURCE_CHOICES:
+            raise SystemExit(f"Invalid --query-param resource {resource!r}; expected one of {', '.join(RESOURCE_CHOICES)}.")
+        if not key:
+            raise SystemExit(f"Invalid --query-param {raw_param!r}; parameter key cannot be blank.")
+        parsed.setdefault(resource, {})[key] = value
+    return {resource: params for resource, params in parsed.items() if params}
 
 
 def supplier_order_window(args: argparse.Namespace, resources: list[str]) -> tuple[date, date] | None:
@@ -195,14 +231,16 @@ def sync_resource(
     output_dir: Path,
     order_window: tuple[date, date] | None,
     account_id: str | None,
+    extra_query_params: dict[str, dict[str, str]],
     delivery_statuses: tuple[str, ...],
     write_normalized: bool,
 ) -> ResourceSummary:
-    requested_params = {}
+    requested_params = resource_query_params(resource, extra_query_params)
     if resource == "supplier_orders":
         if order_window is None:
             raise ValueError("supplier_orders requires an order window")
         requested_params = {
+            **requested_params,
             "delivery_start_date": order_window[0].isoformat(),
             "delivery_end_date": order_window[1].isoformat(),
             "account_id": account_id,
@@ -259,6 +297,13 @@ def accepted_resource_records(
         return []
     windowed = filter_supplier_orders_by_delivery_window(records, order_window[0], order_window[1])
     return filter_supplier_orders_by_delivery_status(windowed, delivery_statuses)
+
+
+def resource_query_params(resource: str, extra_query_params: dict[str, dict[str, str]]) -> dict[str, str]:
+    return {
+        **extra_query_params.get("*", {}),
+        **extra_query_params.get(resource, {}),
+    }
 
 
 def save_raw_payload(output_dir: Path, resource: str, payload: dict[str, Any]) -> Path:
