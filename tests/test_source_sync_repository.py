@@ -6,6 +6,8 @@ import unittest
 from stem_order.supabase_repository import (
     SupabaseRepository,
     dedupe_payloads_for_conflict,
+    execute_with_transient_retries,
+    is_transient_http_error,
     vinosmith_inventory_snapshot_payload,
     vinosmith_order_header_payload,
     vinosmith_order_line_payload,
@@ -263,6 +265,22 @@ class SourceSyncRepositoryTests(unittest.TestCase):
                 {"wine_id": "wine-2", "name": "Second"},
             ],
         )
+
+    def test_transient_retry_helper_retries_protocol_disconnects(self):
+        class RemoteProtocolError(RuntimeError):
+            __module__ = "httpx"
+
+        attempts = {"count": 0}
+
+        def operation():
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RemoteProtocolError("ConnectionTerminated")
+            return "ok"
+
+        self.assertTrue(is_transient_http_error(RemoteProtocolError("ConnectionTerminated")))
+        self.assertEqual(execute_with_transient_retries(operation, attempts=2, base_delay=0), "ok")
+        self.assertEqual(attempts["count"], 2)
 
 
 if __name__ == "__main__":

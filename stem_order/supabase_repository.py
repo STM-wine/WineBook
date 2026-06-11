@@ -12,6 +12,7 @@ import hashlib
 import math
 import os
 from pathlib import Path
+import time
 from typing import Any
 
 try:
@@ -811,7 +812,7 @@ class SupabaseRepository:
         table: str,
         payloads: list[dict[str, Any]],
         on_conflict: str,
-        batch_size: int = 500,
+        batch_size: int = 100,
     ) -> list[dict[str, Any]]:
         saved: list[dict[str, Any]] = []
         cleaned_payloads = dedupe_payloads_for_conflict(
@@ -820,7 +821,9 @@ class SupabaseRepository:
         )
         for start in range(0, len(cleaned_payloads), batch_size):
             batch = cleaned_payloads[start : start + batch_size]
-            result = self.client.table(table).upsert(batch, on_conflict=on_conflict).execute()
+            result = execute_with_transient_retries(
+                lambda: self.client.table(table).upsert(batch, on_conflict=on_conflict).execute()
+            )
             saved.extend(result.data or [])
         return saved
 
@@ -1013,6 +1016,35 @@ def dedupe_payloads_for_conflict(payloads: list[dict[str, Any]], on_conflict: st
             continue
         deduped[key] = payload
     return [*passthrough, *deduped.values()]
+
+
+def execute_with_transient_retries(operation, attempts: int = 4, base_delay: float = 0.75):
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except Exception as exc:
+            if attempt >= attempts or not is_transient_http_error(exc):
+                raise
+            time.sleep(base_delay * attempt)
+    raise RuntimeError("unreachable retry state")
+
+
+def is_transient_http_error(exc: Exception) -> bool:
+    module = type(exc).__module__
+    name = type(exc).__name__
+    message = str(exc)
+    if module.startswith(("httpx", "httpcore")):
+        return True
+    return any(
+        marker in message
+        for marker in [
+            "ConnectionTerminated",
+            "RemoteProtocolError",
+            "Server disconnected",
+            "Connection reset",
+            "timed out",
+        ]
+    ) or name in {"RemoteProtocolError", "ReadTimeout", "ConnectTimeout"}
 
 
 def named_entity_id(value):
