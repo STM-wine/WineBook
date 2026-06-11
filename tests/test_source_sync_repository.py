@@ -8,6 +8,7 @@ from stem_order.supabase_repository import (
     dedupe_payloads_for_conflict,
     execute_with_transient_retries,
     is_transient_http_error,
+    normalized_vinosmith_vintage,
     vinosmith_inventory_snapshot_payload,
     vinosmith_order_header_payload,
     vinosmith_order_line_payload,
@@ -246,6 +247,47 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["end_of_stock"], False)
         self.assertEqual(vinosmith_order_header_payload(order)["supplier_order_id"], "supplier-order-1")
         self.assertEqual(vinosmith_order_line_payload(line, "supplier-order-1")["quantity_bottles"], 12)
+
+    def test_normalized_vinosmith_vintage_prefers_name_year_and_nv_over_bad_source_value(self):
+        self.assertEqual(
+            normalized_vinosmith_vintage(
+                {
+                    "name": "Chateau Tronquoy-Lalande St Estephe Red 2019 6/750ml",
+                    "vintage": "2079",
+                },
+                current_year=2026,
+            ),
+            "2019",
+        )
+        self.assertEqual(
+            normalized_vinosmith_vintage(
+                {
+                    "name": "Chartogne Taillet Cuvee Ste Anne NV 12/750ml",
+                    "vintage": "2047",
+                },
+                current_year=2026,
+            ),
+            "NV",
+        )
+        self.assertIsNone(
+            normalized_vinosmith_vintage(
+                {
+                    "name": "Mystery Wine 12/750ml",
+                    "vintage": "2079",
+                },
+                current_year=2026,
+            )
+        )
+        self.assertEqual(
+            normalized_vinosmith_vintage(
+                {
+                    "name": "Legitimate Future Release 12/750ml",
+                    "vintage": "2027",
+                },
+                current_year=2026,
+            ),
+            "2027",
+        )
 
     def test_dedupe_payloads_for_conflict_keeps_last_duplicate_key(self):
         payloads = [

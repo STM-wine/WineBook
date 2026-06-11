@@ -12,6 +12,7 @@ import hashlib
 import math
 import os
 from pathlib import Path
+import re
 import time
 from typing import Any
 
@@ -432,7 +433,7 @@ class SupabaseRepository:
                     "confidence": 0,
                     "is_primary": False,
                     "metadata": {
-                        "vintage": clean_value(wine.get("vintage")),
+                        "vintage": normalized_vinosmith_vintage(wine),
                         "unit_set": clean_numeric(wine.get("unit_set")),
                         "importer_name": named_entity_name(wine.get("importer")),
                         "producer_name": named_entity_name(wine.get("producer")),
@@ -1061,6 +1062,43 @@ def named_entity_name(value):
     return None
 
 
+def normalized_vinosmith_vintage(wine: dict[str, Any], current_year: int | None = None):
+    current_year = current_year or datetime.now(timezone.utc).year
+    name_value = clean_value(wine.get("name"))
+    name = str(name_value or "")
+    name_year = vintage_year_from_text(name, current_year=current_year)
+    if name_year:
+        return name_year
+    if non_vintage_from_text(name):
+        return "NV"
+
+    source_vintage = clean_value(wine.get("vintage"))
+    source_text = str(source_vintage).strip() if source_vintage is not None else ""
+    if not source_text:
+        return None
+    if non_vintage_from_text(source_text):
+        return "NV"
+    if re.fullmatch(r"\d{4}", source_text):
+        year = int(source_text)
+        if 1800 <= year <= current_year + 1:
+            return source_text
+        return None
+    return source_text
+
+
+def vintage_year_from_text(value: str, current_year: int | None = None):
+    current_year = current_year or datetime.now(timezone.utc).year
+    for match in re.finditer(r"(?<!\d)(18\d{2}|19\d{2}|20\d{2})(?!\d)", value):
+        year = int(match.group(1))
+        if 1800 <= year <= current_year + 1:
+            return match.group(1)
+    return None
+
+
+def non_vintage_from_text(value: str) -> bool:
+    return bool(re.search(r"(?<![A-Za-z0-9])N\.?V\.?(?![A-Za-z0-9])|non[- ]?vintage", value, re.IGNORECASE))
+
+
 def vinosmith_wine_payload(wine: dict[str, Any], raw_response_id: str | None = None) -> dict[str, Any]:
     wine_id = clean_value(wine.get("id"))
     if not wine_id:
@@ -1069,7 +1107,7 @@ def vinosmith_wine_payload(wine: dict[str, Any], raw_response_id: str | None = N
         "wine_id": str(wine_id),
         "code": clean_value(wine.get("code")),
         "name": clean_value(wine.get("name")),
-        "vintage": clean_value(wine.get("vintage")),
+        "vintage": normalized_vinosmith_vintage(wine),
         "supplier_id": clean_value(wine.get("supplier_id")),
         "importer_name": named_entity_name(wine.get("importer")),
         "producer_name": named_entity_name(wine.get("producer")),
@@ -1211,7 +1249,7 @@ def vinosmith_order_line_payload(line_item: dict[str, Any], supplier_order_id: s
         "wine_id": clean_value(wine.get("id")),
         "wine_code": clean_value(wine.get("code")),
         "wine_name": clean_value(wine.get("name")),
-        "vintage": clean_value(wine.get("vintage")),
+        "vintage": normalized_vinosmith_vintage(wine),
         "importer_name": named_entity_name(wine.get("importer")),
         "producer_name": named_entity_name(wine.get("producer")),
         "quantity_cases": quantity_cases,
@@ -1236,6 +1274,7 @@ __all__ = [
     "date_value",
     "datetime_value",
     "load_dotenv",
+    "normalized_vinosmith_vintage",
     "vinosmith_inventory_snapshot_payload",
     "vinosmith_order_header_payload",
     "vinosmith_order_line_payload",
