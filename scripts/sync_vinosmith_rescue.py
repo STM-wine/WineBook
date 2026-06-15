@@ -46,6 +46,7 @@ NORMALIZED_WRITE_RESOURCES = {"supplier_orders", "wines", "prices", "inventory",
 @dataclass
 class ResourceSummary:
     resource: str
+    requested_window: str | None
     status: int | None
     record_count: int
     accepted_count: int
@@ -129,7 +130,14 @@ def main() -> int:
 
     client = VinosmithDistributorClient(token=token)
     source_sync_run = None
+    print_progress(f"Starting Vinosmith sync: resources={', '.join(resources)}, output_dir={output_dir.relative_to(ROOT)}")
+    if order_windows:
+        print_progress(
+            f"Supplier-order windows: {len(order_windows)} "
+            f"({order_windows[0][0].isoformat()} to {order_windows[-1][1].isoformat()})"
+        )
     if repo:
+        print_progress("Creating source sync run in Supabase")
         source_sync_run = repo.create_source_sync_run(
             "vinosmith",
             args.sync_type,
@@ -300,6 +308,7 @@ def sync_resource(
     delivery_statuses: tuple[str, ...],
     write_normalized: bool,
 ) -> ResourceSummary:
+    label = resource_label(resource, order_window)
     requested_params = resource_query_params(resource, extra_query_params)
     if resource == "supplier_orders":
         if order_window is None:
@@ -311,20 +320,26 @@ def sync_resource(
             "account_id": account_id,
         }
 
+    print_progress(f"{label}: fetching from Vinosmith")
     result = client.fetch_resource(resource, requested_params)
     payload = result.json_payload() if result.body else {}
     raw_file = save_raw_payload(output_dir, resource, payload, order_window=order_window) if result.body else None
     records = records_for_resource(resource, payload)
     accepted_records = accepted_resource_records(resource, records, order_window, delivery_statuses)
     resource_diagnostics = diagnostics_for_resource(resource, accepted_records, result.fetched_at)
+    status_text = result.status if result.status is not None else result.status_text or "no-status"
+    print_progress(f"{label}: fetched status={status_text}, records={len(records)}, accepted={len(accepted_records)}")
 
     response_id = None
     checkpoint_key = None
     if repo:
+        print_progress(f"{label}: recording source response")
         response_id = record_api_response(repo, source_sync_run_id, result, payload, raw_file, len(records))
         if result.ok and write_normalized and resource in NORMALIZED_WRITE_RESOURCES:
+            print_progress(f"{label}: writing {len(accepted_records)} normalized rows")
             write_resource_records(repo, source_sync_run_id, response_id, resource, accepted_records, result.fetched_at)
         if result.ok:
+            print_progress(f"{label}: updating checkpoint")
             checkpoint_key = upsert_checkpoint(
                 repo,
                 source_sync_run_id,
@@ -336,9 +351,13 @@ def sync_resource(
                 response_id=response_id,
                 resource_diagnostics=resource_diagnostics,
             )
+            print_progress(f"{label}: completed checkpoint={checkpoint_key}")
+        elif result.error:
+            print_progress(f"{label}: failed error={result.error}")
 
     return ResourceSummary(
         resource=resource,
+        requested_window=window_label(order_window),
         status=result.status,
         record_count=len(records),
         accepted_count=len(accepted_records),
@@ -383,6 +402,23 @@ def save_raw_payload(
         destination = output_dir / f"{resource}.json"
     write_raw_json(destination, payload)
     return destination
+
+
+def resource_label(resource: str, order_window: tuple[date, date] | None = None) -> str:
+    if resource == "supplier_orders" and order_window:
+        return f"{resource} {order_window[0].isoformat()}..{order_window[1].isoformat()}"
+    return resource
+
+
+def window_label(order_window: tuple[date, date] | None = None) -> str | None:
+    if not order_window:
+        return None
+    return f"{order_window[0].isoformat()}:{order_window[1].isoformat()}"
+
+
+def print_progress(message: str) -> None:
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"[{timestamp}] {message}", flush=True)
 
 
 def record_api_response(
@@ -513,8 +549,9 @@ def write_run_summary(output_dir: Path, diagnostics: dict[str, Any]) -> None:
 def print_summary(summaries: list[ResourceSummary], output_dir: Path, repo_enabled: bool) -> None:
     for summary in summaries:
         error = f", error={summary.error}" if summary.error else ""
+        resource = f"{summary.resource} {summary.requested_window}" if summary.requested_window else summary.resource
         print(
-            f"{summary.resource}: status={summary.status}, records={summary.record_count}, "
+            f"{resource}: status={summary.status}, records={summary.record_count}, "
             f"accepted={summary.accepted_count}{error}"
         )
     print(f"Raw output: {output_dir.relative_to(ROOT)}")
