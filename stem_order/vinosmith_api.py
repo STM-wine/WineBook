@@ -200,10 +200,7 @@ def filter_supplier_orders_by_delivery_status(
 
 
 def supplier_order_line_bottle_quantity(line_item: dict[str, Any]) -> float:
-    quantity = numeric_value(line_item.get("quantity"), 0) or 0
-    wine = line_item.get("wine") if isinstance(line_item.get("wine"), dict) else {}
-    unit_set = numeric_value(wine.get("unit_set"), 1) or 1
-    return quantity * unit_set
+    return numeric_value(line_item.get("quantity"), 0) or 0
 
 
 def collect_wine_snapshots(resource: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:

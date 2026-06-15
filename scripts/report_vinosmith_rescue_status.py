@@ -226,7 +226,7 @@ def print_report(report: dict[str, Any]) -> None:
     print(f"Lines: {totals['lines']:,}")
     print(f"Order total: {format_cents(totals['order_total_cents'])}")
     print(f"Line total: {format_cents(totals['line_total_cents'])}")
-    print(f"Quantity bottles: {totals['quantity_bottles']:,.4f}")
+    print(f"Quantity bottle/eaches: {totals['quantity_bottles']:,.4f}")
     print(
         "Missing links: "
         f"accounts={totals['missing_account_orders']:,}, "

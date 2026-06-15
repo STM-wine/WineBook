@@ -3,8 +3,8 @@
 This read-only helper uses the latest completed `report_runs` +
 `reorder_recommendations` rows as the legacy RB6/RADs baseline, then aggregates
 rescued Vinosmith supplier-order lines over the same trailing windows. It prints
-both raw Vinosmith `quantity` and multiplied `quantity * unit_set` totals because
-quantity semantics still need proof before replacing RADs.
+both the RADs-compatible bottle/eaches quantity and the legacy multiplied value
+so old over-multiplied rescues are obvious.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ WINDOWS = (30, 60, 90)
 
 @dataclass
 class VinosmithSkuTotals:
-    raw_quantity: float = 0
-    multiplied_quantity: float = 0
+    bottle_quantity: float = 0
+    legacy_multiplied_quantity: float = 0
     line_total_cents: int = 0
     line_count: int = 0
 
@@ -201,8 +201,21 @@ def aggregate_vinosmith_lines(
             if not sku:
                 continue
             summary = totals[sku]
-            summary.raw_quantity += float_value(line.get("quantity_cases"))
-            summary.multiplied_quantity += float_value(line.get("quantity_bottles"))
+            stored_quantity_cases = float_value(line.get("quantity_cases"))
+            stored_quantity_bottles = float_value(line.get("quantity_bottles"))
+            if (
+                stored_quantity_cases
+                and is_integer_like(stored_quantity_cases)
+                and is_integer_like(stored_quantity_bottles)
+                and stored_quantity_bottles > stored_quantity_cases * 1.5
+            ):
+                bottle_quantity = stored_quantity_cases
+                legacy_multiplied_quantity = stored_quantity_bottles
+            else:
+                bottle_quantity = stored_quantity_bottles
+                legacy_multiplied_quantity = stored_quantity_bottles
+            summary.bottle_quantity += bottle_quantity
+            summary.legacy_multiplied_quantity += legacy_multiplied_quantity
             summary.line_total_cents += int_value(line.get("total_cents"))
             summary.line_count += 1
     return totals
@@ -217,8 +230,8 @@ def compare_window(
     sales_key = f"last_{window}_day_sales"
     sku_rows = []
     rads_total = 0.0
-    vinosmith_raw_total = 0.0
-    vinosmith_multiplied_total = 0.0
+    vinosmith_bottle_total = 0.0
+    vinosmith_legacy_multiplied_total = 0.0
     matched_skus = 0
     for recommendation in recommendation_rows:
         sku = recommendation["sku"]
@@ -227,41 +240,43 @@ def compare_window(
         if rads_quantity or vinosmith.line_count:
             matched_skus += int(bool(vinosmith.line_count))
             rads_total += rads_quantity
-            vinosmith_raw_total += vinosmith.raw_quantity
-            vinosmith_multiplied_total += vinosmith.multiplied_quantity
+            vinosmith_bottle_total += vinosmith.bottle_quantity
+            vinosmith_legacy_multiplied_total += vinosmith.legacy_multiplied_quantity
             sku_rows.append(
                 {
                     "sku": sku,
                     "product_name": recommendation.get("product_name"),
                     "rads_quantity": round(rads_quantity, 4),
-                    "vinosmith_raw_quantity": round(vinosmith.raw_quantity, 4),
-                    "vinosmith_multiplied_quantity": round(vinosmith.multiplied_quantity, 4),
-                    "raw_diff": round(vinosmith.raw_quantity - rads_quantity, 4),
-                    "multiplied_diff": round(vinosmith.multiplied_quantity - rads_quantity, 4),
+                    "vinosmith_bottle_quantity": round(vinosmith.bottle_quantity, 4),
+                    "vinosmith_legacy_multiplied_quantity": round(vinosmith.legacy_multiplied_quantity, 4),
+                    "bottle_diff": round(vinosmith.bottle_quantity - rads_quantity, 4),
+                    "legacy_multiplied_diff": round(vinosmith.legacy_multiplied_quantity - rads_quantity, 4),
                     "line_total_cents": vinosmith.line_total_cents,
                     "line_count": vinosmith.line_count,
                 }
             )
 
-    raw_abs_diff = abs(vinosmith_raw_total - rads_total)
-    multiplied_abs_diff = abs(vinosmith_multiplied_total - rads_total)
-    sku_rows.sort(key=lambda row: abs(row["raw_diff"]), reverse=True)
+    bottle_abs_diff = abs(vinosmith_bottle_total - rads_total)
+    legacy_multiplied_abs_diff = abs(vinosmith_legacy_multiplied_total - rads_total)
+    sku_rows.sort(key=lambda row: abs(row["bottle_diff"]), reverse=True)
     return {
         "days": window,
         "sku_count_with_any_sales": len(sku_rows),
         "matched_skus": matched_skus,
         "totals": {
             "rads_quantity": round(rads_total, 4),
-            "vinosmith_raw_quantity": round(vinosmith_raw_total, 4),
-            "vinosmith_multiplied_quantity": round(vinosmith_multiplied_total, 4),
-            "raw_diff": round(vinosmith_raw_total - rads_total, 4),
-            "multiplied_diff": round(vinosmith_multiplied_total - rads_total, 4),
-            "raw_abs_diff": round(raw_abs_diff, 4),
-            "multiplied_abs_diff": round(multiplied_abs_diff, 4),
-            "best_quantity_basis": "raw_quantity" if raw_abs_diff <= multiplied_abs_diff else "multiplied_quantity",
+            "vinosmith_bottle_quantity": round(vinosmith_bottle_total, 4),
+            "vinosmith_legacy_multiplied_quantity": round(vinosmith_legacy_multiplied_total, 4),
+            "bottle_diff": round(vinosmith_bottle_total - rads_total, 4),
+            "legacy_multiplied_diff": round(vinosmith_legacy_multiplied_total - rads_total, 4),
+            "bottle_abs_diff": round(bottle_abs_diff, 4),
+            "legacy_multiplied_abs_diff": round(legacy_multiplied_abs_diff, 4),
+            "best_quantity_basis": "bottle_quantity"
+            if bottle_abs_diff <= legacy_multiplied_abs_diff
+            else "legacy_multiplied_quantity",
             "vinosmith_line_total": format_cents(sum(row["line_total_cents"] for row in sku_rows)),
         },
-        "top_raw_quantity_differences": sku_rows[:top],
+        "top_bottle_quantity_differences": sku_rows[:top],
     }
 
 
@@ -277,18 +292,22 @@ def print_report(report: dict[str, Any]) -> None:
         totals = window["totals"]
         print(f"\nLast {window['days']} days")
         print(f"RADs quantity: {totals['rads_quantity']:,.4f}")
-        print(f"Vinosmith raw quantity: {totals['vinosmith_raw_quantity']:,.4f} (diff {totals['raw_diff']:,.4f})")
         print(
-            "Vinosmith multiplied quantity: "
-            f"{totals['vinosmith_multiplied_quantity']:,.4f} (diff {totals['multiplied_diff']:,.4f})"
+            f"Vinosmith bottle/eaches quantity: {totals['vinosmith_bottle_quantity']:,.4f} "
+            f"(diff {totals['bottle_diff']:,.4f})"
+        )
+        print(
+            "Legacy multiplied quantity: "
+            f"{totals['vinosmith_legacy_multiplied_quantity']:,.4f} "
+            f"(diff {totals['legacy_multiplied_diff']:,.4f})"
         )
         print(f"Best quantity basis: {totals['best_quantity_basis']}")
         print(f"Vinosmith line total: {totals['vinosmith_line_total']}")
-        print("Largest raw quantity differences:")
-        for row in window["top_raw_quantity_differences"][:10]:
+        print("Largest bottle/eaches quantity differences:")
+        for row in window["top_bottle_quantity_differences"][:10]:
             print(
-                f"  {row['raw_diff']:>10,.2f} | RADs {row['rads_quantity']:>8,.2f} | "
-                f"VS raw {row['vinosmith_raw_quantity']:>8,.2f} | {row['product_name'] or row['sku']}"
+                f"  {row['bottle_diff']:>10,.2f} | RADs {row['rads_quantity']:>8,.2f} | "
+                f"VS bottles {row['vinosmith_bottle_quantity']:>8,.2f} | {row['product_name'] or row['sku']}"
             )
 
 
@@ -336,6 +355,10 @@ def float_value(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0
+
+
+def is_integer_like(value: float) -> bool:
+    return abs(value - round(value)) < 0.0001
 
 
 if __name__ == "__main__":

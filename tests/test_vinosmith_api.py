@@ -104,7 +104,7 @@ class VinosmithApiHelperTests(unittest.TestCase):
         )
         self.assertEqual(
             supplier_order_line_bottle_quantity({"quantity": "3", "wine": {"unit_set": "12"}}),
-            36,
+            3,
         )
 
     def test_analyze_vintage_values_counts_missing_odd_and_future_values(self):

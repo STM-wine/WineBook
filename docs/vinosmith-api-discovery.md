@@ -203,7 +203,7 @@ Saved samples:
 | Account/customer | `account.id`, `account.name` | Live match | Present on every order. |
 | Rep/user | `user.id`, `.email`, `.full_name` | Live match | Present on every order. |
 | Invoice/order/delivery date | `supplier_order.invoice_number`, `order.id`, `supplier_order.delivery_at` | Live match | Order, confirmed, paid, due, and delivery dates are available. Use delivery date and filter locally. |
-| Quantity sold | `line_items[].quantity * wine.unit_set` | Reconstructable with validation | Quantity is an integer-valued float and behaves like case quantity because line total usually equals quantity times case price. Convert to bottles using `unit_set`; validate exceptions and non-case products. |
+| Quantity sold | `line_items[].quantity` | Live match after parity | Quantity is an integer-valued float and matches RADs bottle/eaches quantity. Do not multiply by `wine.unit_set`; use `unit_set` only to derive case equivalents when needed. |
 | Sales dollars | `line_items[].total_cents`; order-level `supplier_order.total_cents` | Live match | Line totals exist on every line. 988 positive-quantity lines have zero totals and require sample/free-goods review. |
 | FOB | Join line wine ID to `wines[].fob_price` | Reconstructable | Current FOB exists for 1,788/1,791 wines; historical-at-sale FOB is not provided. |
 | Laid-in cost | Not returned | Missing | Continue using Stem logistics/freight inputs unless Vinosmith identifies another endpoint. |
@@ -431,7 +431,8 @@ described above. It should:
 2. write normalized local dev files for wines, prices, inventory snapshots, and
    delivered order lines;
 3. locally filter May 1-31 and exclude pending orders;
-4. convert order quantity to bottles using `unit_set`;
+4. use order quantity directly as bottle/eaches quantity and derive case
+   equivalents with `unit_set` only when needed;
 5. emit parity diagnostics against same-window RB6/RADs email files without
    writing to Supabase or changing the scheduled worker.
 

@@ -248,7 +248,9 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["available"], 10.5)
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["end_of_stock"], False)
         self.assertEqual(vinosmith_order_header_payload(order)["supplier_order_id"], "supplier-order-1")
-        self.assertEqual(vinosmith_order_line_payload(line, "supplier-order-1")["quantity_bottles"], 12)
+        line_payload = vinosmith_order_line_payload(line, "supplier-order-1")
+        self.assertEqual(line_payload["quantity_bottles"], 2)
+        self.assertAlmostEqual(line_payload["quantity_cases"], 2 / 6)
 
     def test_vinosmith_account_and_user_payloads(self):
         account_payload = vinosmith_account_payload(
