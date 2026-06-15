@@ -112,6 +112,12 @@ python scripts/sync_vinosmith_rescue.py --resource supplier_orders --backfill-st
 For especially slow Vinosmith months, add `--backfill-window-days 7` to request
 the same range in weekly chunks.
 
+After rescue runs, summarize the normalized Vinosmith cache tables with:
+
+```bash
+python scripts/report_vinosmith_rescue_status.py --start-date 2023-01-01 --end-date 2026-06-15
+```
+
 ## Automation Strategy
 
 The current remote automation path uses Supabase as the clock and GitHub Actions as the worker:
