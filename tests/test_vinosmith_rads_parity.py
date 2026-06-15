@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import date
 import unittest
 
-from scripts.report_vinosmith_rads_parity import build_parity_report
+from scripts.report_vinosmith_rads_parity import build_parity_report, normalize_sku
 
 
 class VinosmithRadsParityTests(unittest.TestCase):
+    def test_normalize_sku_does_not_require_pandas_pipeline_imports(self):
+        self.assertEqual(normalize_sku("Example, Wine. 2024 12/750ml"), "example wine 12/750ml")
+
     def test_build_parity_report_compares_raw_and_multiplied_quantities(self):
         report = build_parity_report(
             report_run={

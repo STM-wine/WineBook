@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -22,7 +23,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.report_vinosmith_rescue_status import fetch_all, format_cents
-from stem_order.core import normalize_planning_sku
 from stem_order.supabase_repository import SupabaseRepository, load_dotenv
 
 
@@ -305,7 +305,10 @@ def resolve_as_of_date(raw_as_of_date: str | None, report_run: dict[str, Any]) -
 def normalize_sku(value: Any) -> str:
     if value in (None, ""):
         return ""
-    return str(normalize_planning_sku(str(value)) or "").strip()
+    name = str(value).lower()
+    name = re.sub(r"\b20[2-9][0-9]\b", "", name)
+    name = re.sub(r"[,.]", "", name)
+    return " ".join(name.split()).strip()
 
 
 def date_from_timestamp(value: Any) -> date | None:
