@@ -5,7 +5,13 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from scripts.sync_vinosmith_rescue import monthly_windows, parse_query_params, resource_query_params, save_raw_payload
+from scripts.sync_vinosmith_rescue import (
+    date_windows,
+    monthly_windows,
+    parse_query_params,
+    resource_query_params,
+    save_raw_payload,
+)
 from stem_order.vinosmith_api import (
     analyze_vintage_values,
     collect_wine_snapshots,
@@ -33,6 +39,22 @@ class VinosmithApiHelperTests(unittest.TestCase):
     def test_monthly_windows_rejects_inverted_dates(self):
         with self.assertRaisesRegex(ValueError, "on or after"):
             monthly_windows(date(2026, 3, 1), date(2026, 2, 28))
+
+    def test_date_windows_splits_by_requested_day_count(self):
+        windows = date_windows(date(2026, 5, 1), date(2026, 5, 16), 7)
+
+        self.assertEqual(
+            windows,
+            [
+                (date(2026, 5, 1), date(2026, 5, 7)),
+                (date(2026, 5, 8), date(2026, 5, 14)),
+                (date(2026, 5, 15), date(2026, 5, 16)),
+            ],
+        )
+
+    def test_date_windows_rejects_oversized_windows(self):
+        with self.assertRaisesRegex(ValueError, "between 1 and 31"):
+            date_windows(date(2026, 5, 1), date(2026, 5, 31), 32)
 
     def test_validate_supplier_order_window_rejects_too_large_windows(self):
         with self.assertRaisesRegex(ValueError, "may not exceed"):

@@ -109,6 +109,9 @@ historical range into calendar-month requests, filters returned orders locally b
 python scripts/sync_vinosmith_rescue.py --resource supplier_orders --backfill-start-date 2023-01-01 --backfill-end-date 2026-05-31 --sync-type historical_backfill --require-supabase
 ```
 
+For especially slow Vinosmith months, add `--backfill-window-days 7` to request
+the same range in weekly chunks.
+
 ## Automation Strategy
 
 The current remote automation path uses Supabase as the clock and GitHub Actions as the worker:

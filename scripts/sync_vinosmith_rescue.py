@@ -76,6 +76,12 @@ def parse_args() -> argparse.Namespace:
         "--backfill-end-date",
         help="YYYY-MM-DD; split supplier_orders rescue into calendar-month windows ending here.",
     )
+    parser.add_argument(
+        "--backfill-window-days",
+        type=int,
+        default=31,
+        help="Maximum days per supplier_orders backfill request. Defaults to 31; use 7 if Vinosmith is slow.",
+    )
     parser.add_argument("--account-id", help="Optional Vinosmith account ID for supplier_orders.")
     parser.add_argument(
         "--query-param",
@@ -154,6 +160,7 @@ def main() -> int:
                     {"start_date": window[0].isoformat(), "end_date": window[1].isoformat()}
                     for window in (order_windows or [])
                 ],
+                "backfill_window_days": args.backfill_window_days,
             },
         )
 
@@ -252,8 +259,12 @@ def supplier_order_windows(args: argparse.Namespace, resources: list[str]) -> li
     if has_backfill_window:
         if not args.backfill_start_date or not args.backfill_end_date:
             raise SystemExit("--backfill-start-date and --backfill-end-date must be supplied together.")
+        if args.backfill_window_days < 1 or args.backfill_window_days > 31:
+            raise SystemExit("--backfill-window-days must be between 1 and 31.")
         start_date = date.fromisoformat(args.backfill_start_date)
         end_date = date.fromisoformat(args.backfill_end_date)
+        if args.backfill_window_days < 31:
+            return date_windows(start_date, end_date, args.backfill_window_days)
         return monthly_windows(start_date, end_date)
     if not args.delivery_start_date or not args.delivery_end_date:
         raise SystemExit(
@@ -271,6 +282,21 @@ def monthly_windows(start_date: date, end_date: date) -> list[tuple[date, date]]
     cursor = start_date
     while cursor <= end_date:
         window_end = min(month_end(cursor), end_date)
+        windows.append(validate_supplier_order_window(cursor.isoformat(), window_end.isoformat()))
+        cursor = window_end + timedelta(days=1)
+    return windows
+
+
+def date_windows(start_date: date, end_date: date, window_days: int) -> list[tuple[date, date]]:
+    if end_date < start_date:
+        raise ValueError("backfill end date must be on or after the start date")
+    if window_days < 1 or window_days > 31:
+        raise ValueError("window_days must be between 1 and 31")
+
+    windows: list[tuple[date, date]] = []
+    cursor = start_date
+    while cursor <= end_date:
+        window_end = min(cursor + timedelta(days=window_days - 1), end_date)
         windows.append(validate_supplier_order_window(cursor.isoformat(), window_end.isoformat()))
         cursor = window_end + timedelta(days=1)
     return windows

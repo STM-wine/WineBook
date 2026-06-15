@@ -171,6 +171,10 @@ python scripts/sync_vinosmith_rescue.py \
   --require-supabase
 ```
 
+If a supplier-order month is slow or Render Shell appears unstable, add
+`--backfill-window-days 7` to split the same historical range into weekly
+requests without changing the local filtering or upsert behavior.
+
 Important live-account differences from the examples:
 
 - Entity and line IDs are strings.
