@@ -101,11 +101,12 @@ python scripts/sync_vinosmith_rescue.py --resource wines --resource prices --res
 ```
 
 Supplier-order rescue should run in month-sized windows because Vinosmith may
-return a broader date range than requested. The worker filters returned orders
-locally by `supplier_order.delivery_at` and defaults to `sent-to-warehouse` only:
+return a broader date range than requested. The worker can split a larger
+historical range into calendar-month requests, filters returned orders locally by
+`supplier_order.delivery_at`, and defaults to `sent-to-warehouse` only:
 
 ```bash
-python scripts/sync_vinosmith_rescue.py --resource supplier_orders --delivery-start-date 2026-05-01 --delivery-end-date 2026-05-31 --sync-type historical_backfill --require-supabase
+python scripts/sync_vinosmith_rescue.py --resource supplier_orders --backfill-start-date 2023-01-01 --backfill-end-date 2026-05-31 --sync-type historical_backfill --require-supabase
 ```
 
 ## Automation Strategy

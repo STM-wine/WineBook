@@ -158,6 +158,19 @@ python scripts/sync_vinosmith_rescue.py \
   --require-supabase
 ```
 
+For supplier-order rescue, the runner can now split a larger historical range
+into calendar-month API requests while keeping one source sync run, one
+checkpoint per requested month, and one raw JSON file per requested month:
+
+```bash
+python scripts/sync_vinosmith_rescue.py \
+  --resource supplier_orders \
+  --backfill-start-date 2023-01-01 \
+  --backfill-end-date 2026-05-31 \
+  --sync-type historical_backfill \
+  --require-supabase
+```
+
 Important live-account differences from the examples:
 
 - Entity and line IDs are strings.
@@ -251,8 +264,9 @@ parity is proven.
 
 1. Backfill `supplier_orders` from January 1, 2023 through the most recent completed
    month, then fetch the current partial month through today.
-2. Request one calendar month at a time and record a checkpoint for each requested
-   month.
+2. Use `--backfill-start-date` and `--backfill-end-date` so the rescue worker
+   requests one calendar month at a time and records a checkpoint for each
+   requested month.
 3. Always filter returned rows locally using `supplier_order.delivery_at`. The live
    May 1-31 request returned April 1-May 31, and a May 15-20 request returned March
    21-May 20. The API date range may therefore be broader than requested.

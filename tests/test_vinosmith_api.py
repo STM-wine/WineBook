@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+import tempfile
 import unittest
 
-from scripts.sync_vinosmith_rescue import parse_query_params, resource_query_params
+from scripts.sync_vinosmith_rescue import monthly_windows, parse_query_params, resource_query_params, save_raw_payload
 from stem_order.vinosmith_api import (
     analyze_vintage_values,
     collect_wine_snapshots,
@@ -16,6 +18,22 @@ from stem_order.vinosmith_api import (
 
 
 class VinosmithApiHelperTests(unittest.TestCase):
+    def test_monthly_windows_splits_partial_calendar_months(self):
+        windows = monthly_windows(date(2026, 1, 15), date(2026, 3, 5))
+
+        self.assertEqual(
+            windows,
+            [
+                (date(2026, 1, 15), date(2026, 1, 31)),
+                (date(2026, 2, 1), date(2026, 2, 28)),
+                (date(2026, 3, 1), date(2026, 3, 5)),
+            ],
+        )
+
+    def test_monthly_windows_rejects_inverted_dates(self):
+        with self.assertRaisesRegex(ValueError, "on or after"):
+            monthly_windows(date(2026, 3, 1), date(2026, 2, 28))
+
     def test_validate_supplier_order_window_rejects_too_large_windows(self):
         with self.assertRaisesRegex(ValueError, "may not exceed"):
             validate_supplier_order_window("2026-05-01", "2026-06-15")
@@ -114,6 +132,18 @@ class VinosmithApiHelperTests(unittest.TestCase):
     def test_parse_query_params_rejects_unknown_resource(self):
         with self.assertRaises(SystemExit):
             parse_query_params(["winery.secret=true"])
+
+    def test_supplier_order_raw_payload_file_includes_window(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = save_raw_payload(
+                Path(tmp_dir),
+                "supplier_orders",
+                {"data": {"supplier_orders": []}},
+                order_window=(date(2026, 5, 1), date(2026, 5, 31)),
+            )
+
+            self.assertEqual(path.name, "supplier_orders_2026-05-01_2026-05-31.json")
+            self.assertTrue(path.exists())
 
 
 if __name__ == "__main__":

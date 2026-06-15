@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -67,6 +67,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--all", action="store_true", help="Fetch all resources, including supplier_orders.")
     parser.add_argument("--delivery-start-date", help="YYYY-MM-DD; required for supplier_orders.")
     parser.add_argument("--delivery-end-date", help="YYYY-MM-DD; required for supplier_orders.")
+    parser.add_argument(
+        "--backfill-start-date",
+        help="YYYY-MM-DD; split supplier_orders rescue into calendar-month windows starting here.",
+    )
+    parser.add_argument(
+        "--backfill-end-date",
+        help="YYYY-MM-DD; split supplier_orders rescue into calendar-month windows ending here.",
+    )
     parser.add_argument("--account-id", help="Optional Vinosmith account ID for supplier_orders.")
     parser.add_argument(
         "--query-param",
@@ -103,7 +111,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     resources = selected_resources(args)
-    order_window = supplier_order_window(args, resources)
+    order_windows = supplier_order_windows(args, resources)
     statuses = tuple(args.delivery_status or DEFAULT_VINOSMITH_DELIVERY_STATUSES)
     extra_query_params = parse_query_params(args.query_param)
 
@@ -125,8 +133,8 @@ def main() -> int:
         source_sync_run = repo.create_source_sync_run(
             "vinosmith",
             args.sync_type,
-            requested_start_date=order_window[0] if order_window else None,
-            requested_end_date=order_window[1] if order_window else None,
+            requested_start_date=order_windows[0][0] if order_windows else None,
+            requested_end_date=order_windows[-1][1] if order_windows else None,
             worker_name="sync_vinosmith_rescue.py",
             parameters={
                 "resources": resources,
@@ -134,19 +142,40 @@ def main() -> int:
                 "account_id_supplied": bool(args.account_id),
                 "extra_query_params": extra_query_params,
                 "normalized_writes": not args.no_normalized_writes,
+                "supplier_order_windows": [
+                    {"start_date": window[0].isoformat(), "end_date": window[1].isoformat()}
+                    for window in (order_windows or [])
+                ],
             },
         )
 
     summaries: list[ResourceSummary] = []
     try:
         for resource in resources:
+            if resource == "supplier_orders" and order_windows:
+                for order_window in order_windows:
+                    summary = sync_resource(
+                        client=client,
+                        repo=repo,
+                        source_sync_run_id=source_sync_run["id"] if source_sync_run else None,
+                        resource=resource,
+                        output_dir=output_dir,
+                        order_window=order_window,
+                        account_id=args.account_id,
+                        extra_query_params=extra_query_params,
+                        delivery_statuses=statuses,
+                        write_normalized=not args.no_normalized_writes,
+                    )
+                    summaries.append(summary)
+                continue
+
             summary = sync_resource(
                 client=client,
                 repo=repo,
                 source_sync_run_id=source_sync_run["id"] if source_sync_run else None,
                 resource=resource,
                 output_dir=output_dir,
-                order_window=order_window,
+                order_window=None,
                 account_id=args.account_id,
                 extra_query_params=extra_query_params,
                 delivery_statuses=statuses,
@@ -202,12 +231,47 @@ def parse_query_params(raw_params: list[str]) -> dict[str, dict[str, str]]:
     return {resource: params for resource, params in parsed.items() if params}
 
 
-def supplier_order_window(args: argparse.Namespace, resources: list[str]) -> tuple[date, date] | None:
+def supplier_order_windows(args: argparse.Namespace, resources: list[str]) -> list[tuple[date, date]] | None:
     if "supplier_orders" not in resources:
+        if args.delivery_start_date or args.delivery_end_date or args.backfill_start_date or args.backfill_end_date:
+            raise SystemExit("Supplier-order date options require --resource supplier_orders.")
         return None
+
+    has_single_window = bool(args.delivery_start_date or args.delivery_end_date)
+    has_backfill_window = bool(args.backfill_start_date or args.backfill_end_date)
+    if has_single_window and has_backfill_window:
+        raise SystemExit("Use either --delivery-start-date/--delivery-end-date or --backfill-start-date/--backfill-end-date.")
+    if has_backfill_window:
+        if not args.backfill_start_date or not args.backfill_end_date:
+            raise SystemExit("--backfill-start-date and --backfill-end-date must be supplied together.")
+        start_date = date.fromisoformat(args.backfill_start_date)
+        end_date = date.fromisoformat(args.backfill_end_date)
+        return monthly_windows(start_date, end_date)
     if not args.delivery_start_date or not args.delivery_end_date:
-        raise SystemExit("--delivery-start-date and --delivery-end-date are required for supplier_orders.")
-    return validate_supplier_order_window(args.delivery_start_date, args.delivery_end_date)
+        raise SystemExit(
+            "--delivery-start-date and --delivery-end-date are required for supplier_orders, "
+            "or use --backfill-start-date and --backfill-end-date."
+        )
+    return [validate_supplier_order_window(args.delivery_start_date, args.delivery_end_date)]
+
+
+def monthly_windows(start_date: date, end_date: date) -> list[tuple[date, date]]:
+    if end_date < start_date:
+        raise ValueError("backfill end date must be on or after the start date")
+
+    windows: list[tuple[date, date]] = []
+    cursor = start_date
+    while cursor <= end_date:
+        window_end = min(month_end(cursor), end_date)
+        windows.append(validate_supplier_order_window(cursor.isoformat(), window_end.isoformat()))
+        cursor = window_end + timedelta(days=1)
+    return windows
+
+
+def month_end(value: date) -> date:
+    if value.month == 12:
+        return date(value.year, 12, 31)
+    return date(value.year, value.month + 1, 1) - timedelta(days=1)
 
 
 def maybe_repository(require: bool) -> SupabaseRepository | None:
@@ -249,7 +313,7 @@ def sync_resource(
 
     result = client.fetch_resource(resource, requested_params)
     payload = result.json_payload() if result.body else {}
-    raw_file = save_raw_payload(output_dir, resource, payload) if result.body else None
+    raw_file = save_raw_payload(output_dir, resource, payload, order_window=order_window) if result.body else None
     records = records_for_resource(resource, payload)
     accepted_records = accepted_resource_records(resource, records, order_window, delivery_statuses)
     resource_diagnostics = diagnostics_for_resource(resource, accepted_records, result.fetched_at)
@@ -307,8 +371,16 @@ def resource_query_params(resource: str, extra_query_params: dict[str, dict[str,
     }
 
 
-def save_raw_payload(output_dir: Path, resource: str, payload: dict[str, Any]) -> Path:
-    destination = output_dir / f"{resource}.json"
+def save_raw_payload(
+    output_dir: Path,
+    resource: str,
+    payload: dict[str, Any],
+    order_window: tuple[date, date] | None = None,
+) -> Path:
+    if resource == "supplier_orders" and order_window:
+        destination = output_dir / f"{resource}_{order_window[0].isoformat()}_{order_window[1].isoformat()}.json"
+    else:
+        destination = output_dir / f"{resource}.json"
     write_raw_json(destination, payload)
     return destination
 
