@@ -59,6 +59,10 @@ class VinosmithApiHelperTests(unittest.TestCase):
         payload = {"data": {"wines": [{"id": "wine-1"}]}}
         self.assertEqual(records_for_resource("wines", payload), [{"id": "wine-1"}])
         self.assertEqual(
+            records_for_resource("wine_prearrivals", {"data": {"prearrivals": [{"id": "pre-1"}]}}),
+            [{"id": "pre-1"}],
+        )
+        self.assertEqual(
             supplier_order_line_bottle_quantity({"quantity": "3", "wine": {"unit_set": "12"}}),
             36,
         )
@@ -101,6 +105,11 @@ class VinosmithApiHelperTests(unittest.TestCase):
             resource_query_params("wines", parsed),
             {"include": "producer:logo", "updated_since": "2026-06-01T00:00:00Z"},
         )
+
+    def test_parse_query_params_supports_new_rescue_resources(self):
+        parsed = parse_query_params(["accounts.include_disabled=true"])
+
+        self.assertEqual(parsed["accounts"], {"include_disabled": "true"})
 
     def test_parse_query_params_rejects_unknown_resource(self):
         with self.assertRaises(SystemExit):

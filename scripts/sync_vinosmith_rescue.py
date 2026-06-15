@@ -39,7 +39,8 @@ from stem_order.vinosmith_api import (
 
 
 OUTPUT_ROOT = ROOT / "tmp" / "vinosmith-rescue"
-RESOURCE_CHOICES = ("supplier_orders", "wines", "prices", "inventory")
+RESOURCE_CHOICES = ("supplier_orders", "wines", "prices", "inventory", "accounts", "users", "wine_prearrivals")
+NORMALIZED_WRITE_RESOURCES = {"supplier_orders", "wines", "prices", "inventory"}
 
 
 @dataclass
@@ -257,7 +258,7 @@ def sync_resource(
     checkpoint_key = None
     if repo:
         response_id = record_api_response(repo, source_sync_run_id, result, payload, raw_file, len(records))
-        if result.ok and write_normalized:
+        if result.ok and write_normalized and resource in NORMALIZED_WRITE_RESOURCES:
             write_resource_records(repo, source_sync_run_id, response_id, resource, accepted_records, result.fetched_at)
         if result.ok:
             checkpoint_key = upsert_checkpoint(
@@ -372,11 +373,12 @@ def diagnostics_for_resource(
     fetched_at: datetime,
 ) -> dict[str, Any]:
     wines = collect_wine_snapshots(resource, records)
-    if not wines:
-        return {}
-    return {
-        "vintage": analyze_vintage_values(wines, current_year=fetched_at.year),
+    diagnostics = {
+        "normalized_write_supported": resource in NORMALIZED_WRITE_RESOURCES,
     }
+    if wines:
+        diagnostics["vintage"] = analyze_vintage_values(wines, current_year=fetched_at.year)
+    return diagnostics
 
 
 def upsert_checkpoint(

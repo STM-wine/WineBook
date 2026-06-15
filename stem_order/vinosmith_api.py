@@ -22,6 +22,13 @@ VINOSMITH_DISTRIBUTOR_ENDPOINTS = {
     "wines": "/wines",
     "prices": "/prices",
     "inventory": "/inventory",
+    "accounts": "/accounts",
+    "users": "/users",
+    "wine_prearrivals": "/wine_prearrivals",
+}
+
+VINOSMITH_RESOURCE_RECORD_KEYS = {
+    "wine_prearrivals": "prearrivals",
 }
 
 
@@ -153,7 +160,7 @@ def records_for_resource(resource: str, payload: dict[str, Any]) -> list[dict[st
     data = payload.get("data")
     if not isinstance(data, dict):
         return []
-    records = data.get(resource)
+    records = data.get(VINOSMITH_RESOURCE_RECORD_KEYS.get(resource, resource))
     return records if isinstance(records, list) else []
 
 
@@ -202,7 +209,7 @@ def supplier_order_line_bottle_quantity(line_item: dict[str, Any]) -> float:
 def collect_wine_snapshots(resource: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if resource == "wines":
         return records
-    if resource in {"prices", "inventory"}:
+    if resource in {"prices", "inventory", "wine_prearrivals"}:
         return [
             record["wine"]
             for record in records

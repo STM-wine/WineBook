@@ -110,6 +110,16 @@ Official markdown docs also expose these query parameters:
   `delivery_end_date`, and optional `account_id`.
 - `GET /api/distributor/prices`: no documented query parameters.
 - `GET /api/distributor/inventory`: no documented query parameters.
+- `GET /api/distributor/accounts`: `created_since`, `updated_since`, and
+  `include_disabled`.
+- `GET /api/distributor/users`: no documented query parameters.
+- `GET /api/distributor/wine_prearrivals`: no documented query parameters.
+- `GET /api/distributor/wines/{wine_id}`: single-wine detail, with the same
+  `include` expansion style as the full wines endpoint.
+- `GET /api/distributor/wines/{wine_id}/prices` and
+  `GET /api/distributor/wines/{wine_id}/inventory`: targeted per-wine enrichment
+  endpoints. These should be used later for selected wine IDs rather than as the
+  first broad rescue pass.
 
 The rescue runner supports safe parameter probing with `--query-param`. Use
 `--no-normalized-writes` for experiments so new parameter combinations save raw
@@ -119,6 +129,19 @@ JSON and response metadata without mutating cache tables:
 python scripts/sync_vinosmith_rescue.py \
   --resource wines \
   --query-param wines.include=producer:logo \
+  --no-normalized-writes \
+  --require-supabase
+```
+
+The first expanded raw rescue pass should capture accounts, users, and
+pre-arrivals as source metadata before dedicated normalized tables are added:
+
+```bash
+python scripts/sync_vinosmith_rescue.py \
+  --resource accounts \
+  --query-param accounts.include_disabled=true \
+  --resource users \
+  --resource wine_prearrivals \
   --no-normalized-writes \
   --require-supabase
 ```
