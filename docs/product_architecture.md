@@ -115,7 +115,18 @@ the same range in weekly chunks.
 After rescue runs, summarize the normalized Vinosmith cache tables with:
 
 ```bash
+cd /opt/render/project/src
+python -m pip install -r requirements-source-sync.txt
 python scripts/report_vinosmith_rescue_status.py --start-date 2023-01-01 --end-date 2026-06-15
+```
+
+Then compare the latest RB6/RADs recommendation sales windows against rescued
+Vinosmith supplier-order quantities:
+
+```bash
+cd /opt/render/project/src
+python -m pip install -r requirements-source-sync.txt
+python scripts/report_vinosmith_rads_parity.py --as-of-date 2026-06-15
 ```
 
 ## Automation Strategy
