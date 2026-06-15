@@ -9,10 +9,12 @@ from stem_order.supabase_repository import (
     execute_with_transient_retries,
     is_transient_http_error,
     normalized_vinosmith_vintage,
+    vinosmith_account_payload,
     vinosmith_inventory_snapshot_payload,
     vinosmith_order_header_payload,
     vinosmith_order_line_payload,
     vinosmith_price_payload,
+    vinosmith_user_payload,
     vinosmith_wine_payload,
 )
 
@@ -247,6 +249,59 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["end_of_stock"], False)
         self.assertEqual(vinosmith_order_header_payload(order)["supplier_order_id"], "supplier-order-1")
         self.assertEqual(vinosmith_order_line_payload(line, "supplier-order-1")["quantity_bottles"], 12)
+
+    def test_vinosmith_account_and_user_payloads(self):
+        account_payload = vinosmith_account_payload(
+            {
+                "id": 3430,
+                "name": "1760 Restaurant",
+                "code": "1760",
+                "status": "active",
+                "kind": "Restaurant",
+                "license_expiration": "2027-12-31",
+                "shipping_lat": "37.793139",
+                "shipping_lng": "-122.421159",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2026-02-27T19:22:30.664+00:00",
+            },
+            raw_response_id="response-1",
+        )
+        user_payload = vinosmith_user_payload(
+            {
+                "user_id": 123,
+                "first_name": "Taylor",
+                "last_name": "Sorensen",
+                "email": "taylor@example.com",
+                "active": "true",
+                "role": "sales_rep",
+            },
+            raw_response_id="response-2",
+        )
+
+        self.assertEqual(account_payload["account_id"], "3430")
+        self.assertEqual(account_payload["license_expiration"], "2027-12-31")
+        self.assertEqual(account_payload["shipping_lat"], 37.793139)
+        self.assertEqual(account_payload["raw_response_id"], "response-1")
+        self.assertEqual(user_payload["user_id"], "123")
+        self.assertEqual(user_payload["full_name"], "Taylor Sorensen")
+        self.assertEqual(user_payload["active"], True)
+        self.assertEqual(user_payload["raw_response_id"], "response-2")
+
+    def test_upsert_vinosmith_accounts_and_users(self):
+        client = FakeClient()
+        repo = SupabaseRepository(client)
+
+        repo.upsert_vinosmith_accounts([{"id": 3430, "name": "1760 Restaurant"}], raw_response_id="response-1")
+        repo.upsert_vinosmith_users([{"user_id": 123, "email": "rep@example.com"}], raw_response_id="response-2")
+
+        account_call = client.calls[-2]
+        user_call = client.calls[-1]
+        self.assertEqual(account_call["table"], "vinosmith_accounts")
+        self.assertEqual(account_call["on_conflict"], "account_id")
+        self.assertEqual(account_call["payload"][0]["account_id"], "3430")
+        self.assertEqual(user_call["table"], "vinosmith_users")
+        self.assertEqual(user_call["on_conflict"], "user_id")
+        self.assertEqual(user_call["payload"][0]["user_id"], "123")
 
     def test_normalized_vinosmith_vintage_prefers_name_year_and_nv_over_bad_source_value(self):
         self.assertEqual(

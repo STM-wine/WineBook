@@ -134,7 +134,7 @@ python scripts/sync_vinosmith_rescue.py \
 ```
 
 The first expanded raw rescue pass should capture accounts, users, and
-pre-arrivals as source metadata before dedicated normalized tables are added:
+pre-arrivals as source metadata:
 
 ```bash
 python scripts/sync_vinosmith_rescue.py \
@@ -143,6 +143,18 @@ python scripts/sync_vinosmith_rescue.py \
   --resource users \
   --resource wine_prearrivals \
   --no-normalized-writes \
+  --require-supabase
+```
+
+After applying `supabase/migrations/20260615191800_vinosmith_accounts_users.sql`,
+omit `--no-normalized-writes` to populate the private normalized account and user
+cache tables:
+
+```bash
+python scripts/sync_vinosmith_rescue.py \
+  --resource accounts \
+  --query-param accounts.include_disabled=true \
+  --resource users \
   --require-supabase
 ```
 

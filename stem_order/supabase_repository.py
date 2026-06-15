@@ -416,6 +416,22 @@ class SupabaseRepository:
         )
         return saved_headers, saved_lines
 
+    def upsert_vinosmith_accounts(
+        self,
+        accounts: list[dict[str, Any]],
+        raw_response_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        payloads = [vinosmith_account_payload(account, raw_response_id=raw_response_id) for account in accounts]
+        return self._upsert_many("vinosmith_accounts", payloads, on_conflict="account_id")
+
+    def upsert_vinosmith_users(
+        self,
+        users: list[dict[str, Any]],
+        raw_response_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        payloads = [vinosmith_user_payload(user, raw_response_id=raw_response_id) for user in users]
+        return self._upsert_many("vinosmith_users", payloads, on_conflict="user_id")
+
     def upsert_vinosmith_product_links(self, wines: list[dict[str, Any]]) -> list[dict[str, Any]]:
         payloads = []
         now = datetime.now(timezone.utc).isoformat()
@@ -1267,6 +1283,72 @@ def vinosmith_order_line_payload(line_item: dict[str, Any], supplier_order_id: s
     }
 
 
+def vinosmith_account_payload(account: dict[str, Any], raw_response_id: str | None = None) -> dict[str, Any]:
+    account_id = clean_value(account.get("id"))
+    if not account_id:
+        return {}
+    return {
+        "account_id": str(account_id),
+        "name": clean_value(account.get("name"), ""),
+        "code": clean_value(account.get("code")),
+        "status": clean_value(account.get("status")),
+        "kind": clean_value(account.get("kind")),
+        "primary_contact_id": clean_value(account.get("primary_contact_id")),
+        "invoice_title": clean_value(account.get("invoice_title")),
+        "warehouse_code": clean_value(account.get("warehouse_code")),
+        "tasting_hours": clean_value(account.get("tasting_hours")),
+        "delivery_restrictions": clean_value(account.get("delivery_restrictions")),
+        "abc_num": clean_value(account.get("abc_num")),
+        "tax_id_num": clean_value(account.get("tax_id_num")),
+        "resale_num": clean_value(account.get("resale_num")),
+        "license_expiration": date_value(account.get("license_expiration")),
+        "shipping_street1": clean_value(account.get("shipping_street1")),
+        "shipping_street2": clean_value(account.get("shipping_street2")),
+        "shipping_city": clean_value(account.get("shipping_city")),
+        "shipping_state": clean_value(account.get("shipping_state")),
+        "shipping_zip": clean_value(account.get("shipping_zip")),
+        "shipping_lat": clean_numeric(account.get("shipping_lat")),
+        "shipping_lng": clean_numeric(account.get("shipping_lng")),
+        "billing_street1": clean_value(account.get("billing_street1")),
+        "billing_street2": clean_value(account.get("billing_street2")),
+        "billing_city": clean_value(account.get("billing_city")),
+        "billing_state": clean_value(account.get("billing_state")),
+        "billing_zip": clean_value(account.get("billing_zip")),
+        "billing_lat": clean_numeric(account.get("billing_lat")),
+        "billing_lng": clean_numeric(account.get("billing_lng")),
+        "website_url": clean_value(account.get("website_url")),
+        "phone_number": clean_value(account.get("phone_number")),
+        "source_created_at": datetime_value(account.get("created_at")),
+        "source_updated_at": datetime_value(account.get("updated_at")),
+        "raw_response_id": raw_response_id,
+        "raw_data": account,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def vinosmith_user_payload(user: dict[str, Any], raw_response_id: str | None = None) -> dict[str, Any]:
+    user_id = clean_value(user.get("user_id") or user.get("id"))
+    if not user_id:
+        return {}
+    first_name = clean_value(user.get("first_name"))
+    last_name = clean_value(user.get("last_name"))
+    full_name = clean_value(user.get("full_name"))
+    if not full_name:
+        full_name = " ".join(part for part in [first_name, last_name] if part) or None
+    return {
+        "user_id": str(user_id),
+        "first_name": first_name,
+        "last_name": last_name,
+        "full_name": full_name,
+        "email": clean_value(user.get("email")),
+        "active": nullable_bool_value(user.get("active")),
+        "role": clean_value(user.get("role")),
+        "raw_response_id": raw_response_id,
+        "raw_data": user,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 __all__ = [
     "SupabaseConfig",
     "SupabaseRepository",
@@ -1276,9 +1358,11 @@ __all__ = [
     "datetime_value",
     "load_dotenv",
     "normalized_vinosmith_vintage",
+    "vinosmith_account_payload",
     "vinosmith_inventory_snapshot_payload",
     "vinosmith_order_header_payload",
     "vinosmith_order_line_payload",
     "vinosmith_price_payload",
+    "vinosmith_user_payload",
     "vinosmith_wine_payload",
 ]
