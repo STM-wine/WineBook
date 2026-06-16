@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import json
 from pathlib import Path
@@ -47,6 +47,15 @@ class LinkCoverage:
     @property
     def linked_percent(self) -> float:
         return round((self.linked / self.total) * 100, 2) if self.total else 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "total": self.total,
+            "linked": self.linked,
+            "missing": self.missing,
+            "blank": self.blank,
+            "linked_percent": self.linked_percent,
+        }
 
 
 def parse_args() -> argparse.Namespace:
@@ -282,16 +291,16 @@ def build_quality_report(
             "quantity_bottles": round(quantity_bottles, 4),
         },
         "coverage": {
-            "order_accounts": asdict(link_coverage(orders, "account_id", account_ids)),
-            "contact_accounts": asdict(link_coverage(contacts, "account_id", account_ids)),
-            "sales_rep_accounts": asdict(link_coverage(account_sales_reps, "account_id", account_ids)),
-            "sales_rep_users": asdict(link_coverage(account_sales_reps, "user_id", user_ids)),
-            "order_users": asdict(link_coverage(orders, "user_id", user_ids)),
-            "line_wines": asdict(link_coverage(lines, "wine_id", wine_ids)),
-            "price_wines": asdict(link_coverage(prices, "wine_id", wine_ids)),
-            "prearrival_wines": asdict(link_coverage(prearrivals, "wine_id", wine_ids)),
-            "inventory_wines": asdict(link_coverage(inventory_rows, "wine_id", wine_ids)),
-            "catalog_wines_with_latest_inventory": asdict(reverse_coverage(wine_ids, inventory_wine_ids)),
+            "order_accounts": link_coverage(orders, "account_id", account_ids).to_dict(),
+            "contact_accounts": link_coverage(contacts, "account_id", account_ids).to_dict(),
+            "sales_rep_accounts": link_coverage(account_sales_reps, "account_id", account_ids).to_dict(),
+            "sales_rep_users": link_coverage(account_sales_reps, "user_id", user_ids).to_dict(),
+            "order_users": link_coverage(orders, "user_id", user_ids).to_dict(),
+            "line_wines": link_coverage(lines, "wine_id", wine_ids).to_dict(),
+            "price_wines": link_coverage(prices, "wine_id", wine_ids).to_dict(),
+            "prearrival_wines": link_coverage(prearrivals, "wine_id", wine_ids).to_dict(),
+            "inventory_wines": link_coverage(inventory_rows, "wine_id", wine_ids).to_dict(),
+            "catalog_wines_with_latest_inventory": reverse_coverage(wine_ids, inventory_wine_ids).to_dict(),
         },
         "vintage_quality": summarize_vintages(wines, lines, sample_size=sample_size),
         "samples": {
