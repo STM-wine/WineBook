@@ -3,8 +3,8 @@
 This read-only helper uses the latest completed `report_runs` +
 `reorder_recommendations` rows as the legacy RB6/RADs baseline, then aggregates
 rescued Vinosmith supplier-order lines over the same trailing windows. It prints
-both the RADs-compatible bottle/eaches quantity and the legacy multiplied value
-so old over-multiplied rescues are obvious.
+the RADs-compatible bottle/eaches quantity alongside the stored case-equivalent
+quantity as a sanity check.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.report_vinosmith_rescue_status import fetch_all, format_cents
+from scripts.report_vinosmith_rescue_status import fetch_all, fetch_lines_for_order_ids, format_cents
 from stem_order.supabase_repository import SupabaseRepository, load_dotenv
 
 
@@ -32,7 +32,7 @@ WINDOWS = (30, 60, 90)
 @dataclass
 class VinosmithSkuTotals:
     bottle_quantity: float = 0
-    legacy_multiplied_quantity: float = 0
+    case_equivalent_quantity: float = 0
     line_total_cents: int = 0
     line_count: int = 0
 
@@ -77,11 +77,10 @@ def main() -> int:
         order_by="delivery_at",
     )
     print("Fetching Vinosmith order lines...", file=sys.stderr, flush=True)
-    line_rows = fetch_all(
+    line_rows = fetch_lines_for_order_ids(
         repo,
-        "vinosmith_order_lines",
+        [row.get("supplier_order_id") for row in order_rows],
         "line_item_id,supplier_order_id,wine_name,quantity_cases,quantity_bottles,total_cents",
-        order_by="supplier_order_id",
     )
 
     report = build_parity_report(
@@ -201,21 +200,8 @@ def aggregate_vinosmith_lines(
             if not sku:
                 continue
             summary = totals[sku]
-            stored_quantity_cases = float_value(line.get("quantity_cases"))
-            stored_quantity_bottles = float_value(line.get("quantity_bottles"))
-            if (
-                stored_quantity_cases
-                and is_integer_like(stored_quantity_cases)
-                and is_integer_like(stored_quantity_bottles)
-                and stored_quantity_bottles > stored_quantity_cases * 1.5
-            ):
-                bottle_quantity = stored_quantity_cases
-                legacy_multiplied_quantity = stored_quantity_bottles
-            else:
-                bottle_quantity = stored_quantity_bottles
-                legacy_multiplied_quantity = stored_quantity_bottles
-            summary.bottle_quantity += bottle_quantity
-            summary.legacy_multiplied_quantity += legacy_multiplied_quantity
+            summary.bottle_quantity += float_value(line.get("quantity_bottles"))
+            summary.case_equivalent_quantity += float_value(line.get("quantity_cases"))
             summary.line_total_cents += int_value(line.get("total_cents"))
             summary.line_count += 1
     return totals
@@ -231,7 +217,7 @@ def compare_window(
     sku_rows = []
     rads_total = 0.0
     vinosmith_bottle_total = 0.0
-    vinosmith_legacy_multiplied_total = 0.0
+    vinosmith_case_equivalent_total = 0.0
     matched_skus = 0
     for recommendation in recommendation_rows:
         sku = recommendation["sku"]
@@ -241,23 +227,23 @@ def compare_window(
             matched_skus += int(bool(vinosmith.line_count))
             rads_total += rads_quantity
             vinosmith_bottle_total += vinosmith.bottle_quantity
-            vinosmith_legacy_multiplied_total += vinosmith.legacy_multiplied_quantity
+            vinosmith_case_equivalent_total += vinosmith.case_equivalent_quantity
             sku_rows.append(
                 {
                     "sku": sku,
                     "product_name": recommendation.get("product_name"),
                     "rads_quantity": round(rads_quantity, 4),
                     "vinosmith_bottle_quantity": round(vinosmith.bottle_quantity, 4),
-                    "vinosmith_legacy_multiplied_quantity": round(vinosmith.legacy_multiplied_quantity, 4),
+                    "vinosmith_case_equivalent_quantity": round(vinosmith.case_equivalent_quantity, 4),
                     "bottle_diff": round(vinosmith.bottle_quantity - rads_quantity, 4),
-                    "legacy_multiplied_diff": round(vinosmith.legacy_multiplied_quantity - rads_quantity, 4),
+                    "case_equivalent_diff": round(vinosmith.case_equivalent_quantity - rads_quantity, 4),
                     "line_total_cents": vinosmith.line_total_cents,
                     "line_count": vinosmith.line_count,
                 }
             )
 
     bottle_abs_diff = abs(vinosmith_bottle_total - rads_total)
-    legacy_multiplied_abs_diff = abs(vinosmith_legacy_multiplied_total - rads_total)
+    case_equivalent_abs_diff = abs(vinosmith_case_equivalent_total - rads_total)
     sku_rows.sort(key=lambda row: abs(row["bottle_diff"]), reverse=True)
     return {
         "days": window,
@@ -266,14 +252,14 @@ def compare_window(
         "totals": {
             "rads_quantity": round(rads_total, 4),
             "vinosmith_bottle_quantity": round(vinosmith_bottle_total, 4),
-            "vinosmith_legacy_multiplied_quantity": round(vinosmith_legacy_multiplied_total, 4),
+            "vinosmith_case_equivalent_quantity": round(vinosmith_case_equivalent_total, 4),
             "bottle_diff": round(vinosmith_bottle_total - rads_total, 4),
-            "legacy_multiplied_diff": round(vinosmith_legacy_multiplied_total - rads_total, 4),
+            "case_equivalent_diff": round(vinosmith_case_equivalent_total - rads_total, 4),
             "bottle_abs_diff": round(bottle_abs_diff, 4),
-            "legacy_multiplied_abs_diff": round(legacy_multiplied_abs_diff, 4),
+            "case_equivalent_abs_diff": round(case_equivalent_abs_diff, 4),
             "best_quantity_basis": "bottle_quantity"
-            if bottle_abs_diff <= legacy_multiplied_abs_diff
-            else "legacy_multiplied_quantity",
+            if bottle_abs_diff <= case_equivalent_abs_diff
+            else "case_equivalent_quantity",
             "vinosmith_line_total": format_cents(sum(row["line_total_cents"] for row in sku_rows)),
         },
         "top_bottle_quantity_differences": sku_rows[:top],
@@ -297,9 +283,9 @@ def print_report(report: dict[str, Any]) -> None:
             f"(diff {totals['bottle_diff']:,.4f})"
         )
         print(
-            "Legacy multiplied quantity: "
-            f"{totals['vinosmith_legacy_multiplied_quantity']:,.4f} "
-            f"(diff {totals['legacy_multiplied_diff']:,.4f})"
+            "Vinosmith case-equivalent quantity: "
+            f"{totals['vinosmith_case_equivalent_quantity']:,.4f} "
+            f"(diff {totals['case_equivalent_diff']:,.4f})"
         )
         print(f"Best quantity basis: {totals['best_quantity_basis']}")
         print(f"Vinosmith line total: {totals['vinosmith_line_total']}")
@@ -355,10 +341,6 @@ def float_value(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0
-
-
-def is_integer_like(value: float) -> bool:
-    return abs(value - round(value)) < 0.0001
 
 
 if __name__ == "__main__":

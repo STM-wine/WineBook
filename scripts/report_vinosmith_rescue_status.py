@@ -69,11 +69,10 @@ def main() -> int:
         order_by="delivery_at",
     )
     print("Fetching Vinosmith order lines...", file=sys.stderr, flush=True)
-    line_rows = fetch_all(
+    line_rows = fetch_lines_for_order_ids(
         repo,
-        "vinosmith_order_lines",
+        [row.get("supplier_order_id") for row in order_rows],
         "line_item_id,supplier_order_id,wine_id,total_cents,quantity_bottles",
-        order_by="supplier_order_id",
     )
     print("Fetching supplier-order checkpoints...", file=sys.stderr, flush=True)
     checkpoints = fetch_all(
@@ -136,6 +135,36 @@ def fetch_all(
         rows.extend(page)
         if len(page) < page_size:
             break
+    return rows
+
+
+def fetch_lines_for_order_ids(
+    repo: SupabaseRepository,
+    order_ids: list[Any],
+    columns: str,
+    chunk_size: int = 200,
+    page_size: int = 1000,
+) -> list[dict[str, Any]]:
+    unique_order_ids = sorted({str(order_id) for order_id in order_ids if order_id not in (None, "")})
+    rows: list[dict[str, Any]] = []
+    total_chunks = (len(unique_order_ids) + chunk_size - 1) // chunk_size
+    for chunk_index, start in enumerate(range(0, len(unique_order_ids), chunk_size), start=1):
+        chunk = unique_order_ids[start : start + chunk_size]
+        print(
+            f"Fetching Vinosmith order lines chunk {chunk_index}/{total_chunks}...",
+            file=sys.stderr,
+            flush=True,
+        )
+        rows.extend(
+            fetch_all(
+                repo,
+                "vinosmith_order_lines",
+                columns,
+                filters=[("in_", "supplier_order_id", chunk)],
+                order_by="supplier_order_id",
+                page_size=page_size,
+            )
+        )
     return rows
 
 
