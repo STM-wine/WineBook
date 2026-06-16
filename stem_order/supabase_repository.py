@@ -432,6 +432,21 @@ class SupabaseRepository:
         payloads = [vinosmith_user_payload(user, raw_response_id=raw_response_id) for user in users]
         return self._upsert_many("vinosmith_users", payloads, on_conflict="user_id")
 
+    def upsert_vinosmith_prearrivals(
+        self,
+        prearrivals: list[dict[str, Any]],
+        raw_response_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        embedded_wines = [
+            record.get("wine")
+            for record in prearrivals
+            if isinstance(record.get("wine"), dict) and record["wine"].get("id")
+        ]
+        if embedded_wines:
+            self.upsert_vinosmith_wines(embedded_wines, raw_response_id=raw_response_id)
+        payloads = [vinosmith_prearrival_payload(record, raw_response_id=raw_response_id) for record in prearrivals]
+        return self._upsert_many("vinosmith_prearrivals", payloads, on_conflict="prearrival_key")
+
     def upsert_vinosmith_product_links(self, wines: list[dict[str, Any]]) -> list[dict[str, Any]]:
         payloads = []
         now = datetime.now(timezone.utc).isoformat()
@@ -1350,6 +1365,41 @@ def vinosmith_user_payload(user: dict[str, Any], raw_response_id: str | None = N
     }
 
 
+def vinosmith_prearrival_payload(record: dict[str, Any], raw_response_id: str | None = None) -> dict[str, Any]:
+    wine = record.get("wine") if isinstance(record.get("wine"), dict) else {}
+    prearrival = record.get("prearrival") if isinstance(record.get("prearrival"), dict) else record
+    wine_id = clean_value(wine.get("id") or prearrival.get("wine_id"))
+    expected_date = date_value(prearrival.get("expected_date"))
+    quantity = clean_numeric(prearrival.get("quantity"))
+    source_created_at = datetime_value(prearrival.get("created_at"))
+    external_identifier = clean_value(prearrival.get("external_identifier"))
+    external_identifier_1 = clean_value(prearrival.get("external_identifier1") or prearrival.get("external_identifier_1"))
+    key_parts = [
+        str(wine_id or ""),
+        str(expected_date or ""),
+        str(quantity if quantity is not None else ""),
+        str(external_identifier or ""),
+        str(external_identifier_1 or ""),
+        str(source_created_at or ""),
+    ]
+    prearrival_key = hashlib.sha256("|".join(key_parts).encode("utf-8")).hexdigest()
+    return {
+        "prearrival_key": prearrival_key,
+        "wine_id": str(wine_id) if wine_id else None,
+        "wine_code": clean_value(wine.get("code")),
+        "wine_name": clean_value(wine.get("name")),
+        "quantity": quantity,
+        "expected_date": expected_date,
+        "notes": clean_value(prearrival.get("notes")),
+        "external_identifier": external_identifier,
+        "external_identifier_1": external_identifier_1,
+        "source_created_at": source_created_at,
+        "raw_response_id": raw_response_id,
+        "raw_data": record,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 __all__ = [
     "SupabaseConfig",
     "SupabaseRepository",
@@ -1363,6 +1413,7 @@ __all__ = [
     "vinosmith_inventory_snapshot_payload",
     "vinosmith_order_header_payload",
     "vinosmith_order_line_payload",
+    "vinosmith_prearrival_payload",
     "vinosmith_price_payload",
     "vinosmith_user_payload",
     "vinosmith_wine_payload",

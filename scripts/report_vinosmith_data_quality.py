@@ -101,6 +101,12 @@ def main() -> int:
     accounts = fetch_all(repo, "vinosmith_accounts", "account_id,name,status,last_seen_at", order_by="account_id")
     users = fetch_all(repo, "vinosmith_users", "user_id,full_name,email,active,role,last_seen_at", order_by="user_id")
     prices = fetch_all(repo, "vinosmith_prices", "price_id,wine_id,price_cents,active,disabled,last_seen_at", order_by="price_id")
+    prearrivals = fetch_all(
+        repo,
+        "vinosmith_prearrivals",
+        "prearrival_key,wine_id,wine_code,wine_name,quantity,expected_date,last_seen_at",
+        order_by="expected_date",
+    )
     latest_inventory = fetch_latest_inventory_snapshot(repo)
 
     print("Fetching rescued Vinosmith orders for validation window...", file=sys.stderr, flush=True)
@@ -130,6 +136,7 @@ def main() -> int:
         accounts=accounts,
         users=users,
         prices=prices,
+        prearrivals=prearrivals,
         inventory_rows=latest_inventory["rows"],
         inventory_snapshot_date=latest_inventory["snapshot_date"],
         orders=orders,
@@ -175,6 +182,7 @@ def build_quality_report(
     accounts: list[dict[str, Any]],
     users: list[dict[str, Any]],
     prices: list[dict[str, Any]],
+    prearrivals: list[dict[str, Any]],
     inventory_rows: list[dict[str, Any]],
     inventory_snapshot_date: str | None,
     orders: list[dict[str, Any]],
@@ -234,6 +242,7 @@ def build_quality_report(
             "users": len(users),
             "wines": len(wines),
             "prices": len(prices),
+            "prearrivals": len(prearrivals),
             "latest_inventory_snapshot_date": inventory_snapshot_date,
             "latest_inventory_rows": len(inventory_rows),
             "orders": len(orders),
@@ -250,6 +259,7 @@ def build_quality_report(
             "order_users": asdict(link_coverage(orders, "user_id", user_ids)),
             "line_wines": asdict(link_coverage(lines, "wine_id", wine_ids)),
             "price_wines": asdict(link_coverage(prices, "wine_id", wine_ids)),
+            "prearrival_wines": asdict(link_coverage(prearrivals, "wine_id", wine_ids)),
             "inventory_wines": asdict(link_coverage(inventory_rows, "wine_id", wine_ids)),
             "catalog_wines_with_latest_inventory": asdict(reverse_coverage(wine_ids, inventory_wine_ids)),
         },
@@ -426,7 +436,8 @@ def print_report(report: dict[str, Any]) -> None:
     print(
         "Cache counts: "
         f"accounts={counts['accounts']:,}, users={counts['users']:,}, wines={counts['wines']:,}, "
-        f"prices={counts['prices']:,}, latest_inventory={counts['latest_inventory_rows']:,} "
+        f"prices={counts['prices']:,}, prearrivals={counts['prearrivals']:,}, "
+        f"latest_inventory={counts['latest_inventory_rows']:,} "
         f"({counts['latest_inventory_snapshot_date']}), orders={counts['orders']:,}, lines={counts['order_lines']:,}"
     )
     print(

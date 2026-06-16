@@ -13,6 +13,7 @@ from stem_order.supabase_repository import (
     vinosmith_inventory_snapshot_payload,
     vinosmith_order_header_payload,
     vinosmith_order_line_payload,
+    vinosmith_prearrival_payload,
     vinosmith_price_payload,
     vinosmith_user_payload,
     vinosmith_wine_payload,
@@ -215,7 +216,7 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(link_call["payload"][0]["source_system"], "vinosmith")
         self.assertEqual(link_call["payload"][0]["source_entity_type"], "wine")
 
-    def test_vinosmith_payload_helpers_map_orders_inventory_and_prices(self):
+    def test_vinosmith_payload_helpers_map_orders_inventory_prices_and_prearrivals(self):
         wine = {"id": "wine-1", "code": "ABC", "name": "Wine", "unit_set": "6"}
         price_record = {"price": {"id": "price-1", "price_cents": "1999", "default": "true"}, "wine": wine}
         inventory_record = {
@@ -251,6 +252,24 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         line_payload = vinosmith_order_line_payload(line, "supplier-order-1")
         self.assertEqual(line_payload["quantity_bottles"], 2)
         self.assertAlmostEqual(line_payload["quantity_cases"], 2 / 6)
+        prearrival_payload = vinosmith_prearrival_payload(
+            {
+                "wine": wine,
+                "prearrival": {
+                    "quantity": "20.0",
+                    "expected_date": "2026-08-01",
+                    "notes": "More coming",
+                    "external_identifier1": "pre-1",
+                    "created_at": "2026-06-01T12:00:00Z",
+                },
+            },
+            raw_response_id="response-3",
+        )
+        self.assertEqual(prearrival_payload["wine_id"], "wine-1")
+        self.assertEqual(prearrival_payload["quantity"], 20)
+        self.assertEqual(prearrival_payload["expected_date"], "2026-08-01")
+        self.assertEqual(prearrival_payload["external_identifier_1"], "pre-1")
+        self.assertEqual(prearrival_payload["raw_response_id"], "response-3")
 
     def test_vinosmith_account_and_user_payloads(self):
         account_payload = vinosmith_account_payload(
@@ -289,21 +308,29 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(user_payload["active"], True)
         self.assertEqual(user_payload["raw_response_id"], "response-2")
 
-    def test_upsert_vinosmith_accounts_and_users(self):
+    def test_upsert_vinosmith_accounts_users_and_prearrivals(self):
         client = FakeClient()
         repo = SupabaseRepository(client)
 
         repo.upsert_vinosmith_accounts([{"id": 3430, "name": "1760 Restaurant"}], raw_response_id="response-1")
         repo.upsert_vinosmith_users([{"user_id": 123, "email": "rep@example.com"}], raw_response_id="response-2")
+        repo.upsert_vinosmith_prearrivals(
+            [{"wine": {"id": "wine-1"}, "prearrival": {"quantity": "10.0", "expected_date": "2026-08-01"}}],
+            raw_response_id="response-3",
+        )
 
-        account_call = client.calls[-2]
-        user_call = client.calls[-1]
+        account_call = client.calls[-5]
+        user_call = client.calls[-4]
+        prearrival_call = client.calls[-1]
         self.assertEqual(account_call["table"], "vinosmith_accounts")
         self.assertEqual(account_call["on_conflict"], "account_id")
         self.assertEqual(account_call["payload"][0]["account_id"], "3430")
         self.assertEqual(user_call["table"], "vinosmith_users")
         self.assertEqual(user_call["on_conflict"], "user_id")
         self.assertEqual(user_call["payload"][0]["user_id"], "123")
+        self.assertEqual(prearrival_call["table"], "vinosmith_prearrivals")
+        self.assertEqual(prearrival_call["on_conflict"], "prearrival_key")
+        self.assertEqual(prearrival_call["payload"][0]["wine_id"], "wine-1")
 
     def test_normalized_vinosmith_vintage_prefers_name_year_and_nv_over_bad_source_value(self):
         self.assertEqual(

@@ -42,6 +42,10 @@ class VinosmithDataQualityTests(unittest.TestCase):
                 {"price_id": "price-1", "wine_id": "wine-1", "price_cents": 1200},
                 {"price_id": "price-2", "wine_id": "missing-wine", "price_cents": 1500},
             ],
+            prearrivals=[
+                {"prearrival_key": "pre-1", "wine_id": "wine-1", "quantity": 12},
+                {"prearrival_key": "pre-2", "wine_id": "missing-wine", "quantity": 6},
+            ],
             inventory_rows=[{"wine_id": "wine-1", "available": 12}],
             inventory_snapshot_date="2026-06-16",
             orders=[
@@ -99,6 +103,7 @@ class VinosmithDataQualityTests(unittest.TestCase):
         self.assertEqual(report["coverage"]["line_wines"]["missing"], 1)
         self.assertEqual(report["coverage"]["line_wines"]["blank"], 1)
         self.assertEqual(report["coverage"]["price_wines"]["missing"], 1)
+        self.assertEqual(report["coverage"]["prearrival_wines"]["missing"], 1)
         self.assertEqual(report["coverage"]["catalog_wines_with_latest_inventory"]["missing"], 1)
         self.assertEqual(report["vintage_quality"]["catalog_wines"]["name_year_mismatch_samples"][0]["wine_id"], "wine-2")
         self.assertEqual(report["vintage_quality"]["order_lines"]["suspect_count"], 1)

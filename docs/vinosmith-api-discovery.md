@@ -326,9 +326,33 @@ point-in-time quantity feed and should be snapshotted daily.
    - Snapshot timestamp/date, wine ID, warehouse ID, available, on-hand, on-hold,
      on-order, on-future, pending-sync, end-of-stock, bin/UOM metadata, and raw
      response ID.
+7. `vinosmith_prearrivals`
+   - Wine ID/code/name, expected date, quantity, notes, external identifiers,
+     source-created timestamp, and raw prearrival payload.
 
 Normalized records should retain source-response IDs or fetch timestamps so any
 parity mismatch can be traced back to exact raw input.
+
+### Data-rescue gap classification
+
+The API cancellation question should be tracked in three buckets:
+
+1. **Fetched and normalized:** supplier-order headers/lines, wines, prices,
+   inventory snapshots, accounts, users, and pre-arrivals.
+2. **Fetched but only retained inside `raw_data`:** rich wine/product fields such
+   as tasting notes, organic/sustainable/certification flags, UPC, alcohol, SRP,
+   RRP, cases produced, aging, vinification, images, awards, varietals, sub-
+   appellation, classification, and some inventory/bin/UOM metadata. These are
+   not lost, but they are not yet first-class query columns.
+3. **Documented but not yet broadly rescued:** per-account detail endpoints include
+   account contacts and sales reps. The list accounts endpoint does not include
+   those nested structures, so cancellation readiness should include a targeted
+   account-detail rescue if Stem needs contact/buyer history inside WineBook.
+
+Known unresolved or unavailable fields remain BTG, laid-in cost, exact
+unconfirmed-quantity semantics, historical-at-sale FOB, exact line-to-price joins
+for live Stem supplier-order rows, and authoritative interpretation of free/sample,
+credit/return, pending, and cancelled order lines.
 
 ### Stable keys and joins
 

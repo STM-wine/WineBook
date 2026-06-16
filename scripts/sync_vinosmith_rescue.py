@@ -40,7 +40,15 @@ from stem_order.vinosmith_api import (
 
 OUTPUT_ROOT = ROOT / "tmp" / "vinosmith-rescue"
 RESOURCE_CHOICES = ("supplier_orders", "wines", "prices", "inventory", "accounts", "users", "wine_prearrivals")
-NORMALIZED_WRITE_RESOURCES = {"supplier_orders", "wines", "prices", "inventory", "accounts", "users"}
+NORMALIZED_WRITE_RESOURCES = {
+    "supplier_orders",
+    "wines",
+    "prices",
+    "inventory",
+    "accounts",
+    "users",
+    "wine_prearrivals",
+}
 
 
 @dataclass
@@ -501,6 +509,8 @@ def write_resource_records(
         repo.upsert_vinosmith_accounts(records, raw_response_id=response_id)
     elif resource == "users":
         repo.upsert_vinosmith_users(records, raw_response_id=response_id)
+    elif resource == "wine_prearrivals":
+        repo.upsert_vinosmith_prearrivals(records, raw_response_id=response_id)
     else:
         raise ValueError(f"Unsupported Vinosmith resource: {resource}")
 
