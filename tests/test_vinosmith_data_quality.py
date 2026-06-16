@@ -29,11 +29,22 @@ class VinosmithDataQualityTests(unittest.TestCase):
                     "wine_id": "wine-1",
                     "name": "Example Wine 2024 12/750ml",
                     "vintage": "2024",
+                    "active": True,
+                    "orderable": True,
+                    "inventory_item": True,
                 },
                 {
                     "wine_id": "wine-2",
                     "name": "Mismatched Wine 2021 12/750ml",
                     "vintage": "2020",
+                    "active": True,
+                    "orderable": True,
+                    "inventory_item": True,
+                },
+                {
+                    "wine_id": "historical-wine",
+                    "name": "Historical Wine 2019 12/750ml",
+                    "vintage": "2019",
                 },
             ],
             accounts=[{"account_id": "acct-1", "name": "Account"}],
@@ -56,6 +67,8 @@ class VinosmithDataQualityTests(unittest.TestCase):
             ],
             inventory_rows=[{"wine_id": "wine-1", "available": 12}],
             inventory_snapshot_date="2026-06-16",
+            inventory_snapshot_at="2026-06-16T12:00:00+00:00",
+            inventory_source_sync_run_id="sync-run-1",
             orders=[
                 {
                     "supplier_order_id": "order-1",
@@ -105,6 +118,9 @@ class VinosmithDataQualityTests(unittest.TestCase):
 
         self.assertEqual(report["cache_counts"]["orders"], 2)
         self.assertEqual(report["cache_counts"]["order_lines"], 3)
+        self.assertEqual(report["cache_counts"]["wine_identities"], 3)
+        self.assertEqual(report["cache_counts"]["current_catalog_wines"], 2)
+        self.assertEqual(report["cache_counts"]["latest_inventory_source_sync_run_id"], "sync-run-1")
         self.assertEqual(report["cache_counts"]["account_contacts"], 2)
         self.assertEqual(report["cache_counts"]["account_sales_reps"], 2)
         self.assertEqual(report["sales_totals"]["line_total_cents"], 3500)
@@ -116,8 +132,8 @@ class VinosmithDataQualityTests(unittest.TestCase):
         self.assertEqual(report["coverage"]["line_wines"]["blank"], 1)
         self.assertEqual(report["coverage"]["price_wines"]["missing"], 1)
         self.assertEqual(report["coverage"]["prearrival_wines"]["missing"], 1)
-        self.assertEqual(report["coverage"]["catalog_wines_with_latest_inventory"]["missing"], 1)
-        self.assertEqual(report["vintage_quality"]["catalog_wines"]["name_year_mismatch_samples"][0]["wine_id"], "wine-2")
+        self.assertEqual(report["coverage"]["current_catalog_wines_with_latest_inventory"]["missing"], 1)
+        self.assertEqual(report["vintage_quality"]["wine_identities"]["name_year_mismatch_samples"][0]["wine_id"], "wine-2")
         self.assertEqual(report["vintage_quality"]["order_lines"]["suspect_count"], 1)
         self.assertIn("accounts", report["sync_metadata"]["missing_resource_checkpoints"])
         self.assertIn("wines", report["sync_metadata"]["missing_resource_responses"])
@@ -129,7 +145,14 @@ class VinosmithDataQualityTests(unittest.TestCase):
             checkpoints=[],
             responses=[],
             recent_runs=[],
-            wines=[{"wine_id": "wine-1", "name": "Example Wine 2024 12/750ml", "vintage": "2024"}],
+            wines=[
+                {
+                    "wine_id": "wine-1",
+                    "name": "Example Wine 2024 12/750ml",
+                    "vintage": "2024",
+                    "active": True,
+                }
+            ],
             accounts=[{"account_id": "acct-1", "name": "Account"}],
             contacts=[],
             account_sales_reps=[],
@@ -138,6 +161,8 @@ class VinosmithDataQualityTests(unittest.TestCase):
             prearrivals=[],
             inventory_rows=[],
             inventory_snapshot_date=None,
+            inventory_snapshot_at=None,
+            inventory_source_sync_run_id=None,
             orders=[
                 {
                     "supplier_order_id": "order-1",
@@ -153,6 +178,9 @@ class VinosmithDataQualityTests(unittest.TestCase):
 
         self.assertEqual(report["cache_counts"]["order_lines"], 0)
         self.assertEqual(report["cache_counts"]["order_lines_included"], False)
+        self.assertIsNone(report["sales_totals"]["line_total_cents"])
+        self.assertIsNone(report["sales_totals"]["order_line_total_diff_cents"])
+        self.assertIsNone(report["sales_totals"]["quantity_bottles"])
         self.assertIsNone(report["coverage"]["line_wines"])
         self.assertNotIn("order_lines", report["vintage_quality"])
 

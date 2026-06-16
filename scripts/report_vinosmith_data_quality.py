@@ -181,6 +181,8 @@ def main() -> int:
         prearrivals=prearrivals,
         inventory_rows=latest_inventory["rows"],
         inventory_snapshot_date=latest_inventory["snapshot_date"],
+        inventory_snapshot_at=latest_inventory["snapshot_at"],
+        inventory_source_sync_run_id=latest_inventory["source_sync_run_id"],
         orders=orders,
         lines=lines,
         order_lines_included=args.include_order_lines,
@@ -197,22 +199,34 @@ def fetch_latest_inventory_snapshot(repo: SupabaseRepository) -> dict[str, Any]:
     latest = fetch_all(
         repo,
         "vinosmith_inventory_snapshots",
-        "snapshot_date",
-        order_by="snapshot_date",
+        "source_sync_run_id,snapshot_at,snapshot_date",
+        order_by="snapshot_at",
         desc=True,
         limit=1,
     )
-    snapshot_date = latest[0]["snapshot_date"] if latest else None
+    snapshot_date = latest[0].get("snapshot_date") if latest else None
+    snapshot_at = latest[0].get("snapshot_at") if latest else None
+    source_sync_run_id = latest[0].get("source_sync_run_id") if latest else None
     if not snapshot_date:
-        return {"snapshot_date": None, "rows": []}
+        return {"snapshot_date": None, "snapshot_at": None, "source_sync_run_id": None, "rows": []}
+    filters = (
+        [("eq", "source_sync_run_id", source_sync_run_id)]
+        if source_sync_run_id
+        else [("eq", "snapshot_at", snapshot_at)]
+    )
     rows = fetch_all(
         repo,
         "vinosmith_inventory_snapshots",
-        "id,wine_id,warehouse_id,available,on_hand,on_order,on_future,on_pending_sync,snapshot_date",
-        filters=[("eq", "snapshot_date", snapshot_date)],
+        "id,source_sync_run_id,wine_id,warehouse_id,available,on_hand,on_order,on_future,on_pending_sync,snapshot_at,snapshot_date",
+        filters=filters,
         order_by="wine_id",
     )
-    return {"snapshot_date": snapshot_date, "rows": rows}
+    return {
+        "snapshot_date": snapshot_date,
+        "snapshot_at": snapshot_at,
+        "source_sync_run_id": source_sync_run_id,
+        "rows": rows,
+    }
 
 
 def build_quality_report(
@@ -230,19 +244,22 @@ def build_quality_report(
     prearrivals: list[dict[str, Any]],
     inventory_rows: list[dict[str, Any]],
     inventory_snapshot_date: str | None,
+    inventory_snapshot_at: str | None,
+    inventory_source_sync_run_id: str | None,
     orders: list[dict[str, Any]],
     lines: list[dict[str, Any]],
     order_lines_included: bool = True,
     sample_size: int = 10,
 ) -> dict[str, Any]:
     wine_ids = {str(row["wine_id"]) for row in wines if row.get("wine_id")}
+    current_catalog_wine_ids = current_catalog_ids(wines)
     account_ids = {str(row["account_id"]) for row in accounts if row.get("account_id")}
     user_ids = {str(row["user_id"]) for row in users if row.get("user_id")}
     inventory_wine_ids = {str(row["wine_id"]) for row in inventory_rows if row.get("wine_id")}
 
     order_total_cents = sum_int(orders, "total_cents")
-    line_total_cents = sum_int(lines, "total_cents")
-    quantity_bottles = sum_float(lines, "quantity_bottles")
+    line_total_cents = sum_int(lines, "total_cents") if order_lines_included else None
+    quantity_bottles = round(sum_float(lines, "quantity_bottles"), 4) if order_lines_included else None
 
     checkpoints_by_resource = summarize_checkpoints(checkpoints)
     responses_by_resource = summarize_responses(responses)
@@ -288,10 +305,13 @@ def build_quality_report(
             "account_contacts": len(contacts),
             "account_sales_reps": len(account_sales_reps),
             "users": len(users),
-            "wines": len(wines),
+            "wine_identities": len(wines),
+            "current_catalog_wines": len(current_catalog_wine_ids),
             "prices": len(prices),
             "prearrivals": len(prearrivals),
             "latest_inventory_snapshot_date": inventory_snapshot_date,
+            "latest_inventory_snapshot_at": inventory_snapshot_at,
+            "latest_inventory_source_sync_run_id": inventory_source_sync_run_id,
             "latest_inventory_rows": len(inventory_rows),
             "orders": len(orders),
             "order_lines": len(lines),
@@ -300,8 +320,10 @@ def build_quality_report(
         "sales_totals": {
             "order_total_cents": order_total_cents,
             "line_total_cents": line_total_cents,
-            "order_line_total_diff_cents": line_total_cents - order_total_cents,
-            "quantity_bottles": round(quantity_bottles, 4),
+            "order_line_total_diff_cents": (
+                line_total_cents - order_total_cents if line_total_cents is not None else None
+            ),
+            "quantity_bottles": quantity_bottles,
         },
         "coverage": {
             "order_accounts": link_coverage(orders, "account_id", account_ids).to_dict(),
@@ -313,7 +335,10 @@ def build_quality_report(
             "price_wines": link_coverage(prices, "wine_id", wine_ids).to_dict(),
             "prearrival_wines": link_coverage(prearrivals, "wine_id", wine_ids).to_dict(),
             "inventory_wines": link_coverage(inventory_rows, "wine_id", wine_ids).to_dict(),
-            "catalog_wines_with_latest_inventory": reverse_coverage(wine_ids, inventory_wine_ids).to_dict(),
+            "current_catalog_wines_with_latest_inventory": reverse_coverage(
+                current_catalog_wine_ids,
+                inventory_wine_ids,
+            ).to_dict(),
         },
         "vintage_quality": summarize_vintages(
             wines,
@@ -375,7 +400,7 @@ def summarize_vintages(
     sample_size: int = 10,
 ) -> dict[str, Any]:
     current_year = datetime.now(timezone.utc).year
-    catalog = vintage_counts(wines, "vintage", current_year=current_year)
+    wine_identity = vintage_counts(wines, "vintage", current_year=current_year)
     line = vintage_counts(lines, "vintage", current_year=current_year) if include_lines else None
     mismatches = []
     for row in wines:
@@ -383,8 +408,8 @@ def summarize_vintages(
         vintage = str(row.get("vintage") or "")
         if name_year and vintage and vintage not in {"NV", name_year}:
             mismatches.append({"wine_id": row.get("wine_id"), "name": row.get("name"), "vintage": vintage, "name_year": name_year})
-    catalog["name_year_mismatch_samples"] = mismatches[:sample_size]
-    vintages = {"catalog_wines": catalog}
+    wine_identity["name_year_mismatch_samples"] = mismatches[:sample_size]
+    vintages = {"wine_identities": wine_identity}
     if line is not None:
         vintages["order_lines"] = line
     return vintages
@@ -418,6 +443,15 @@ def vintage_counts(rows: list[dict[str, Any]], column: str, current_year: int) -
         "year": year,
         "suspect_count": len(suspect),
         "suspect_samples": suspect[:10],
+    }
+
+
+def current_catalog_ids(wines: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(row["wine_id"])
+        for row in wines
+        if row.get("wine_id")
+        and any(row.get(column) is not None for column in ("active", "orderable", "inventory_item"))
     }
 
 
@@ -497,19 +531,28 @@ def print_report(report: dict[str, Any]) -> None:
     print(
         "Cache counts: "
         f"accounts={counts['accounts']:,}, contacts={counts['account_contacts']:,}, "
-        f"account_reps={counts['account_sales_reps']:,}, users={counts['users']:,}, wines={counts['wines']:,}, "
+        f"account_reps={counts['account_sales_reps']:,}, users={counts['users']:,}, "
+        f"wine_identities={counts['wine_identities']:,}, "
+        f"current_catalog={counts['current_catalog_wines']:,}, "
         f"prices={counts['prices']:,}, prearrivals={counts['prearrivals']:,}, "
         f"latest_inventory={counts['latest_inventory_rows']:,} "
         f"({counts['latest_inventory_snapshot_date']}), orders={counts['orders']:,}, lines={counts['order_lines']:,}"
         f"{'' if counts['order_lines_included'] else ' (not scanned)'}"
     )
-    print(
-        "Sales totals: "
-        f"orders={format_cents(totals['order_total_cents'])}, "
-        f"lines={format_cents(totals['line_total_cents'])}, "
-        f"diff={format_cents(totals['order_line_total_diff_cents'])}, "
-        f"bottle/eaches={totals['quantity_bottles']:,.4f}"
-    )
+    if counts["order_lines_included"]:
+        print(
+            "Sales totals: "
+            f"orders={format_cents(totals['order_total_cents'])}, "
+            f"lines={format_cents(totals['line_total_cents'])}, "
+            f"diff={format_cents(totals['order_line_total_diff_cents'])}, "
+            f"bottle/eaches={totals['quantity_bottles']:,.4f}"
+        )
+    else:
+        print(
+            "Sales totals: "
+            f"orders={format_cents(totals['order_total_cents'])}, "
+            "line totals not scanned"
+        )
     print("\nCoverage")
     if not counts["order_lines_included"]:
         print("line_wines coverage skipped; rerun with --include-order-lines for full line validation.")
