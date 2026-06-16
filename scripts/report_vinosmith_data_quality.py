@@ -25,7 +25,16 @@ from scripts.report_vinosmith_rescue_status import fetch_all, fetch_lines_for_or
 from stem_order.supabase_repository import SupabaseRepository, load_dotenv
 
 
-RESOURCE_NAMES = ("accounts", "users", "wines", "prices", "inventory", "wine_prearrivals", "supplier_orders")
+RESOURCE_NAMES = (
+    "accounts",
+    "account_details",
+    "users",
+    "wines",
+    "prices",
+    "inventory",
+    "wine_prearrivals",
+    "supplier_orders",
+)
 
 
 @dataclass
@@ -99,6 +108,18 @@ def main() -> int:
         order_by="wine_id",
     )
     accounts = fetch_all(repo, "vinosmith_accounts", "account_id,name,status,last_seen_at", order_by="account_id")
+    contacts = fetch_all(
+        repo,
+        "vinosmith_account_contacts",
+        "contact_id,account_id,full_name,email,buyer,primary_contact,last_seen_at",
+        order_by="account_id",
+    )
+    account_sales_reps = fetch_all(
+        repo,
+        "vinosmith_account_sales_reps",
+        "account_id,user_id,full_name,email,last_seen_at",
+        order_by="account_id",
+    )
     users = fetch_all(repo, "vinosmith_users", "user_id,full_name,email,active,role,last_seen_at", order_by="user_id")
     prices = fetch_all(repo, "vinosmith_prices", "price_id,wine_id,price_cents,active,disabled,last_seen_at", order_by="price_id")
     prearrivals = fetch_all(
@@ -134,6 +155,8 @@ def main() -> int:
         recent_runs=recent_runs,
         wines=wines,
         accounts=accounts,
+        contacts=contacts,
+        account_sales_reps=account_sales_reps,
         users=users,
         prices=prices,
         prearrivals=prearrivals,
@@ -180,6 +203,8 @@ def build_quality_report(
     recent_runs: list[dict[str, Any]],
     wines: list[dict[str, Any]],
     accounts: list[dict[str, Any]],
+    contacts: list[dict[str, Any]],
+    account_sales_reps: list[dict[str, Any]],
     users: list[dict[str, Any]],
     prices: list[dict[str, Any]],
     prearrivals: list[dict[str, Any]],
@@ -239,6 +264,8 @@ def build_quality_report(
         },
         "cache_counts": {
             "accounts": len(accounts),
+            "account_contacts": len(contacts),
+            "account_sales_reps": len(account_sales_reps),
             "users": len(users),
             "wines": len(wines),
             "prices": len(prices),
@@ -256,6 +283,9 @@ def build_quality_report(
         },
         "coverage": {
             "order_accounts": asdict(link_coverage(orders, "account_id", account_ids)),
+            "contact_accounts": asdict(link_coverage(contacts, "account_id", account_ids)),
+            "sales_rep_accounts": asdict(link_coverage(account_sales_reps, "account_id", account_ids)),
+            "sales_rep_users": asdict(link_coverage(account_sales_reps, "user_id", user_ids)),
             "order_users": asdict(link_coverage(orders, "user_id", user_ids)),
             "line_wines": asdict(link_coverage(lines, "wine_id", wine_ids)),
             "price_wines": asdict(link_coverage(prices, "wine_id", wine_ids)),
@@ -435,7 +465,8 @@ def print_report(report: dict[str, Any]) -> None:
     print(f"Vinosmith data quality: {report['range']['start_date']}..{report['range']['end_date']}")
     print(
         "Cache counts: "
-        f"accounts={counts['accounts']:,}, users={counts['users']:,}, wines={counts['wines']:,}, "
+        f"accounts={counts['accounts']:,}, contacts={counts['account_contacts']:,}, "
+        f"account_reps={counts['account_sales_reps']:,}, users={counts['users']:,}, wines={counts['wines']:,}, "
         f"prices={counts['prices']:,}, prearrivals={counts['prearrivals']:,}, "
         f"latest_inventory={counts['latest_inventory_rows']:,} "
         f"({counts['latest_inventory_snapshot_date']}), orders={counts['orders']:,}, lines={counts['order_lines']:,}"

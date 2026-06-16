@@ -112,6 +112,8 @@ Official markdown docs also expose these query parameters:
 - `GET /api/distributor/inventory`: no documented query parameters.
 - `GET /api/distributor/accounts`: `created_since`, `updated_since`, and
   `include_disabled`.
+- `GET /api/distributor/accounts/{account_id}`: single-account detail, including
+  nested contacts and sales reps that are not present on the list endpoint.
 - `GET /api/distributor/users`: no documented query parameters.
 - `GET /api/distributor/wine_prearrivals`: no documented query parameters.
 - `GET /api/distributor/wines/{wine_id}`: single-wine detail, with the same
@@ -329,6 +331,12 @@ point-in-time quantity feed and should be snapshotted daily.
 7. `vinosmith_prearrivals`
    - Wine ID/code/name, expected date, quantity, notes, external identifiers,
      source-created timestamp, and raw prearrival payload.
+8. `vinosmith_account_contacts`
+   - Contact ID, account ID, name/title/email/phone fields, invoice/buyer/primary
+     flags, notes, birth date, and raw contact payload.
+9. `vinosmith_account_sales_reps`
+   - Account-to-user assignment rows from account detail responses, with snapshot
+     rep name/email fields and raw sales-rep payload.
 
 Normalized records should retain source-response IDs or fetch timestamps so any
 parity mismatch can be traced back to exact raw input.
@@ -344,10 +352,11 @@ The API cancellation question should be tracked in three buckets:
    RRP, cases produced, aging, vinification, images, awards, varietals, sub-
    appellation, classification, and some inventory/bin/UOM metadata. These are
    not lost, but they are not yet first-class query columns.
-3. **Documented but not yet broadly rescued:** per-account detail endpoints include
-   account contacts and sales reps. The list accounts endpoint does not include
-   those nested structures, so cancellation readiness should include a targeted
-   account-detail rescue if Stem needs contact/buyer history inside WineBook.
+3. **Documented and now supported by the rescue runner, but requires an explicit
+   detail pass:** per-account detail endpoints include account contacts and sales
+   reps. The list accounts endpoint does not include those nested structures, so
+   cancellation readiness should run `--resource account_details` after the broad
+   account list has populated `vinosmith_accounts`.
 
 Known unresolved or unavailable fields remain BTG, laid-in cost, exact
 unconfirmed-quantity semantics, historical-at-sale FOB, exact line-to-price joins

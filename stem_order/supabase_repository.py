@@ -447,6 +447,48 @@ class SupabaseRepository:
         payloads = [vinosmith_prearrival_payload(record, raw_response_id=raw_response_id) for record in prearrivals]
         return self._upsert_many("vinosmith_prearrivals", payloads, on_conflict="prearrival_key")
 
+    def upsert_vinosmith_account_details(
+        self,
+        accounts: list[dict[str, Any]],
+        raw_response_id: str | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        saved_accounts = self.upsert_vinosmith_accounts(accounts, raw_response_id=raw_response_id)
+        contact_payloads: list[dict[str, Any]] = []
+        sales_rep_payloads: list[dict[str, Any]] = []
+        for account in accounts:
+            account_id = clean_value(account.get("id"))
+            if not account_id:
+                continue
+            for contact in account.get("contacts") or []:
+                if isinstance(contact, dict):
+                    contact_payloads.append(
+                        vinosmith_account_contact_payload(
+                            contact,
+                            account_id=str(account_id),
+                            raw_response_id=raw_response_id,
+                        )
+                    )
+            for sales_rep in account.get("sales_reps") or []:
+                if isinstance(sales_rep, dict):
+                    sales_rep_payloads.append(
+                        vinosmith_account_sales_rep_payload(
+                            sales_rep,
+                            account_id=str(account_id),
+                            raw_response_id=raw_response_id,
+                        )
+                    )
+        saved_contacts = self._upsert_many(
+            "vinosmith_account_contacts",
+            contact_payloads,
+            on_conflict="contact_id",
+        )
+        saved_sales_reps = self._upsert_many(
+            "vinosmith_account_sales_reps",
+            sales_rep_payloads,
+            on_conflict="account_id,user_id",
+        )
+        return saved_accounts, saved_contacts, saved_sales_reps
+
     def upsert_vinosmith_product_links(self, wines: list[dict[str, Any]]) -> list[dict[str, Any]]:
         payloads = []
         now = datetime.now(timezone.utc).isoformat()
@@ -1400,6 +1442,69 @@ def vinosmith_prearrival_payload(record: dict[str, Any], raw_response_id: str | 
     }
 
 
+def vinosmith_account_contact_payload(
+    contact: dict[str, Any],
+    account_id: str,
+    raw_response_id: str | None = None,
+) -> dict[str, Any]:
+    contact_id = clean_value(contact.get("id") or contact.get("contact_id"))
+    if not contact_id:
+        return {}
+    first_name = clean_value(contact.get("first_name"))
+    last_name = clean_value(contact.get("last_name"))
+    full_name = clean_value(contact.get("full_name"))
+    if not full_name:
+        full_name = " ".join(part for part in [first_name, last_name] if part) or None
+    return {
+        "contact_id": str(contact_id),
+        "account_id": str(account_id),
+        "first_name": first_name,
+        "last_name": last_name,
+        "full_name": full_name,
+        "title": clean_value(contact.get("title")),
+        "email": clean_value(contact.get("email")),
+        "phone": clean_value(contact.get("phone")),
+        "mobile_phone": clean_value(contact.get("mobile_phone")),
+        "business_phone": clean_value(contact.get("business_phone")),
+        "personal_email": clean_value(contact.get("personal_email")),
+        "fax": clean_value(contact.get("fax")),
+        "invoices": nullable_bool_value(contact.get("invoices")),
+        "buyer": nullable_bool_value(contact.get("buyer")),
+        "primary_contact": nullable_bool_value(contact.get("primary")),
+        "notes": clean_value(contact.get("notes")),
+        "birth_date": date_value(contact.get("birth_date")),
+        "raw_response_id": raw_response_id,
+        "raw_data": contact,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def vinosmith_account_sales_rep_payload(
+    sales_rep: dict[str, Any],
+    account_id: str,
+    raw_response_id: str | None = None,
+) -> dict[str, Any]:
+    user_id = clean_value(sales_rep.get("user_id") or sales_rep.get("id"))
+    if not user_id:
+        return {}
+    first_name = clean_value(sales_rep.get("first_name"))
+    last_name = clean_value(sales_rep.get("last_name"))
+    full_name = clean_value(sales_rep.get("full_name"))
+    if not full_name:
+        full_name = " ".join(part for part in [first_name, last_name] if part) or None
+    return {
+        "account_id": str(account_id),
+        "user_id": str(user_id),
+        "first_name": first_name,
+        "last_name": last_name,
+        "full_name": full_name,
+        "email": clean_value(sales_rep.get("email")),
+        "raw_response_id": raw_response_id,
+        "raw_data": sales_rep,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 __all__ = [
     "SupabaseConfig",
     "SupabaseRepository",
@@ -1409,7 +1514,9 @@ __all__ = [
     "datetime_value",
     "load_dotenv",
     "normalized_vinosmith_vintage",
+    "vinosmith_account_contact_payload",
     "vinosmith_account_payload",
+    "vinosmith_account_sales_rep_payload",
     "vinosmith_inventory_snapshot_payload",
     "vinosmith_order_header_payload",
     "vinosmith_order_line_payload",

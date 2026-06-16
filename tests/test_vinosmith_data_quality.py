@@ -37,6 +37,14 @@ class VinosmithDataQualityTests(unittest.TestCase):
                 },
             ],
             accounts=[{"account_id": "acct-1", "name": "Account"}],
+            contacts=[
+                {"contact_id": "contact-1", "account_id": "acct-1", "full_name": "Buyer"},
+                {"contact_id": "contact-2", "account_id": "missing-account", "full_name": "Lost Buyer"},
+            ],
+            account_sales_reps=[
+                {"account_id": "acct-1", "user_id": "user-1", "full_name": "Rep"},
+                {"account_id": "acct-1", "user_id": "missing-user", "full_name": "Other Rep"},
+            ],
             users=[{"user_id": "user-1", "full_name": "Rep"}],
             prices=[
                 {"price_id": "price-1", "wine_id": "wine-1", "price_cents": 1200},
@@ -97,8 +105,12 @@ class VinosmithDataQualityTests(unittest.TestCase):
 
         self.assertEqual(report["cache_counts"]["orders"], 2)
         self.assertEqual(report["cache_counts"]["order_lines"], 3)
+        self.assertEqual(report["cache_counts"]["account_contacts"], 2)
+        self.assertEqual(report["cache_counts"]["account_sales_reps"], 2)
         self.assertEqual(report["sales_totals"]["line_total_cents"], 3500)
         self.assertEqual(report["coverage"]["order_accounts"]["missing"], 1)
+        self.assertEqual(report["coverage"]["contact_accounts"]["missing"], 1)
+        self.assertEqual(report["coverage"]["sales_rep_users"]["missing"], 1)
         self.assertEqual(report["coverage"]["order_users"]["blank"], 1)
         self.assertEqual(report["coverage"]["line_wines"]["missing"], 1)
         self.assertEqual(report["coverage"]["line_wines"]["blank"], 1)

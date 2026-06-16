@@ -86,10 +86,39 @@ class VinosmithDistributorClient:
         if resource not in VINOSMITH_DISTRIBUTOR_ENDPOINTS:
             raise ValueError(f"Unsupported Vinosmith resource: {resource}")
 
+        endpoint = VINOSMITH_DISTRIBUTOR_ENDPOINTS[resource]
         requested_params = {key: value for key, value in (params or {}).items() if value not in (None, "")}
-        url = f"{self.base_url}{VINOSMITH_DISTRIBUTOR_ENDPOINTS[resource]}"
-        if requested_params:
-            url = f"{url}?{urlencode(requested_params)}"
+        return self.fetch_endpoint(resource=resource, endpoint=endpoint, params=requested_params)
+
+    def fetch_account_details(
+        self,
+        account_id: str,
+        params: dict[str, Any] | None = None,
+    ) -> VinosmithFetchResult:
+        account_id = str(account_id).strip()
+        if not account_id:
+            raise ValueError("account_id is required")
+        return self.fetch_endpoint(
+            resource="account_details",
+            endpoint=f"/accounts/{account_id}",
+            params={**(params or {}), "account_id": account_id},
+        )
+
+    def fetch_endpoint(
+        self,
+        resource: str,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+    ) -> VinosmithFetchResult:
+        requested_params = {key: value for key, value in (params or {}).items() if value not in (None, "")}
+        url = f"{self.base_url}{endpoint}"
+        query_params = (
+            {key: value for key, value in requested_params.items() if key != "account_id"}
+            if resource == "account_details"
+            else requested_params
+        )
+        if query_params:
+            url = f"{url}?{urlencode(query_params)}"
 
         request = Request(
             url,
@@ -110,7 +139,7 @@ class VinosmithDistributorClient:
                 json.loads(body)
                 return VinosmithFetchResult(
                     resource=resource,
-                    endpoint=VINOSMITH_DISTRIBUTOR_ENDPOINTS[resource],
+                    endpoint=endpoint,
                     requested_params=requested_params,
                     status=response.status,
                     status_text=response.reason or "",
@@ -122,7 +151,7 @@ class VinosmithDistributorClient:
             body = exc.read(MAX_RESPONSE_BYTES)
             return VinosmithFetchResult(
                 resource=resource,
-                endpoint=VINOSMITH_DISTRIBUTOR_ENDPOINTS[resource],
+                endpoint=endpoint,
                 requested_params=requested_params,
                 status=exc.code,
                 status_text=exc.reason or "",
@@ -134,7 +163,7 @@ class VinosmithDistributorClient:
         except (json.JSONDecodeError, RuntimeError, TimeoutError, URLError) as exc:
             return VinosmithFetchResult(
                 resource=resource,
-                endpoint=VINOSMITH_DISTRIBUTOR_ENDPOINTS[resource],
+                endpoint=endpoint,
                 requested_params=requested_params,
                 status=None,
                 status_text="",
@@ -160,6 +189,9 @@ def records_for_resource(resource: str, payload: dict[str, Any]) -> list[dict[st
     data = payload.get("data")
     if not isinstance(data, dict):
         return []
+    if resource == "account_details":
+        account = data.get("account")
+        return [account] if isinstance(account, dict) else []
     records = data.get(VINOSMITH_RESOURCE_RECORD_KEYS.get(resource, resource))
     return records if isinstance(records, list) else []
 

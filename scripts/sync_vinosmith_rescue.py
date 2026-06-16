@@ -39,13 +39,23 @@ from stem_order.vinosmith_api import (
 
 
 OUTPUT_ROOT = ROOT / "tmp" / "vinosmith-rescue"
-RESOURCE_CHOICES = ("supplier_orders", "wines", "prices", "inventory", "accounts", "users", "wine_prearrivals")
+RESOURCE_CHOICES = (
+    "supplier_orders",
+    "wines",
+    "prices",
+    "inventory",
+    "accounts",
+    "account_details",
+    "users",
+    "wine_prearrivals",
+)
 NORMALIZED_WRITE_RESOURCES = {
     "supplier_orders",
     "wines",
     "prices",
     "inventory",
     "accounts",
+    "account_details",
     "users",
     "wine_prearrivals",
 }
@@ -91,6 +101,17 @@ def parse_args() -> argparse.Namespace:
         help="Maximum days per supplier_orders backfill request. Defaults to 31; use 7 if Vinosmith is slow.",
     )
     parser.add_argument("--account-id", help="Optional Vinosmith account ID for supplier_orders.")
+    parser.add_argument(
+        "--account-detail-id",
+        action="append",
+        default=[],
+        help="Specific Vinosmith account ID for account_details rescue. Repeatable. Defaults to all rescued accounts.",
+    )
+    parser.add_argument(
+        "--account-detail-limit",
+        type=int,
+        help="Optional limit for account_details rescue, useful for a small proof run.",
+    )
     parser.add_argument(
         "--query-param",
         action="append",
@@ -139,6 +160,7 @@ def main() -> int:
         return 2
 
     repo = None if args.no_supabase else maybe_repository(require=args.require_supabase)
+    account_detail_ids = selected_account_detail_ids(args, repo, resources)
     output_dir = args.output_dir or default_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -162,6 +184,7 @@ def main() -> int:
                 "resources": resources,
                 "delivery_statuses": statuses,
                 "account_id_supplied": bool(args.account_id),
+                "account_detail_count": len(account_detail_ids),
                 "extra_query_params": extra_query_params,
                 "normalized_writes": not args.no_normalized_writes,
                 "supplier_order_windows": [
@@ -175,6 +198,20 @@ def main() -> int:
     summaries: list[ResourceSummary] = []
     try:
         for resource in resources:
+            if resource == "account_details":
+                for account_detail_id in account_detail_ids:
+                    summary = sync_account_detail(
+                        client=client,
+                        repo=repo,
+                        source_sync_run_id=source_sync_run["id"] if source_sync_run else None,
+                        output_dir=output_dir,
+                        account_id=account_detail_id,
+                        extra_query_params=extra_query_params,
+                        write_normalized=not args.no_normalized_writes,
+                    )
+                    summaries.append(summary)
+                continue
+
             if resource == "supplier_orders" and order_windows:
                 for order_window in order_windows:
                     summary = sync_resource(
@@ -252,6 +289,49 @@ def parse_query_params(raw_params: list[str]) -> dict[str, dict[str, str]]:
             raise SystemExit(f"Invalid --query-param {raw_param!r}; parameter key cannot be blank.")
         parsed.setdefault(resource, {})[key] = value
     return {resource: params for resource, params in parsed.items() if params}
+
+
+def selected_account_detail_ids(
+    args: argparse.Namespace,
+    repo: SupabaseRepository | None,
+    resources: list[str],
+) -> list[str]:
+    if "account_details" not in resources:
+        if args.account_detail_id or args.account_detail_limit:
+            raise SystemExit("Account-detail options require --resource account_details.")
+        return []
+    if args.account_detail_id:
+        account_ids = [str(account_id).strip() for account_id in args.account_detail_id if str(account_id).strip()]
+    else:
+        if repo is None:
+            raise SystemExit("--resource account_details requires Supabase writes or explicit --account-detail-id values.")
+        account_ids = fetch_rescued_account_ids(repo)
+    if args.account_detail_limit is not None:
+        if args.account_detail_limit < 1:
+            raise SystemExit("--account-detail-limit must be greater than zero.")
+        account_ids = account_ids[: args.account_detail_limit]
+    if not account_ids:
+        raise SystemExit("No account IDs available for account_details rescue.")
+    return account_ids
+
+
+def fetch_rescued_account_ids(repo: SupabaseRepository, page_size: int = 1000) -> list[str]:
+    account_ids: list[str] = []
+    while True:
+        start = len(account_ids)
+        end = start + page_size - 1
+        result = (
+            repo.client.table("vinosmith_accounts")
+            .select("account_id")
+            .order("account_id")
+            .range(start, end)
+            .execute()
+        )
+        page = result.data or []
+        account_ids.extend(str(row["account_id"]) for row in page if row.get("account_id"))
+        if len(page) < page_size:
+            break
+    return account_ids
 
 
 def supplier_order_windows(args: argparse.Namespace, resources: list[str]) -> list[tuple[date, date]] | None:
@@ -403,6 +483,66 @@ def sync_resource(
     )
 
 
+def sync_account_detail(
+    client: VinosmithDistributorClient,
+    repo: SupabaseRepository | None,
+    source_sync_run_id: str | None,
+    output_dir: Path,
+    account_id: str,
+    extra_query_params: dict[str, dict[str, str]],
+    write_normalized: bool,
+) -> ResourceSummary:
+    resource = "account_details"
+    label = f"{resource} {account_id}"
+    requested_params = resource_query_params(resource, extra_query_params)
+    print_progress(f"{label}: fetching from Vinosmith")
+    result = client.fetch_account_details(account_id, requested_params)
+    payload = result.json_payload() if result.body else {}
+    raw_file = save_raw_payload(output_dir, resource, payload, account_id=account_id) if result.body else None
+    records = records_for_resource(resource, payload)
+    resource_diagnostics = diagnostics_for_resource(resource, records, result.fetched_at)
+    status_text = result.status if result.status is not None else result.status_text or "no-status"
+    print_progress(f"{label}: fetched status={status_text}, records={len(records)}, accepted={len(records)}")
+
+    response_id = None
+    checkpoint_key = None
+    if repo:
+        print_progress(f"{label}: recording source response")
+        response_id = record_api_response(repo, source_sync_run_id, result, payload, raw_file, len(records))
+        if result.ok and write_normalized:
+            print_progress(f"{label}: writing normalized account detail rows")
+            write_resource_records(repo, source_sync_run_id, response_id, resource, records, result.fetched_at)
+        if result.ok:
+            print_progress(f"{label}: updating checkpoint")
+            checkpoint_key = upsert_checkpoint(
+                repo,
+                source_sync_run_id,
+                resource,
+                None,
+                result,
+                record_count=len(records),
+                accepted_count=len(records),
+                response_id=response_id,
+                resource_diagnostics=resource_diagnostics,
+            )
+            print_progress(f"{label}: completed checkpoint={checkpoint_key}")
+        elif result.error:
+            print_progress(f"{label}: failed error={result.error}")
+
+    return ResourceSummary(
+        resource=resource,
+        requested_window=None,
+        status=result.status,
+        record_count=len(records),
+        accepted_count=len(records),
+        raw_file=str(raw_file.relative_to(ROOT)) if raw_file else None,
+        response_id=response_id,
+        checkpoint_key=checkpoint_key,
+        diagnostics=resource_diagnostics,
+        error=result.error,
+    )
+
+
 def accepted_resource_records(
     resource: str,
     records: list[dict[str, Any]],
@@ -429,13 +569,20 @@ def save_raw_payload(
     resource: str,
     payload: dict[str, Any],
     order_window: tuple[date, date] | None = None,
+    account_id: str | None = None,
 ) -> Path:
     if resource == "supplier_orders" and order_window:
         destination = output_dir / f"{resource}_{order_window[0].isoformat()}_{order_window[1].isoformat()}.json"
+    elif resource == "account_details" and account_id:
+        destination = output_dir / f"{resource}_{safe_filename_part(account_id)}.json"
     else:
         destination = output_dir / f"{resource}.json"
     write_raw_json(destination, payload)
     return destination
+
+
+def safe_filename_part(value: str) -> str:
+    return "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in str(value))
 
 
 def resource_label(resource: str, order_window: tuple[date, date] | None = None) -> str:
@@ -511,6 +658,8 @@ def write_resource_records(
         repo.upsert_vinosmith_users(records, raw_response_id=response_id)
     elif resource == "wine_prearrivals":
         repo.upsert_vinosmith_prearrivals(records, raw_response_id=response_id)
+    elif resource == "account_details":
+        repo.upsert_vinosmith_account_details(records, raw_response_id=response_id)
     else:
         raise ValueError(f"Unsupported Vinosmith resource: {resource}")
 
@@ -524,6 +673,13 @@ def diagnostics_for_resource(
     diagnostics = {
         "normalized_write_supported": resource in NORMALIZED_WRITE_RESOURCES,
     }
+    if resource == "account_details":
+        diagnostics["contacts_count"] = sum(
+            len(account.get("contacts") or []) for account in records if isinstance(account, dict)
+        )
+        diagnostics["sales_reps_count"] = sum(
+            len(account.get("sales_reps") or []) for account in records if isinstance(account, dict)
+        )
     if wines:
         diagnostics["vintage"] = analyze_vintage_values(wines, current_year=fetched_at.year)
     return diagnostics
@@ -544,6 +700,10 @@ def upsert_checkpoint(
         checkpoint_key = f"{order_window[0].isoformat()}:{order_window[1].isoformat()}"
         requested_start_date = order_window[0]
         requested_end_date = order_window[1]
+    elif resource == "account_details":
+        checkpoint_key = str(result.requested_params.get("account_id") or "unknown")
+        requested_start_date = None
+        requested_end_date = None
     elif resource == "inventory":
         checkpoint_key = result.fetched_at.date().isoformat()
         requested_start_date = result.fetched_at.date()
@@ -571,6 +731,7 @@ def upsert_checkpoint(
         diagnostics={
             "returned_metadata": returned_metadata(result.json_payload() if result.body else {}),
             "known_endpoint": VINOSMITH_DISTRIBUTOR_ENDPOINTS.get(resource),
+            "endpoint": result.endpoint,
             **(resource_diagnostics or {}),
         },
         last_synced_at=result.fetched_at,

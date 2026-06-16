@@ -103,6 +103,10 @@ class VinosmithApiHelperTests(unittest.TestCase):
             [{"id": "pre-1"}],
         )
         self.assertEqual(
+            records_for_resource("account_details", {"data": {"account": {"id": "acct-1"}}}),
+            [{"id": "acct-1"}],
+        )
+        self.assertEqual(
             supplier_order_line_bottle_quantity({"quantity": "3", "wine": {"unit_set": "12"}}),
             3,
         )
@@ -147,9 +151,10 @@ class VinosmithApiHelperTests(unittest.TestCase):
         )
 
     def test_parse_query_params_supports_new_rescue_resources(self):
-        parsed = parse_query_params(["accounts.include_disabled=true"])
+        parsed = parse_query_params(["accounts.include_disabled=true", "account_details.include_contacts=true"])
 
         self.assertEqual(parsed["accounts"], {"include_disabled": "true"})
+        self.assertEqual(parsed["account_details"], {"include_contacts": "true"})
 
     def test_parse_query_params_rejects_unknown_resource(self):
         with self.assertRaises(SystemExit):
@@ -165,6 +170,18 @@ class VinosmithApiHelperTests(unittest.TestCase):
             )
 
             self.assertEqual(path.name, "supplier_orders_2026-05-01_2026-05-31.json")
+            self.assertTrue(path.exists())
+
+    def test_account_detail_raw_payload_file_includes_account_id(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = save_raw_payload(
+                Path(tmp_dir),
+                "account_details",
+                {"data": {"account": {"id": "acct/1"}}},
+                account_id="acct/1",
+            )
+
+            self.assertEqual(path.name, "account_details_acct_1.json")
             self.assertTrue(path.exists())
 
 

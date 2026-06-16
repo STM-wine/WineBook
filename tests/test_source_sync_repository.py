@@ -9,7 +9,9 @@ from stem_order.supabase_repository import (
     execute_with_transient_retries,
     is_transient_http_error,
     normalized_vinosmith_vintage,
+    vinosmith_account_contact_payload,
     vinosmith_account_payload,
+    vinosmith_account_sales_rep_payload,
     vinosmith_inventory_snapshot_payload,
     vinosmith_order_header_payload,
     vinosmith_order_line_payload,
@@ -271,7 +273,7 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(prearrival_payload["external_identifier_1"], "pre-1")
         self.assertEqual(prearrival_payload["raw_response_id"], "response-3")
 
-    def test_vinosmith_account_and_user_payloads(self):
+    def test_vinosmith_account_user_contact_and_sales_rep_payloads(self):
         account_payload = vinosmith_account_payload(
             {
                 "id": 3430,
@@ -298,6 +300,33 @@ class SourceSyncRepositoryTests(unittest.TestCase):
             },
             raw_response_id="response-2",
         )
+        contact_payload = vinosmith_account_contact_payload(
+            {
+                "id": 12920,
+                "first_name": "Travis",
+                "last_name": "Hip",
+                "title": "Buyer",
+                "email": "buyer@example.com",
+                "phone": "555-0101",
+                "mobile_phone": "555-0102",
+                "invoices": False,
+                "buyer": True,
+                "primary": "true",
+                "birth_date": "1980-01-01",
+            },
+            account_id="3430",
+            raw_response_id="response-3",
+        )
+        sales_rep_payload = vinosmith_account_sales_rep_payload(
+            {
+                "user_id": 475,
+                "first_name": "Brooke",
+                "last_name": "Page",
+                "email": "rep@example.com",
+            },
+            account_id="3430",
+            raw_response_id="response-4",
+        )
 
         self.assertEqual(account_payload["account_id"], "3430")
         self.assertEqual(account_payload["license_expiration"], "2027-12-31")
@@ -307,8 +336,17 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(user_payload["full_name"], "Taylor Sorensen")
         self.assertEqual(user_payload["active"], True)
         self.assertEqual(user_payload["raw_response_id"], "response-2")
+        self.assertEqual(contact_payload["contact_id"], "12920")
+        self.assertEqual(contact_payload["account_id"], "3430")
+        self.assertEqual(contact_payload["full_name"], "Travis Hip")
+        self.assertEqual(contact_payload["buyer"], True)
+        self.assertEqual(contact_payload["primary_contact"], True)
+        self.assertEqual(contact_payload["birth_date"], "1980-01-01")
+        self.assertEqual(sales_rep_payload["account_id"], "3430")
+        self.assertEqual(sales_rep_payload["user_id"], "475")
+        self.assertEqual(sales_rep_payload["full_name"], "Brooke Page")
 
-    def test_upsert_vinosmith_accounts_users_and_prearrivals(self):
+    def test_upsert_vinosmith_accounts_users_prearrivals_and_account_details(self):
         client = FakeClient()
         repo = SupabaseRepository(client)
 
@@ -318,10 +356,24 @@ class SourceSyncRepositoryTests(unittest.TestCase):
             [{"wine": {"id": "wine-1"}, "prearrival": {"quantity": "10.0", "expected_date": "2026-08-01"}}],
             raw_response_id="response-3",
         )
+        repo.upsert_vinosmith_account_details(
+            [
+                {
+                    "id": 3430,
+                    "name": "1760 Restaurant",
+                    "contacts": [{"id": 12920, "first_name": "Travis", "buyer": True}],
+                    "sales_reps": [{"user_id": 475, "first_name": "Brooke"}],
+                }
+            ],
+            raw_response_id="response-4",
+        )
 
-        account_call = client.calls[-5]
-        user_call = client.calls[-4]
-        prearrival_call = client.calls[-1]
+        account_call = client.calls[-8]
+        user_call = client.calls[-7]
+        prearrival_call = client.calls[-4]
+        detail_account_call = client.calls[-3]
+        contact_call = client.calls[-2]
+        sales_rep_call = client.calls[-1]
         self.assertEqual(account_call["table"], "vinosmith_accounts")
         self.assertEqual(account_call["on_conflict"], "account_id")
         self.assertEqual(account_call["payload"][0]["account_id"], "3430")
@@ -331,6 +383,14 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(prearrival_call["table"], "vinosmith_prearrivals")
         self.assertEqual(prearrival_call["on_conflict"], "prearrival_key")
         self.assertEqual(prearrival_call["payload"][0]["wine_id"], "wine-1")
+        self.assertEqual(detail_account_call["table"], "vinosmith_accounts")
+        self.assertEqual(detail_account_call["payload"][0]["raw_response_id"], "response-4")
+        self.assertEqual(contact_call["table"], "vinosmith_account_contacts")
+        self.assertEqual(contact_call["on_conflict"], "contact_id")
+        self.assertEqual(contact_call["payload"][0]["contact_id"], "12920")
+        self.assertEqual(sales_rep_call["table"], "vinosmith_account_sales_reps")
+        self.assertEqual(sales_rep_call["on_conflict"], "account_id,user_id")
+        self.assertEqual(sales_rep_call["payload"][0]["user_id"], "475")
 
     def test_normalized_vinosmith_vintage_prefers_name_year_and_nv_over_bad_source_value(self):
         self.assertEqual(
