@@ -408,7 +408,7 @@ class SupabaseRepository:
                     line_wines.append(wine)
 
         if line_wines:
-            self.upsert_vinosmith_product_links(line_wines)
+            self.upsert_vinosmith_wines(line_wines, raw_response_id=raw_response_id)
         saved_lines = self._upsert_many(
             "vinosmith_order_lines",
             line_payloads,

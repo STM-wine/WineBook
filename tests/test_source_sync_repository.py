@@ -273,6 +273,43 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(prearrival_payload["external_identifier_1"], "pre-1")
         self.assertEqual(prearrival_payload["raw_response_id"], "response-3")
 
+    def test_upsert_vinosmith_supplier_orders_hydrates_line_wines(self):
+        client = FakeClient()
+        repo = SupabaseRepository(client)
+
+        repo.upsert_vinosmith_supplier_orders(
+            [
+                {
+                    "account": {"id": "acct-1", "name": "Account"},
+                    "user": {"id": "user-1", "email": "rep@example.com", "full_name": "Rep"},
+                    "order": {"id": "order-1"},
+                    "supplier_order": {
+                        "id": "supplier-order-1",
+                        "delivery_at": "2026-05-10T12:00:00Z",
+                        "delivery_status": "sent-to-warehouse",
+                        "total_cents": "24000",
+                    },
+                    "line_items": [
+                        {
+                            "id": "line-1",
+                            "wine": {"id": "wine-1", "code": "ABC", "name": "Wine", "unit_set": "6"},
+                            "quantity": "2",
+                            "price_cents": "12000",
+                            "total_cents": "24000",
+                        }
+                    ],
+                }
+            ],
+            raw_response_id="response-1",
+        )
+
+        self.assertEqual(client.calls[0]["table"], "vinosmith_order_headers")
+        self.assertEqual(client.calls[1]["table"], "vinosmith_wines")
+        self.assertEqual(client.calls[1]["payload"][0]["wine_id"], "wine-1")
+        self.assertEqual(client.calls[1]["payload"][0]["raw_response_id"], "response-1")
+        self.assertEqual(client.calls[2]["table"], "product_source_links")
+        self.assertEqual(client.calls[3]["table"], "vinosmith_order_lines")
+
     def test_vinosmith_account_user_contact_and_sales_rep_payloads(self):
         account_payload = vinosmith_account_payload(
             {
