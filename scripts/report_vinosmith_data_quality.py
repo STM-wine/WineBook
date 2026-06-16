@@ -95,15 +95,7 @@ def main() -> int:
         filters=[("eq", "source_system", "vinosmith")],
         order_by="resource_name",
     )
-    responses = fetch_all(
-        repo,
-        "source_api_responses",
-        "endpoint,request_identifier,requested_params,response_status,record_count,fetched_at,source_sync_run_id",
-        filters=[("eq", "source_system", "vinosmith")],
-        order_by="fetched_at",
-        desc=True,
-        limit=100,
-    )
+    responses = fetch_vinosmith_responses(repo)
     recent_runs = fetch_all(
         repo,
         "source_sync_runs",
@@ -227,6 +219,25 @@ def fetch_latest_inventory_snapshot(repo: SupabaseRepository) -> dict[str, Any]:
         "source_sync_run_id": source_sync_run_id,
         "rows": rows,
     }
+
+
+def fetch_vinosmith_responses(repo: SupabaseRepository) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for resource in RESOURCE_NAMES:
+        rows.extend(
+            fetch_all(
+                repo,
+                "source_api_responses",
+                "endpoint,request_identifier,requested_params,response_status,record_count,fetched_at,source_sync_run_id",
+                filters=[
+                    ("eq", "source_system", "vinosmith"),
+                    ("eq", "request_identifier", resource),
+                ],
+                order_by="fetched_at",
+                desc=True,
+            )
+        )
+    return rows
 
 
 def build_quality_report(
