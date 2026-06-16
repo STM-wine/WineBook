@@ -21,6 +21,12 @@ class VinosmithDataQualityTests(unittest.TestCase):
                     "response_status": 200,
                     "record_count": 10,
                     "fetched_at": "2026-06-15T12:00:00+00:00",
+                },
+                {
+                    "request_identifier": "wines",
+                    "response_status": 200,
+                    "record_count": 2,
+                    "fetched_at": "2026-06-15T12:00:00+00:00",
                 }
             ],
             recent_runs=[],
@@ -119,7 +125,8 @@ class VinosmithDataQualityTests(unittest.TestCase):
         self.assertEqual(report["cache_counts"]["orders"], 2)
         self.assertEqual(report["cache_counts"]["order_lines"], 3)
         self.assertEqual(report["cache_counts"]["wine_identities"], 3)
-        self.assertEqual(report["cache_counts"]["current_catalog_wines"], 2)
+        self.assertEqual(report["cache_counts"]["latest_wines_response_record_count"], 2)
+        self.assertEqual(report["cache_counts"]["latest_inventory_wines"], 1)
         self.assertEqual(report["cache_counts"]["latest_inventory_source_sync_run_id"], "sync-run-1")
         self.assertEqual(report["cache_counts"]["account_contacts"], 2)
         self.assertEqual(report["cache_counts"]["account_sales_reps"], 2)
@@ -132,11 +139,11 @@ class VinosmithDataQualityTests(unittest.TestCase):
         self.assertEqual(report["coverage"]["line_wines"]["blank"], 1)
         self.assertEqual(report["coverage"]["price_wines"]["missing"], 1)
         self.assertEqual(report["coverage"]["prearrival_wines"]["missing"], 1)
-        self.assertEqual(report["coverage"]["current_catalog_wines_with_latest_inventory"]["missing"], 1)
+        self.assertEqual(report["coverage"]["wine_identities_with_latest_inventory"]["missing"], 2)
         self.assertEqual(report["vintage_quality"]["wine_identities"]["name_year_mismatch_samples"][0]["wine_id"], "wine-2")
         self.assertEqual(report["vintage_quality"]["order_lines"]["suspect_count"], 1)
         self.assertIn("accounts", report["sync_metadata"]["missing_resource_checkpoints"])
-        self.assertIn("wines", report["sync_metadata"]["missing_resource_responses"])
+        self.assertNotIn("wines", report["sync_metadata"]["missing_resource_responses"])
 
     def test_build_quality_report_can_skip_order_line_scan(self):
         report = build_quality_report(

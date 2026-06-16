@@ -263,7 +263,6 @@ def build_quality_report(
     sample_size: int = 10,
 ) -> dict[str, Any]:
     wine_ids = {str(row["wine_id"]) for row in wines if row.get("wine_id")}
-    current_catalog_wine_ids = current_catalog_ids(wines)
     account_ids = {str(row["account_id"]) for row in accounts if row.get("account_id")}
     user_ids = {str(row["user_id"]) for row in users if row.get("user_id")}
     inventory_wine_ids = {str(row["wine_id"]) for row in inventory_rows if row.get("wine_id")}
@@ -274,6 +273,7 @@ def build_quality_report(
 
     checkpoints_by_resource = summarize_checkpoints(checkpoints)
     responses_by_resource = summarize_responses(responses)
+    latest_wines_response_count = responses_by_resource.get("wines", {}).get("latest_record_count")
 
     missing_line_wines = [
         sample_line(line)
@@ -317,13 +317,14 @@ def build_quality_report(
             "account_sales_reps": len(account_sales_reps),
             "users": len(users),
             "wine_identities": len(wines),
-            "current_catalog_wines": len(current_catalog_wine_ids),
+            "latest_wines_response_record_count": latest_wines_response_count,
             "prices": len(prices),
             "prearrivals": len(prearrivals),
             "latest_inventory_snapshot_date": inventory_snapshot_date,
             "latest_inventory_snapshot_at": inventory_snapshot_at,
             "latest_inventory_source_sync_run_id": inventory_source_sync_run_id,
             "latest_inventory_rows": len(inventory_rows),
+            "latest_inventory_wines": len(inventory_wine_ids),
             "orders": len(orders),
             "order_lines": len(lines),
             "order_lines_included": order_lines_included,
@@ -346,10 +347,7 @@ def build_quality_report(
             "price_wines": link_coverage(prices, "wine_id", wine_ids).to_dict(),
             "prearrival_wines": link_coverage(prearrivals, "wine_id", wine_ids).to_dict(),
             "inventory_wines": link_coverage(inventory_rows, "wine_id", wine_ids).to_dict(),
-            "current_catalog_wines_with_latest_inventory": reverse_coverage(
-                current_catalog_wine_ids,
-                inventory_wine_ids,
-            ).to_dict(),
+            "wine_identities_with_latest_inventory": reverse_coverage(wine_ids, inventory_wine_ids).to_dict(),
         },
         "vintage_quality": summarize_vintages(
             wines,
@@ -457,15 +455,6 @@ def vintage_counts(rows: list[dict[str, Any]], column: str, current_year: int) -
     }
 
 
-def current_catalog_ids(wines: list[dict[str, Any]]) -> set[str]:
-    return {
-        str(row["wine_id"])
-        for row in wines
-        if row.get("wine_id")
-        and any(row.get(column) is not None for column in ("active", "orderable", "inventory_item"))
-    }
-
-
 def link_coverage(rows: list[dict[str, Any]], column: str, valid_ids: set[str]) -> LinkCoverage:
     blank = 0
     linked = 0
@@ -525,6 +514,13 @@ def sum_float(rows: list[dict[str, Any]], column: str) -> float:
     return total
 
 
+def format_optional_int(value: Any) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "unknown"
+
+
 def last_year_from_text(value: str, current_year: int) -> str | None:
     candidates = []
     for match in re.finditer(r"(?<![A-Za-z0-9/])(18\d{2}|19\d{2}|20\d{2})(?![A-Za-z0-9])", value):
@@ -544,10 +540,12 @@ def print_report(report: dict[str, Any]) -> None:
         f"accounts={counts['accounts']:,}, contacts={counts['account_contacts']:,}, "
         f"account_reps={counts['account_sales_reps']:,}, users={counts['users']:,}, "
         f"wine_identities={counts['wine_identities']:,}, "
-        f"current_catalog={counts['current_catalog_wines']:,}, "
+        f"latest_wines_response={format_optional_int(counts['latest_wines_response_record_count'])}, "
         f"prices={counts['prices']:,}, prearrivals={counts['prearrivals']:,}, "
         f"latest_inventory={counts['latest_inventory_rows']:,} "
-        f"({counts['latest_inventory_snapshot_date']}), orders={counts['orders']:,}, lines={counts['order_lines']:,}"
+        f"({counts['latest_inventory_snapshot_date']}), "
+        f"latest_inventory_wines={counts['latest_inventory_wines']:,}, "
+        f"orders={counts['orders']:,}, lines={counts['order_lines']:,}"
         f"{'' if counts['order_lines_included'] else ' (not scanned)'}"
     )
     if counts["order_lines_included"]:
