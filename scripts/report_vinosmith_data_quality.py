@@ -66,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         default=date.today().isoformat(),
         help="Inclusive supplier-order delivery upper bound. Defaults to today.",
     )
+    parser.add_argument(
+        "--include-order-lines",
+        action="store_true",
+        help="Fetch every order line in the date window. Slower; use only when line-level coverage is needed.",
+    )
     parser.add_argument("--sample-size", type=int, default=10, help="Number of sample IDs/names to include per issue.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     return parser.parse_args()
@@ -150,11 +155,16 @@ def main() -> int:
         ],
         order_by="delivery_at",
     )
-    lines = fetch_lines_for_order_ids(
-        repo,
-        [order.get("supplier_order_id") for order in orders],
-        "line_item_id,supplier_order_id,wine_id,wine_name,vintage,quantity_bottles,total_cents",
-    )
+    lines: list[dict[str, Any]] = []
+    if args.include_order_lines:
+        lines = fetch_lines_for_order_ids(
+            repo,
+            [order.get("supplier_order_id") for order in orders],
+            "line_item_id,supplier_order_id,wine_id,wine_name,vintage,quantity_bottles,total_cents",
+            chunk_size=50,
+        )
+    else:
+        print("Skipping full order-line scan; pass --include-order-lines for line-level coverage.", file=sys.stderr, flush=True)
 
     report = build_quality_report(
         start_date=start_date,
@@ -173,6 +183,7 @@ def main() -> int:
         inventory_snapshot_date=latest_inventory["snapshot_date"],
         orders=orders,
         lines=lines,
+        order_lines_included=args.include_order_lines,
         sample_size=args.sample_size,
     )
     if args.json:
@@ -221,6 +232,7 @@ def build_quality_report(
     inventory_snapshot_date: str | None,
     orders: list[dict[str, Any]],
     lines: list[dict[str, Any]],
+    order_lines_included: bool = True,
     sample_size: int = 10,
 ) -> dict[str, Any]:
     wine_ids = {str(row["wine_id"]) for row in wines if row.get("wine_id")}
@@ -283,6 +295,7 @@ def build_quality_report(
             "latest_inventory_rows": len(inventory_rows),
             "orders": len(orders),
             "order_lines": len(lines),
+            "order_lines_included": order_lines_included,
         },
         "sales_totals": {
             "order_total_cents": order_total_cents,
@@ -296,13 +309,18 @@ def build_quality_report(
             "sales_rep_accounts": link_coverage(account_sales_reps, "account_id", account_ids).to_dict(),
             "sales_rep_users": link_coverage(account_sales_reps, "user_id", user_ids).to_dict(),
             "order_users": link_coverage(orders, "user_id", user_ids).to_dict(),
-            "line_wines": link_coverage(lines, "wine_id", wine_ids).to_dict(),
+            "line_wines": link_coverage(lines, "wine_id", wine_ids).to_dict() if order_lines_included else None,
             "price_wines": link_coverage(prices, "wine_id", wine_ids).to_dict(),
             "prearrival_wines": link_coverage(prearrivals, "wine_id", wine_ids).to_dict(),
             "inventory_wines": link_coverage(inventory_rows, "wine_id", wine_ids).to_dict(),
             "catalog_wines_with_latest_inventory": reverse_coverage(wine_ids, inventory_wine_ids).to_dict(),
         },
-        "vintage_quality": summarize_vintages(wines, lines, sample_size=sample_size),
+        "vintage_quality": summarize_vintages(
+            wines,
+            lines,
+            include_lines=order_lines_included,
+            sample_size=sample_size,
+        ),
         "samples": {
             "missing_order_accounts": order_account_missing[:sample_size],
             "missing_order_users": order_user_missing[:sample_size],
@@ -353,11 +371,12 @@ def summarize_responses(responses: list[dict[str, Any]]) -> dict[str, dict[str, 
 def summarize_vintages(
     wines: list[dict[str, Any]],
     lines: list[dict[str, Any]],
+    include_lines: bool = True,
     sample_size: int = 10,
 ) -> dict[str, Any]:
     current_year = datetime.now(timezone.utc).year
     catalog = vintage_counts(wines, "vintage", current_year=current_year)
-    line = vintage_counts(lines, "vintage", current_year=current_year)
+    line = vintage_counts(lines, "vintage", current_year=current_year) if include_lines else None
     mismatches = []
     for row in wines:
         name_year = last_year_from_text(str(row.get("name") or ""), current_year=current_year)
@@ -365,7 +384,10 @@ def summarize_vintages(
         if name_year and vintage and vintage not in {"NV", name_year}:
             mismatches.append({"wine_id": row.get("wine_id"), "name": row.get("name"), "vintage": vintage, "name_year": name_year})
     catalog["name_year_mismatch_samples"] = mismatches[:sample_size]
-    return {"catalog_wines": catalog, "order_lines": line}
+    vintages = {"catalog_wines": catalog}
+    if line is not None:
+        vintages["order_lines"] = line
+    return vintages
 
 
 def vintage_counts(rows: list[dict[str, Any]], column: str, current_year: int) -> dict[str, Any]:
@@ -479,6 +501,7 @@ def print_report(report: dict[str, Any]) -> None:
         f"prices={counts['prices']:,}, prearrivals={counts['prearrivals']:,}, "
         f"latest_inventory={counts['latest_inventory_rows']:,} "
         f"({counts['latest_inventory_snapshot_date']}), orders={counts['orders']:,}, lines={counts['order_lines']:,}"
+        f"{'' if counts['order_lines_included'] else ' (not scanned)'}"
     )
     print(
         "Sales totals: "
@@ -488,7 +511,11 @@ def print_report(report: dict[str, Any]) -> None:
         f"bottle/eaches={totals['quantity_bottles']:,.4f}"
     )
     print("\nCoverage")
+    if not counts["order_lines_included"]:
+        print("line_wines coverage skipped; rerun with --include-order-lines for full line validation.")
     for label, row in coverage.items():
+        if row is None:
+            continue
         print(
             f"{label:36} linked={row['linked']:>7,}/{row['total']:<7,} "
             f"({row['linked_percent']:>6.2f}%) missing={row['missing']:,} blank={row['blank']:,}"

@@ -122,6 +122,40 @@ class VinosmithDataQualityTests(unittest.TestCase):
         self.assertIn("accounts", report["sync_metadata"]["missing_resource_checkpoints"])
         self.assertIn("wines", report["sync_metadata"]["missing_resource_responses"])
 
+    def test_build_quality_report_can_skip_order_line_scan(self):
+        report = build_quality_report(
+            start_date=date(2026, 6, 1),
+            end_date=date(2026, 6, 15),
+            checkpoints=[],
+            responses=[],
+            recent_runs=[],
+            wines=[{"wine_id": "wine-1", "name": "Example Wine 2024 12/750ml", "vintage": "2024"}],
+            accounts=[{"account_id": "acct-1", "name": "Account"}],
+            contacts=[],
+            account_sales_reps=[],
+            users=[{"user_id": "user-1", "full_name": "Rep"}],
+            prices=[],
+            prearrivals=[],
+            inventory_rows=[],
+            inventory_snapshot_date=None,
+            orders=[
+                {
+                    "supplier_order_id": "order-1",
+                    "account_id": "acct-1",
+                    "user_id": "user-1",
+                    "delivery_at": "2026-06-10T12:00:00+00:00",
+                    "total_cents": 2500,
+                }
+            ],
+            lines=[],
+            order_lines_included=False,
+        )
+
+        self.assertEqual(report["cache_counts"]["order_lines"], 0)
+        self.assertEqual(report["cache_counts"]["order_lines_included"], False)
+        self.assertIsNone(report["coverage"]["line_wines"])
+        self.assertNotIn("order_lines", report["vintage_quality"])
+
 
 if __name__ == "__main__":
     unittest.main()
