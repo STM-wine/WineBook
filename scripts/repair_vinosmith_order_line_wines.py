@@ -30,17 +30,26 @@ def main() -> int:
     wines = fetch_all(repo, "vinosmith_wines", "wine_id", order_by="wine_id")
     existing_wine_ids = {str(row["wine_id"]) for row in wines if row.get("wine_id")}
 
-    print("Fetching rescued Vinosmith order-line raw data...", file=sys.stderr, flush=True)
-    lines = fetch_all(
+    print("Fetching rescued Vinosmith order-line wine references...", file=sys.stderr, flush=True)
+    line_summaries = fetch_all(
         repo,
         "vinosmith_order_lines",
-        "line_item_id,wine_id,wine_code,wine_name,vintage,raw_data",
+        "line_item_id,wine_id,wine_code,wine_name,vintage",
         order_by="line_item_id",
     )
-    missing_wines = missing_order_line_wines(lines, existing_wine_ids)
+    missing_wines = missing_order_line_wines(line_summaries, existing_wine_ids)
+    missing_wine_ids = {str(wine["id"]) for wine in missing_wines if wine.get("id")}
+    if missing_wine_ids:
+        print(
+            f"Fetching raw data for {len(missing_wine_ids):,} missing wine IDs...",
+            file=sys.stderr,
+            flush=True,
+        )
+        raw_lines = fetch_order_lines_for_wine_ids(repo, missing_wine_ids)
+        missing_wines = enrich_wines_from_raw_lines(missing_wines, raw_lines)
     print(
         f"Missing order-line wine identities: {len(missing_wines):,} "
-        f"from {len(lines):,} order lines",
+        f"from {len(line_summaries):,} order lines",
         flush=True,
     )
     for wine in missing_wines[:10]:
@@ -54,6 +63,27 @@ def main() -> int:
     saved = repo.upsert_vinosmith_wines(missing_wines, raw_response_id=None)
     print(f"Supabase writes: upserted {len(saved):,} Vinosmith wine identities")
     return 0
+
+
+def fetch_order_lines_for_wine_ids(
+    repo: SupabaseRepository,
+    wine_ids: set[str],
+    chunk_size: int = 50,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    sorted_ids = sorted(wine_ids)
+    for start in range(0, len(sorted_ids), chunk_size):
+        chunk = sorted_ids[start : start + chunk_size]
+        rows.extend(
+            fetch_all(
+                repo,
+                "vinosmith_order_lines",
+                "line_item_id,wine_id,wine_code,wine_name,vintage,raw_data",
+                filters=[("in_", "wine_id", chunk)],
+                order_by="line_item_id",
+            )
+        )
+    return rows
 
 
 def missing_order_line_wines(
@@ -77,6 +107,20 @@ def missing_order_line_wines(
             "vintage": line.get("vintage"),
         }
     return list(missing.values())
+
+
+def enrich_wines_from_raw_lines(
+    fallback_wines: list[dict[str, Any]],
+    raw_lines: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    raw_wines_by_id: dict[str, dict[str, Any]] = {}
+    for line in raw_lines:
+        wine_id = str(line.get("wine_id") or "").strip()
+        raw_data = line.get("raw_data") if isinstance(line.get("raw_data"), dict) else {}
+        wine = raw_data.get("wine") if isinstance(raw_data.get("wine"), dict) else {}
+        if wine_id and str(wine.get("id") or "").strip() == wine_id and wine_id not in raw_wines_by_id:
+            raw_wines_by_id[wine_id] = wine
+    return [raw_wines_by_id.get(str(wine.get("id"))) or wine for wine in fallback_wines]
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.repair_vinosmith_order_line_wines import missing_order_line_wines
+from scripts.repair_vinosmith_order_line_wines import enrich_wines_from_raw_lines, missing_order_line_wines
 
 
 class RepairVinosmithOrderLineWinesTests(unittest.TestCase):
@@ -43,6 +43,30 @@ class RepairVinosmithOrderLineWinesTests(unittest.TestCase):
         self.assertEqual(wines[0]["unit_set"], "6")
         self.assertEqual(wines[1]["code"], "ABC")
         self.assertEqual(wines[1]["vintage"], "2021")
+
+    def test_enrich_wines_from_raw_lines_replaces_fallback_payload(self):
+        wines = enrich_wines_from_raw_lines(
+            [
+                {"id": "missing-1", "code": "ABC", "name": "Fallback Wine"},
+                {"id": "missing-2", "code": "DEF", "name": "Other Fallback"},
+            ],
+            [
+                {
+                    "line_item_id": "line-1",
+                    "wine_id": "missing-1",
+                    "raw_data": {"wine": {"id": "missing-1", "name": "Full Wine", "unit_set": "6"}},
+                },
+                {
+                    "line_item_id": "line-2",
+                    "wine_id": "missing-2",
+                    "raw_data": {},
+                },
+            ],
+        )
+
+        self.assertEqual(wines[0]["name"], "Full Wine")
+        self.assertEqual(wines[0]["unit_set"], "6")
+        self.assertEqual(wines[1]["name"], "Other Fallback")
 
 
 if __name__ == "__main__":
