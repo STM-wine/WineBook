@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { OrderDashboard } from "@/components/order-dashboard";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
+import { fetchVinosmithExplorerData, unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import type {
   AppProfile,
@@ -12,7 +13,7 @@ import type {
   WineRequest,
   SupplierLogistics
 } from "@/lib/types";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -72,12 +73,29 @@ export default async function HomePage() {
     .limit(100)
     .returns<PriceChangeEvent[]>();
 
+  const vinosmithExplorerPromise = (() => {
+    try {
+      return fetchVinosmithExplorerData(createServiceRoleClient());
+    } catch (error) {
+      return Promise.resolve(
+        unavailableVinosmithExplorerData(error instanceof Error ? error.message : "Vinosmith Rescue Explorer is not configured.")
+      );
+    }
+  })();
+
   const [
     { data: reportRuns },
     { data: supplierCatalogWines },
     { data: wineRequests },
-    { data: priceChangeEvents }
-  ] = await Promise.all([reportRunsPromise, supplierCatalogPromise, wineRequestsPromise, priceChangeEventsPromise]);
+    { data: priceChangeEvents },
+    vinosmithExplorer
+  ] = await Promise.all([
+    reportRunsPromise,
+    supplierCatalogPromise,
+    wineRequestsPromise,
+    priceChangeEventsPromise,
+    vinosmithExplorerPromise
+  ]);
 
   const latestRun = reportRuns?.[0] || null;
 
@@ -156,6 +174,7 @@ export default async function HomePage() {
       poDrafts={poDraftRows || []}
       suppliers={mergedSuppliers}
       supplierCatalogWines={supplierCatalogWines || []}
+      vinosmithExplorer={vinosmithExplorer}
       wineRequests={wineRequests || []}
       priceChangeEvents={priceChangeEvents || []}
     />

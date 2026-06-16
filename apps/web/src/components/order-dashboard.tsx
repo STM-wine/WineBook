@@ -19,6 +19,7 @@ import type {
   Recommendation,
   ReportRun,
   SupplierCatalogWine,
+  VinosmithExplorerData,
   WineRequest,
   SupplierLogistics
 } from "@/lib/types";
@@ -42,6 +43,7 @@ import { PoDraftsView } from "./po-drafts-view";
 import { StatusMessages } from "./status-messages";
 import { SupplierBoardView } from "./supplier-board-view";
 import { SupplierHubView } from "./supplier-hub-view";
+import { VinosmithRescueExplorerView } from "./vinosmith-rescue-explorer-view";
 
 type Props = {
   reportRun: ReportRun;
@@ -49,6 +51,7 @@ type Props = {
   poDrafts: PurchaseOrderDraftWithLines[];
   suppliers: SupplierLogistics[];
   supplierCatalogWines: SupplierCatalogWine[];
+  vinosmithExplorer: VinosmithExplorerData;
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
 };
@@ -72,6 +75,7 @@ export function OrderDashboard({
   poDrafts,
   suppliers,
   supplierCatalogWines,
+  vinosmithExplorer,
   wineRequests,
   priceChangeEvents
 }: Props) {
@@ -537,6 +541,8 @@ export function OrderDashboard({
           onUpdateWineRequestApproval={updateWineRequestApproval}
         />
       ) : null}
+
+      {activeView === "vinosmith-rescue" ? <VinosmithRescueExplorerView data={vinosmithExplorer} /> : null}
 
       {activeView === "supplier-board" ? <SupplierBoardView groups={allSupplierGroups} /> : null}
 

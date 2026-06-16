@@ -191,3 +191,139 @@ export type PurchaseOrderLine = {
 export type PurchaseOrderDraftWithLines = PurchaseOrderDraft & {
   lines: PurchaseOrderLine[];
 };
+
+export type VinosmithExplorerWine = {
+  wine_id: string;
+  code: string | null;
+  name: string | null;
+  vintage: string | null;
+  importer_name: string | null;
+  producer_name: string | null;
+  product_family: string | null;
+  unit_set: number | string | null;
+  bottle_size: string | null;
+  bottle_size_label: string | null;
+  fob_price: number | string | null;
+  category: string | null;
+  country: string | null;
+  region: string | null;
+  appellation: string | null;
+  active: boolean | null;
+  orderable: boolean | null;
+  core: boolean | null;
+  inventory_item: boolean | null;
+  last_seen_at: string | null;
+};
+
+export type VinosmithExplorerInventory = {
+  wine_id: string;
+  warehouse_name: string | null;
+  available: number | string | null;
+  on_hand: number | string | null;
+  on_hold: number | string | null;
+  on_order: number | string | null;
+  on_future: number | string | null;
+  on_pending_sync: number | string | null;
+  end_of_stock: boolean | null;
+  snapshot_date: string | null;
+  snapshot_at: string | null;
+};
+
+export type VinosmithExplorerPriceSummary = {
+  wine_id: string;
+  prices: number;
+  activePrices: number;
+  minPriceCents: number | null;
+  maxPriceCents: number | null;
+  billBacks: number;
+};
+
+export type VinosmithExplorerAccount = {
+  account_id: string;
+  name: string | null;
+  code: string | null;
+  status: string | null;
+  kind: string | null;
+  shipping_city: string | null;
+  shipping_state: string | null;
+  phone_number: string | null;
+  website_url: string | null;
+  last_seen_at: string | null;
+};
+
+export type VinosmithExplorerContact = {
+  contact_id: string;
+  account_id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  buyer: boolean | null;
+  primary_contact: boolean | null;
+};
+
+export type VinosmithExplorerSalesRep = {
+  account_id: string;
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+};
+
+export type VinosmithExplorerOrder = {
+  supplier_order_id: string;
+  account_id: string | null;
+  account_name: string | null;
+  user_full_name: string | null;
+  invoice_number: string | null;
+  po_number: string | null;
+  delivery_at: string | null;
+  delivery_status: string | null;
+  payment_status: string | null;
+  total_cents: number | null;
+};
+
+export type VinosmithExplorerSyncRun = {
+  id: string;
+  sync_type: string;
+  status: string;
+  requested_start_date: string | null;
+  requested_end_date: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+};
+
+export type VinosmithExplorerCheckpoint = {
+  resource_name: string;
+  checkpoint_key: string;
+  status: string;
+  last_synced_at: string | null;
+  requested_start_date: string | null;
+  requested_end_date: string | null;
+};
+
+export type VinosmithExplorerData = {
+  error: string | null;
+  counts: {
+    wines: number;
+    latestWinesResponse: number | null;
+    accounts: number;
+    contacts: number;
+    salesReps: number;
+    prices: number;
+    latestInventoryRows: number;
+    latestInventoryWines: number;
+    orders: number;
+    orderLines: number;
+    prearrivals: number;
+  };
+  latestInventorySnapshotDate: string | null;
+  wines: VinosmithExplorerWine[];
+  inventory: VinosmithExplorerInventory[];
+  priceSummaries: VinosmithExplorerPriceSummary[];
+  accounts: VinosmithExplorerAccount[];
+  contacts: VinosmithExplorerContact[];
+  salesReps: VinosmithExplorerSalesRep[];
+  recentOrders: VinosmithExplorerOrder[];
+  syncRuns: VinosmithExplorerSyncRun[];
+  checkpoints: VinosmithExplorerCheckpoint[];
+};

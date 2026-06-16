@@ -1,8 +1,9 @@
-export type ActiveView = "order-review" | "supplier-hub" | "supplier-board" | "freight" | "po-drafts";
+export type ActiveView = "order-review" | "supplier-hub" | "vinosmith-rescue" | "supplier-board" | "freight" | "po-drafts";
 
 export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolean }> = [
   { id: "order-review", label: "Order Review" },
   { id: "supplier-hub", label: "Supplier Hub" },
+  { id: "vinosmith-rescue", label: "Vinosmith Rescue" },
   { id: "supplier-board", label: "Supplier Board", hidden: true },
   { id: "freight", label: "Freight" },
   { id: "po-drafts", label: "PO Drafts" }

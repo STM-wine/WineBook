@@ -2178,6 +2178,196 @@ td {
   text-transform: uppercase;
 }
 
+.rescue-explorer-panel {
+  display: grid;
+  gap: 20px;
+}
+
+.rescue-metrics {
+  margin-bottom: 2px;
+}
+
+.rescue-tabs {
+  margin-bottom: 0;
+}
+
+.rescue-workspace {
+  display: grid;
+  gap: 16px;
+}
+
+.rescue-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.rescue-grid-two {
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+}
+
+.rescue-card {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.rescue-card-wide {
+  grid-column: 1 / -1;
+}
+
+.rescue-card h2 {
+  font-size: 18px;
+  line-height: 1.2;
+  margin: 0 0 14px;
+}
+
+.rescue-definition-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  margin: 0;
+}
+
+.rescue-definition-grid div {
+  border-top: 1px solid #eee7dc;
+  padding-top: 10px;
+}
+
+.rescue-definition-grid dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rescue-definition-grid dd {
+  font-size: 20px;
+  font-weight: 850;
+  margin: 4px 0 0;
+}
+
+.rescue-list {
+  display: grid;
+  gap: 10px;
+}
+
+.rescue-list-row {
+  align-items: center;
+  border-top: 1px solid #eee7dc;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-top: 10px;
+}
+
+.rescue-list-row div {
+  display: grid;
+  gap: 2px;
+}
+
+.rescue-list-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-pill {
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  padding: 6px 8px;
+  text-transform: uppercase;
+}
+
+.status-completed {
+  background: #e6efe5;
+  color: var(--green);
+}
+
+.status-failed {
+  background: #fde8e5;
+  color: #8f2c26;
+}
+
+.status-running,
+.status-pending {
+  background: #f6ecd7;
+  color: #7a5a1a;
+}
+
+.compact-table th,
+.compact-table td {
+  font-size: 12px;
+  padding: 10px 12px;
+}
+
+.rescue-table-shell {
+  max-height: 680px;
+}
+
+.rescue-table-shell th:first-child,
+.rescue-table-shell td:first-child {
+  left: 0;
+  position: sticky;
+  text-align: left;
+  z-index: 1;
+}
+
+.rescue-table-shell th:first-child {
+  background: #f2eee7;
+  z-index: 2;
+}
+
+.rescue-table-shell td:first-child {
+  background: var(--surface);
+  min-width: 280px;
+}
+
+.rescue-table-shell td:first-child strong,
+.rescue-table-shell td:first-child span {
+  display: block;
+  text-align: left;
+}
+
+.muted-line {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.result-count {
+  align-self: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.rescue-flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.rescue-flags span {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #3c3934;
+  font-size: 11px;
+  font-weight: 850;
+  padding: 5px 7px;
+}
+
+.rescue-footnote {
+  font-size: 13px;
+  margin: 0;
+}
+
 .workbench-grid .ag-cell-edit-input,
 .workbench-grid input[class^="ag-"] {
   font-size: 14px;
@@ -2336,7 +2526,9 @@ tr.has-recommendation .sticky-name {
   .supplier-form-grid,
   .request-form-grid,
   .catalog-preview-grid,
-  .grw-summary-grid {
+  .grw-summary-grid,
+  .rescue-grid-two,
+  .rescue-definition-grid {
     grid-template-columns: 1fr;
   }
 
