@@ -11,8 +11,10 @@ import {
   calculateGpMargin,
   calculatePricing,
   defaultLaidInForSupplier,
+  findSupplierCatalogWineNameMatch,
   money,
   normalizeWineIdentity,
+  parseSupplierCatalogWineNameInput,
   requiredDepletionAllowanceForTargetMargin,
   type SupplierCatalogWineInput
 } from "@/lib/supplier-catalog";
@@ -175,6 +177,10 @@ function AddWinePanel({
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
   const sortedCloneOptions = useMemo(() => [...wines].sort(sortNewestVintageFirst), [wines]);
   const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
+  const wineNameMatch = useMemo(
+    () => findSupplierCatalogWineNameMatch({ wineName, supplierId, supplierName }, wines),
+    [supplierId, supplierName, wineName, wines]
+  );
   const computedPricing = calculatePricing({
     packSize: Math.max(1, Math.trunc(Number(packSize) || 12)),
     fobBottle: parseOptionalNumber(fobBottle),
@@ -199,6 +205,7 @@ function AddWinePanel({
     copiedSkuChanged && quickbooksItemNumber.trim() === (copiedFromWine?.quickbooks_item_number || "").trim()
       ? ""
       : quickbooksItemNumber;
+  const conversionStatus = conversionStatusForDraft(copiedFromWine, currentIdentity);
 
   function selectSupplier(nextSupplierId: string) {
     setSupplierId(nextSupplierId);
@@ -212,26 +219,49 @@ function AddWinePanel({
     setLaidInPerBottle("0");
   }
 
-  function selectClone(value: string) {
-    const wine = wines.find((row) => row.id === value || row.display_name === value || row.planning_sku === value);
-    if (!wine) return;
+  function applyWineTemplate(wine: SupplierCatalogWine, sourceValue = "", preserveTypedIdentity = false) {
+    const parsed = preserveTypedIdentity ? parseSupplierCatalogWineNameInput(sourceValue, wine) : null;
+    const nextProducer = parsed?.producer || wine.producer;
+    const nextWineName = parsed?.wineName || wine.wine_name;
+    const nextVintage = parsed?.vintage || wine.vintage || "NV";
+    const nextPackSize = parsed?.packSize ? String(parsed.packSize) : String(wine.pack_size || 12);
+    const nextBottleSize = parsed?.bottleSize || wine.bottle_size || "750ml";
+    const nextIdentity = normalizeWineIdentity({
+      producer: nextProducer,
+      wineName: nextWineName,
+      vintage: nextVintage,
+      packSize: Math.max(1, Math.trunc(Number(nextPackSize) || 12)),
+      bottleSize: nextBottleSize
+    });
 
     setCopiedFromSupplierCatalogWineId(wine.id);
     setSupplierId(wine.supplier_id || "");
     setSupplierName(wine.supplier_name);
-    setProducer(wine.producer);
-    setWineName(wine.wine_name);
-    setVintage(wine.vintage || "NV");
-    setPackSize(String(wine.pack_size || 12));
-    setBottleSize(wine.bottle_size || "750ml");
+    setProducer(nextProducer);
+    setWineName(nextWineName);
+    setVintage(nextVintage);
+    setPackSize(nextPackSize);
+    setBottleSize(nextBottleSize);
     setFobBottle(String(asNumber(wine.fob_bottle) || ""));
     setFobCase(String(asNumber(wine.fob_case) || ""));
     setLaidInPerBottle(String(asNumber(wine.laid_in_per_bottle) || 0));
     setSystemTags(wine.system_tags || []);
-    setQuickbooksItemNumber(wine.quickbooks_item_number || "");
+    setQuickbooksItemNumber(nextIdentity.planningSku === wine.planning_sku ? wine.quickbooks_item_number || "" : "");
     setPriceLevels(priceLevelDraftsFromWine(wine));
     setFreeGoods(freeGoodDraftsFromWine(wine));
-    setPriceChangeReason(`Copied from ${wine.display_name}`);
+    setPriceChangeReason(`${preserveTypedIdentity ? "Matched" : "Copied"} from ${wine.display_name}`);
+  }
+
+  function selectClone(value: string) {
+    const wine = wines.find((row) => row.id === value || row.display_name === value || row.planning_sku === value);
+    if (!wine) return;
+
+    applyWineTemplate(wine);
+  }
+
+  function applyBestWineNameMatch() {
+    if (!wineNameMatch || copiedFromSupplierCatalogWineId === wineNameMatch.wine.id) return;
+    applyWineTemplate(wineNameMatch.wine, wineName, true);
   }
 
   function startNewSku() {
@@ -336,7 +366,7 @@ function AddWinePanel({
     frontlineOverride: null,
     bestPriceOverride: null,
     availabilityStatus: "available",
-    conversionStatus: "net_new_product",
+    conversionStatus,
     systemTags,
     copiedFromSupplierCatalogWineId,
     quickbooksItemNumber: effectiveQuickbooksItemNumber,
@@ -367,6 +397,7 @@ function AddWinePanel({
               setWineName(event.target.value);
               selectClone(event.target.value);
             }}
+            onBlur={applyBestWineNameMatch}
             placeholder="Create new or search existing SKU"
           />
           <datalist id="supplier-catalog-clone-options">
@@ -377,6 +408,18 @@ function AddWinePanel({
             ))}
           </datalist>
         </label>
+        {wineNameMatch && (!copiedFromWine || copiedFromWine.id !== wineNameMatch.wine.id) ? (
+          <div className="catalog-match-suggestion">
+            <div>
+              <span>Best match</span>
+              <strong>{wineNameMatch.wine.display_name}</strong>
+              <small>{wineNameMatch.wine.supplier_name}</small>
+            </div>
+            <button className="ghost-button button-small" onClick={() => applyWineTemplate(wineNameMatch.wine, wineName, true)} type="button">
+              Use Match
+            </button>
+          </div>
+        ) : null}
         <label>
           Supplier
           <select value={supplierId} onChange={(event) => selectSupplier(event.target.value)}>
@@ -493,7 +536,8 @@ function AddWinePanel({
         </div>
         <div>
           <span>Status</span>
-          <strong>{effectiveQuickbooksItemNumber.trim() ? "Linked Item" : "New Item"}</strong>
+          <strong>{conversionStatus.replace(/_/g, " ")}</strong>
+          <small>{effectiveQuickbooksItemNumber.trim() ? "Linked Item" : "New Item"}</small>
         </div>
       </div>
 
@@ -812,6 +856,25 @@ function freeGoodDraftsFromWine(wine: SupplierCatalogWine): FreeGoodDraft[] {
     notes: freeGood.notes || "",
     active: freeGood.active !== false
   }));
+}
+
+function conversionStatusForDraft(
+  copiedFromWine: SupplierCatalogWine | null,
+  currentIdentity: ReturnType<typeof normalizeWineIdentity>
+): SupplierCatalogWineInput["conversionStatus"] {
+  if (!copiedFromWine) return "net_new_product";
+  const copiedIdentity = normalizeWineIdentity({
+    producer: copiedFromWine.producer,
+    wineName: copiedFromWine.wine_name,
+    vintage: copiedFromWine.vintage || "NV",
+    packSize: copiedFromWine.pack_size || 12,
+    bottleSize: copiedFromWine.bottle_size || "750ml"
+  });
+
+  if (currentIdentity.planningSku === copiedFromWine.planning_sku) return "exact_existing_product";
+  if (currentIdentity.packFormat !== copiedIdentity.packFormat) return "new_format";
+  if (currentIdentity.normalizedVintage !== copiedIdentity.normalizedVintage) return "new_vintage";
+  return "possible_match_needs_review";
 }
 
 function parseOptionalPercent(value: string) {

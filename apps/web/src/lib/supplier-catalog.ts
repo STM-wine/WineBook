@@ -44,6 +44,11 @@ export const APPROVAL_DECISIONS = [
 const GP_WARNING_PERSISTED = "Gross profit margin is below 27%.";
 const GP_WARNING_THRESHOLD = 0.27;
 const PACK_RE = /^\s*(\d+)\s*[/xX]\s*([0-9.]+)\s*(ml|mL|ML|l|L)\s*$/;
+const PACK_SEARCH_RE = /\b(\d+)\s*[/xX]\s*([0-9.]+)\s*(ml|mL|ML|l|L)\b/i;
+const PACK_SEARCH_GLOBAL_RE = /\b\d+\s*[/xX]\s*[0-9.]+\s*(?:ml|mL|ML|l|L)\b/g;
+const VINTAGE_SEARCH_RE = /\b((?:19|20)\d{2}|NV|N\/V)\b/i;
+const VINTAGE_SEARCH_GLOBAL_RE = /\b(?:(?:19|20)\d{2}|NV|N\/V)\b/gi;
+const SEARCH_STOP_WORDS = new Set(["wine", "wines"]);
 
 export type AvailabilityStatus = (typeof AVAILABILITY_STATUSES)[number];
 export type ConversionStatus = (typeof CONVERSION_STATUSES)[number];
@@ -197,6 +202,149 @@ export function normalizeWineIdentity(input: {
     normalizedVintage: normalizeVintage(input.vintage),
     packFormat: normalizePackFormat(input.packSize, input.bottleSize)
   };
+}
+
+export type SupplierCatalogWineNameMatch = {
+  wine: SupplierCatalogWine;
+  score: number;
+};
+
+export type ParsedSupplierCatalogWineName = {
+  producer?: string;
+  wineName: string;
+  vintage?: string;
+  packSize?: number;
+  bottleSize?: string;
+};
+
+function normalizeSearchText(value: unknown) {
+  return normalizeSpaces(value)
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\w\s/.]/g, " ");
+}
+
+function catalogWineSearchKey(value: unknown) {
+  return normalizeSpaces(
+    normalizeSearchText(value)
+      .replace(PACK_SEARCH_GLOBAL_RE, " ")
+      .replace(VINTAGE_SEARCH_GLOBAL_RE, " ")
+      .replace(/\//g, " ")
+  );
+}
+
+function searchTokens(value: string) {
+  return catalogWineSearchKey(value)
+    .split(/\s+/)
+    .filter((token) => token.length > 1 && !SEARCH_STOP_WORDS.has(token));
+}
+
+function scoreSearchKey(queryKey: string, candidateKey: string) {
+  if (!queryKey || !candidateKey) return 0;
+  if (queryKey === candidateKey) return 1;
+  if (candidateKey.includes(queryKey)) {
+    return 0.82 + Math.min(0.12, (queryKey.length / Math.max(candidateKey.length, 1)) * 0.12);
+  }
+  if (queryKey.includes(candidateKey)) {
+    return 0.76 + Math.min(0.1, (candidateKey.length / Math.max(queryKey.length, 1)) * 0.1);
+  }
+
+  const queryTokens = searchTokens(queryKey);
+  const candidateTokens = searchTokens(candidateKey);
+  if (queryTokens.length === 0 || candidateTokens.length === 0) return 0;
+
+  const candidateSet = new Set(candidateTokens);
+  const overlap = queryTokens.filter((token) => candidateSet.has(token)).length;
+  const coverage = overlap / queryTokens.length;
+  const precision = overlap / candidateTokens.length;
+  return coverage * 0.72 + precision * 0.18;
+}
+
+function supplierMatchBonus(
+  wine: SupplierCatalogWine,
+  input: { supplierId?: string | null; supplierName?: string | null }
+) {
+  if (input.supplierId && wine.supplier_id === input.supplierId) return 0.08;
+  if (input.supplierName && normalizeSearchText(wine.supplier_name) === normalizeSearchText(input.supplierName)) return 0.06;
+  return 0;
+}
+
+export function parseSupplierCatalogWineNameInput(
+  value: string,
+  template?: Pick<SupplierCatalogWine, "producer" | "wine_name" | "vintage" | "pack_size" | "bottle_size">
+): ParsedSupplierCatalogWineName {
+  let remaining = normalizeSpaces(value);
+  const packMatch = remaining.match(PACK_SEARCH_RE);
+  const parsedPackSize = packMatch ? Math.max(1, Math.trunc(Number(packMatch[1]) || 12)) : undefined;
+  const parsedBottleSize = packMatch
+    ? `${packMatch[2]}${packMatch[3].toLowerCase() === "ml" ? "ml" : "L"}`
+    : undefined;
+  if (packMatch) {
+    remaining = normalizeSpaces(remaining.replace(PACK_SEARCH_RE, " "));
+  }
+
+  const vintageMatch = remaining.match(VINTAGE_SEARCH_RE);
+  const parsedVintage = vintageMatch ? normalizeVintage(vintageMatch[1]) : undefined;
+  if (vintageMatch) {
+    remaining = normalizeSpaces(remaining.replace(VINTAGE_SEARCH_RE, " "));
+  }
+
+  let parsedProducer: string | undefined;
+  if (template?.producer) {
+    const producerWords = normalizeSpaces(template.producer).split(/\s+/).filter(Boolean);
+    const remainingWords = remaining.split(/\s+/).filter(Boolean);
+    const producerKey = normalizeSearchText(template.producer);
+    const remainingProducerKey = normalizeSearchText(remainingWords.slice(0, producerWords.length).join(" "));
+    if (producerWords.length > 0 && producerKey === remainingProducerKey) {
+      parsedProducer = normalizeSpaces(template.producer);
+      remaining = normalizeSpaces(remainingWords.slice(producerWords.length).join(" "));
+    }
+  }
+
+  return {
+    producer: parsedProducer,
+    wineName: remaining || normalizeSpaces(template?.wine_name || value),
+    vintage: parsedVintage,
+    packSize: parsedPackSize,
+    bottleSize: parsedBottleSize
+  };
+}
+
+export function findSupplierCatalogWineNameMatch(
+  input: { wineName: string; supplierId?: string | null; supplierName?: string | null },
+  wines: SupplierCatalogWine[]
+): SupplierCatalogWineNameMatch | null {
+  const queryKey = catalogWineSearchKey(input.wineName);
+  const queryTokens = searchTokens(queryKey);
+  if (queryKey.length < 5 || queryTokens.length === 0) return null;
+
+  let best: SupplierCatalogWineNameMatch | null = null;
+
+  for (const wine of wines) {
+    const candidateKeys = [
+      `${wine.producer} ${wine.wine_name}`,
+      wine.display_name,
+      wine.planning_sku_without_vintage,
+      wine.planning_sku
+    ].map(catalogWineSearchKey);
+    const baseScore = Math.max(...candidateKeys.map((candidateKey) => scoreSearchKey(queryKey, candidateKey)));
+    const score = Math.min(1, baseScore + supplierMatchBonus(wine, input));
+    if (!best || score > best.score || (score === best.score && sortCatalogMatchTie(wine, best.wine) < 0)) {
+      best = { wine, score };
+    }
+  }
+
+  const threshold = queryTokens.length === 1 ? 0.86 : 0.68;
+  return best && best.score >= threshold ? best : null;
+}
+
+function sortCatalogMatchTie(a: SupplierCatalogWine, b: SupplierCatalogWine) {
+  const vintageA = Number(a.vintage);
+  const vintageB = Number(b.vintage);
+  if (Number.isFinite(vintageA) && Number.isFinite(vintageB) && vintageA !== vintageB) {
+    return vintageB - vintageA;
+  }
+  return (b.updated_at || "").localeCompare(a.updated_at || "");
 }
 
 export function calculateBestPrice(frontlineBottlePrice: number) {

@@ -107,15 +107,10 @@ textarea {
 .nav-tabs {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  white-space: nowrap;
-}
-
-.nav-tabs::-webkit-scrollbar {
-  display: none;
+  overflow: visible;
 }
 
 .nav-tabs button,
@@ -130,6 +125,7 @@ textarea {
   font-size: 17px;
   font-weight: 700;
   padding: 14px 16px 13px;
+  white-space: nowrap;
 }
 
 .nav-tabs button.active,
@@ -139,6 +135,7 @@ textarea {
 }
 
 .nav-dropdown {
+  flex: 0 0 auto;
   position: relative;
 }
 
@@ -335,7 +332,7 @@ textarea {
   min-width: 150px;
 }
 
-@media (max-width: 1580px) and (min-width: 1101px) {
+@media (max-width: 1760px) and (min-width: 1101px) {
   .app-shell {
     padding-top: 158px;
   }
@@ -1473,6 +1470,55 @@ td {
 
 .supplier-form-grid .is-hidden-field {
   display: none;
+}
+
+.catalog-match-suggestion {
+  align-items: center;
+  background: #f8faf7;
+  border: 1px solid #cbd9c5;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  grid-column: span 2;
+  justify-content: space-between;
+  min-height: var(--control-height);
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.catalog-match-suggestion div {
+  min-width: 0;
+}
+
+.catalog-match-suggestion span {
+  color: #62745b;
+  display: block;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.catalog-match-suggestion strong,
+.catalog-match-suggestion small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-match-suggestion strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.catalog-match-suggestion small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  margin-top: 2px;
 }
 
 .request-form-grid textarea {
@@ -2717,6 +2763,10 @@ tr.has-recommendation .sticky-name {
   }
 
   .wide-field {
+    grid-column: span 1;
+  }
+
+  .catalog-match-suggestion {
     grid-column: span 1;
   }
 
