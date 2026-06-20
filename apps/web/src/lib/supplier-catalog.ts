@@ -314,11 +314,20 @@ export function findSupplierCatalogWineNameMatch(
   input: { wineName: string; supplierId?: string | null; supplierName?: string | null },
   wines: SupplierCatalogWine[]
 ): SupplierCatalogWineNameMatch | null {
+  return findSupplierCatalogWineNameMatches(input, wines, 1)[0] || null;
+}
+
+export function findSupplierCatalogWineNameMatches(
+  input: { wineName: string; supplierId?: string | null; supplierName?: string | null },
+  wines: SupplierCatalogWine[],
+  limit = 5
+): SupplierCatalogWineNameMatch[] {
   const queryKey = catalogWineSearchKey(input.wineName);
   const queryTokens = searchTokens(queryKey);
-  if (queryKey.length < 5 || queryTokens.length === 0) return null;
+  if (queryKey.length < 3 || queryTokens.length === 0) return [];
 
-  let best: SupplierCatalogWineNameMatch | null = null;
+  const threshold = queryTokens.length === 1 ? 0.58 : 0.34;
+  const matches: SupplierCatalogWineNameMatch[] = [];
 
   for (const wine of wines) {
     const candidateKeys = [
@@ -329,13 +338,14 @@ export function findSupplierCatalogWineNameMatch(
     ].map(catalogWineSearchKey);
     const baseScore = Math.max(...candidateKeys.map((candidateKey) => scoreSearchKey(queryKey, candidateKey)));
     const score = Math.min(1, baseScore + supplierMatchBonus(wine, input));
-    if (!best || score > best.score || (score === best.score && sortCatalogMatchTie(wine, best.wine) < 0)) {
-      best = { wine, score };
+    if (score >= threshold) {
+      matches.push({ wine, score });
     }
   }
 
-  const threshold = queryTokens.length === 1 ? 0.86 : 0.68;
-  return best && best.score >= threshold ? best : null;
+  return matches
+    .sort((a, b) => b.score - a.score || sortCatalogMatchTie(a.wine, b.wine))
+    .slice(0, Math.max(1, limit));
 }
 
 function sortCatalogMatchTie(a: SupplierCatalogWine, b: SupplierCatalogWine) {

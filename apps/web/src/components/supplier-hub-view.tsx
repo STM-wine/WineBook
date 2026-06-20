@@ -11,7 +11,7 @@ import {
   calculateGpMargin,
   calculatePricing,
   defaultLaidInForSupplier,
-  findSupplierCatalogWineNameMatch,
+  findSupplierCatalogWineNameMatches,
   money,
   normalizeWineIdentity,
   parseSupplierCatalogWineNameInput,
@@ -177,8 +177,8 @@ function AddWinePanel({
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
   const sortedCloneOptions = useMemo(() => [...wines].sort(sortNewestVintageFirst), [wines]);
   const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
-  const wineNameMatch = useMemo(
-    () => findSupplierCatalogWineNameMatch({ wineName, supplierId, supplierName }, wines),
+  const wineNameMatches = useMemo(
+    () => findSupplierCatalogWineNameMatches({ wineName, supplierId, supplierName }, wines, 5),
     [supplierId, supplierName, wineName, wines]
   );
   const computedPricing = calculatePricing({
@@ -193,6 +193,7 @@ function AddWinePanel({
   const copiedFromWine = copiedFromSupplierCatalogWineId
     ? wines.find((wine) => wine.id === copiedFromSupplierCatalogWineId) || null
     : null;
+  const showWineNameMatches = wineName.trim().length >= 3 && !copiedFromWine;
   const currentIdentity = normalizeWineIdentity({
     producer,
     wineName,
@@ -257,11 +258,6 @@ function AddWinePanel({
     if (!wine) return;
 
     applyWineTemplate(wine);
-  }
-
-  function applyBestWineNameMatch() {
-    if (!wineNameMatch || copiedFromSupplierCatalogWineId === wineNameMatch.wine.id) return;
-    applyWineTemplate(wineNameMatch.wine, wineName, true);
   }
 
   function startNewSku() {
@@ -397,7 +393,6 @@ function AddWinePanel({
               setWineName(event.target.value);
               selectClone(event.target.value);
             }}
-            onBlur={applyBestWineNameMatch}
             placeholder="Create new or search existing SKU"
           />
           <datalist id="supplier-catalog-clone-options">
@@ -408,16 +403,26 @@ function AddWinePanel({
             ))}
           </datalist>
         </label>
-        {wineNameMatch && (!copiedFromWine || copiedFromWine.id !== wineNameMatch.wine.id) ? (
-          <div className="catalog-match-suggestion">
-            <div>
-              <span>Best match</span>
-              <strong>{wineNameMatch.wine.display_name}</strong>
-              <small>{wineNameMatch.wine.supplier_name}</small>
-            </div>
-            <button className="ghost-button button-small" onClick={() => applyWineTemplate(wineNameMatch.wine, wineName, true)} type="button">
-              Use Match
-            </button>
+        {showWineNameMatches ? (
+          <div className="catalog-match-suggestions">
+            {wineNameMatches.length > 0 ? (
+              wineNameMatches.map((match) => (
+                <div className="catalog-match-suggestion" key={match.wine.id}>
+                  <div>
+                    <span>{match.wine.conversion_status.replace(/_/g, " ")}</span>
+                    <strong>{match.wine.display_name}</strong>
+                    <small>{match.wine.supplier_name}</small>
+                  </div>
+                  <button className="ghost-button button-small" onClick={() => applyWineTemplate(match.wine, wineName, true)} type="button">
+                    Start From
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="catalog-match-empty">
+                No catalog matches found.
+              </div>
+            )}
           </div>
         ) : null}
         <label>

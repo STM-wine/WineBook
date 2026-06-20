@@ -1472,6 +1472,13 @@ td {
   display: none;
 }
 
+.catalog-match-suggestions {
+  display: grid;
+  gap: 8px;
+  grid-column: span 2;
+  min-width: 0;
+}
+
 .catalog-match-suggestion {
   align-items: center;
   background: #f8faf7;
@@ -1484,6 +1491,10 @@ td {
   min-height: var(--control-height);
   min-width: 0;
   padding: 9px 10px;
+}
+
+.catalog-match-suggestions .catalog-match-suggestion {
+  grid-column: auto;
 }
 
 .catalog-match-suggestion div {
@@ -1519,6 +1530,17 @@ td {
   font-size: 12px;
   font-weight: 750;
   margin-top: 2px;
+}
+
+.catalog-match-empty {
+  background: var(--surface-soft);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  min-height: var(--control-height);
+  padding: 14px;
 }
 
 .request-form-grid textarea {
@@ -2767,6 +2789,10 @@ tr.has-recommendation .sticky-name {
   }
 
   .catalog-match-suggestion {
+    grid-column: span 1;
+  }
+
+  .catalog-match-suggestions {
     grid-column: span 1;
   }
 
