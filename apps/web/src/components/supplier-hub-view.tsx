@@ -262,13 +262,6 @@ function AddWinePanel({
     const nextVintage = wine.vintage || "NV";
     const nextPackSize = String(wine.pack_size || 12);
     const nextBottleSize = wine.bottle_size || "750ml";
-    const nextIdentity = normalizeWineIdentity({
-      producer: nextProducer,
-      wineName: nextWineName,
-      vintage: nextVintage,
-      packSize: Math.max(1, Math.trunc(Number(nextPackSize) || 12)),
-      bottleSize: nextBottleSize
-    });
 
     setTemplateWine(wine);
     setCopiedFromSupplierCatalogWineId(catalogWineId);
@@ -285,7 +278,7 @@ function AddWinePanel({
     setFobCase(String(asNumber(wine.fob_case) || ""));
     setLaidInPerBottle(String(asNumber(wine.laid_in_per_bottle) || 0));
     setSystemTags(wine.system_tags || []);
-    setQuickbooksItemNumber(nextIdentity.planningSku === wine.planning_sku ? wine.quickbooks_item_number || "" : "");
+    setQuickbooksItemNumber("");
     setPriceLevels(priceLevelDraftsFromWine(wine));
     setFreeGoods(freeGoodDraftsFromWine(wine));
     setPriceChangeReason(`Matched from ${wine.display_name}`);
@@ -869,9 +862,9 @@ function productIdentityMatchToTemplateWine(match: ProductIdentityMatch, query: 
     planning_sku_without_vintage: identity.planningSkuWithoutVintage,
     diagnostics: { source: match.source, source_id: match.sourceId },
     quickbooks_item_id: null,
-    quickbooks_item_name: match.quickbooksItemName,
-    quickbooks_item_number: match.quickbooksItemNumber,
-    quickbooks_sync_status: match.quickbooksItemNumber ? "linked" : "not_created",
+    quickbooks_item_name: null,
+    quickbooks_item_number: null,
+    quickbooks_sync_status: "not_created",
     product_lifecycle_status: match.source === "supplier_catalog" ? "supplier_available" : "active_product",
     accounting_create_payload: {},
     system_tags: match.systemTags,
