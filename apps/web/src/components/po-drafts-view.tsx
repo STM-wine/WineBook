@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 import { asNumber, formatCurrency, formatCurrencyCents, formatInteger } from "@/lib/order-data";
+import { isActivePoStatus } from "@/lib/po-status";
 import {
   poDraftOrderPath,
   poDraftSupplierLabel,
@@ -24,6 +25,7 @@ function poCsvText(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle =
     "Supplier",
     "Wine",
     "Code",
+    "Item Warning",
     "Quantity",
     "FOB",
     "Laid In Cost",
@@ -38,6 +40,7 @@ function poCsvText(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle =
       poDraftSupplierLabel(draft),
       line.product_name || "",
       line.product_code || "",
+      line.is_new_item ? line.new_item_warning || "New Item" : "",
       qty,
       fob.toFixed(2),
       laidIn.toFixed(4),
@@ -56,6 +59,7 @@ function allPoCsvText(drafts: PurchaseOrderDraftWithLines[], suppliers: Map<stri
     "Supplier",
     "Wine",
     "Code",
+    "Item Warning",
     "Quantity",
     "FOB",
     "Laid In Cost",
@@ -73,6 +77,7 @@ function allPoCsvText(drafts: PurchaseOrderDraftWithLines[], suppliers: Map<stri
         poDraftSupplierLabel(draft),
         line.product_name || "",
         line.product_code || "",
+        line.is_new_item ? line.new_item_warning || "New Item" : "",
         qty,
         fob.toFixed(2),
         laidIn.toFixed(4),
@@ -120,6 +125,7 @@ export function PoDraftsView({
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+  const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
   const supplierMetadata = useMemo(() => supplierLogisticsLookup(suppliers), [suppliers]);
   const draftSummaries = useMemo(() => drafts.map((draft) => {
     const lines = draft.lines || [];
@@ -142,7 +148,7 @@ export function PoDraftsView({
     const needle = search.trim().toLowerCase();
 
     return draftSummaries.filter(({ draft }) => {
-      if (statusFilter === "active" && !["draft", "ready_for_entry"].includes(draft.status)) return false;
+      if (statusFilter === "active" && !isActivePoStatus(draft.status)) return false;
       if (statusFilter !== "all" && statusFilter !== "active" && draft.status !== statusFilter) return false;
       if (!needle) return true;
 
@@ -164,9 +170,58 @@ export function PoDraftsView({
   const totalLaidInCost = filteredSummaries.reduce((sum, summary) => sum + summary.laidInCost, 0);
   const totalEstimatedCost = filteredSummaries.reduce((sum, summary) => sum + (summary.estimatedCost || summary.wineCost + summary.laidInCost), 0);
   const exportableDrafts = useMemo(
-    () => draftSummaries.map(({ draft }) => draft).filter((draft) => draft.status !== "cancelled"),
+    () => draftSummaries.map(({ draft }) => draft).filter((draft) => isActivePoStatus(draft.status)),
     [draftSummaries]
   );
+  const exportableDraftIds = useMemo(() => new Set(exportableDrafts.map((draft) => draft.id)), [exportableDrafts]);
+  const filteredSelectableDraftIds = useMemo(
+    () => filteredSummaries.map(({ draft }) => draft).filter((draft) => isActivePoStatus(draft.status)).map((draft) => draft.id),
+    [filteredSummaries]
+  );
+  const selectedExportableDrafts = useMemo(
+    () => exportableDrafts.filter((draft) => selectedDraftIds.has(draft.id)),
+    [exportableDrafts, selectedDraftIds]
+  );
+  const selectedDraftIdList = selectedExportableDrafts.map((draft) => draft.id);
+  const allFilteredSelected =
+    filteredSelectableDraftIds.length > 0 && filteredSelectableDraftIds.every((id) => selectedDraftIds.has(id));
+  const selectedCount = selectedExportableDrafts.length;
+
+  useEffect(() => {
+    setSelectedDraftIds((current) => {
+      const next = new Set(Array.from(current).filter((id) => exportableDraftIds.has(id)));
+      if (next.size === current.size && Array.from(current).every((id) => next.has(id))) {
+        return current;
+      }
+      return next;
+    });
+  }, [exportableDraftIds]);
+
+  function toggleDraftSelection(draftId: string, checked: boolean) {
+    setSelectedDraftIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(draftId);
+      } else {
+        next.delete(draftId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelectedDraftIds((current) => {
+      const next = new Set(current);
+      for (const draftId of filteredSelectableDraftIds) {
+        if (checked) {
+          next.add(draftId);
+        } else {
+          next.delete(draftId);
+        }
+      }
+      return next;
+    });
+  }
 
   function downloadCsv(draft: PurchaseOrderDraftWithLines) {
     const blob = new Blob([poCsvText(draft, supplierLaidInForDraft(draft, supplierMetadata))], {
@@ -196,6 +251,20 @@ export function PoDraftsView({
     URL.revokeObjectURL(url);
   }
 
+  function downloadSelectedCsv() {
+    const blob = new Blob([allPoCsvText(selectedExportableDrafts, supplierMetadata)], {
+      type: "text/csv;charset=utf-8"
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `POs selected ${poTimestamp()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="panel po-panel" id="po-drafts">
       <div className="section-heading">
@@ -204,6 +273,17 @@ export function PoDraftsView({
           <p>Drafts created from approved lines in the current report run.</p>
         </div>
         <div className="po-export-all-actions">
+          <a
+            className={selectedCount === 0 ? "button button-small disabled-link" : "button button-small"}
+            download={`POs selected ${poTimestamp()}.xlsx`}
+            href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}&draftIds=${encodeURIComponent(selectedDraftIdList.join(","))}`}
+            aria-disabled={selectedCount === 0}
+          >
+            Export Selected PO XLSX
+          </a>
+          <button className="button button-small" disabled={selectedCount === 0} onClick={downloadSelectedCsv} type="button">
+            Export Selected PO CSV
+          </button>
           <a
             className={exportableDrafts.length === 0 ? "button button-small disabled-link" : "button button-small"}
             download={`POs ${poTimestamp()}.xlsx`}
@@ -244,6 +324,15 @@ export function PoDraftsView({
         </div>
       </div>
       <div className="po-filter-bar">
+        <label className="check-control po-select-all-control">
+          <input
+            checked={allFilteredSelected}
+            disabled={filteredSelectableDraftIds.length === 0}
+            onChange={(event) => toggleSelectAll(event.target.checked)}
+            type="checkbox"
+          />
+          <span>Select All</span>
+        </label>
         <label className="search-field">
           Search
           <input
@@ -268,10 +357,21 @@ export function PoDraftsView({
         <div className="empty-inline">No PO drafts exist for this report run yet.</div>
       ) : (
         <div className="po-draft-stack">
-          {filteredSummaries.map(({ draft, lineCount, approvedQty, wineCost, laidInCost, estimatedCost }) => (
+          {filteredSummaries.map(({ draft, lineCount, approvedQty, wineCost, laidInCost, estimatedCost }) => {
+            const isExportable = isActivePoStatus(draft.status);
+
+            return (
             <details className="po-draft-card" key={draft.id}>
               <summary>
-                <div>
+                <div className="po-draft-summary-main">
+                  <input
+                    aria-label={`Select ${draft.supplier_name || "Unknown Supplier"} PO draft`}
+                    checked={selectedDraftIds.has(draft.id)}
+                    disabled={!isExportable}
+                    onChange={(event) => toggleDraftSelection(draft.id, event.target.checked)}
+                    onClick={(event) => event.stopPropagation()}
+                    type="checkbox"
+                  />
                   <span className="supplier-chip">{draft.supplier_name || "Unknown Supplier"}</span>
                   <span className={poDraftOrderPath(draft) === "di" ? "order-path-chip is-di" : "order-path-chip"}>
                     {poOrderPathLabel(poDraftOrderPath(draft))}
@@ -285,20 +385,24 @@ export function PoDraftsView({
               </summary>
               <div className="po-draft-actions">
                 <DraftStatusActions draft={draft} disabled={isPending} onStatusChange={onStatusChange} />
-                <a
-                  className="button button-tiny"
-                  download={poXlsxFilename(draft)}
-                  href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}&draftId=${encodeURIComponent(draft.id)}`}
-                >
-                  Export XLSX
-                </a>
-                <button
-                  className="button button-tiny"
-                  onClick={() => downloadCsv(draft)}
-                  type="button"
-                >
-                  Export CSV
-                </button>
+                {isExportable ? (
+                  <>
+                    <a
+                      className="button button-tiny"
+                      download={poXlsxFilename(draft)}
+                      href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}&draftId=${encodeURIComponent(draft.id)}`}
+                    >
+                      Export XLSX
+                    </a>
+                    <button
+                      className="button button-tiny"
+                      onClick={() => downloadCsv(draft)}
+                      type="button"
+                    >
+                      Export CSV
+                    </button>
+                  </>
+                ) : null}
               </div>
               <SupplierDraftMetadata supplier={supplierMetadata.get((draft.supplier_name || "").trim().toLowerCase())} />
               <PoDraftLinesTable
@@ -308,7 +412,8 @@ export function PoDraftsView({
                 onDeleteLine={onDeleteLine}
               />
             </details>
-          ))}
+            );
+          })}
           {filteredSummaries.length === 0 ? <div className="empty-inline">No PO drafts match the current filters.</div> : null}
         </div>
       )}
@@ -351,6 +456,7 @@ function PoDraftLinesTable({
           <tr>
             <th>Wine</th>
             <th>Code</th>
+            <th>Item</th>
             <th>Quantity</th>
             <th>FOB</th>
             <th>Laid In / Bottle</th>
@@ -365,9 +471,13 @@ function PoDraftLinesTable({
             const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidInPerBottle);
 
             return (
-              <tr key={line.id}>
-                <td>{line.product_name || "Unnamed wine"}</td>
+              <tr className={line.is_new_item ? "new-item-row" : undefined} key={line.id}>
+                <td>
+                  {line.product_name || "Unnamed wine"}
+                  {line.is_new_item ? <span className="new-item-badge">New Item</span> : null}
+                </td>
                 <td>{line.product_code || ""}</td>
+                <td>{line.is_new_item ? line.new_item_warning || "QuickBooks Item Number required." : ""}</td>
                 <td>{formatInteger(qty)}</td>
                 <td>{formatCurrency(fob)}</td>
                 <td>{formatCurrencyCents(laidIn)}</td>

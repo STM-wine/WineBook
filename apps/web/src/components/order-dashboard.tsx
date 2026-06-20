@@ -8,6 +8,7 @@ import {
   refreshVinosmithReports,
   saveSupplierCatalogWine,
   saveSupplierLogistics,
+  updateSupplierCatalogWorkbenchItems,
   updateSupplierWineRequestApproval,
   updatePurchaseOrderDraftStatus,
   updateRecommendationOrderPath,
@@ -30,6 +31,7 @@ import {
   buildMetrics,
   buildSupplierGroups,
   filterRecommendations,
+  mergeSupplierCatalogRows,
   sortSupplierGroups,
   type SupplierGroupSortMode,
   rowRecommendedQty,
@@ -80,7 +82,11 @@ export function OrderDashboard({
   priceChangeEvents
 }: Props) {
   const router = useRouter();
-  const [rows, setRows] = useState(recommendations);
+  const combinedRecommendations = useMemo(
+    () => mergeSupplierCatalogRows(recommendations, supplierCatalogWines, reportRun.id),
+    [recommendations, reportRun.id, supplierCatalogWines]
+  );
+  const [rows, setRows] = useState(combinedRecommendations);
   const [draftRows, setDraftRows] = useState(poDrafts);
   const [activeView, setActiveView] = useState<ActiveView>("order-review");
   const [supplier, setSupplier] = useState("All");
@@ -95,11 +101,12 @@ export function OrderDashboard({
   const approvalQueueRef = useRef(new Map<string, { recommendationStatus: string; approvedQty: number }>());
   const approvalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const approvalFlushRef = useRef<Promise<void> | null>(null);
+  const catalogWorkbenchSavesRef = useRef(new Set<Promise<void>>());
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
-    setRows(recommendations);
-  }, [recommendations]);
+    setRows(combinedRecommendations);
+  }, [combinedRecommendations]);
 
   useEffect(() => {
     setDraftRows(poDrafts);
@@ -204,6 +211,21 @@ export function OrderDashboard({
     }, 650);
   }
 
+  function trackCatalogWorkbenchSave(save: Promise<void>) {
+    catalogWorkbenchSavesRef.current.add(save);
+    save.then(
+      () => catalogWorkbenchSavesRef.current.delete(save),
+      () => catalogWorkbenchSavesRef.current.delete(save)
+    );
+    return save;
+  }
+
+  async function flushCatalogWorkbenchSaves() {
+    while (catalogWorkbenchSavesRef.current.size > 0) {
+      await Promise.all(Array.from(catalogWorkbenchSavesRef.current));
+    }
+  }
+
   function setSupplierTargetWeeksValue(supplierName: string, value: string) {
     setSupplierTargetWeeks((current) => {
       const next = { ...current };
@@ -228,6 +250,34 @@ export function OrderDashboard({
     setPendingMessage("");
     setErrorMessage("");
 
+    if (row.supplier_catalog_wine_id) {
+      setPendingMessage("Saving catalog workbench row...");
+      startTransition(async () => {
+        const save = updateSupplierCatalogWorkbenchItems({
+          updates: [
+            {
+              id: row.supplier_catalog_workbench_item_id,
+              reportRunId: row.report_run_id || reportRun.id,
+              supplierCatalogWineId: row.supplier_catalog_wine_id as string,
+              recommendationStatus: status,
+              approvedQty: qty,
+              recommendedQty: Math.max(0, Math.round(asNumber(row.recommended_qty_rounded))),
+              orderPath: row.order_path === "di" ? "di" : "stateside"
+            }
+          ]
+        });
+        trackCatalogWorkbenchSave(save);
+        try {
+          await save;
+          setPendingMessage("Catalog workbench row saved");
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not save catalog workbench row.");
+          setPendingMessage("");
+        }
+      });
+      return;
+    }
+
     queueApprovalSave(row.id, status, qty);
   }
 
@@ -245,7 +295,35 @@ export function OrderDashboard({
       )
     );
     setErrorMessage("");
-    approvedRows.forEach((row) => queueApprovalSave(row.id, "rejected", 0));
+    approvedRows
+      .filter((row) => !row.supplier_catalog_wine_id)
+      .forEach((row) => queueApprovalSave(row.id, "rejected", 0));
+
+    const manualRows = approvedRows.filter((row) => row.supplier_catalog_wine_id);
+    if (manualRows.length > 0) {
+      setPendingMessage("Clearing catalog workbench approvals...");
+      startTransition(async () => {
+        const save = updateSupplierCatalogWorkbenchItems({
+          updates: manualRows.map((row) => ({
+            id: row.supplier_catalog_workbench_item_id,
+            reportRunId: row.report_run_id || reportRun.id,
+            supplierCatalogWineId: row.supplier_catalog_wine_id as string,
+            recommendationStatus: "rejected",
+            approvedQty: 0,
+            recommendedQty: Math.max(0, Math.round(asNumber(row.recommended_qty_rounded))),
+            orderPath: row.order_path === "di" ? "di" : "stateside"
+          }))
+        });
+        trackCatalogWorkbenchSave(save);
+        try {
+          await save;
+          setPendingMessage("Catalog workbench approvals cleared");
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not clear catalog workbench approvals.");
+          setPendingMessage("");
+        }
+      });
+    }
   }
 
   function setWorkingQty(row: Recommendation, qty: number) {
@@ -260,6 +338,37 @@ export function OrderDashboard({
   }
 
   function saveOrderPath(row: Recommendation, orderPath: "stateside" | "di") {
+    if (row.supplier_catalog_wine_id) {
+      patchRow(row.id, { order_path: orderPath });
+      setPendingMessage("Saving catalog order path...");
+      setErrorMessage("");
+
+      startTransition(async () => {
+        const save = updateSupplierCatalogWorkbenchItems({
+          updates: [
+            {
+              id: row.supplier_catalog_workbench_item_id,
+              reportRunId: row.report_run_id || reportRun.id,
+              supplierCatalogWineId: row.supplier_catalog_wine_id as string,
+              recommendationStatus: row.recommendation_status || "rejected",
+              approvedQty: asNumber(row.approved_qty),
+              recommendedQty: Math.max(0, Math.round(asNumber(row.recommended_qty_rounded))),
+              orderPath
+            }
+          ]
+        });
+        trackCatalogWorkbenchSave(save);
+        try {
+          await save;
+          setPendingMessage("Catalog order path saved");
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not save catalog order path.");
+          setPendingMessage("");
+        }
+      });
+      return;
+    }
+
     const nextRows = rows.map((current) => (current.id === row.id ? { ...current, order_path: orderPath } : current));
     const nextDisplayRow = applyDiContainerRecommendations(nextRows).find((current) => current.id === row.id);
     const isApprovedRow = row.recommendation_status === "approved" || row.recommendation_status === "edited";
@@ -296,6 +405,7 @@ export function OrderDashboard({
     startTransition(async () => {
       try {
         await flushApprovalQueue();
+        await flushCatalogWorkbenchSaves();
         const response = await fetch("/api/po-drafts/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

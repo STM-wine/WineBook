@@ -1,4 +1,4 @@
-import type { DashboardMetrics, Recommendation, SupplierGroup } from "./types";
+import type { DashboardMetrics, Recommendation, SupplierCatalogWine, SupplierCatalogWorkbenchItem, SupplierGroup } from "./types";
 
 export type SupplierGroupSortMode = "default" | "az" | "za";
 
@@ -105,6 +105,88 @@ export function displayWineName(row: Recommendation): string {
   const flags = [row.is_core ? "⭐" : "", row.is_btg ? "🍷" : ""].filter(Boolean);
   const suffix = flags.length ? ` ${flags.join(" ")}` : "";
   return `${row.product_name || row.planning_sku || "Unnamed wine"}${suffix}`;
+}
+
+export function isManualCatalogRow(row: Pick<Recommendation, "supplier_catalog_wine_id">): boolean {
+  return Boolean(row.supplier_catalog_wine_id);
+}
+
+export function hasQuickBooksItemNumber(wine: Pick<SupplierCatalogWine, "quickbooks_item_number">): boolean {
+  return Boolean(wine.quickbooks_item_number?.trim());
+}
+
+export function manualCatalogNewItemWarning(wine: Pick<SupplierCatalogWine, "quickbooks_item_number">): string | null {
+  return hasQuickBooksItemNumber(wine) ? null : "New Item: QuickBooks Item Number required before final entry.";
+}
+
+function workbenchItemForRun(wine: SupplierCatalogWine, reportRunId: string): SupplierCatalogWorkbenchItem | null {
+  return (
+    wine.workbench_items?.find((item) => item.report_run_id === reportRunId && item.active !== false) || null
+  );
+}
+
+export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, reportRunId: string): Recommendation {
+  const workbenchItem = workbenchItemForRun(wine, reportRunId);
+  const warning = manualCatalogNewItemWarning(wine);
+  const recommendedQty = Math.max(0, Math.round(asNumber(workbenchItem?.recommended_qty) || asNumber(wine.pack_size) || 1));
+  const approvedQty = Math.max(0, Math.round(asNumber(workbenchItem?.approved_qty)));
+  const fob = asNumber(wine.fob_bottle);
+  const trucking = asNumber(wine.laid_in_per_bottle);
+  const orderCost = fob * recommendedQty;
+  const landedCost = (fob + trucking) * recommendedQty;
+
+  return {
+    id: workbenchItem?.id || `manual-catalog:${wine.id}`,
+    report_run_id: reportRunId,
+    supplier_catalog_wine_id: wine.id,
+    supplier_catalog_workbench_item_id: workbenchItem?.id || null,
+    planning_sku: wine.planning_sku,
+    product_name: wine.display_name,
+    product_code: wine.quickbooks_item_number || null,
+    supplier_name: wine.supplier_name,
+    brand_manager: null,
+    is_btg: Boolean(wine.system_tags?.includes("BTG")),
+    is_core: Boolean(wine.system_tags?.includes("Core")),
+    last_30_day_sales: 0,
+    last_60_day_sales: 0,
+    last_90_day_sales: 0,
+    last_365_day_sales: 0,
+    last_12_month_sales: 0,
+    next_30_day_forecast: 0,
+    next_60_day_forecast: 0,
+    next_90_day_forecast: 0,
+    weekly_velocity: 0,
+    velocity_trend_pct: 0,
+    velocity_trend_label: "Manual",
+    weeks_on_hand_with_on_order: 0,
+    weeks_on_hand: 0,
+    true_available: 0,
+    on_order: 0,
+    recommended_qty_rounded: recommendedQty,
+    approved_qty: approvedQty,
+    recommendation_status: workbenchItem?.recommendation_status || "rejected",
+    reorder_status: "LOW",
+    risk_level: warning ? "Medium" : "Low",
+    pickup_location: null,
+    order_cost: orderCost,
+    fob,
+    pack_size: wine.pack_size,
+    trucking_cost_per_bottle: trucking,
+    landed_cost: landedCost,
+    order_path: workbenchItem?.order_path || "stateside",
+    is_new_item: Boolean(warning),
+    new_item_warning: warning
+  };
+}
+
+export function mergeSupplierCatalogRows(recommendations: Recommendation[], catalogWines: SupplierCatalogWine[], reportRunId: string): Recommendation[] {
+  const recommendationSkus = new Set(recommendations.map((row) => row.planning_sku).filter(Boolean));
+  const manualRows = catalogWines
+    .filter((wine) => wine.product_lifecycle_status !== "inactive")
+    .filter((wine) => !recommendationSkus.has(wine.planning_sku))
+    .map((wine) => supplierCatalogWineToRecommendation(wine, reportRunId));
+
+  return [...recommendations, ...manualRows];
 }
 
 export function uniqueSorted(values: Array<string | null | undefined>): string[] {

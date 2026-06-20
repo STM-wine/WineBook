@@ -41,6 +41,7 @@ function buildFallbackWorkbook(lines: PoExportLine[]) {
     { header: "Producer", key: "producer", width: 28 },
     { header: "Quantity", key: "quantity", width: 10 },
     { header: "Code", key: "code", width: 14 },
+    { header: "Item Warning", key: "itemWarning", width: 28 },
     { header: "Wine", key: "wine", width: 48 },
     { header: "FOB", key: "fob", width: 12 },
     { header: "Laid In Cost", key: "laidInPerBottle", width: 14 }
@@ -58,6 +59,7 @@ function buildFallbackWorkbook(lines: PoExportLine[]) {
       producer: line.producer,
       quantity: line.quantity,
       code: line.code,
+      itemWarning: line.itemWarning,
       wine: line.wine,
       fob: line.fob,
       laidInPerBottle: line.laidInPerBottle
@@ -106,9 +108,19 @@ export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[]
     sheet.getCell(excelRow, 2).value = line.producer;
     sheet.getCell(excelRow, 3).value = line.quantity;
     sheet.getCell(excelRow, 4).value = line.code;
-    sheet.getCell(excelRow, 5).value = line.wine;
-    sheet.getCell(excelRow, 6).value = line.fob;
-    sheet.getCell(excelRow, 7).value = line.laidInPerBottle;
+    sheet.getCell(excelRow, 5).value = line.itemWarning;
+    sheet.getCell(excelRow, 6).value = line.wine;
+    sheet.getCell(excelRow, 7).value = line.fob;
+    sheet.getCell(excelRow, 8).value = line.laidInPerBottle;
+    if (line.itemWarning) {
+      for (let column = 1; column <= 8; column += 1) {
+        sheet.getCell(excelRow, column).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFFF2CC" }
+        };
+      }
+    }
     excelRow += 1;
   }
 

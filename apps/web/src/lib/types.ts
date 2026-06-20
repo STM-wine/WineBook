@@ -15,6 +15,8 @@ export type ReportRun = {
 export type Recommendation = {
   id: string;
   report_run_id: string;
+  supplier_catalog_wine_id?: string | null;
+  supplier_catalog_workbench_item_id?: string | null;
   planning_sku: string | null;
   product_name: string | null;
   product_code: string | null;
@@ -49,6 +51,8 @@ export type Recommendation = {
   trucking_cost_per_bottle: number | string | null;
   landed_cost: number | string | null;
   order_path?: "stateside" | "di" | string | null;
+  is_new_item?: boolean | null;
+  new_item_warning?: string | null;
 };
 
 export type SupplierGroup = {
@@ -101,9 +105,65 @@ export type SupplierCatalogWine = {
   diagnostics: Record<string, unknown> | null;
   quickbooks_item_id: string | null;
   quickbooks_item_name: string | null;
+  quickbooks_item_number?: string | null;
   quickbooks_sync_status: string;
   product_lifecycle_status: string;
   accounting_create_payload: Record<string, unknown> | null;
+  system_tags?: string[] | null;
+  copied_from_supplier_catalog_wine_id?: string | null;
+  source_system?: string | null;
+  source_id?: string | null;
+  price_levels?: SupplierCatalogPriceLevel[];
+  free_goods?: SupplierCatalogFreeGood[];
+  workbench_items?: SupplierCatalogWorkbenchItem[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type SupplierCatalogPriceLevel = {
+  id: string;
+  supplier_catalog_wine_id: string;
+  name: string;
+  bottle_price: number | string;
+  depletion_allowance: number | string;
+  target_gp_margin: number | string | null;
+  calculated_gp_margin: number | string;
+  is_frontline: boolean;
+  is_best: boolean;
+  display_order: number | string;
+  active: boolean;
+  source_system: string | null;
+  source_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SupplierCatalogFreeGood = {
+  id: string;
+  supplier_catalog_wine_id: string;
+  buy_quantity: number | string;
+  free_quantity: number | string;
+  unit: "bottle" | "case" | string;
+  program_name: string | null;
+  starts_on: string | null;
+  ends_on: string | null;
+  notes: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SupplierCatalogWorkbenchItem = {
+  id: string;
+  report_run_id: string | null;
+  supplier_catalog_wine_id: string;
+  recommendation_status: string;
+  recommended_qty: number | string;
+  approved_qty: number | string;
+  order_path: "stateside" | "di" | string;
+  active: boolean;
+  notes: string | null;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -175,6 +235,8 @@ export type PurchaseOrderLine = {
   id: string;
   purchase_order_draft_id: string;
   recommendation_id?: string | null;
+  supplier_catalog_wine_id?: string | null;
+  producer_name?: string | null;
   product_name: string | null;
   product_code: string | null;
   planning_sku: string | null;
@@ -186,6 +248,8 @@ export type PurchaseOrderLine = {
   wine_cost: number | string | null;
   laid_in_cost: number | string | null;
   landed_cost: number | string | null;
+  is_new_item?: boolean | null;
+  new_item_warning?: string | null;
 };
 
 export type PurchaseOrderDraftWithLines = PurchaseOrderDraft & {

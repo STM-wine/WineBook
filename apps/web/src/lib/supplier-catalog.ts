@@ -1,6 +1,14 @@
-import type { PriceChangeEvent, SupplierCatalogWine, SupplierLogistics, WineRequest } from "@/lib/types";
+import type {
+  PriceChangeEvent,
+  SupplierCatalogFreeGood,
+  SupplierCatalogPriceLevel,
+  SupplierCatalogWine,
+  SupplierLogistics,
+  WineRequest
+} from "@/lib/types";
 
 export const AVAILABILITY_STATUSES = ["available", "limited", "sold_out", "unknown"] as const;
+export const SYSTEM_TAGS = ["Core", "BTG", "Limited", "Special Order", "Allocated"] as const;
 export const CONVERSION_STATUSES = [
   "exact_existing_product",
   "new_vintage",
@@ -40,6 +48,34 @@ const PACK_RE = /^\s*(\d+)\s*[/xX]\s*([0-9.]+)\s*(ml|mL|ML|l|L)\s*$/;
 export type AvailabilityStatus = (typeof AVAILABILITY_STATUSES)[number];
 export type ConversionStatus = (typeof CONVERSION_STATUSES)[number];
 export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
+export type SystemTag = (typeof SYSTEM_TAGS)[number];
+
+export type SupplierCatalogPriceLevelInput = {
+  id?: string;
+  name: string;
+  bottlePrice?: number | null;
+  depletionAllowance?: number | null;
+  targetGpMargin?: number | null;
+  calculatedGpMargin?: number | null;
+  isFrontline?: boolean;
+  isBest?: boolean;
+  displayOrder?: number;
+  active?: boolean;
+  sourceSystem?: string | null;
+  sourceId?: string | null;
+};
+
+export type SupplierCatalogFreeGoodInput = {
+  id?: string;
+  buyQuantity?: number | null;
+  freeQuantity?: number | null;
+  unit?: "bottle" | "case";
+  programName?: string | null;
+  startsOn?: string | null;
+  endsOn?: string | null;
+  notes?: string | null;
+  active?: boolean;
+};
 
 export type SupplierCatalogWineInput = {
   supplierId?: string | null;
@@ -56,6 +92,13 @@ export type SupplierCatalogWineInput = {
   bestPriceOverride?: number | null;
   availabilityStatus: AvailabilityStatus;
   conversionStatus: ConversionStatus;
+  systemTags?: string[];
+  copiedFromSupplierCatalogWineId?: string | null;
+  quickbooksItemNumber?: string | null;
+  sourceSystem?: string | null;
+  sourceId?: string | null;
+  priceLevels?: SupplierCatalogPriceLevelInput[];
+  freeGoods?: SupplierCatalogFreeGoodInput[];
   priceChangeReason?: string;
 };
 
@@ -164,6 +207,31 @@ export function calculateBestPrice(frontlineBottlePrice: number) {
   return null;
 }
 
+export function calculateGpMargin(input: {
+  bottlePrice?: number | null;
+  landedBottleCost?: number | null;
+  depletionAllowance?: number | null;
+}) {
+  const bottlePrice = money(input.bottlePrice);
+  if (bottlePrice <= 0) return 0;
+  const landedBottleCost = money(input.landedBottleCost);
+  const depletionAllowance = money(input.depletionAllowance);
+  const netCost = Math.max(0, landedBottleCost - depletionAllowance);
+  return Math.round(((bottlePrice - netCost) / bottlePrice) * 10000) / 10000;
+}
+
+export function requiredDepletionAllowanceForTargetMargin(input: {
+  bottlePrice?: number | null;
+  landedBottleCost?: number | null;
+  targetGpMargin?: number | null;
+}) {
+  const bottlePrice = money(input.bottlePrice);
+  const landedBottleCost = money(input.landedBottleCost);
+  const targetGpMargin = Math.max(0, Math.min(0.99, Number(input.targetGpMargin) || 0));
+  if (bottlePrice <= 0 || landedBottleCost <= 0 || targetGpMargin <= 0) return 0;
+  return money(Math.max(0, landedBottleCost - bottlePrice * (1 - targetGpMargin)));
+}
+
 export function calculatePricing(input: {
   packSize?: number | null;
   fobBottle?: number | null;
@@ -216,6 +284,97 @@ export function calculatePricing(input: {
   };
 }
 
+export function normalizeSystemTags(tags: string[] = []) {
+  const valid = new Set<string>(SYSTEM_TAGS);
+  return Array.from(new Set(tags.map(normalizeSpaces).filter((tag) => valid.has(tag))));
+}
+
+export function defaultPriceLevelsForPricing(pricing: PricingResult): SupplierCatalogPriceLevelInput[] {
+  return [
+    {
+      name: "Frontline",
+      bottlePrice: pricing.frontlineBottlePrice,
+      depletionAllowance: 0,
+      calculatedGpMargin: pricing.grossProfitMargin,
+      isFrontline: true,
+      isBest: false,
+      displayOrder: 0,
+      active: true
+    },
+    ...(pricing.bestPrice !== null
+      ? [
+          {
+            name: "Best",
+            bottlePrice: pricing.bestPrice,
+            depletionAllowance: 0,
+            calculatedGpMargin: calculateGpMargin({
+              bottlePrice: pricing.bestPrice,
+              landedBottleCost: pricing.landedBottleCost
+            }),
+            isFrontline: false,
+            isBest: true,
+            displayOrder: 1,
+            active: true
+          }
+        ]
+      : [])
+  ];
+}
+
+export function normalizePriceLevels(
+  levels: SupplierCatalogPriceLevelInput[] = [],
+  landedBottleCost = 0
+): SupplierCatalogPriceLevelInput[] {
+  return levels
+    .map((level, index) => {
+      const bottlePrice = money(level.bottlePrice);
+      const targetGpMargin =
+        level.targetGpMargin === null || level.targetGpMargin === undefined ? null : Math.max(0, Math.min(0.99, Number(level.targetGpMargin) || 0));
+      const depletionAllowance =
+        level.depletionAllowance !== null && level.depletionAllowance !== undefined
+          ? money(level.depletionAllowance)
+          : targetGpMargin !== null
+            ? requiredDepletionAllowanceForTargetMargin({ bottlePrice, landedBottleCost, targetGpMargin })
+            : 0;
+
+      return {
+        id: level.id,
+        name: normalizeSpaces(level.name) || `Level ${index + 1}`,
+        bottlePrice,
+        depletionAllowance,
+        targetGpMargin,
+        calculatedGpMargin:
+          level.calculatedGpMargin !== null && level.calculatedGpMargin !== undefined
+            ? Math.round((Number(level.calculatedGpMargin) || 0) * 10000) / 10000
+            : calculateGpMargin({ bottlePrice, landedBottleCost, depletionAllowance }),
+        isFrontline: Boolean(level.isFrontline),
+        isBest: Boolean(level.isBest),
+        displayOrder: Math.max(0, Math.trunc(Number(level.displayOrder ?? index) || 0)),
+        active: level.active ?? true,
+        sourceSystem: level.sourceSystem || null,
+        sourceId: level.sourceId || null
+      };
+    })
+    .filter((level) => money(level.bottlePrice) > 0 || Boolean(level.isFrontline))
+    .sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0));
+}
+
+export function normalizeFreeGoods(freeGoods: SupplierCatalogFreeGoodInput[] = []): SupplierCatalogFreeGoodInput[] {
+  return freeGoods
+    .map((freeGood) => ({
+      id: freeGood.id,
+      buyQuantity: Math.max(0, Number(freeGood.buyQuantity) || 0),
+      freeQuantity: Math.max(0, Number(freeGood.freeQuantity) || 0),
+      unit: freeGood.unit === "case" ? "case" as const : "bottle" as const,
+      programName: normalizeSpaces(freeGood.programName || "") || null,
+      startsOn: freeGood.startsOn || null,
+      endsOn: freeGood.endsOn || null,
+      notes: normalizeSpaces(freeGood.notes || "") || null,
+      active: freeGood.active ?? true
+    }))
+    .filter((freeGood) => Number(freeGood.buyQuantity) > 0 || Number(freeGood.freeQuantity) > 0 || Boolean(freeGood.programName));
+}
+
 export function defaultLaidInForSupplier(suppliers: SupplierLogistics[], supplierId: string | null, supplierName: string) {
   const selected = suppliers.find((supplier) => supplier.id === supplierId) || suppliers.find((supplier) => supplier.name === supplierName);
   if (!selected) return 0;
@@ -238,6 +397,20 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     frontlineBottlePrice: input.frontlineOverride,
     bestPrice: input.bestPriceOverride
   });
+  const priceLevels = normalizePriceLevels(
+    input.priceLevels && input.priceLevels.length > 0 ? input.priceLevels : defaultPriceLevelsForPricing(pricing),
+    pricing.landedBottleCost
+  );
+  const frontlineLevel = priceLevels.find((level) => level.isFrontline) || priceLevels[0] || null;
+  const bestLevel = priceLevels.find((level) => level.isBest) || null;
+  const frontlineBottlePrice = frontlineLevel ? money(frontlineLevel.bottlePrice) : pricing.frontlineBottlePrice;
+  const bestPrice = bestLevel ? money(bestLevel.bottlePrice) : pricing.bestPrice;
+  const grossProfitMargin = calculateGpMargin({
+    bottlePrice: frontlineBottlePrice,
+    landedBottleCost: pricing.landedBottleCost,
+    depletionAllowance: frontlineLevel?.depletionAllowance
+  });
+  const warnings = frontlineBottlePrice && grossProfitMargin < GP_WARNING_THRESHOLD ? [GP_WARNING_PERSISTED] : [];
   const productLifecycleStatus = input.conversionStatus === "exact_existing_product" ? "supplier_available" : "pending_product_creation";
 
   const supplierWine = {
@@ -253,9 +426,9 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     fob_case: pricing.fobCase,
     laid_in_per_bottle: pricing.laidInPerBottle,
     landed_bottle_cost: pricing.landedBottleCost,
-    frontline_bottle_price: pricing.frontlineBottlePrice,
-    best_price: pricing.bestPrice,
-    gross_profit_margin: pricing.grossProfitMargin,
+    frontline_bottle_price: frontlineBottlePrice,
+    best_price: bestPrice,
+    gross_profit_margin: grossProfitMargin,
     availability_status: input.availabilityStatus,
     conversion_status: input.conversionStatus,
     display_name: identity.displayName,
@@ -263,12 +436,20 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     planning_sku_without_vintage: identity.planningSkuWithoutVintage,
     diagnostics: {
       ...pricing.diagnostics,
+      warnings,
+      price_levels: priceLevels,
+      free_goods: normalizeFreeGoods(input.freeGoods),
       quickbooks_item_name_preview: identity.displayName
     },
+    quickbooks_item_number: normalizeSpaces(input.quickbooksItemNumber || "") || null,
     quickbooks_sync_status: "not_created",
     product_lifecycle_status: productLifecycleStatus,
-    accounting_create_payload: {}
-  } satisfies Omit<SupplierCatalogWine, "id" | "created_at" | "updated_at" | "quickbooks_item_id" | "quickbooks_item_name">;
+    accounting_create_payload: {},
+    system_tags: normalizeSystemTags(input.systemTags || []),
+    copied_from_supplier_catalog_wine_id: input.copiedFromSupplierCatalogWineId || null,
+    source_system: input.sourceSystem || null,
+    source_id: input.sourceId || null
+  } satisfies Omit<SupplierCatalogWine, "id" | "created_at" | "updated_at" | "quickbooks_item_id" | "quickbooks_item_name" | "price_levels" | "free_goods" | "workbench_items">;
 
   return {
     ...supplierWine,
@@ -284,7 +465,38 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
       fob_bottle: supplierWine.fob_bottle,
       frontline_bottle_price: supplierWine.frontline_bottle_price,
       best_price: supplierWine.best_price
-    }
+    },
+    price_levels: priceLevels.map((level, index) => ({
+      id: level.id || `draft-${index}`,
+      supplier_catalog_wine_id: "",
+      name: level.name,
+      bottle_price: level.bottlePrice || 0,
+      depletion_allowance: level.depletionAllowance || 0,
+      target_gp_margin: level.targetGpMargin ?? null,
+      calculated_gp_margin: level.calculatedGpMargin || 0,
+      is_frontline: Boolean(level.isFrontline),
+      is_best: Boolean(level.isBest),
+      display_order: level.displayOrder || index,
+      active: level.active ?? true,
+      source_system: level.sourceSystem || null,
+      source_id: level.sourceId || null,
+      created_at: "",
+      updated_at: ""
+    })) satisfies SupplierCatalogPriceLevel[],
+    free_goods: normalizeFreeGoods(input.freeGoods).map((freeGood, index) => ({
+      id: freeGood.id || `draft-${index}`,
+      supplier_catalog_wine_id: "",
+      buy_quantity: freeGood.buyQuantity || 0,
+      free_quantity: freeGood.freeQuantity || 0,
+      unit: freeGood.unit || "bottle",
+      program_name: freeGood.programName || null,
+      starts_on: freeGood.startsOn || null,
+      ends_on: freeGood.endsOn || null,
+      notes: freeGood.notes || null,
+      active: freeGood.active ?? true,
+      created_at: "",
+      updated_at: ""
+    })) satisfies SupplierCatalogFreeGood[]
   };
 }
 

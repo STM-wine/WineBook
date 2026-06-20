@@ -56,7 +56,12 @@ export default async function HomePage() {
 
   const supplierCatalogPromise = supabase
     .from("supplier_catalog_wines")
-    .select("*")
+    .select(`
+      *,
+      price_levels:supplier_catalog_price_levels (*),
+      free_goods:supplier_catalog_free_goods (*),
+      workbench_items:supplier_catalog_workbench_items (*)
+    `)
     .order("updated_at", { ascending: false })
     .returns<SupplierCatalogWine[]>();
 
@@ -130,6 +135,8 @@ export default async function HomePage() {
         id,
         purchase_order_draft_id,
         recommendation_id,
+        supplier_catalog_wine_id,
+        producer_name,
         product_name,
         product_code,
         planning_sku,
@@ -140,7 +147,9 @@ export default async function HomePage() {
         trucking_cost_per_bottle,
         wine_cost,
         laid_in_cost,
-        landed_cost
+        landed_cost,
+        is_new_item,
+        new_item_warning
       )
     `)
     .eq("report_run_id", latestRun.id)

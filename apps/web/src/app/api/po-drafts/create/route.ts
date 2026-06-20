@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from "@/lib/di-planning";
-import { asNumber } from "@/lib/order-data";
+import { asNumber, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { formatInteger } from "@/lib/order-data";
+import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import { createClient } from "@/lib/supabase/server";
-import type { Recommendation, SupplierLogistics } from "@/lib/types";
+import type { Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
-const ACTIVE_PO_STATUSES = ["draft", "ready_for_entry"];
 
 function normalizeSupplier(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
@@ -68,11 +68,43 @@ export async function POST(request: Request) {
     .from("purchase_order_drafts")
     .select("id,supplier_name,notes")
     .eq("report_run_id", reportRunId)
-    .in("status", ACTIVE_PO_STATUSES);
+    .in("status", [...ACTIVE_PO_STATUSES]);
 
   if (activeDraftsError) {
     return NextResponse.json({ error: activeDraftsError.message }, { status: 500 });
   }
+
+  const { data: enteredDrafts, error: enteredDraftsError } = await supabase
+    .from("purchase_order_drafts")
+    .select(`
+      id,
+      lines:purchase_order_lines (
+        recommendation_id,
+        supplier_catalog_wine_id
+      )
+    `)
+    .eq("report_run_id", reportRunId)
+    .eq("status", "entered_in_quickbooks")
+    .returns<Array<{ id: string; lines: Array<{ recommendation_id: string | null; supplier_catalog_wine_id: string | null }> }>>();
+
+  if (enteredDraftsError) {
+    return NextResponse.json({ error: enteredDraftsError.message }, { status: 500 });
+  }
+
+  const enteredRecommendationIds = new Set(
+    (enteredDrafts || []).flatMap((draft) =>
+      (draft.lines || [])
+        .map((line) => line.recommendation_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    )
+  );
+  const enteredCatalogWineIds = new Set(
+    (enteredDrafts || []).flatMap((draft) =>
+      (draft.lines || [])
+        .map((line) => line.supplier_catalog_wine_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    )
+  );
 
   const activeDraftsBySupplierPath = new Map(
     (activeDrafts || []).map((draft) => [
@@ -82,8 +114,23 @@ export async function POST(request: Request) {
   );
 
   let recommendations: Recommendation[];
+  let supplierCatalogWines: SupplierCatalogWine[] = [];
   try {
-    recommendations = await fetchAllRecommendationsForRun(supabase, reportRunId);
+    const fetchedRecommendations = await fetchAllRecommendationsForRun(supabase, reportRunId);
+    const { data: catalogWines, error: catalogError } = await supabase
+      .from("supplier_catalog_wines")
+      .select(`
+        *,
+        workbench_items:supplier_catalog_workbench_items (*)
+      `)
+      .returns<SupplierCatalogWine[]>();
+
+    if (catalogError) {
+      throw new Error(catalogError.message);
+    }
+
+    supplierCatalogWines = catalogWines || [];
+    recommendations = mergeSupplierCatalogRows(fetchedRecommendations, supplierCatalogWines, reportRunId);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Could not load recommendations." },
@@ -92,9 +139,14 @@ export async function POST(request: Request) {
   }
 
   const poRows = applyDiContainerRecommendations(recommendations).filter(
-    (row) =>
-      ["approved", "edited"].includes(row.recommendation_status || "") &&
-      Math.round(asNumber(row.approved_qty)) > 0
+    (row) => {
+      if (!["approved", "edited"].includes(row.recommendation_status || "")) return false;
+      if (Math.round(asNumber(row.approved_qty)) <= 0) return false;
+      if (row.supplier_catalog_wine_id) {
+        return !enteredCatalogWineIds.has(row.supplier_catalog_wine_id);
+      }
+      return !enteredRecommendationIds.has(row.id);
+    }
   );
   const capacityViolations = diCapacityViolations(poRows);
   if (capacityViolations.length > 0) {
@@ -132,6 +184,9 @@ export async function POST(request: Request) {
   const supplierDefaults = await loadImporterDefaults();
   const suppliers = mergeSupplierDefaults(supplierRows || [], supplierDefaults);
   const supplierMetadata = new Map(suppliers.map((row) => [normalizeSupplier(row.name), row]));
+  const catalogProducersById = new Map(
+    supplierCatalogWines.map((wine) => [wine.id, wine.producer?.trim() || null])
+  );
 
   for (const { supplier, orderPath: path, rows } of grouped.values()) {
     const metadata = supplierMetadata.get(normalizeSupplier(supplier));
@@ -167,18 +222,23 @@ export async function POST(request: Request) {
 
     const { data: existingLines, error: existingLinesError } = await supabase
       .from("purchase_order_lines")
-      .select("id,recommendation_id")
+      .select("id,recommendation_id,supplier_catalog_wine_id")
       .eq("purchase_order_draft_id", draft.id)
-      .returns<Array<{ id: string; recommendation_id: string | null }>>();
+      .returns<Array<{ id: string; recommendation_id: string | null; supplier_catalog_wine_id: string | null }>>();
 
     if (existingLinesError) {
       errors.push(`${supplier}: ${existingLinesError.message}`);
       continue;
     }
 
-    const approvedRecommendationIds = new Set(rows.map((row) => row.id));
+    const approvedRecommendationIds = new Set(rows.filter((row) => !row.supplier_catalog_wine_id).map((row) => row.id));
+    const approvedCatalogWineIds = new Set(rows.map((row) => row.supplier_catalog_wine_id).filter(Boolean));
     const staleLineIds = (existingLines || [])
-      .filter((line) => line.recommendation_id && !approvedRecommendationIds.has(line.recommendation_id))
+      .filter((line) => {
+        if (line.supplier_catalog_wine_id) return !approvedCatalogWineIds.has(line.supplier_catalog_wine_id);
+        if (line.recommendation_id) return !approvedRecommendationIds.has(line.recommendation_id);
+        return false;
+      })
       .map((line) => line.id);
 
     if (staleLineIds.length > 0) {
@@ -189,14 +249,15 @@ export async function POST(request: Request) {
       }
     }
 
-    const existingLineIds = new Map(
-      (existingLines || [])
-        .filter(
-          (line): line is { id: string; recommendation_id: string } =>
-            typeof line.recommendation_id === "string" && approvedRecommendationIds.has(line.recommendation_id)
-        )
-        .map((line) => [line.recommendation_id, line.id])
-    );
+    const existingLineEntries: Array<[string, string]> = [];
+    for (const line of existingLines || []) {
+      if (line.supplier_catalog_wine_id && approvedCatalogWineIds.has(line.supplier_catalog_wine_id)) {
+        existingLineEntries.push([`catalog:${line.supplier_catalog_wine_id}`, line.id]);
+      } else if (line.recommendation_id && approvedRecommendationIds.has(line.recommendation_id)) {
+        existingLineEntries.push([`recommendation:${line.recommendation_id}`, line.id]);
+      }
+    }
+    const existingLineIds = new Map(existingLineEntries);
     const linePayloads = rows.map((row) => {
       const approvedQty = Math.max(0, Math.round(asNumber(row.approved_qty)));
       const recommendedQty = Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)));
@@ -207,8 +268,11 @@ export async function POST(request: Request) {
       const laidInCost = trucking * approvedQty;
 
       return {
+        line_key: row.supplier_catalog_wine_id ? `catalog:${row.supplier_catalog_wine_id}` : `recommendation:${row.id}`,
         purchase_order_draft_id: draft.id,
-        recommendation_id: row.id,
+        recommendation_id: row.supplier_catalog_wine_id ? null : row.id,
+        supplier_catalog_wine_id: row.supplier_catalog_wine_id || null,
+        producer_name: row.supplier_catalog_wine_id ? catalogProducersById.get(row.supplier_catalog_wine_id) || null : null,
         product_name: row.product_name,
         product_code: row.product_code,
         planning_sku: row.planning_sku,
@@ -219,24 +283,27 @@ export async function POST(request: Request) {
         wine_cost: wineCost,
         laid_in_cost: laidInCost,
         landed_cost: wineCost + laidInCost,
-        line_cost: wineCost
+        line_cost: wineCost,
+        is_new_item: Boolean(row.is_new_item),
+        new_item_warning: row.new_item_warning || null
       };
     });
 
-    const insertPayloads = linePayloads.filter((line) => !existingLineIds.has(line.recommendation_id));
-    const updatePayloads = linePayloads.filter((line) => existingLineIds.has(line.recommendation_id));
+    const insertPayloads = linePayloads.filter((line) => !existingLineIds.has(line.line_key));
+    const updatePayloads = linePayloads.filter((line) => existingLineIds.has(line.line_key));
 
     for (const line of updatePayloads) {
-      const lineId = existingLineIds.get(line.recommendation_id);
+      const lineId = existingLineIds.get(line.line_key);
       if (!lineId) continue;
-      const { error: updateError } = await supabase.from("purchase_order_lines").update(line).eq("id", lineId);
+      const { line_key: _lineKey, ...lineUpdate } = line;
+      const { error: updateError } = await supabase.from("purchase_order_lines").update(lineUpdate).eq("id", lineId);
       if (updateError) {
         errors.push(`${supplier}: ${updateError.message}`);
       }
     }
 
     const { error: linesError } = insertPayloads.length
-      ? await supabase.from("purchase_order_lines").insert(insertPayloads)
+      ? await supabase.from("purchase_order_lines").insert(insertPayloads.map(({ line_key: _lineKey, ...line }) => line))
       : { error: null };
     if (linesError) {
       errors.push(`${supplier}: ${linesError.message}`);

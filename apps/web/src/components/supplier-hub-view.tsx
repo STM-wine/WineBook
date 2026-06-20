@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PriceChangeEvent, SupplierCatalogWine, SupplierLogistics, WineRequest } from "@/lib/types";
-import { asNumber, formatCurrency, formatInteger, uniqueSorted } from "@/lib/order-data";
+import { asNumber, formatCurrency, formatCurrencyCents, formatInteger, uniqueSorted } from "@/lib/order-data";
 import {
   APPROVAL_DECISIONS,
   APPROVER_NAMES,
   AVAILABILITY_STATUSES,
-  CONVERSION_STATUSES,
   PLACEMENT_TYPES,
+  SYSTEM_TAGS,
   buildSupplierCatalogWine,
+  calculateGpMargin,
+  calculatePricing,
   defaultLaidInForSupplier,
   money,
+  normalizeWineIdentity,
+  requiredDepletionAllowanceForTargetMargin,
   type SupplierCatalogWineInput
 } from "@/lib/supplier-catalog";
 
@@ -163,11 +167,38 @@ function AddWinePanel({
   const [fobBottle, setFobBottle] = useState("");
   const [fobCase, setFobCase] = useState("");
   const [laidInPerBottle, setLaidInPerBottle] = useState(() => String(defaultLaidInForSupplier(suppliers, firstSupplier?.id || null, firstSupplier?.name || "")));
-  const [frontlineOverride, setFrontlineOverride] = useState("");
-  const [bestPriceOverride, setBestPriceOverride] = useState("");
-  const [availabilityStatus, setAvailabilityStatus] = useState("available");
-  const [conversionStatus, setConversionStatus] = useState("net_new_product");
+  const [systemTags, setSystemTags] = useState<string[]>([]);
+  const [quickbooksItemNumber, setQuickbooksItemNumber] = useState("");
+  const [copiedFromSupplierCatalogWineId, setCopiedFromSupplierCatalogWineId] = useState<string | null>(null);
+  const [priceLevels, setPriceLevels] = useState<PriceLevelDraft[]>(() => defaultPriceLevelDrafts());
+  const [freeGoods, setFreeGoods] = useState<FreeGoodDraft[]>([]);
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
+  const sortedCloneOptions = useMemo(() => [...wines].sort(sortNewestVintageFirst), [wines]);
+  const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
+  const computedPricing = calculatePricing({
+    packSize: Math.max(1, Math.trunc(Number(packSize) || 12)),
+    fobBottle: parseOptionalNumber(fobBottle),
+    fobCase: parseOptionalNumber(fobCase),
+    laidInPerBottle: parseOptionalNumber(laidInPerBottle) || 0
+  });
+  const draftPriceLevels = priceLevels
+    .map((level, index) => priceLevelDraftToInput(level, index, computedPricing))
+    .filter((level) => level.active && (money(level.bottlePrice) > 0 || level.isFrontline));
+  const copiedFromWine = copiedFromSupplierCatalogWineId
+    ? wines.find((wine) => wine.id === copiedFromSupplierCatalogWineId) || null
+    : null;
+  const currentIdentity = normalizeWineIdentity({
+    producer,
+    wineName,
+    vintage,
+    packSize: Math.max(1, Math.trunc(Number(packSize) || 12)),
+    bottleSize
+  });
+  const copiedSkuChanged = Boolean(copiedFromWine && currentIdentity.planningSku !== copiedFromWine.planning_sku);
+  const effectiveQuickbooksItemNumber =
+    copiedSkuChanged && quickbooksItemNumber.trim() === (copiedFromWine?.quickbooks_item_number || "").trim()
+      ? ""
+      : quickbooksItemNumber;
 
   function selectSupplier(nextSupplierId: string) {
     setSupplierId(nextSupplierId);
@@ -175,7 +206,120 @@ function AddWinePanel({
     if (supplier) {
       setSupplierName(supplier.name);
       setLaidInPerBottle(String(defaultLaidInForSupplier(suppliers, supplier.id, supplier.name)));
+      return;
     }
+    setSupplierName("Manual Supplier");
+    setLaidInPerBottle("0");
+  }
+
+  function selectClone(value: string) {
+    const wine = wines.find((row) => row.id === value || row.display_name === value || row.planning_sku === value);
+    if (!wine) return;
+
+    setCopiedFromSupplierCatalogWineId(wine.id);
+    setSupplierId(wine.supplier_id || "");
+    setSupplierName(wine.supplier_name);
+    setProducer(wine.producer);
+    setWineName(wine.wine_name);
+    setVintage(wine.vintage || "NV");
+    setPackSize(String(wine.pack_size || 12));
+    setBottleSize(wine.bottle_size || "750ml");
+    setFobBottle(String(asNumber(wine.fob_bottle) || ""));
+    setFobCase(String(asNumber(wine.fob_case) || ""));
+    setLaidInPerBottle(String(asNumber(wine.laid_in_per_bottle) || 0));
+    setSystemTags(wine.system_tags || []);
+    setQuickbooksItemNumber(wine.quickbooks_item_number || "");
+    setPriceLevels(priceLevelDraftsFromWine(wine));
+    setFreeGoods(freeGoodDraftsFromWine(wine));
+    setPriceChangeReason(`Copied from ${wine.display_name}`);
+  }
+
+  function startNewSku() {
+    setCopiedFromSupplierCatalogWineId(null);
+    setProducer("");
+    setWineName("");
+    setVintage("NV");
+    setPackSize("12");
+    setBottleSize("750ml");
+    setFobBottle("");
+    setFobCase("");
+    setSystemTags([]);
+    setQuickbooksItemNumber("");
+    setPriceLevels(defaultPriceLevelDrafts());
+    setFreeGoods([]);
+    setPriceChangeReason("Manual catalog update");
+    if (supplierId) {
+      const supplier = suppliers.find((row) => row.id === supplierId);
+      setLaidInPerBottle(String(defaultLaidInForSupplier(suppliers, supplier?.id || null, supplier?.name || supplierName)));
+    }
+  }
+
+  function toggleSystemTag(tag: string) {
+    setSystemTags((current) => (current.includes(tag) ? current.filter((value) => value !== tag) : [...current, tag]));
+  }
+
+  function patchPriceLevel(id: string, patch: Partial<PriceLevelDraft>) {
+    setPriceLevels((current) =>
+      current.map((level) => {
+        if (level.id !== id) return level;
+        const next = { ...level, ...patch };
+        if (patch.isFrontline) next.isBest = false;
+        if (patch.isBest) next.isFrontline = false;
+        return next;
+      })
+    );
+  }
+
+  function addPriceLevel() {
+    setPriceLevels((current) => [
+      ...current,
+      {
+        id: `level-${Date.now()}`,
+        name: `Level ${current.length + 1}`,
+        bottlePrice: "",
+        depletionAllowance: "",
+        targetGpMargin: "",
+        isFrontline: false,
+        isBest: false,
+        active: true
+      }
+    ]);
+  }
+
+  function removePriceLevel(id: string) {
+    setPriceLevels((current) => (current.length <= 1 ? current : current.filter((level) => level.id !== id)));
+  }
+
+  function calculateDaForLevel(level: PriceLevelDraft) {
+    const bottlePrice = parseOptionalNumber(level.bottlePrice) || 0;
+    const targetGpMargin = parseOptionalPercent(level.targetGpMargin);
+    const depletionAllowance = requiredDepletionAllowanceForTargetMargin({
+      bottlePrice,
+      landedBottleCost: computedPricing.landedBottleCost,
+      targetGpMargin
+    });
+    patchPriceLevel(level.id, { depletionAllowance: depletionAllowance ? String(depletionAllowance) : "0" });
+  }
+
+  function patchFreeGood(id: string, patch: Partial<FreeGoodDraft>) {
+    setFreeGoods((current) => current.map((freeGood) => (freeGood.id === id ? { ...freeGood, ...patch } : freeGood)));
+  }
+
+  function addFreeGood() {
+    setFreeGoods((current) => [
+      ...current,
+      {
+        id: `free-${Date.now()}`,
+        buyQuantity: "",
+        freeQuantity: "",
+        unit: "case",
+        programName: "",
+        startsOn: "",
+        endsOn: "",
+        notes: "",
+        active: true
+      }
+    ]);
   }
 
   const draftInput: SupplierCatalogWineInput = {
@@ -189,10 +333,15 @@ function AddWinePanel({
     fobBottle: parseOptionalNumber(fobBottle),
     fobCase: parseOptionalNumber(fobCase),
     laidInPerBottle: parseOptionalNumber(laidInPerBottle) || 0,
-    frontlineOverride: parseOptionalNumber(frontlineOverride),
-    bestPriceOverride: parseOptionalNumber(bestPriceOverride),
-    availabilityStatus: availabilityStatus as SupplierCatalogWineInput["availabilityStatus"],
-    conversionStatus: conversionStatus as SupplierCatalogWineInput["conversionStatus"],
+    frontlineOverride: null,
+    bestPriceOverride: null,
+    availabilityStatus: "available",
+    conversionStatus: "net_new_product",
+    systemTags,
+    copiedFromSupplierCatalogWineId,
+    quickbooksItemNumber: effectiveQuickbooksItemNumber,
+    priceLevels: draftPriceLevels,
+    freeGoods: freeGoods.map(freeGoodDraftToInput),
     priceChangeReason
   };
   const preview = buildSupplierCatalogWine(draftInput);
@@ -208,8 +357,28 @@ function AddWinePanel({
   return (
     <form className="supplier-hub-workspace" onSubmit={saveWine}>
       <div className="supplier-form-grid">
+        <label className="wide-field">
+          Wine Name
+          <input
+            list="supplier-catalog-clone-options"
+            required
+            value={wineName}
+            onChange={(event) => {
+              setWineName(event.target.value);
+              selectClone(event.target.value);
+            }}
+            placeholder="Create new or search existing SKU"
+          />
+          <datalist id="supplier-catalog-clone-options">
+            {sortedCloneOptions.map((wine) => (
+              <option key={wine.id} value={wine.display_name}>
+                {wine.supplier_name}
+              </option>
+            ))}
+          </datalist>
+        </label>
         <label>
-          Supplier / importer
+          Supplier
           <select value={supplierId} onChange={(event) => selectSupplier(event.target.value)}>
             <option value="">Manual Supplier</option>
             {suppliers.map((supplier) => (
@@ -219,17 +388,18 @@ function AddWinePanel({
             ))}
           </select>
         </label>
-        <label>
-          Supplier name
+        <label className={supplierId ? "is-hidden-field" : undefined}>
+          Supplier
           <input value={supplierName} onChange={(event) => setSupplierName(event.target.value)} />
         </label>
         <label>
           Producer
-          <input required value={producer} onChange={(event) => setProducer(event.target.value)} />
-        </label>
-        <label>
-          Wine / fantasy name
-          <input required value={wineName} onChange={(event) => setWineName(event.target.value)} />
+          <input list="producer-options" required value={producer} onChange={(event) => setProducer(event.target.value)} />
+          <datalist id="producer-options">
+            {producerOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
         </label>
         <label>
           Vintage
@@ -245,44 +415,53 @@ function AddWinePanel({
         </label>
         <label>
           Bottle FOB
-          <input min={0} step={0.01} type="number" value={fobBottle} onChange={(event) => setFobBottle(event.target.value)} />
+          <input
+            min={0}
+            step={0.01}
+            type="number"
+            value={fobBottle}
+            onChange={(event) => {
+              setFobBottle(event.target.value);
+              const next = parseOptionalNumber(event.target.value);
+              if (next !== null) setFobCase(String(money(next * Math.max(1, Number(packSize) || 12))));
+            }}
+          />
         </label>
         <label>
           Case FOB
-          <input min={0} step={0.01} type="number" value={fobCase} onChange={(event) => setFobCase(event.target.value)} />
+          <input
+            min={0}
+            step={0.01}
+            type="number"
+            value={fobCase}
+            onChange={(event) => {
+              setFobCase(event.target.value);
+              const next = parseOptionalNumber(event.target.value);
+              if (next !== null) setFobBottle(String(money(next / Math.max(1, Number(packSize) || 12))));
+            }}
+          />
         </label>
         <label>
           Laid-in per bottle
           <input min={0} step={0.01} type="number" value={laidInPerBottle} onChange={(event) => setLaidInPerBottle(event.target.value)} />
         </label>
         <label>
-          Frontline override
-          <input min={0} step={0.01} type="number" value={frontlineOverride} onChange={(event) => setFrontlineOverride(event.target.value)} />
-        </label>
-        <label>
-          Best price override
-          <input min={0} step={0.01} type="number" value={bestPriceOverride} onChange={(event) => setBestPriceOverride(event.target.value)} />
-        </label>
-        <label>
-          Availability status
-          <select value={availabilityStatus} onChange={(event) => setAvailabilityStatus(event.target.value)}>
-            {AVAILABILITY_STATUSES.map((status) => (
-              <option key={status}>{status}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Conversion / match status
-          <select value={conversionStatus} onChange={(event) => setConversionStatus(event.target.value)}>
-            {CONVERSION_STATUSES.map((status) => (
-              <option key={status}>{status}</option>
-            ))}
-          </select>
+          QB Item #
+          <input value={quickbooksItemNumber} onChange={(event) => setQuickbooksItemNumber(event.target.value)} placeholder="Leave blank for New Item" />
         </label>
         <label className="wide-field">
           Price change reason
           <input value={priceChangeReason} onChange={(event) => setPriceChangeReason(event.target.value)} />
         </label>
+      </div>
+
+      <div className="tag-selector" aria-label="System tags">
+        {SYSTEM_TAGS.map((tag) => (
+          <label className="check-control" key={tag}>
+            <input type="checkbox" checked={systemTags.includes(tag)} onChange={() => toggleSystemTag(tag)} />
+            {tag}
+          </label>
+        ))}
       </div>
 
       <div className="catalog-preview-grid">
@@ -296,20 +475,194 @@ function AddWinePanel({
         </div>
         <div>
           <span>Landed Bottle</span>
-          <strong>{formatCurrency(preview.landed_bottle_cost)}</strong>
+          <strong>{formatCurrencyCents(preview.landed_bottle_cost)}</strong>
         </div>
         <div>
-          <span>Frontline</span>
+          <span>Frontline / GM</span>
           <strong>{formatCurrency(preview.frontline_bottle_price)}</strong>
+          <small>{formatPercent(preview.gross_profit_margin)}</small>
         </div>
         <div>
-          <span>Best Price</span>
+          <span>Best / GM</span>
           <strong>{preview.best_price === null ? "Frontline only" : formatCurrency(preview.best_price)}</strong>
+          <small>
+            {preview.best_price === null
+              ? ""
+              : formatPercent(calculateGpMargin({ bottlePrice: asNumber(preview.best_price), landedBottleCost: asNumber(preview.landed_bottle_cost) }))}
+          </small>
         </div>
         <div>
-          <span>GP Margin</span>
-          <strong>{formatPercent(preview.gross_profit_margin)}</strong>
+          <span>Status</span>
+          <strong>{effectiveQuickbooksItemNumber.trim() ? "Linked Item" : "New Item"}</strong>
         </div>
+      </div>
+
+      <div className="price-level-editor">
+        <div className="section-heading compact-heading">
+          <div>
+            <h2>Price Levels</h2>
+            <p>Frontline and Best calculate from landed cost until edited.</p>
+          </div>
+          <button className="button button-small" onClick={addPriceLevel} type="button">
+            Add Level
+          </button>
+        </div>
+        <div className="table-shell price-level-table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Price</th>
+                <th>DA</th>
+                <th>Target GP</th>
+                <th>GM</th>
+                <th>FL</th>
+                <th>Best</th>
+                <th>Active</th>
+                <th>Remove</th>
+              </tr>
+            </thead>
+            <tbody>
+              {priceLevels.map((level, index) => {
+                const effective = priceLevelDraftToInput(level, index, computedPricing);
+                const gp = calculateGpMargin({
+                  bottlePrice: effective.bottlePrice,
+                  landedBottleCost: computedPricing.landedBottleCost,
+                  depletionAllowance: effective.depletionAllowance
+                });
+
+                return (
+                  <tr key={level.id}>
+                    <td>
+                      <input aria-label="Price level name" value={level.name} onChange={(event) => patchPriceLevel(level.id, { name: event.target.value })} />
+                    </td>
+                    <td>
+                      <input
+                        aria-label="Bottle price"
+                        min={0}
+                        placeholder={String(effective.bottlePrice || "")}
+                        step={0.01}
+                        type="number"
+                        value={level.bottlePrice}
+                        onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <div className="inline-input-action">
+                        <input
+                          aria-label="Depletion allowance"
+                          min={0}
+                          step={0.01}
+                          type="number"
+                          value={level.depletionAllowance}
+                          onChange={(event) => patchPriceLevel(level.id, { depletionAllowance: event.target.value })}
+                        />
+                        <button className="ghost-button button-tiny" onClick={() => calculateDaForLevel(level)} type="button">
+                          Calc
+                        </button>
+                      </div>
+                    </td>
+                    <td>
+                      <input
+                        aria-label="Target GP margin"
+                        min={0}
+                        max={99}
+                        step={0.1}
+                        type="number"
+                        value={level.targetGpMargin}
+                        onChange={(event) => patchPriceLevel(level.id, { targetGpMargin: event.target.value })}
+                      />
+                    </td>
+                    <td>{formatPercent(gp)}</td>
+                    <td>
+                      <input
+                        aria-label="Frontline"
+                        className="approval-input"
+                        type="checkbox"
+                        checked={level.isFrontline}
+                        onChange={(event) => patchPriceLevel(level.id, { isFrontline: event.target.checked })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        aria-label="Best"
+                        className="approval-input"
+                        type="checkbox"
+                        checked={level.isBest}
+                        onChange={(event) => patchPriceLevel(level.id, { isBest: event.target.checked })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        aria-label="Active"
+                        className="approval-input"
+                        type="checkbox"
+                        checked={level.active}
+                        onChange={(event) => patchPriceLevel(level.id, { active: event.target.checked })}
+                      />
+                    </td>
+                    <td>
+                      <button className="ghost-button remove-line-button" disabled={priceLevels.length <= 1} onClick={() => removePriceLevel(level.id)} type="button">
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="free-goods-editor">
+        <div className="section-heading compact-heading">
+          <div>
+            <h2>Free Goods</h2>
+            <p>V1 records program terms for buyer review only.</p>
+          </div>
+          <button className="button button-small" onClick={addFreeGood} type="button">
+            Add Program
+          </button>
+        </div>
+        {freeGoods.length === 0 ? <div className="inline-info">No free-goods program recorded for this SKU.</div> : null}
+        {freeGoods.map((freeGood) => (
+          <div className="free-good-row" key={freeGood.id}>
+            <label>
+              Buy
+              <input min={0} type="number" value={freeGood.buyQuantity} onChange={(event) => patchFreeGood(freeGood.id, { buyQuantity: event.target.value })} />
+            </label>
+            <label>
+              Free
+              <input min={0} type="number" value={freeGood.freeQuantity} onChange={(event) => patchFreeGood(freeGood.id, { freeQuantity: event.target.value })} />
+            </label>
+            <label>
+              Unit
+              <select value={freeGood.unit} onChange={(event) => patchFreeGood(freeGood.id, { unit: event.target.value as "bottle" | "case" })}>
+                <option value="case">case</option>
+                <option value="bottle">bottle</option>
+              </select>
+            </label>
+            <label>
+              Program
+              <input value={freeGood.programName} onChange={(event) => patchFreeGood(freeGood.id, { programName: event.target.value })} />
+            </label>
+            <label>
+              Starts
+              <input type="date" value={freeGood.startsOn} onChange={(event) => patchFreeGood(freeGood.id, { startsOn: event.target.value })} />
+            </label>
+            <label>
+              Ends
+              <input type="date" value={freeGood.endsOn} onChange={(event) => patchFreeGood(freeGood.id, { endsOn: event.target.value })} />
+            </label>
+            <label className="wide-field">
+              Notes
+              <input value={freeGood.notes} onChange={(event) => patchFreeGood(freeGood.id, { notes: event.target.value })} />
+            </label>
+            <button className="ghost-button remove-line-button" onClick={() => setFreeGoods((current) => current.filter((row) => row.id !== freeGood.id))} type="button">
+              Remove
+            </button>
+          </div>
+        ))}
       </div>
 
       {warnings.map((warning) => (
@@ -322,14 +675,198 @@ function AddWinePanel({
           Existing planning SKU found. Saving updates the existing supplier wine and creates a draft price-change event if FOB or frontline changed.
         </div>
       ) : null}
+      {!effectiveQuickbooksItemNumber.trim() ? (
+        <div className="inline-warning">
+          This SKU will be marked as a New Item in Order Review and PO Drafts until a QuickBooks Item Number is attached.
+        </div>
+      ) : null}
+      {copiedFromSupplierCatalogWineId ? (
+        <div className="inline-info">
+          Copied from an existing SKU. Changing vintage, pack, or bottle size will save a separate orderable SKU row.
+        </div>
+      ) : null}
 
       <div className="form-actions">
+        <button className="ghost-button" disabled={isPending} onClick={startNewSku} type="button">
+          Create New
+        </button>
         <button className="button" disabled={isPending || !producer.trim() || !wineName.trim()} type="submit">
-          {existing ? "Update Supplier Wine" : "Save Supplier Wine"}
+          {existing ? "Update SKU" : "Save SKU"}
         </button>
       </div>
     </form>
   );
+}
+
+type PriceLevelDraft = {
+  id: string;
+  name: string;
+  bottlePrice: string;
+  depletionAllowance: string;
+  targetGpMargin: string;
+  isFrontline: boolean;
+  isBest: boolean;
+  active: boolean;
+};
+
+type FreeGoodDraft = {
+  id: string;
+  buyQuantity: string;
+  freeQuantity: string;
+  unit: "bottle" | "case";
+  programName: string;
+  startsOn: string;
+  endsOn: string;
+  notes: string;
+  active: boolean;
+};
+
+function defaultPriceLevelDrafts(): PriceLevelDraft[] {
+  return [
+    {
+      id: "frontline",
+      name: "Frontline",
+      bottlePrice: "",
+      depletionAllowance: "",
+      targetGpMargin: "",
+      isFrontline: true,
+      isBest: false,
+      active: true
+    },
+    {
+      id: "best",
+      name: "Best",
+      bottlePrice: "",
+      depletionAllowance: "",
+      targetGpMargin: "",
+      isFrontline: false,
+      isBest: true,
+      active: true
+    }
+  ];
+}
+
+function sortNewestVintageFirst(a: SupplierCatalogWine, b: SupplierCatalogWine) {
+  const vintageA = Number(a.vintage);
+  const vintageB = Number(b.vintage);
+  if (Number.isFinite(vintageA) && Number.isFinite(vintageB) && vintageA !== vintageB) {
+    return vintageB - vintageA;
+  }
+  if (Number.isFinite(vintageA) !== Number.isFinite(vintageB)) {
+    return Number.isFinite(vintageA) ? -1 : 1;
+  }
+  return (b.updated_at || "").localeCompare(a.updated_at || "") || a.display_name.localeCompare(b.display_name);
+}
+
+function priceLevelDraftsFromWine(wine: SupplierCatalogWine): PriceLevelDraft[] {
+  const levels = wine.price_levels && wine.price_levels.length > 0
+    ? [...wine.price_levels].sort((a, b) => asNumber(a.display_order) - asNumber(b.display_order))
+    : [
+        {
+          id: "frontline",
+          name: "Frontline",
+          bottle_price: wine.frontline_bottle_price,
+          depletion_allowance: 0,
+          target_gp_margin: null,
+          is_frontline: true,
+          is_best: false,
+          active: true
+        },
+        ...(wine.best_price !== null
+          ? [
+              {
+                id: "best",
+                name: "Best",
+                bottle_price: wine.best_price,
+                depletion_allowance: 0,
+                target_gp_margin: null,
+                is_frontline: false,
+                is_best: true,
+                active: true
+              }
+            ]
+          : [])
+      ];
+
+  return levels.map((level, index) => ({
+    id: `${level.id || "level"}-${index}`,
+    name: level.name || `Level ${index + 1}`,
+    bottlePrice: asNumber(level.bottle_price).toString(),
+    depletionAllowance: asNumber(level.depletion_allowance).toString(),
+    targetGpMargin: level.target_gp_margin === null || level.target_gp_margin === undefined ? "" : (asNumber(level.target_gp_margin) * 100).toString(),
+    isFrontline: Boolean(level.is_frontline),
+    isBest: Boolean(level.is_best),
+    active: level.active !== false
+  }));
+}
+
+function freeGoodDraftsFromWine(wine: SupplierCatalogWine): FreeGoodDraft[] {
+  return (wine.free_goods || []).map((freeGood, index) => ({
+    id: `${freeGood.id || "free"}-${index}`,
+    buyQuantity: asNumber(freeGood.buy_quantity).toString(),
+    freeQuantity: asNumber(freeGood.free_quantity).toString(),
+    unit: freeGood.unit === "bottle" ? "bottle" : "case",
+    programName: freeGood.program_name || "",
+    startsOn: freeGood.starts_on || "",
+    endsOn: freeGood.ends_on || "",
+    notes: freeGood.notes || "",
+    active: freeGood.active !== false
+  }));
+}
+
+function parseOptionalPercent(value: string) {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.min(0.99, parsed / 100));
+}
+
+function priceLevelDraftToInput(level: PriceLevelDraft, index: number, pricing: ReturnType<typeof calculatePricing>) {
+  const fallbackPrice = level.isFrontline
+    ? pricing.frontlineBottlePrice
+    : level.isBest
+      ? pricing.bestPrice || 0
+      : 0;
+  const bottlePrice = parseOptionalNumber(level.bottlePrice) ?? fallbackPrice;
+  const targetGpMargin = parseOptionalPercent(level.targetGpMargin);
+  const depletionAllowance = parseOptionalNumber(level.depletionAllowance) ?? (
+    targetGpMargin === null
+      ? 0
+      : requiredDepletionAllowanceForTargetMargin({
+          bottlePrice,
+          landedBottleCost: pricing.landedBottleCost,
+          targetGpMargin
+        })
+  );
+
+  return {
+    name: level.name || `Level ${index + 1}`,
+    bottlePrice,
+    depletionAllowance,
+    targetGpMargin,
+    calculatedGpMargin: calculateGpMargin({
+      bottlePrice,
+      landedBottleCost: pricing.landedBottleCost,
+      depletionAllowance
+    }),
+    isFrontline: level.isFrontline,
+    isBest: level.isBest,
+    displayOrder: index,
+    active: level.active
+  };
+}
+
+function freeGoodDraftToInput(freeGood: FreeGoodDraft) {
+  return {
+    buyQuantity: parseOptionalNumber(freeGood.buyQuantity) || 0,
+    freeQuantity: parseOptionalNumber(freeGood.freeQuantity) || 0,
+    unit: freeGood.unit,
+    programName: freeGood.programName,
+    startsOn: freeGood.startsOn || null,
+    endsOn: freeGood.endsOn || null,
+    notes: freeGood.notes,
+    active: freeGood.active
+  };
 }
 
 function SearchWinesPanel({ wines }: { wines: SupplierCatalogWine[] }) {

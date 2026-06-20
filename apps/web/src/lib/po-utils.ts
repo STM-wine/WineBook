@@ -7,6 +7,7 @@ export type PoExportLine = {
   producer: string;
   wine: string;
   code: string;
+  itemWarning: string;
   quantity: number;
   fob: number;
   laidInPerBottle: number;
@@ -74,6 +75,10 @@ export function poLineCosts(line: PurchaseOrderLine, fallbackLaidInPerBottle = 0
   return { qty, fob, laidIn, wineCost, laidInCost, estimatedCost };
 }
 
+function poLineProducer(line: PurchaseOrderLine) {
+  return line.producer_name?.trim() || producerFromDescription(line.product_name);
+}
+
 export function poExportLines(drafts: PurchaseOrderDraftWithLines[], suppliers: SupplierLogistics[] = []): PoExportLine[] {
   const supplierLookup = supplierLogisticsLookup(suppliers);
 
@@ -86,9 +91,10 @@ export function poExportLines(drafts: PurchaseOrderDraftWithLines[], suppliers: 
 
         return {
           supplier: poDraftSupplierLabel(draft),
-          producer: producerFromDescription(line.product_name),
+          producer: poLineProducer(line),
           wine: line.product_name || "",
           code: line.product_code || "",
+          itemWarning: line.is_new_item ? line.new_item_warning || "New Item" : "",
           quantity: qty,
           fob,
           laidInPerBottle: laidIn,

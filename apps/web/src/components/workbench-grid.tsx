@@ -52,6 +52,7 @@ const currencyFormatter = (params: ValueFormatterParams<WorkbenchRow, number>) =
 const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
   <span className="wine-cell-value">
     <span>{params.valueFormatted ?? params.value ?? ""}</span>
+    {params.data?.is_new_item ? <span className="new-item-badge">New Item</span> : null}
     {params.data && isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}
   </span>
 );
@@ -373,7 +374,14 @@ export function WorkbenchGrid({
         width: 110,
         cellClass: "center-cell",
         cellStyle: CENTER_CELL_STYLE,
-        cellRenderer: centeredRenderer,
+        cellRenderer: (params: ICellRendererParams<WorkbenchRow>) =>
+          params.data?.is_new_item ? (
+            <span className="grid-center-value new-item-code" title={params.data.new_item_warning || undefined}>
+              New Item
+            </span>
+          ) : (
+            centeredRenderer(params)
+          ),
         headerClass: "center-header"
       },
       {
@@ -453,6 +461,7 @@ export function WorkbenchGrid({
         defaultColDef={defaultColDef}
         theme="legacy"
         getRowId={(params) => params.data.id}
+        getRowClass={(params) => (params.data?.is_new_item ? "new-item-row" : undefined)}
         getRowHeight={(params) => rowHeightForWineName(params.data?.wine_display ?? "")}
         onCellValueChanged={onCellValueChanged}
         headerHeight={64}
