@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import {
   productRowToCandidate,
   recommendationRowToCandidate,
@@ -22,16 +22,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ matches: [] });
   }
 
-  const supabase = await createClient();
+  const authSupabase = await createClient();
   const {
     data: { user }
-  } = await supabase.auth.getUser();
+  } = await authSupabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: "Sign in required." }, { status: 401 });
   }
 
-  const { data: profile, error: profileError } = await supabase
+  const { data: profile, error: profileError } = await authSupabase
     .from("app_profiles")
     .select("id")
     .eq("id", user.id)
@@ -44,12 +44,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Account is not enabled." }, { status: 403 });
   }
 
+  let searchSupabase: ReturnType<typeof createServiceRoleClient>;
+  try {
+    searchSupabase = createServiceRoleClient();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Product match search is not configured.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const [supplierResult, catalogResult, productsResult, reportRunsResult, vinosmithResult] = await Promise.all([
-    supabase
+    searchSupabase
       .from("suppliers")
       .select("id,name,trucking_cost_per_bottle")
       .limit(MAX_SOURCE_ROWS),
-    supabase
+    searchSupabase
       .from("supplier_catalog_wines")
       .select(`
         id,
@@ -77,18 +85,18 @@ export async function GET(request: Request) {
       `)
       .neq("product_lifecycle_status", "inactive")
       .limit(MAX_SOURCE_ROWS),
-    supabase
+    searchSupabase
       .from("products")
       .select("id,planning_sku,product_code,name,vintage,pack_size,is_btg,is_core,supplier_id,current_fob,active,updated_at")
       .eq("active", true)
       .limit(MAX_SOURCE_ROWS),
-    supabase
+    searchSupabase
       .from("report_runs")
       .select("id")
       .eq("status", "completed")
       .order("completed_at", { ascending: false })
       .limit(RECENT_REPORT_RUN_COUNT),
-    supabase
+    searchSupabase
       .from("vinosmith_wines")
       .select(`
         wine_id,
@@ -118,7 +126,7 @@ export async function GET(request: Request) {
 
   const reportRunIds = (reportRunsResult.data || []).map((run) => run.id).filter(Boolean);
   const recommendationResult = reportRunIds.length
-    ? await supabase
+    ? await searchSupabase
         .from("reorder_recommendations")
         .select(`
           id,
