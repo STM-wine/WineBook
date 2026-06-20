@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { parseProductIdentityQuery, type ProductIdentityMatch } from "@/lib/product-identity-search";
 import type { PriceChangeEvent, SupplierCatalogWine, SupplierLogistics, WineRequest } from "@/lib/types";
 import { asNumber, formatCurrency, formatCurrencyCents, formatInteger, uniqueSorted } from "@/lib/order-data";
 import {
@@ -11,10 +12,8 @@ import {
   calculateGpMargin,
   calculatePricing,
   defaultLaidInForSupplier,
-  findSupplierCatalogWineNameMatches,
   money,
   normalizeWineIdentity,
-  parseSupplierCatalogWineNameInput,
   requiredDepletionAllowanceForTargetMargin,
   type SupplierCatalogWineInput
 } from "@/lib/supplier-catalog";
@@ -172,15 +171,15 @@ function AddWinePanel({
   const [systemTags, setSystemTags] = useState<string[]>([]);
   const [quickbooksItemNumber, setQuickbooksItemNumber] = useState("");
   const [copiedFromSupplierCatalogWineId, setCopiedFromSupplierCatalogWineId] = useState<string | null>(null);
+  const [templateWine, setTemplateWine] = useState<SupplierCatalogWine | null>(null);
+  const [wineNameMatches, setWineNameMatches] = useState<ProductIdentityMatch[]>([]);
+  const [wineMatchError, setWineMatchError] = useState("");
+  const [isSearchingWineMatches, setIsSearchingWineMatches] = useState(false);
   const [priceLevels, setPriceLevels] = useState<PriceLevelDraft[]>(() => defaultPriceLevelDrafts());
   const [freeGoods, setFreeGoods] = useState<FreeGoodDraft[]>([]);
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
   const sortedCloneOptions = useMemo(() => [...wines].sort(sortNewestVintageFirst), [wines]);
   const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
-  const wineNameMatches = useMemo(
-    () => findSupplierCatalogWineNameMatches({ wineName, supplierId, supplierName }, wines, 5),
-    [supplierId, supplierName, wineName, wines]
-  );
   const computedPricing = calculatePricing({
     packSize: Math.max(1, Math.trunc(Number(packSize) || 12)),
     fobBottle: parseOptionalNumber(fobBottle),
@@ -190,10 +189,8 @@ function AddWinePanel({
   const draftPriceLevels = priceLevels
     .map((level, index) => priceLevelDraftToInput(level, index, computedPricing))
     .filter((level) => level.active && (money(level.bottlePrice) > 0 || level.isFrontline));
-  const copiedFromWine = copiedFromSupplierCatalogWineId
-    ? wines.find((wine) => wine.id === copiedFromSupplierCatalogWineId) || null
-    : null;
-  const showWineNameMatches = wineName.trim().length >= 3 && !copiedFromWine;
+  const copiedFromWine = templateWine;
+  const showWineNameMatches = wineName.trim().length >= 3 && !templateWine;
   const currentIdentity = normalizeWineIdentity({
     producer,
     wineName,
@@ -208,6 +205,45 @@ function AddWinePanel({
       : quickbooksItemNumber;
   const conversionStatus = conversionStatusForDraft(copiedFromWine, currentIdentity);
 
+  useEffect(() => {
+    const query = wineName.trim();
+    if (query.length < 3 || templateWine) {
+      setWineNameMatches([]);
+      setWineMatchError("");
+      setIsSearchingWineMatches(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      const params = new URLSearchParams({ q: query });
+      if (supplierId) params.set("supplierId", supplierId);
+      if (supplierName) params.set("supplierName", supplierName);
+
+      setIsSearchingWineMatches(true);
+      setWineMatchError("");
+      fetch(`/api/supplier-wines/matches?${params.toString()}`, { signal: controller.signal })
+        .then(async (response) => {
+          const body = await response.json();
+          if (!response.ok) {
+            throw new Error(body.error || "Could not search product matches.");
+          }
+          setWineNameMatches(Array.isArray(body.matches) ? body.matches : []);
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setWineNameMatches([]);
+          setWineMatchError(error instanceof Error ? error.message : "Could not search product matches.");
+        })
+        .finally(() => setIsSearchingWineMatches(false));
+    }, 220);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [supplierId, supplierName, templateWine, wineName]);
+
   function selectSupplier(nextSupplierId: string) {
     setSupplierId(nextSupplierId);
     const supplier = suppliers.find((row) => row.id === nextSupplierId);
@@ -220,13 +256,12 @@ function AddWinePanel({
     setLaidInPerBottle("0");
   }
 
-  function applyWineTemplate(wine: SupplierCatalogWine, sourceValue = "", preserveTypedIdentity = false) {
-    const parsed = preserveTypedIdentity ? parseSupplierCatalogWineNameInput(sourceValue, wine) : null;
-    const nextProducer = parsed?.producer || wine.producer;
-    const nextWineName = parsed?.wineName || wine.wine_name;
-    const nextVintage = parsed?.vintage || wine.vintage || "NV";
-    const nextPackSize = parsed?.packSize ? String(parsed.packSize) : String(wine.pack_size || 12);
-    const nextBottleSize = parsed?.bottleSize || wine.bottle_size || "750ml";
+  function applyWineTemplate(wine: SupplierCatalogWine, catalogWineId: string | null = null) {
+    const nextProducer = wine.producer;
+    const nextWineName = wine.wine_name;
+    const nextVintage = wine.vintage || "NV";
+    const nextPackSize = String(wine.pack_size || 12);
+    const nextBottleSize = wine.bottle_size || "750ml";
     const nextIdentity = normalizeWineIdentity({
       producer: nextProducer,
       wineName: nextWineName,
@@ -235,7 +270,10 @@ function AddWinePanel({
       bottleSize: nextBottleSize
     });
 
-    setCopiedFromSupplierCatalogWineId(wine.id);
+    setTemplateWine(wine);
+    setCopiedFromSupplierCatalogWineId(catalogWineId);
+    setWineNameMatches([]);
+    setWineMatchError("");
     setSupplierId(wine.supplier_id || "");
     setSupplierName(wine.supplier_name);
     setProducer(nextProducer);
@@ -250,18 +288,21 @@ function AddWinePanel({
     setQuickbooksItemNumber(nextIdentity.planningSku === wine.planning_sku ? wine.quickbooks_item_number || "" : "");
     setPriceLevels(priceLevelDraftsFromWine(wine));
     setFreeGoods(freeGoodDraftsFromWine(wine));
-    setPriceChangeReason(`${preserveTypedIdentity ? "Matched" : "Copied"} from ${wine.display_name}`);
+    setPriceChangeReason(`Matched from ${wine.display_name}`);
   }
 
   function selectClone(value: string) {
     const wine = wines.find((row) => row.id === value || row.display_name === value || row.planning_sku === value);
     if (!wine) return;
 
-    applyWineTemplate(wine);
+    applyWineTemplate(wine, wine.id);
   }
 
   function startNewSku() {
     setCopiedFromSupplierCatalogWineId(null);
+    setTemplateWine(null);
+    setWineNameMatches([]);
+    setWineMatchError("");
     setProducer("");
     setWineName("");
     setVintage("NV");
@@ -405,23 +446,37 @@ function AddWinePanel({
         </label>
         {showWineNameMatches ? (
           <div className="catalog-match-suggestions">
-            {wineNameMatches.length > 0 ? (
+            {isSearchingWineMatches ? (
+              <div className="catalog-match-empty">Searching product matches...</div>
+            ) : wineMatchError ? (
+              <div className="catalog-match-empty">{wineMatchError}</div>
+            ) : wineNameMatches.length > 0 ? (
               wineNameMatches.map((match) => (
-                <div className="catalog-match-suggestion" key={match.wine.id}>
+                <div className="catalog-match-suggestion" key={`${match.source}:${match.sourceId}`}>
                   <div>
-                    <span>{match.wine.conversion_status.replace(/_/g, " ")}</span>
-                    <strong>{match.wine.display_name}</strong>
-                    <small>{match.wine.supplier_name}</small>
+                    <span>{match.sourceLabel}</span>
+                    <strong>{match.displayName}</strong>
+                    <small>
+                      {match.supplierName}
+                      {match.quickbooksItemNumber ? ` · ${match.quickbooksItemNumber}` : ""}
+                    </small>
                   </div>
-                  <button className="ghost-button button-small" onClick={() => applyWineTemplate(match.wine, wineName, true)} type="button">
+                  <button
+                    className="ghost-button button-small"
+                    onClick={() =>
+                      applyWineTemplate(
+                        productIdentityMatchToTemplateWine(match, wineName),
+                        match.source === "supplier_catalog" ? match.sourceId : null
+                      )
+                    }
+                    type="button"
+                  >
                     Start From
                   </button>
                 </div>
               ))
             ) : (
-              <div className="catalog-match-empty">
-                No catalog matches found.
-              </div>
+              <div className="catalog-match-empty">No product matches found.</div>
             )}
           </div>
         ) : null}
@@ -769,6 +824,67 @@ type FreeGoodDraft = {
   notes: string;
   active: boolean;
 };
+
+function productIdentityMatchToTemplateWine(match: ProductIdentityMatch, query: string): SupplierCatalogWine {
+  const requested = parseProductIdentityQuery(query);
+  const vintage = requested.vintage || match.vintage || "NV";
+  const packSize = requested.packSize || match.packSize || 12;
+  const bottleSize = requested.bottleSize || match.bottleSize || "750ml";
+  const identity = normalizeWineIdentity({
+    producer: match.producer,
+    wineName: match.wineName,
+    vintage,
+    packSize,
+    bottleSize
+  });
+  const pricing = calculatePricing({
+    packSize,
+    fobBottle: match.fobBottle,
+    laidInPerBottle: match.laidInPerBottle,
+    frontlineBottlePrice: match.frontlineBottlePrice,
+    bestPrice: match.bestPrice
+  });
+
+  return {
+    id: match.source === "supplier_catalog" ? match.sourceId : `${match.source}-${match.sourceId}`,
+    supplier_id: match.supplierId,
+    supplier_name: match.supplierName,
+    producer: match.producer,
+    wine_name: match.wineName,
+    vintage,
+    pack_size: packSize,
+    bottle_size: bottleSize,
+    pricing_basis: "bottle",
+    fob_bottle: pricing.fobBottle,
+    fob_case: pricing.fobCase,
+    laid_in_per_bottle: pricing.laidInPerBottle,
+    landed_bottle_cost: pricing.landedBottleCost,
+    frontline_bottle_price: pricing.frontlineBottlePrice,
+    best_price: pricing.bestPrice,
+    gross_profit_margin: pricing.grossProfitMargin,
+    availability_status: "available",
+    conversion_status: "exact_existing_product",
+    display_name: identity.displayName,
+    planning_sku: identity.planningSku,
+    planning_sku_without_vintage: identity.planningSkuWithoutVintage,
+    diagnostics: { source: match.source, source_id: match.sourceId },
+    quickbooks_item_id: null,
+    quickbooks_item_name: match.quickbooksItemName,
+    quickbooks_item_number: match.quickbooksItemNumber,
+    quickbooks_sync_status: match.quickbooksItemNumber ? "linked" : "not_created",
+    product_lifecycle_status: match.source === "supplier_catalog" ? "supplier_available" : "active_product",
+    accounting_create_payload: {},
+    system_tags: match.systemTags,
+    copied_from_supplier_catalog_wine_id: match.source === "supplier_catalog" ? match.sourceId : null,
+    source_system: match.source,
+    source_id: match.sourceId,
+    price_levels: [],
+    free_goods: [],
+    workbench_items: [],
+    created_at: match.updatedAt || "",
+    updated_at: match.updatedAt || ""
+  };
+}
 
 function defaultPriceLevelDrafts(): PriceLevelDraft[] {
   return [
