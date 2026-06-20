@@ -20,6 +20,8 @@
   --blue: #226d79;
   --plum: #7a2b55;
   --shadow: 0 18px 45px rgba(57, 46, 34, 0.09);
+  --control-height: 48px;
+  --compact-control-height: 40px;
 }
 
 * {
@@ -57,7 +59,7 @@ textarea {
   border-bottom: 1px solid var(--line);
   display: grid;
   gap: 24px;
-  grid-template-columns: auto max-content minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   left: 0;
   padding: 16px 32px;
   position: fixed;
@@ -106,6 +108,14 @@ textarea {
   align-items: center;
   display: flex;
   gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.nav-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-tabs button,
@@ -188,6 +198,7 @@ textarea {
   display: flex;
   gap: 12px;
   justify-content: flex-end;
+  min-width: 0;
 }
 
 .account-menu {
@@ -254,9 +265,20 @@ textarea {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
+  line-height: 1.15;
   padding: 9px 14px;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.topbar-actions .data-pill {
+  align-items: center;
+  flex: 0 1 244px;
+  justify-content: center;
+  max-width: 244px;
+  min-height: 40px;
+  text-align: center;
+  white-space: normal;
 }
 
 .order-path-chip {
@@ -313,7 +335,7 @@ textarea {
   min-width: 150px;
 }
 
-@media (max-width: 1400px) and (min-width: 1101px) {
+@media (max-width: 1580px) and (min-width: 1101px) {
   .app-shell {
     padding-top: 158px;
   }
@@ -331,6 +353,39 @@ textarea {
   .topbar-actions {
     grid-column: 2;
     grid-row: 1;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 1280px) and (min-width: 1101px) {
+  .app-shell {
+    padding-top: 176px;
+  }
+
+  .topbar {
+    row-gap: 12px;
+  }
+
+  .topbar-actions {
+    gap: 10px;
+  }
+
+  .topbar-actions .data-pill {
+    font-size: 10px;
+    max-width: 210px;
+    padding: 7px 10px;
+  }
+
+  .topbar-actions .button-small {
+    min-width: 136px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .topbar-actions .ghost-button {
+    padding-left: 8px;
+    padding-right: 8px;
+    white-space: nowrap;
   }
 }
 
@@ -1317,7 +1372,7 @@ td {
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--ink);
-  height: 48px;
+  height: var(--control-height);
   line-height: 1.2;
   padding: 11px 12px;
   width: 100%;
@@ -1398,10 +1453,22 @@ td {
   border-radius: 10px;
   color: var(--ink);
   line-height: 1.2;
-  min-height: 46px;
+  min-height: var(--control-height);
   padding: 11px 12px;
   text-transform: none;
   width: 100%;
+}
+
+.supplier-form-grid input,
+.supplier-form-grid select,
+.request-form-grid input,
+.request-form-grid select {
+  height: var(--control-height);
+}
+
+.supplier-form-grid select,
+.request-form-grid select {
+  padding-right: 34px;
 }
 
 .supplier-form-grid .is-hidden-field {
@@ -1481,7 +1548,8 @@ td {
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--ink);
-  min-height: 38px;
+  height: var(--compact-control-height);
+  min-height: var(--compact-control-height);
   padding: 8px 9px;
   width: 100%;
 }
