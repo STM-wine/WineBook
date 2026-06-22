@@ -2730,6 +2730,349 @@ tr.has-recommendation .sticky-name {
   color: var(--green);
 }
 
+.settings-shell {
+  padding-top: 112px;
+}
+
+.settings-layout {
+  align-items: start;
+  display: grid;
+  gap: 28px;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.settings-sidebar {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  position: sticky;
+  top: 104px;
+}
+
+.settings-sidebar nav {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-sidebar a {
+  border-radius: 7px;
+  color: #3c3934;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 10px 12px;
+}
+
+.settings-sidebar a:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.settings-content {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+
+.settings-header {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-header h1,
+.settings-panel h2,
+.settings-group h3 {
+  margin: 0;
+}
+
+.settings-header .muted,
+.settings-panel .muted {
+  margin: 0;
+}
+
+.settings-metrics,
+.settings-grid-two,
+.settings-field-grid,
+.settings-form-grid,
+.settings-preview {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-metrics {
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+.settings-metrics > div,
+.settings-panel,
+.settings-field,
+.settings-preview > div {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.settings-metrics > div {
+  display: grid;
+  gap: 7px;
+  padding: 18px;
+}
+
+.settings-metrics span,
+.settings-field span,
+.settings-preview span,
+.settings-definition-list dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.settings-metrics strong {
+  font-size: 28px;
+}
+
+.settings-metrics small,
+.settings-field small,
+.settings-list small,
+.settings-table small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-panel {
+  display: grid;
+  gap: 20px;
+  padding: 22px;
+}
+
+.settings-panel-header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.settings-definition-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.settings-definition-list div {
+  align-items: baseline;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding-bottom: 10px;
+}
+
+.settings-definition-list dd {
+  font-weight: 850;
+  margin: 0;
+  text-align: right;
+}
+
+.settings-list {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-list article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.settings-list article > strong,
+.settings-list article span {
+  display: block;
+}
+
+.settings-group {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-field-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-field {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.settings-field strong {
+  font-size: 21px;
+}
+
+.settings-field p {
+  color: #3c3934;
+  margin: 0;
+}
+
+.settings-form {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-form label,
+.settings-publish-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  font-weight: 850;
+  gap: 7px;
+}
+
+.settings-form input,
+.settings-form select,
+.settings-form textarea,
+.settings-publish-form input,
+.settings-publish-form select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: var(--compact-control-height);
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.settings-form input[type="checkbox"],
+.settings-publish-form input[type="checkbox"] {
+  min-height: 18px;
+  width: 18px;
+}
+
+.settings-form-wide {
+  grid-column: 1 / -1;
+}
+
+.settings-month-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.settings-month-grid div {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 28px 1fr 80px;
+}
+
+.settings-preview {
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
+.settings-preview > div {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.settings-preview strong {
+  font-size: 20px;
+}
+
+.settings-preview-wide {
+  grid-column: 1 / -1;
+}
+
+.settings-preview ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.settings-preview .warning {
+  border-color: #e3bd7d;
+  color: #7a5a1a;
+}
+
+.settings-publish-form {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(240px, 1fr) auto auto auto;
+}
+
+.checkbox-row {
+  align-items: center;
+  display: flex !important;
+  flex-direction: row;
+  white-space: nowrap;
+}
+
+.settings-table-wrap {
+  overflow-x: auto;
+}
+
+.settings-table {
+  border-collapse: collapse;
+  min-width: 860px;
+  width: 100%;
+}
+
+.settings-table th,
+.settings-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.settings-table th {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.settings-table td strong,
+.settings-table td small {
+  display: block;
+}
+
+.permission-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.permission-chip {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #3c3934;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+  padding: 6px 8px;
+  text-transform: capitalize;
+}
+
+.permission-chip.active {
+  background: #e5eee4;
+  border-color: #a8bda8;
+  color: var(--green);
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     padding-top: 492px;
@@ -2806,5 +3149,23 @@ tr.has-recommendation .sticky-name {
 
   .login-panel {
     grid-template-columns: 1fr;
+  }
+
+  .settings-layout,
+  .settings-metrics,
+  .settings-grid-two,
+  .settings-field-grid,
+  .settings-form-grid,
+  .settings-preview,
+  .settings-publish-form {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-sidebar {
+    position: static;
+  }
+
+  .settings-month-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

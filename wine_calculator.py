@@ -2,39 +2,11 @@ import pandas as pd
 import numpy as np
 import re
 from datetime import datetime, timedelta
-
-
-PURCHASING_ENVIRONMENT_BY_MONTH = {
-    1: ("Aggressive", 1.15),
-    2: ("Aggressive", 1.15),
-    3: ("Aggressive", 1.15),
-    4: ("Neutral", 1.00),
-    5: ("Defensive", 0.75),
-    6: ("Defensive", 0.75),
-    7: ("Defensive", 0.75),
-    8: ("Defensive", 0.75),
-    9: ("Rebuild", 1.00),
-    10: ("Growth", 1.10),
-    11: ("Growth", 1.10),
-    12: ("Growth", 1.10),
-}
-
-
-def purchasing_environment_for_month(month: int) -> tuple[str, float]:
-    """Return the purchasing mode and multiplier for a calendar month."""
-    try:
-        month_number = int(month)
-    except (TypeError, ValueError):
-        month_number = 4
-    return PURCHASING_ENVIRONMENT_BY_MONTH.get(month_number, ("Neutral", 1.00))
-
-
-def purchasing_environment_multiplier(reference_date: datetime | pd.Timestamp | None = None) -> float:
-    """Return the monthly purchasing risk multiplier for a report date."""
-    if reference_date is None or pd.isna(reference_date):
-        reference_date = datetime.now()
-    _, multiplier = purchasing_environment_for_month(reference_date.month)
-    return multiplier
+from stem_order.ordering_logic import (
+    OrderingLogicSettings,
+    purchasing_environment_for_month,
+    purchasing_environment_multiplier,
+)
 
 
 def normalize_planning_sku(name: str) -> str:
@@ -127,7 +99,7 @@ def _choose_live_rb6_rows(rb6_data: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def calculate_reorder_recommendations(rb6_data, sales_data):
+def calculate_reorder_recommendations(rb6_data, sales_data, settings=None):
     """
     Calculate wine reorder recommendations using RB6 inventory and RADs sales data.
     
@@ -145,6 +117,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         DataFrame with reorder recommendations (one row per planning_sku)
     """
     
+    logic_settings = OrderingLogicSettings.from_mapping(settings)
+
     # --- STEP 1: NORMALIZE PLANNING_SKU FOR MATCHING ---
     # Create normalized planning_sku for consistent matching
     if 'name' in rb6_data.columns:
@@ -321,7 +295,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
     pack_size = recommendations.get('pack_size', recommendations.get('Pack Size', 12))
     if not isinstance(pack_size, pd.Series):
         pack_size = recommendations['Pack Size'] if 'Pack Size' in recommendations.columns else 12
-    recommendations['pack_size'] = pack_size.fillna(12) if isinstance(pack_size, pd.Series) else 12
+    recommendations['pack_size'] = pack_size.fillna(logic_settings.default_pack_size) if isinstance(pack_size, pd.Series) else logic_settings.default_pack_size
     
     # DEFENSIVE: Find FOB/cost column (may have various names)
     possible_fob_cols = [
@@ -392,15 +366,13 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         return False
 
     def get_target_days(row):
-        if row_has_truthy_flag(row, ['Is BTG', 'is_btg', 'is_btg_', 'btg', 'btg_flag']):
-            return 45
-        elif row_has_truthy_flag(row, ['Is Core', 'is_core', 'is_core_', 'core', 'core_flag']):
-            return 30
-        else:
-            return 15
+        return logic_settings.target_days(
+            row_has_truthy_flag(row, ['Is BTG', 'is_btg', 'is_btg_', 'btg', 'btg_flag']),
+            row_has_truthy_flag(row, ['Is Core', 'is_core', 'is_core_', 'core', 'core_flag']),
+        )
     
     recommendations['target_days'] = recommendations.apply(get_target_days, axis=1)
-    mode, multiplier = purchasing_environment_for_month(reference_date.month)
+    mode, multiplier = logic_settings.purchasing_environment_for_month(reference_date.month)
     recommendations['purchasing_environment_mode'] = mode
     recommendations['purchasing_environment_multiplier'] = multiplier
     recommendations['purchasing_environment_month'] = reference_date.month
@@ -428,7 +400,8 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
             return 0
         if pd.isna(pack_size) or pack_size <= 0:
             return int(np.ceil(qty))
-        if not preserve_one_case and qty < pack_size:
+        minimum_standard_qty = max(0, logic_settings.standard_minimum_packs) * pack_size
+        if not preserve_one_case and qty < minimum_standard_qty:
             return 0
         return int(np.ceil(qty / pack_size) * pack_size)
     
@@ -436,18 +409,22 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         lambda row: round_recommendation_qty(
             row['recommended_qty_raw'],
             row['pack_size'],
-            preserve_one_case=row_has_truthy_flag(
-                row,
-                ['Is BTG', 'is_btg', 'is_btg_', 'btg', 'btg_flag', 'Is Core', 'is_core', 'is_core_', 'core', 'core_flag'],
+            preserve_one_case=(
+                logic_settings.btg_round_sub_case_to_one_pack
+                and row_has_truthy_flag(row, ['Is BTG', 'is_btg', 'is_btg_', 'btg', 'btg_flag'])
+            )
+            or (
+                logic_settings.core_round_sub_case_to_one_pack
+                and row_has_truthy_flag(row, ['Is Core', 'is_core', 'is_core_', 'core', 'core_flag'])
             ),
         ),
         axis=1
     )
-    recommendations['high_volume_rounding_required'] = recommendations['last_30_day_sales'] > 480
+    recommendations['high_volume_rounding_required'] = recommendations['last_30_day_sales'] > logic_settings.high_volume_flag_threshold
     
     # Calculate order_cost = recommended_qty_rounded * FOB
     recommendations['order_cost'] = recommendations['recommended_qty_rounded'] * recommendations['fob']
-    recommendations['recommendation_status'] = 'rejected'
+    recommendations['recommendation_status'] = logic_settings.recommendation_default_status
     recommendations['approved_qty'] = 0
     
     # --- STEP 8: ADD RB6 METADATA ---
@@ -527,7 +504,7 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
             return "NO SALES"
         
         # Critical: Less than 4 weeks on hand
-        if weeks_on_hand < 4:
+        if weeks_on_hand < logic_settings.urgent_weeks_threshold:
             return "URGENT"
         
         # Low: Less than weeks needed
@@ -548,9 +525,9 @@ def calculate_reorder_recommendations(rb6_data, sales_data):
         if target_qty <= 0:
             return 'Unknown'
         coverage_ratio = available_plus_order / target_qty
-        if coverage_ratio < 0.5:
+        if coverage_ratio < logic_settings.high_risk_coverage_threshold:
             return 'High'
-        if coverage_ratio < 1:
+        if coverage_ratio < logic_settings.medium_risk_coverage_threshold:
             return 'Medium'
         return 'Low'
 

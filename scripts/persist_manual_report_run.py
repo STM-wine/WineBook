@@ -25,8 +25,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    result = build_ordering_pipeline(args.rb6, args.rads, args.importers)
     repo = SupabaseRepository.from_env()
+    ordering_config = repo.get_published_configuration("ordering_logic")
+    result = build_ordering_pipeline(args.rb6, args.rads, args.importers, ordering_logic_settings=ordering_config["values"])
     try:
         seeded_suppliers = repo.seed_supplier_tdm_from_recommendations(result.recommendations)
     except Exception as exc:
@@ -38,7 +39,11 @@ def main() -> None:
             **result.diagnostics,
             "rb6_file_name": Path(args.rb6).name,
             "rads_file_name": Path(args.rads).name,
+            "configuration_version_number": ordering_config["version_number"],
+            "configuration_fallback_used": ordering_config["fallback_used"],
         },
+        configuration_version_id=ordering_config["id"],
+        configuration_snapshot=ordering_config["values"],
     )
 
     try:

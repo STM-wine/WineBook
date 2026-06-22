@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import time
 from typing import Any
+from stem_order.ordering_logic import default_ordering_logic_settings
 
 try:
     import pandas as pd
@@ -111,6 +112,8 @@ class SupabaseRepository:
         created_by: str | None = None,
         report_date: date | str | None = None,
         source_channel: str | None = None,
+        configuration_version_id: str | None = None,
+        configuration_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "run_type": run_type,
@@ -123,7 +126,35 @@ class SupabaseRepository:
             payload["report_date"] = report_date.isoformat() if isinstance(report_date, date) else report_date
         if source_channel is not None:
             payload["source_channel"] = source_channel
+        if configuration_version_id is not None:
+            payload["configuration_version_id"] = configuration_version_id
+        if configuration_snapshot is not None:
+            payload["configuration_snapshot"] = configuration_snapshot
         return self._insert_one("report_runs", payload)
+
+    def get_published_configuration(self, domain: str = "ordering_logic") -> dict[str, Any]:
+        result = (
+            self.client.table("configuration_versions")
+            .select("id,version_number,values")
+            .eq("domain", domain)
+            .eq("status", "published")
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            row = result.data[0]
+            return {
+                "id": row.get("id"),
+                "version_number": row.get("version_number"),
+                "values": row.get("values") or default_ordering_logic_settings(),
+                "fallback_used": False,
+            }
+        return {
+            "id": None,
+            "version_number": None,
+            "values": default_ordering_logic_settings(),
+            "fallback_used": True,
+        }
 
     def complete_report_run(
         self,

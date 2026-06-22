@@ -1,10 +1,9 @@
-import { redirect } from "next/navigation";
 import { OrderDashboard } from "@/components/order-dashboard";
+import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { fetchVinosmithExplorerData, unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import type {
-  AppProfile,
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
   Recommendation,
@@ -13,38 +12,14 @@ import type {
   WineRequest,
   SupplierLogistics
 } from "@/lib/types";
-import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/server";
 
 export default async function HomePage() {
-  const supabase = await createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
+  const context = await getAppContext();
+  if ("pendingEmail" in context) {
+    return <AccountPending email={context.pendingEmail} />;
   }
-
-  const { data: profile } = await supabase
-    .from("app_profiles")
-    .select("id,email,full_name,role")
-    .eq("id", user.id)
-    .maybeSingle<AppProfile>();
-
-  if (!profile) {
-    return (
-      <main className="empty-state">
-        <section>
-          <p className="eyebrow">Stem Intelligence</p>
-          <h1>Account pending</h1>
-          <p className="muted">
-            You are signed in as {user.email}, but this account is not enabled in Stem Intelligence yet.
-            Add a matching row to Supabase app_profiles to grant access.
-          </p>
-        </section>
-      </main>
-    );
-  }
+  const { supabase, permissions } = context;
 
   const reportRunsPromise = supabase
     .from("report_runs")
@@ -186,6 +161,7 @@ export default async function HomePage() {
       vinosmithExplorer={vinosmithExplorer}
       wineRequests={wineRequests || []}
       priceChangeEvents={priceChangeEvents || []}
+      canViewSettings={hasPermission(permissions, "view_settings")}
     />
   );
 }

@@ -14,7 +14,7 @@ from scripts.process_daily_vinosmith_email import (
     safe_filename,
     storage_path,
 )
-from stem_order.core import calculate_reorder_recommendations, normalize_planning_sku
+from stem_order.core import OrderingLogicSettings, calculate_reorder_recommendations, normalize_planning_sku
 from stem_order.ingest import (
     clean_importer_name,
     load_importers_csv,
@@ -296,6 +296,60 @@ class CalculatorTests(unittest.TestCase):
         self.assertEqual(result.loc["Standard Wine 2025 12/750ml", "target_days"], 15)
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "recommendation_status"], "rejected")
         self.assertEqual(result.loc["BTG Wine 2025 12/750ml", "approved_qty"], 0)
+
+    def test_ordering_logic_settings_can_override_coverage_targets(self):
+        settings = OrderingLogicSettings.from_mapping(
+            {
+                "standard_target_days": 21,
+                "core_target_days": 35,
+                "btg_target_days": 49,
+            }
+        )
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": "Config Wine 2025 12/750ml",
+                    "available_inventory": 0,
+                    "on_order": 0,
+                    "fob": 10,
+                    "pack_size": 12,
+                }
+            ]
+        )
+        sales = pd.DataFrame([{"wine_name": "Config Wine 2024 12/750ml", "quantity": 30, "date": "2026-04-01"}])
+
+        result = calculate_reorder_recommendations(rb6, sales, settings=settings).iloc[0]
+
+        self.assertEqual(result["target_days"], 21)
+
+    def test_forecast_values_remain_informational_for_recommendation_quantity(self):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": "Forecast Wine 2025 12/750ml",
+                    "available_inventory": 0,
+                    "on_order": 0,
+                    "fob": 10,
+                    "pack_size": 12,
+                }
+            ]
+        )
+        base_sales = pd.DataFrame([{"wine_name": "Forecast Wine 2024 12/750ml", "quantity": 12, "date": "2026-04-01"}])
+        seasonal_sales = pd.concat(
+            [
+                base_sales,
+                pd.DataFrame(
+                    [{"wine_name": "Forecast Wine 2024 12/750ml", "quantity": 500, "date": "2025-04-01"}]
+                ),
+            ],
+            ignore_index=True,
+        )
+
+        base = calculate_reorder_recommendations(rb6, base_sales).iloc[0]
+        seasonal = calculate_reorder_recommendations(rb6, seasonal_sales).iloc[0]
+
+        self.assertGreater(seasonal["next_30_day_forecast"], base["next_30_day_forecast"])
+        self.assertEqual(seasonal["recommended_qty_rounded"], base["recommended_qty_rounded"])
 
     def test_january_through_march_use_aggressive_purchasing_multiplier(self):
         for report_date in ["2026-01-15", "2026-02-15", "2026-03-15"]:

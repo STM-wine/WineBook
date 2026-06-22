@@ -353,11 +353,13 @@ def main() -> None:
         supplier_logistics = supplier_logistics_rows_to_frame(repo.get_supplier_logistics())
         if csv_loaded:
             supplier_logistics = merge_supplier_logistics_with_csv(supplier_logistics, csv_importers)
+        ordering_config = repo.get_published_configuration("ordering_logic")
         result = build_ordering_pipeline(
             reports.rb6,
             reports.rads,
             ROOT / "importers.csv",
             importers_data=supplier_logistics if not supplier_logistics.empty else None,
+            ordering_logic_settings=ordering_config["values"],
         )
         try:
             seeded_suppliers = repo.seed_supplier_tdm_from_recommendations(result.recommendations)
@@ -377,7 +379,11 @@ def main() -> None:
                     reports.rb6_candidate.message_id,
                     reports.rads_candidate.message_id,
                 ],
+                "configuration_version_number": ordering_config["version_number"],
+                "configuration_fallback_used": ordering_config["fallback_used"],
             },
+            configuration_version_id=ordering_config["id"],
+            configuration_snapshot=ordering_config["values"],
         )
 
         try:

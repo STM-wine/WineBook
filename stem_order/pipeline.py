@@ -323,6 +323,7 @@ def build_ordering_pipeline(
     rads_file_or_path,
     importers_path: str | Path | None = None,
     importers_data: pd.DataFrame | None = None,
+    ordering_logic_settings: dict | None = None,
 ) -> PipelineResult:
     rb6 = prepare_rb6_source(rb6_file_or_path)
     rads = prepare_rads_source(rads_file_or_path)
@@ -338,7 +339,7 @@ def build_ordering_pipeline(
             "importers.csv not configured",
         )
 
-    recommendations = calculate_reorder_recommendations(rb6.data, rads.data)
+    recommendations = calculate_reorder_recommendations(rb6.data, rads.data, settings=ordering_logic_settings)
     recommendations = add_importer_logistics(recommendations, rb6.data, importers_data, importers_loaded)
     raw_df = select_raw_output(recommendations)
     display_df = format_display_dataframe(raw_df)

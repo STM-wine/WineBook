@@ -56,6 +56,7 @@ type Props = {
   vinosmithExplorer: VinosmithExplorerData;
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
+  canViewSettings?: boolean;
 };
 
 function formatReportUpdatedAt(value: string | null) {
@@ -79,7 +80,8 @@ export function OrderDashboard({
   supplierCatalogWines,
   vinosmithExplorer,
   wineRequests,
-  priceChangeEvents
+  priceChangeEvents,
+  canViewSettings
 }: Props) {
   const router = useRouter();
   const combinedRecommendations = useMemo(
@@ -599,6 +601,7 @@ export function OrderDashboard({
     <main className="app-shell">
       <AppTopbar
         activeView={activeView}
+        canViewSettings={canViewSettings}
         dataLabel={dataLabel}
         dataTitle={dataTitle}
         isPending={isPending}

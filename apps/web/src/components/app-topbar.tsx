@@ -6,8 +6,9 @@ import { ActiveView, NAV_VIEW_LABELS } from "./dashboard-types";
 import { SignOutButton } from "./sign-out-button";
 
 type AppTopbarProps = {
-  activeModule?: "grw-converter";
+  activeModule?: "grw-converter" | "settings";
   activeView?: ActiveView;
+  canViewSettings?: boolean;
   dataLabel?: string;
   dataTitle?: string;
   isPending?: boolean;
@@ -23,6 +24,7 @@ function viewHref(view: ActiveView) {
 export function AppTopbar({
   activeModule,
   activeView,
+  canViewSettings,
   dataLabel,
   dataTitle,
   isPending,
@@ -78,6 +80,11 @@ export function AppTopbar({
             </Link>
           </div>
         </div>
+        {canViewSettings ? (
+          <Link className={activeModule === "settings" ? "active" : ""} href="/settings">
+            Settings
+          </Link>
+        ) : null}
       </nav>
       <div className="topbar-actions">
         {dataLabel ? (

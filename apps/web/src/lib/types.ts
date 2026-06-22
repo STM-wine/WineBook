@@ -10,6 +10,8 @@ export type ReportRun = {
   report_date: string | null;
   completed_at: string | null;
   diagnostics?: Record<string, unknown> | null;
+  configuration_version_id?: string | null;
+  configuration_snapshot?: Record<string, unknown> | null;
 };
 
 export type Recommendation = {
