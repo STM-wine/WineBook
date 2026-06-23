@@ -602,7 +602,21 @@ export async function deletePendingSupplierCatalogWine(input: { id: string }) {
     throw new Error("This record is linked to an official or QuickBooks item and cannot be deleted here.");
   }
 
+  const { data: blockingPriceChanges, error: priceChangeReadError } = await supabase
+    .from("price_change_events")
+    .select("id,status")
+    .eq("supplier_catalog_wine_id", input.id)
+    .not("status", "in", "(draft,pending_review)");
+
+  if (priceChangeReadError) {
+    throw new Error(priceChangeReadError.message);
+  }
+  if ((blockingPriceChanges || []).length > 0) {
+    throw new Error("This record has approved or communicated price changes and cannot be deleted here.");
+  }
+
   const childDeletes = await Promise.all([
+    supabase.from("price_change_events").delete().eq("supplier_catalog_wine_id", input.id).in("status", ["draft", "pending_review"]),
     supabase.from("supplier_catalog_price_levels").delete().eq("supplier_catalog_wine_id", input.id),
     supabase.from("supplier_catalog_free_goods").delete().eq("supplier_catalog_wine_id", input.id),
     supabase.from("supplier_catalog_workbench_items").delete().eq("supplier_catalog_wine_id", input.id)
