@@ -60,6 +60,25 @@ const PENDING_CONVERSION_STATUSES = new Set([
   "net_new_product"
 ]);
 
+function hasQuickBooksIdentity(wine: SupplierCatalogWine) {
+  return Boolean(wine.quickbooks_item_id?.trim()) || Boolean(wine.quickbooks_item_number?.trim());
+}
+
+function isDraftOnlyCatalogWine(wine: SupplierCatalogWine) {
+  if (wine.product_lifecycle_status === "active_product") return false;
+  if (wine.quickbooks_sync_status === "created" || wine.quickbooks_sync_status === "linked") return false;
+  if (hasQuickBooksIdentity(wine)) return false;
+  return (
+    wine.product_lifecycle_status === "pending_product_creation" ||
+    wine.quickbooks_sync_status === "not_created" ||
+    PENDING_CONVERSION_STATUSES.has(wine.conversion_status)
+  );
+}
+
+function isSearchableSupplierWine(wine: SupplierCatalogWine) {
+  return !isDraftOnlyCatalogWine(wine);
+}
+
 export function SupplierHubView({
   suppliers,
   supplierCatalogWines,
@@ -85,7 +104,8 @@ export function SupplierHubView({
 }) {
   const [activeArea, setActiveArea] = useState<HubArea>("search");
   const [pendingEditWineId, setPendingEditWineId] = useState<string | null>(null);
-  const pendingWineCount = supplierCatalogWines.filter((wine) => PENDING_CONVERSION_STATUSES.has(wine.conversion_status)).length;
+  const searchableCatalogWines = useMemo(() => supplierCatalogWines.filter(isSearchableSupplierWine), [supplierCatalogWines]);
+  const pendingWineCount = supplierCatalogWines.filter(isDraftOnlyCatalogWine).length;
   const pendingRequestCount = wineRequests.filter((request) => request.request_status === "pending_review").length;
   const draftPriceChanges = priceChangeEvents.filter((event) => event.status === "draft").length;
 
@@ -101,7 +121,7 @@ export function SupplierHubView({
       <div className="supplier-hub-summary">
         <div>
           <span>Supplier Wines</span>
-          <strong>{formatInteger(supplierCatalogWines.length)}</strong>
+          <strong>{formatInteger(searchableCatalogWines.length)}</strong>
         </div>
         <div>
           <span>Pending Creation</span>
@@ -130,11 +150,11 @@ export function SupplierHubView({
         ))}
       </div>
 
-      {activeArea === "search" ? <SearchWinesPanel wines={supplierCatalogWines} /> : null}
+      {activeArea === "search" ? <SearchWinesPanel wines={searchableCatalogWines} /> : null}
       {activeArea === "add" ? (
         <AddWinePanel
           suppliers={suppliers}
-          wines={supplierCatalogWines}
+          wines={searchableCatalogWines}
           isPending={isPending}
           editWine={supplierCatalogWines.find((wine) => wine.id === pendingEditWineId) || null}
           onClearPendingEdit={() => setPendingEditWineId(null)}
@@ -1532,7 +1552,7 @@ function PendingProductCreationPanel({
   onDeleteCatalogWine: (input: DeleteCatalogWineInput) => void;
   onEditCatalogWine: (wine: SupplierCatalogWine) => void;
 }) {
-  const pendingWines = wines.filter((wine) => PENDING_CONVERSION_STATUSES.has(wine.conversion_status));
+  const pendingWines = wines.filter(isDraftOnlyCatalogWine);
   const pendingRequests = requests.filter(
     (request) => request.request_status === "approved" && request.approval_decision === "approve_as_new_stem_product"
   );

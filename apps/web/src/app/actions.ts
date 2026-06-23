@@ -583,18 +583,20 @@ export async function deletePendingSupplierCatalogWine(input: { id: string }) {
     throw new Error(wineError?.message || "Supplier wine not found.");
   }
 
-  const isPendingProduct =
-    wine.product_lifecycle_status === "pending_product_creation" ||
-    ["new_vintage", "new_format", "possible_match_needs_review", "net_new_product"].includes(wine.conversion_status);
   const hasOfficialProduct =
     wine.product_lifecycle_status === "active_product" ||
     wine.quickbooks_sync_status === "created" ||
     wine.quickbooks_sync_status === "linked" ||
     Boolean(wine.quickbooks_item_id?.trim()) ||
     Boolean(wine.quickbooks_item_number?.trim());
+  const isDraftOnlyProduct =
+    !hasOfficialProduct &&
+    (wine.product_lifecycle_status === "pending_product_creation" ||
+      wine.quickbooks_sync_status === "not_created" ||
+      ["new_vintage", "new_format", "possible_match_needs_review", "net_new_product"].includes(wine.conversion_status));
 
-  if (!isPendingProduct) {
-    throw new Error("Only pending product-creation records can be deleted here.");
+  if (!isDraftOnlyProduct) {
+    throw new Error("Only draft-only pending product-creation records can be deleted here.");
   }
   if (hasOfficialProduct) {
     throw new Error("This record is linked to an official or QuickBooks item and cannot be deleted here.");
