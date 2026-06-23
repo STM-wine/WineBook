@@ -14,6 +14,7 @@ import {
   buildSupplierCatalogWine,
   decisionToRequestStatus,
   detectPriceChange,
+  MINIMUM_GP_MARGIN,
   type ApprovalDecision,
   type AvailabilityStatus,
   type ConversionStatus
@@ -372,6 +373,8 @@ export async function saveSupplierCatalogWine(input: {
   bestPriceOverride?: number | null;
   systemTags?: string[];
   copiedFromSupplierCatalogWineId?: string | null;
+  quickbooksItemId?: string | null;
+  quickbooksItemName?: string | null;
   quickbooksItemNumber?: string | null;
   sourceSystem?: string | null;
   sourceId?: string | null;
@@ -466,6 +469,8 @@ export async function saveSupplierCatalogWine(input: {
     bestPriceOverride: input.bestPriceOverride,
     systemTags: input.systemTags || [],
     copiedFromSupplierCatalogWineId: input.copiedFromSupplierCatalogWineId || null,
+    quickbooksItemId: input.quickbooksItemId || null,
+    quickbooksItemName: input.quickbooksItemName || null,
     quickbooksItemNumber: input.quickbooksItemNumber || null,
     sourceSystem: input.sourceSystem || null,
     sourceId: input.sourceId || null,
@@ -475,6 +480,12 @@ export async function saveSupplierCatalogWine(input: {
     conversionStatus: conversionStatus as ConversionStatus,
     priceChangeReason: input.priceChangeReason
   });
+  const lowGpLevel = (payload.price_levels || []).find(
+    (level) => level.active !== false && Number(level.bottle_price || 0) > 0 && Number(level.calculated_gp_margin || 0) < MINIMUM_GP_MARGIN
+  );
+  if (lowGpLevel || Number(payload.gross_profit_margin || 0) < MINIMUM_GP_MARGIN) {
+    throw new Error("Gross profit margin must be at least 28%. Override permission is not available yet.");
+  }
 
   const { data: latestRun, error: latestRunError } = await supabase
     .from("report_runs")

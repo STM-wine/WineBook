@@ -2,7 +2,7 @@ import unittest
 
 from services.normalization_service import normalize_wine_identity
 from services.price_change_service import detect_price_change
-from services.pricing_engine import calculate_best_price, calculate_pricing
+from services.pricing_engine import balance_price_level, calculate_best_price, calculate_pricing
 from services.request_workflow_service import approve_request, create_request, is_approver
 from services.supplier_catalog_service import default_laid_in_for_supplier
 
@@ -34,9 +34,33 @@ class SupplierCatalogServiceTests(unittest.TestCase):
             frontline_bottle_price=28,
         )
 
-        self.assertLess(result.gross_profit_margin, 0.27)
-        self.assertIn("Gross profit margin is below 27%.", result.warnings)
+        self.assertLess(result.gross_profit_margin, 0.28)
+        self.assertIn("Gross profit margin is below 28%.", result.warnings)
         self.assertEqual(result.diagnostics["warnings"], result.warnings)
+
+    def test_price_level_balancing_preserves_gp_then_da_before_frontline(self):
+        result = balance_price_level(
+            landed_bottle_cost=20,
+            target_gp_margin=0.30,
+            depletion_allowance=1.10,
+            bottle_price=25,
+        )
+
+        self.assertEqual(result["calculated_field"], "frontline")
+        self.assertEqual(result["bottle_price"], 27)
+        self.assertEqual(result["depletion_allowance"], 1.10)
+        self.assertAlmostEqual(result["calculated_gp_margin"], 0.30)
+
+    def test_price_level_balancing_calculates_da_when_price_constrains_target_gp(self):
+        result = balance_price_level(
+            landed_bottle_cost=20,
+            target_gp_margin=0.30,
+            bottle_price=27,
+        )
+
+        self.assertEqual(result["calculated_field"], "da")
+        self.assertEqual(result["depletion_allowance"], 1.10)
+        self.assertAlmostEqual(result["calculated_gp_margin"], 0.30)
 
     def test_normalization_preserves_champagne_prefix_pack_and_nv(self):
         identity = normalize_wine_identity(

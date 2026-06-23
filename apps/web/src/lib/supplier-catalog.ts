@@ -41,8 +41,9 @@ export const APPROVAL_DECISIONS = [
   "approve_as_new_stem_product"
 ] as const;
 
-const GP_WARNING_PERSISTED = "Gross profit margin is below 27%.";
-const GP_WARNING_THRESHOLD = 0.27;
+export const MINIMUM_GP_MARGIN = 0.28;
+const GP_WARNING_PERSISTED = "Gross profit margin is below 28%.";
+const GP_WARNING_THRESHOLD = MINIMUM_GP_MARGIN;
 const PACK_RE = /^\s*(\d+)\s*[/xX]\s*([0-9.]+)\s*(ml|mL|ML|l|L)\s*$/;
 
 export type AvailabilityStatus = (typeof AVAILABILITY_STATUSES)[number];
@@ -94,6 +95,8 @@ export type SupplierCatalogWineInput = {
   conversionStatus: ConversionStatus;
   systemTags?: string[];
   copiedFromSupplierCatalogWineId?: string | null;
+  quickbooksItemId?: string | null;
+  quickbooksItemName?: string | null;
   quickbooksItemNumber?: string | null;
   sourceSystem?: string | null;
   sourceId?: string | null;
@@ -232,6 +235,69 @@ export function requiredDepletionAllowanceForTargetMargin(input: {
   return money(Math.max(0, landedBottleCost - bottlePrice * (1 - targetGpMargin)));
 }
 
+export function requiredBottlePriceForTargetMargin(input: {
+  landedBottleCost?: number | null;
+  depletionAllowance?: number | null;
+  targetGpMargin?: number | null;
+}) {
+  const targetGpMargin = Math.max(0, Math.min(0.99, Number(input.targetGpMargin) || 0));
+  const landedBottleCost = money(input.landedBottleCost);
+  const depletionAllowance = money(input.depletionAllowance);
+  const netCost = Math.max(0, landedBottleCost - depletionAllowance);
+  if (netCost <= 0 || targetGpMargin <= 0) return 0;
+  return money(netCost / (1 - targetGpMargin));
+}
+
+export function balancePriceLevel(input: {
+  bottlePrice?: number | null;
+  depletionAllowance?: number | null;
+  targetGpMargin?: number | null;
+  landedBottleCost?: number | null;
+  fallbackBottlePrice?: number | null;
+}) {
+  const hasBottlePrice = input.bottlePrice !== null && input.bottlePrice !== undefined;
+  const hasDepletionAllowance = input.depletionAllowance !== null && input.depletionAllowance !== undefined;
+  const hasTargetGpMargin = input.targetGpMargin !== null && input.targetGpMargin !== undefined;
+  const targetGpMargin = hasTargetGpMargin ? Math.max(0, Math.min(0.99, Number(input.targetGpMargin) || 0)) : null;
+  const landedBottleCost = money(input.landedBottleCost);
+  let bottlePrice = hasBottlePrice ? money(input.bottlePrice) : money(input.fallbackBottlePrice);
+  let depletionAllowance = hasDepletionAllowance ? money(input.depletionAllowance) : 0;
+  let calculatedField: "frontline" | "da" | "gp" | "fallback" = "gp";
+
+  if (targetGpMargin !== null && hasDepletionAllowance) {
+    bottlePrice = requiredBottlePriceForTargetMargin({
+      landedBottleCost,
+      depletionAllowance,
+      targetGpMargin
+    });
+    calculatedField = "frontline";
+  } else if (targetGpMargin !== null && hasBottlePrice) {
+    depletionAllowance = requiredDepletionAllowanceForTargetMargin({
+      bottlePrice,
+      landedBottleCost,
+      targetGpMargin
+    });
+    calculatedField = "da";
+  } else if (!hasBottlePrice && bottlePrice > 0) {
+    calculatedField = "fallback";
+  }
+
+  const calculatedGpMargin = calculateGpMargin({
+    bottlePrice,
+    landedBottleCost,
+    depletionAllowance
+  });
+
+  return {
+    bottlePrice,
+    depletionAllowance,
+    targetGpMargin,
+    calculatedGpMargin,
+    calculatedField,
+    belowMinimumGp: bottlePrice > 0 && calculatedGpMargin < MINIMUM_GP_MARGIN
+  };
+}
+
 export function calculatePricing(input: {
   packSize?: number | null;
   fobBottle?: number | null;
@@ -327,26 +393,22 @@ export function normalizePriceLevels(
 ): SupplierCatalogPriceLevelInput[] {
   return levels
     .map((level, index) => {
-      const bottlePrice = money(level.bottlePrice);
       const targetGpMargin =
         level.targetGpMargin === null || level.targetGpMargin === undefined ? null : Math.max(0, Math.min(0.99, Number(level.targetGpMargin) || 0));
-      const depletionAllowance =
-        level.depletionAllowance !== null && level.depletionAllowance !== undefined
-          ? money(level.depletionAllowance)
-          : targetGpMargin !== null
-            ? requiredDepletionAllowanceForTargetMargin({ bottlePrice, landedBottleCost, targetGpMargin })
-            : 0;
+      const balanced = balancePriceLevel({
+        bottlePrice: level.bottlePrice,
+        depletionAllowance: level.depletionAllowance,
+        targetGpMargin,
+        landedBottleCost
+      });
 
       return {
         id: level.id,
         name: normalizeSpaces(level.name) || `Level ${index + 1}`,
-        bottlePrice,
-        depletionAllowance,
+        bottlePrice: balanced.bottlePrice,
+        depletionAllowance: balanced.depletionAllowance,
         targetGpMargin,
-        calculatedGpMargin:
-          level.calculatedGpMargin !== null && level.calculatedGpMargin !== undefined
-            ? Math.round((Number(level.calculatedGpMargin) || 0) * 10000) / 10000
-            : calculateGpMargin({ bottlePrice, landedBottleCost, depletionAllowance }),
+        calculatedGpMargin: balanced.calculatedGpMargin,
         isFrontline: Boolean(level.isFrontline),
         isBest: Boolean(level.isBest),
         displayOrder: Math.max(0, Math.trunc(Number(level.displayOrder ?? index) || 0)),
@@ -411,6 +473,9 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     depletionAllowance: frontlineLevel?.depletionAllowance
   });
   const warnings = frontlineBottlePrice && grossProfitMargin < GP_WARNING_THRESHOLD ? [GP_WARNING_PERSISTED] : [];
+  const priceLevelWarnings = priceLevels
+    .filter((level) => level.active !== false && money(level.bottlePrice) > 0 && Number(level.calculatedGpMargin || 0) < GP_WARNING_THRESHOLD)
+    .map((level) => `${level.name} gross profit margin is below 28%.`);
   const productLifecycleStatus = input.conversionStatus === "exact_existing_product" ? "supplier_available" : "pending_product_creation";
 
   const supplierWine = {
@@ -436,20 +501,22 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     planning_sku_without_vintage: identity.planningSkuWithoutVintage,
     diagnostics: {
       ...pricing.diagnostics,
-      warnings,
+      warnings: Array.from(new Set([...warnings, ...priceLevelWarnings])),
       price_levels: priceLevels,
       free_goods: normalizeFreeGoods(input.freeGoods),
       quickbooks_item_name_preview: identity.displayName
     },
+    quickbooks_item_id: normalizeSpaces(input.quickbooksItemId || input.quickbooksItemNumber || "") || null,
+    quickbooks_item_name: normalizeSpaces(input.quickbooksItemName || "") || null,
     quickbooks_item_number: normalizeSpaces(input.quickbooksItemNumber || "") || null,
-    quickbooks_sync_status: "not_created",
+    quickbooks_sync_status: input.quickbooksItemNumber || input.quickbooksItemId ? "linked" : "not_created",
     product_lifecycle_status: productLifecycleStatus,
     accounting_create_payload: {},
     system_tags: normalizeSystemTags(input.systemTags || []),
     copied_from_supplier_catalog_wine_id: input.copiedFromSupplierCatalogWineId || null,
     source_system: input.sourceSystem || null,
     source_id: input.sourceId || null
-  } satisfies Omit<SupplierCatalogWine, "id" | "created_at" | "updated_at" | "quickbooks_item_id" | "quickbooks_item_name" | "price_levels" | "free_goods" | "workbench_items">;
+  } satisfies Omit<SupplierCatalogWine, "id" | "created_at" | "updated_at" | "price_levels" | "free_goods" | "workbench_items">;
 
   return {
     ...supplierWine,

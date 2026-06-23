@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import {
   productRowToCandidate,
+  quickbooksItemRowToCandidate,
   recommendationRowToCandidate,
   searchProductIdentityCandidates,
   supplierCatalogRowToCandidate,
@@ -17,6 +18,10 @@ export async function GET(request: Request) {
   const query = url.searchParams.get("q")?.trim() || "";
   const supplierId = url.searchParams.get("supplierId") || null;
   const supplierName = url.searchParams.get("supplierName") || null;
+  const producer = url.searchParams.get("producer") || null;
+  const vintage = url.searchParams.get("vintage") || null;
+  const packSize = Number(url.searchParams.get("packSize") || 0) || null;
+  const bottleSize = url.searchParams.get("bottleSize") || null;
 
   if (query.length < 3) {
     return NextResponse.json({ matches: [] });
@@ -52,7 +57,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  const [supplierResult, catalogResult, productsResult, reportRunsResult, vinosmithResult] = await Promise.all([
+  const [supplierResult, catalogResult, productsResult, reportRunsResult, vinosmithResult, quickbooksResult] = await Promise.all([
     searchSupabase
       .from("suppliers")
       .select("id,name,trucking_cost_per_bottle")
@@ -116,10 +121,16 @@ export async function GET(request: Request) {
         last_seen_at
       `)
       .or("active.is.null,active.eq.true")
+      .limit(MAX_SOURCE_ROWS),
+    searchSupabase
+      .from("quickbooks_items")
+      .select("list_id,name,full_name,is_active,sales_desc,purchase_desc,sales_price,purchase_cost,custom_fields,time_modified,last_seen_at")
+      .or("is_active.is.null,is_active.eq.true")
       .limit(MAX_SOURCE_ROWS)
   ]);
 
-  const sourceError = supplierResult.error || catalogResult.error || productsResult.error || reportRunsResult.error || vinosmithResult.error;
+  const sourceError =
+    supplierResult.error || catalogResult.error || productsResult.error || reportRunsResult.error || vinosmithResult.error || quickbooksResult.error;
   if (sourceError) {
     return NextResponse.json({ error: sourceError.message }, { status: 500 });
   }
@@ -163,6 +174,7 @@ export async function GET(request: Request) {
   const candidates: ProductIdentityCandidate[] = [
     ...(catalogResult.data || []).map((row) => supplierCatalogRowToCandidate(row)),
     ...(productsResult.data || []).map((row) => productRowToCandidate(row, supplierById)),
+    ...(quickbooksResult.data || []).map((row) => quickbooksItemRowToCandidate(row)),
     ...(recommendationResult.data || []).map((row) => recommendationRowToCandidate(row)),
     ...(vinosmithResult.data || []).map((row) => vinosmithWineRowToCandidate({ ...row, updated_at: row.last_seen_at }))
   ];
@@ -170,6 +182,10 @@ export async function GET(request: Request) {
   const matches = searchProductIdentityCandidates(
     {
       query,
+      producer,
+      vintage,
+      packSize,
+      bottleSize,
       supplierId,
       supplierName,
       limit: 8

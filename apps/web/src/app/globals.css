@@ -1622,6 +1622,24 @@ td {
   width: 100%;
 }
 
+.priced-field {
+  display: grid;
+  gap: 4px;
+}
+
+.priced-field small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.danger-cell {
+  color: #8f2c26;
+  font-weight: 900;
+}
+
 .inline-input-action {
   align-items: center;
   display: grid;

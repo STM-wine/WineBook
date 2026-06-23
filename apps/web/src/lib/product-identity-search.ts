@@ -7,7 +7,7 @@ import {
   normalizeVintage
 } from "@/lib/supplier-catalog";
 
-export type ProductIdentitySource = "supplier_catalog" | "product" | "recommendation" | "vinosmith";
+export type ProductIdentitySource = "supplier_catalog" | "product" | "recommendation" | "vinosmith" | "quickbooks_item";
 
 export type ProductIdentityCandidate = {
   source: ProductIdentitySource;
@@ -50,6 +50,10 @@ export type ParsedProductIdentityQuery = {
 
 type SearchInput = {
   query: string;
+  producer?: string | null;
+  vintage?: string | null;
+  packSize?: number | null;
+  bottleSize?: string | null;
   supplierId?: string | null;
   supplierName?: string | null;
   limit?: number;
@@ -59,14 +63,16 @@ const SOURCE_WEIGHT: Record<ProductIdentitySource, number> = {
   supplier_catalog: 0.12,
   product: 0.1,
   recommendation: 0.06,
-  vinosmith: 0.04
+  vinosmith: 0.04,
+  quickbooks_item: 0.11
 };
 
 const SOURCE_LABEL: Record<ProductIdentitySource, string> = {
   supplier_catalog: "Supplier Catalog",
   product: "Stem Product",
   recommendation: "Recent Report",
-  vinosmith: "Vinosmith"
+  vinosmith: "Vinosmith",
+  quickbooks_item: "QuickBooks"
 };
 
 const VINTAGE_RE = /\b(?:(?:19|20)\d{2}|NV|N\/V)\b/gi;
@@ -92,9 +98,10 @@ export function searchProductIdentityCandidates(
         candidate.quickbooksItemNumber
       ].filter(Boolean).map(searchKey);
       const baseScore = Math.max(...candidateKeys.map((key) => scoreKey(query, key)));
+      const attributeScore = scoreIdentityAttributes(candidate, input);
       const supplierScore = supplierBonus(candidate, input);
       const activeScore = candidate.active ? 0.02 : 0;
-      const score = Math.min(1, baseScore + supplierScore + SOURCE_WEIGHT[candidate.source] + activeScore);
+      const score = Math.min(1, baseScore + attributeScore + supplierScore + SOURCE_WEIGHT[candidate.source] + activeScore);
       return { ...candidate, score, sourceLabel: SOURCE_LABEL[candidate.source] };
     })
     .filter((match) => match.score >= minimumScore(queryTokens.length));
@@ -102,6 +109,51 @@ export function searchProductIdentityCandidates(
   return scored
     .sort((a, b) => b.score - a.score || sourceOrder(a.source) - sourceOrder(b.source) || newestFirst(a.updatedAt, b.updatedAt))
     .slice(0, Math.max(1, input.limit || 8));
+}
+
+export function quickbooksItemRowToCandidate(row: Record<string, unknown>): ProductIdentityCandidate {
+  const name = normalizeSpaces(textValue(row.full_name) || textValue(row.name));
+  const parsed = parseDisplayName(name);
+  const packSize = parsed.packSize || numberFromCustomFields(row.custom_fields, ["pack_size", "pack", "unit_set"]) || 12;
+  const bottleSize = parsed.bottleSize || textFromCustomFields(row.custom_fields, ["bottle_size", "size"]) || "750ml";
+  const displayName = buildDisplayName({
+    producer: parsed.producer,
+    wineName: parsed.wineName,
+    vintage: parsed.vintage,
+    packSize,
+    bottleSize
+  });
+  const pricing = calculatePricing({
+    packSize,
+    fobBottle: numberValue(row.purchase_cost),
+    frontlineBottlePrice: numberValue(row.sales_price)
+  });
+
+  return {
+    source: "quickbooks_item",
+    sourceId: String(row.list_id || name),
+    supplierId: null,
+    supplierName: "QuickBooks Desktop",
+    producer: parsed.producer,
+    wineName: parsed.wineName,
+    vintage: normalizeVintage(parsed.vintage),
+    packSize,
+    bottleSize,
+    fobBottle: pricing.fobBottle,
+    fobCase: pricing.fobCase,
+    laidInPerBottle: pricing.laidInPerBottle,
+    frontlineBottlePrice: pricing.frontlineBottlePrice,
+    bestPrice: pricing.bestPrice,
+    grossProfitMargin: pricing.grossProfitMargin,
+    displayName: name || displayName,
+    planningSku: buildPlanningSku(displayName),
+    planningSkuWithoutVintage: buildPlanningSku(displayName, true),
+    quickbooksItemNumber: stringOrNull(row.list_id),
+    quickbooksItemName: name || null,
+    systemTags: [],
+    active: row.is_active !== false,
+    updatedAt: stringOrNull(row.last_seen_at) || stringOrNull(row.time_modified)
+  };
 }
 
 export function supplierCatalogRowToCandidate(row: Record<string, unknown>): ProductIdentityCandidate {
@@ -345,12 +397,29 @@ function supplierBonus(candidate: ProductIdentityCandidate, input: Pick<SearchIn
   return 0;
 }
 
+function scoreIdentityAttributes(candidate: ProductIdentityCandidate, input: SearchInput) {
+  let score = 0;
+  if (input.producer && searchKey(candidate.producer) && scoreKey(searchKey(input.producer), searchKey(candidate.producer)) >= 0.6) {
+    score += 0.08;
+  }
+  if (input.vintage && normalizeVintage(input.vintage) === normalizeVintage(candidate.vintage)) {
+    score += 0.06;
+  }
+  if (input.packSize && Number(candidate.packSize) === Number(input.packSize)) {
+    score += 0.04;
+  }
+  if (input.bottleSize && normalizePackFormatBottle(input.bottleSize) === normalizePackFormatBottle(candidate.bottleSize)) {
+    score += 0.04;
+  }
+  return score;
+}
+
 function minimumScore(queryTokenCount: number) {
   return queryTokenCount <= 1 ? 0.56 : 0.36;
 }
 
 function sourceOrder(source: ProductIdentitySource) {
-  return ["supplier_catalog", "product", "recommendation", "vinosmith"].indexOf(source);
+  return ["quickbooks_item", "supplier_catalog", "product", "recommendation", "vinosmith"].indexOf(source);
 }
 
 function newestFirst(a: string | null, b: string | null) {
@@ -374,4 +443,23 @@ function textValue(value: unknown) {
 
 function numberValue(value: unknown) {
   return asNumber(textValue(value));
+}
+
+function textFromCustomFields(value: unknown, keys: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const fields = value as Record<string, unknown>;
+  for (const key of keys) {
+    const match = Object.entries(fields).find(([fieldKey]) => searchKey(fieldKey) === searchKey(key));
+    if (match) return normalizeSpaces(textValue(match[1]));
+  }
+  return "";
+}
+
+function numberFromCustomFields(value: unknown, keys: string[]) {
+  const text = textFromCustomFields(value, keys);
+  return text ? numberValue(text) : 0;
+}
+
+function normalizePackFormatBottle(value: unknown) {
+  return normalizeSpaces(value).toLowerCase().replace(/\s+/g, "");
 }

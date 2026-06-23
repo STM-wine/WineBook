@@ -8,13 +8,13 @@ import {
   AVAILABILITY_STATUSES,
   PLACEMENT_TYPES,
   SYSTEM_TAGS,
+  balancePriceLevel,
   buildSupplierCatalogWine,
   calculateGpMargin,
   calculatePricing,
   defaultLaidInForSupplier,
   money,
   normalizeWineIdentity,
-  requiredDepletionAllowanceForTargetMargin,
   type SupplierCatalogWineInput
 } from "@/lib/supplier-catalog";
 
@@ -169,6 +169,8 @@ function AddWinePanel({
   const [fobCase, setFobCase] = useState("");
   const [laidInPerBottle, setLaidInPerBottle] = useState(() => String(defaultLaidInForSupplier(suppliers, firstSupplier?.id || null, firstSupplier?.name || "")));
   const [systemTags, setSystemTags] = useState<string[]>([]);
+  const [quickbooksItemId, setQuickbooksItemId] = useState("");
+  const [quickbooksItemName, setQuickbooksItemName] = useState("");
   const [quickbooksItemNumber, setQuickbooksItemNumber] = useState("");
   const [copiedFromSupplierCatalogWineId, setCopiedFromSupplierCatalogWineId] = useState<string | null>(null);
   const [templateWine, setTemplateWine] = useState<SupplierCatalogWine | null>(null);
@@ -219,6 +221,10 @@ function AddWinePanel({
       const params = new URLSearchParams({ q: query });
       if (supplierId) params.set("supplierId", supplierId);
       if (supplierName) params.set("supplierName", supplierName);
+      if (producer) params.set("producer", producer);
+      if (vintage) params.set("vintage", vintage);
+      if (packSize) params.set("packSize", packSize);
+      if (bottleSize) params.set("bottleSize", bottleSize);
 
       setIsSearchingWineMatches(true);
       setWineMatchError("");
@@ -242,7 +248,7 @@ function AddWinePanel({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [supplierId, supplierName, templateWine, wineName]);
+  }, [bottleSize, packSize, producer, supplierId, supplierName, templateWine, vintage, wineName]);
 
   function selectSupplier(nextSupplierId: string) {
     setSupplierId(nextSupplierId);
@@ -278,7 +284,9 @@ function AddWinePanel({
     setFobCase(String(asNumber(wine.fob_case) || ""));
     setLaidInPerBottle(String(asNumber(wine.laid_in_per_bottle) || 0));
     setSystemTags(wine.system_tags || []);
-    setQuickbooksItemNumber("");
+    setQuickbooksItemId(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_id || wine.quickbooks_item_number || "" : "");
+    setQuickbooksItemName(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_name || "" : "");
+    setQuickbooksItemNumber(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_number || wine.quickbooks_item_id || "" : "");
     setPriceLevels(priceLevelDraftsFromWine(wine));
     setFreeGoods(freeGoodDraftsFromWine(wine));
     setPriceChangeReason(`Matched from ${wine.display_name}`);
@@ -304,6 +312,8 @@ function AddWinePanel({
     setFobBottle("");
     setFobCase("");
     setSystemTags([]);
+    setQuickbooksItemId("");
+    setQuickbooksItemName("");
     setQuickbooksItemNumber("");
     setPriceLevels(defaultPriceLevelDrafts());
     setFreeGoods([]);
@@ -350,15 +360,10 @@ function AddWinePanel({
     setPriceLevels((current) => (current.length <= 1 ? current : current.filter((level) => level.id !== id)));
   }
 
-  function calculateDaForLevel(level: PriceLevelDraft) {
-    const bottlePrice = parseOptionalNumber(level.bottlePrice) || 0;
-    const targetGpMargin = parseOptionalPercent(level.targetGpMargin);
-    const depletionAllowance = requiredDepletionAllowanceForTargetMargin({
-      bottlePrice,
-      landedBottleCost: computedPricing.landedBottleCost,
-      targetGpMargin
-    });
-    patchPriceLevel(level.id, { depletionAllowance: depletionAllowance ? String(depletionAllowance) : "0" });
+  function linkQuickbooksItem(match: ProductIdentityMatch) {
+    setQuickbooksItemId(match.quickbooksItemNumber || match.sourceId);
+    setQuickbooksItemName(match.quickbooksItemName || match.displayName);
+    setQuickbooksItemNumber(match.quickbooksItemNumber || match.sourceId);
   }
 
   function patchFreeGood(id: string, patch: Partial<FreeGoodDraft>) {
@@ -399,6 +404,8 @@ function AddWinePanel({
     conversionStatus,
     systemTags,
     copiedFromSupplierCatalogWineId,
+    quickbooksItemId: quickbooksItemId || effectiveQuickbooksItemNumber,
+    quickbooksItemName,
     quickbooksItemNumber: effectiveQuickbooksItemNumber,
     priceLevels: draftPriceLevels,
     freeGoods: freeGoods.map(freeGoodDraftToInput),
@@ -408,9 +415,11 @@ function AddWinePanel({
   const existing = wines.find((wine) => wine.planning_sku === preview.planning_sku);
   const previewDiagnostics = preview.diagnostics as Record<string, unknown>;
   const warnings = Array.isArray(previewDiagnostics.warnings) ? (previewDiagnostics.warnings as string[]) : [];
+  const isBelowMinimumGp = warnings.some((warning) => warning.includes("below 28%"));
 
   function saveWine(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isBelowMinimumGp) return;
     onSaveCatalogWine({ ...draftInput, priceChangeReason });
   }
 
@@ -466,6 +475,11 @@ function AddWinePanel({
                   >
                     Start From
                   </button>
+                  {match.quickbooksItemNumber || match.source === "quickbooks_item" ? (
+                    <button className="ghost-button button-small" onClick={() => linkQuickbooksItem(match)} type="button">
+                      Link QB
+                    </button>
+                  ) : null}
                 </div>
               ))
             ) : (
@@ -543,8 +557,22 @@ function AddWinePanel({
         </label>
         <label>
           QB Item #
-          <input value={quickbooksItemNumber} onChange={(event) => setQuickbooksItemNumber(event.target.value)} placeholder="Leave blank for New Item" />
+          <input
+            value={quickbooksItemNumber}
+            onChange={(event) => {
+              setQuickbooksItemNumber(event.target.value);
+              setQuickbooksItemId(event.target.value);
+              setQuickbooksItemName("");
+            }}
+            placeholder="Leave blank for New Item"
+          />
         </label>
+        {quickbooksItemName ? (
+          <label className="wide-field">
+            Linked QuickBooks Item
+            <input readOnly value={quickbooksItemName} />
+          </label>
+        ) : null}
         <label className="wide-field">
           Price change reason
           <input value={priceChangeReason} onChange={(event) => setPriceChangeReason(event.target.value)} />
@@ -622,11 +650,9 @@ function AddWinePanel({
             <tbody>
               {priceLevels.map((level, index) => {
                 const effective = priceLevelDraftToInput(level, index, computedPricing);
-                const gp = calculateGpMargin({
-                  bottlePrice: effective.bottlePrice,
-                  landedBottleCost: computedPricing.landedBottleCost,
-                  depletionAllowance: effective.depletionAllowance
-                });
+                const bottlePriceEntered = level.bottlePrice.trim().length > 0;
+                const daEntered = level.depletionAllowance.trim().length > 0;
+                const gpEntered = level.targetGpMargin.trim().length > 0;
 
                 return (
                   <tr key={level.id}>
@@ -634,43 +660,48 @@ function AddWinePanel({
                       <input aria-label="Price level name" value={level.name} onChange={(event) => patchPriceLevel(level.id, { name: event.target.value })} />
                     </td>
                     <td>
-                      <input
-                        aria-label="Bottle price"
-                        min={0}
-                        placeholder={String(effective.bottlePrice || "")}
-                        step={0.01}
-                        type="number"
-                        value={level.bottlePrice}
-                        onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value })}
-                      />
+                      <div className="priced-field">
+                        <input
+                          aria-label="Bottle price"
+                          min={0}
+                          placeholder={String(effective.bottlePrice || "")}
+                          step={0.01}
+                          type="number"
+                          value={level.bottlePrice}
+                          onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value })}
+                        />
+                        <small>{bottlePriceEntered && effective.calculatedField !== "frontline" ? "Entered" : "Calculated"}</small>
+                      </div>
                     </td>
                     <td>
-                      <div className="inline-input-action">
+                      <div className="priced-field">
                         <input
                           aria-label="Depletion allowance"
                           min={0}
                           step={0.01}
                           type="number"
+                          placeholder={String(effective.depletionAllowance || "")}
                           value={level.depletionAllowance}
                           onChange={(event) => patchPriceLevel(level.id, { depletionAllowance: event.target.value })}
                         />
-                        <button className="ghost-button button-tiny" onClick={() => calculateDaForLevel(level)} type="button">
-                          Calc
-                        </button>
+                        <small>{daEntered && effective.calculatedField !== "da" ? "Entered" : "Calculated"}</small>
                       </div>
                     </td>
                     <td>
-                      <input
-                        aria-label="Target GP margin"
-                        min={0}
-                        max={99}
-                        step={0.1}
-                        type="number"
-                        value={level.targetGpMargin}
-                        onChange={(event) => patchPriceLevel(level.id, { targetGpMargin: event.target.value })}
-                      />
+                      <div className="priced-field">
+                        <input
+                          aria-label="Target GP margin"
+                          min={0}
+                          max={99}
+                          step={0.1}
+                          type="number"
+                          value={level.targetGpMargin}
+                          onChange={(event) => patchPriceLevel(level.id, { targetGpMargin: event.target.value })}
+                        />
+                        <small>{gpEntered ? "Entered" : "Calculated"}</small>
+                      </div>
                     </td>
-                    <td>{formatPercent(gp)}</td>
+                    <td className={effective.belowMinimumGp ? "danger-cell" : undefined}>{formatPercent(effective.calculatedGpMargin)}</td>
                     <td>
                       <input
                         aria-label="Frontline"
@@ -767,6 +798,11 @@ function AddWinePanel({
           {warning}
         </div>
       ))}
+      {isBelowMinimumGp ? (
+        <div className="inline-warning">
+          Saving is blocked until every active price level is at or above 28% GP. Override permission is not available yet.
+        </div>
+      ) : null}
       {existing ? (
         <div className="inline-info">
           Existing planning SKU found. Saving updates the existing supplier wine and creates a draft price-change event if FOB or frontline changed.
@@ -787,7 +823,7 @@ function AddWinePanel({
         <button className="ghost-button" disabled={isPending} onClick={startNewSku} type="button">
           Create New
         </button>
-        <button className="button" disabled={isPending || !producer.trim() || !wineName.trim()} type="submit">
+        <button className="button" disabled={isPending || isBelowMinimumGp || !producer.trim() || !wineName.trim()} type="submit">
           {existing ? "Update SKU" : "Save SKU"}
         </button>
       </div>
@@ -861,10 +897,10 @@ function productIdentityMatchToTemplateWine(match: ProductIdentityMatch, query: 
     planning_sku: identity.planningSku,
     planning_sku_without_vintage: identity.planningSkuWithoutVintage,
     diagnostics: { source: match.source, source_id: match.sourceId },
-    quickbooks_item_id: null,
-    quickbooks_item_name: null,
-    quickbooks_item_number: null,
-    quickbooks_sync_status: "not_created",
+    quickbooks_item_id: match.source === "quickbooks_item" ? match.sourceId : match.quickbooksItemNumber,
+    quickbooks_item_name: match.quickbooksItemName,
+    quickbooks_item_number: match.quickbooksItemNumber,
+    quickbooks_sync_status: match.quickbooksItemNumber || match.source === "quickbooks_item" ? "linked" : "not_created",
     product_lifecycle_status: match.source === "supplier_catalog" ? "supplier_available" : "active_product",
     accounting_create_payload: {},
     system_tags: match.systemTags,
@@ -1004,28 +1040,25 @@ function priceLevelDraftToInput(level: PriceLevelDraft, index: number, pricing: 
     : level.isBest
       ? pricing.bestPrice || 0
       : 0;
-  const bottlePrice = parseOptionalNumber(level.bottlePrice) ?? fallbackPrice;
+  const bottlePrice = parseOptionalNumber(level.bottlePrice);
   const targetGpMargin = parseOptionalPercent(level.targetGpMargin);
-  const depletionAllowance = parseOptionalNumber(level.depletionAllowance) ?? (
-    targetGpMargin === null
-      ? 0
-      : requiredDepletionAllowanceForTargetMargin({
-          bottlePrice,
-          landedBottleCost: pricing.landedBottleCost,
-          targetGpMargin
-        })
-  );
-
-  return {
-    name: level.name || `Level ${index + 1}`,
+  const depletionAllowance = parseOptionalNumber(level.depletionAllowance);
+  const balanced = balancePriceLevel({
     bottlePrice,
     depletionAllowance,
     targetGpMargin,
-    calculatedGpMargin: calculateGpMargin({
-      bottlePrice,
-      landedBottleCost: pricing.landedBottleCost,
-      depletionAllowance
-    }),
+    landedBottleCost: pricing.landedBottleCost,
+    fallbackBottlePrice: fallbackPrice
+  });
+
+  return {
+    name: level.name || `Level ${index + 1}`,
+    bottlePrice: balanced.bottlePrice,
+    depletionAllowance: balanced.depletionAllowance,
+    targetGpMargin: balanced.targetGpMargin,
+    calculatedGpMargin: balanced.calculatedGpMargin,
+    calculatedField: balanced.calculatedField,
+    belowMinimumGp: balanced.belowMinimumGp,
     isFrontline: level.isFrontline,
     isBest: level.isBest,
     displayOrder: index,

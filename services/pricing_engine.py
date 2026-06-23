@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from math import ceil
 
 
-GP_WARNING_THRESHOLD = 0.27
+GP_WARNING_THRESHOLD = 0.28
 
 
 @dataclass(frozen=True)
@@ -44,6 +44,99 @@ def calculate_best_price(frontline_bottle_price: float) -> float | None:
     return None
 
 
+def calculate_gp_margin(
+    *,
+    bottle_price: float | None = None,
+    landed_bottle_cost: float | None = None,
+    depletion_allowance: float | None = None,
+) -> float:
+    price = _money(bottle_price)
+    if price <= 0:
+        return 0.0
+    landed = _money(landed_bottle_cost)
+    da = _money(depletion_allowance)
+    net_cost = max(0.0, landed - da)
+    return round((price - net_cost) / price, 4)
+
+
+def required_depletion_allowance_for_target_margin(
+    *,
+    bottle_price: float | None = None,
+    landed_bottle_cost: float | None = None,
+    target_gp_margin: float | None = None,
+) -> float:
+    price = _money(bottle_price)
+    landed = _money(landed_bottle_cost)
+    target = max(0.0, min(0.99, float(target_gp_margin or 0)))
+    if price <= 0 or landed <= 0 or target <= 0:
+        return 0.0
+    return _money(max(0.0, landed - price * (1 - target)))
+
+
+def required_bottle_price_for_target_margin(
+    *,
+    landed_bottle_cost: float | None = None,
+    depletion_allowance: float | None = None,
+    target_gp_margin: float | None = None,
+) -> float:
+    target = max(0.0, min(0.99, float(target_gp_margin or 0)))
+    net_cost = max(0.0, _money(landed_bottle_cost) - _money(depletion_allowance))
+    if net_cost <= 0 or target <= 0:
+        return 0.0
+    return _money(net_cost / (1 - target))
+
+
+def balance_price_level(
+    *,
+    bottle_price: float | None = None,
+    depletion_allowance: float | None = None,
+    target_gp_margin: float | None = None,
+    landed_bottle_cost: float | None = None,
+    fallback_bottle_price: float | None = None,
+) -> dict:
+    """Balance GP, DA, and bottle price using GP > DA > price precedence."""
+    has_price = bottle_price is not None
+    has_da = depletion_allowance is not None
+    has_target = target_gp_margin is not None
+    target = max(0.0, min(0.99, float(target_gp_margin or 0))) if has_target else None
+    landed = _money(landed_bottle_cost)
+    resolved_price = _money(bottle_price) if has_price else _money(fallback_bottle_price)
+    resolved_da = _money(depletion_allowance) if has_da else 0.0
+    calculated_field = "gp"
+
+    if target is not None and has_da:
+        resolved_price = required_bottle_price_for_target_margin(
+            landed_bottle_cost=landed,
+            depletion_allowance=resolved_da,
+            target_gp_margin=target,
+        )
+        calculated_field = "frontline"
+    elif target is not None and has_price:
+        resolved_da = required_depletion_allowance_for_target_margin(
+            bottle_price=resolved_price,
+            landed_bottle_cost=landed,
+            target_gp_margin=target,
+        )
+        calculated_field = "da"
+    elif not has_price and resolved_price > 0:
+        calculated_field = "fallback"
+
+    calculated_gp = calculate_gp_margin(
+        bottle_price=resolved_price,
+        landed_bottle_cost=landed,
+        depletion_allowance=resolved_da,
+    )
+
+    return {
+        "bottle_price": resolved_price,
+        "depletion_allowance": resolved_da,
+        "target_gp_margin": target,
+        "calculated_gp_margin": calculated_gp,
+        "calculated_field": calculated_field,
+        "below_minimum_gp": resolved_price > 0 and calculated_gp < GP_WARNING_THRESHOLD,
+    }
+
+
 def calculate_pricing(
     *,
     pack_size: int = 12,
@@ -71,7 +164,7 @@ def calculate_pricing(
 
     warnings = []
     if frontline and margin < GP_WARNING_THRESHOLD:
-        warnings.append("Gross profit margin is below 27%.")
+        warnings.append("Gross profit margin is below 28%.")
 
     return PricingResult(
         pack_size=pack,
