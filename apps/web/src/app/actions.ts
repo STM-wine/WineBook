@@ -359,6 +359,7 @@ export async function saveSupplierLogistics(input: {
 }
 
 export async function saveSupplierCatalogWine(input: {
+  existingCatalogWineId?: string | null;
   supplierId?: string | null;
   supplierName: string;
   producer: string;
@@ -402,6 +403,7 @@ export async function saveSupplierCatalogWine(input: {
     endsOn?: string | null;
     notes?: string | null;
     active?: boolean;
+    extensionMetadata?: Record<string, unknown> | null;
   }>;
   availabilityStatus?: string;
   conversionStatus?: string;
@@ -411,7 +413,7 @@ export async function saveSupplierCatalogWine(input: {
     throw new Error("Producer is required.");
   }
   if (!input.wineName.trim()) {
-    throw new Error("Wine / fantasy name is required.");
+    throw new Error("Fantasy Name is required.");
   }
   if (Number(input.packSize || 12) < 1) {
     throw new Error("Pack size must be at least 1.");
@@ -499,7 +501,11 @@ export async function saveSupplierCatalogWine(input: {
     throw new Error(latestRunError.message);
   }
 
-  const { price_levels: payloadPriceLevels, free_goods: payloadFreeGoods, ...rpcPayload } = payload;
+  const { price_levels: payloadPriceLevels, free_goods: payloadFreeGoods, ...payloadCatalog } = payload;
+  const rpcPayload = {
+    ...payloadCatalog,
+    ...(input.existingCatalogWineId ? { id: input.existingCatalogWineId } : {})
+  };
   const priceLevels = (payloadPriceLevels || []).map((level) => ({
     name: level.name,
     bottle_price: level.bottle_price,
@@ -521,7 +527,8 @@ export async function saveSupplierCatalogWine(input: {
     starts_on: freeGood.starts_on,
     ends_on: freeGood.ends_on,
     notes: freeGood.notes,
-    active: freeGood.active
+    active: freeGood.active,
+    extension_metadata: freeGood.extension_metadata || {}
   }));
 
   const { data: saveResult, error: saveError } = await supabase.rpc("save_supplier_catalog_sku", {
@@ -558,6 +565,58 @@ export async function saveSupplierCatalogWine(input: {
     planningSku: saved.planning_sku,
     priceChangeCreated: Boolean(event)
   };
+}
+
+export async function deletePendingSupplierCatalogWine(input: { id: string }) {
+  if (!input.id) {
+    throw new Error("Missing supplier wine id.");
+  }
+
+  const { supabase } = await requireWriteAccess();
+  const { data: wine, error: wineError } = await supabase
+    .from("supplier_catalog_wines")
+    .select("*")
+    .eq("id", input.id)
+    .single<SupplierCatalogWine>();
+
+  if (wineError || !wine) {
+    throw new Error(wineError?.message || "Supplier wine not found.");
+  }
+
+  const isPendingProduct =
+    wine.product_lifecycle_status === "pending_product_creation" ||
+    ["new_vintage", "new_format", "possible_match_needs_review", "net_new_product"].includes(wine.conversion_status);
+  const hasOfficialProduct =
+    wine.product_lifecycle_status === "active_product" ||
+    wine.quickbooks_sync_status === "created" ||
+    wine.quickbooks_sync_status === "linked" ||
+    Boolean(wine.quickbooks_item_id?.trim()) ||
+    Boolean(wine.quickbooks_item_number?.trim());
+
+  if (!isPendingProduct) {
+    throw new Error("Only pending product-creation records can be deleted here.");
+  }
+  if (hasOfficialProduct) {
+    throw new Error("This record is linked to an official or QuickBooks item and cannot be deleted here.");
+  }
+
+  const childDeletes = await Promise.all([
+    supabase.from("supplier_catalog_price_levels").delete().eq("supplier_catalog_wine_id", input.id),
+    supabase.from("supplier_catalog_free_goods").delete().eq("supplier_catalog_wine_id", input.id),
+    supabase.from("supplier_catalog_workbench_items").delete().eq("supplier_catalog_wine_id", input.id)
+  ]);
+  const childDeleteError = childDeletes.find((result) => result.error)?.error;
+  if (childDeleteError) {
+    throw new Error(childDeleteError.message);
+  }
+
+  const { error: deleteError } = await supabase.from("supplier_catalog_wines").delete().eq("id", input.id);
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+
+  revalidatePath("/");
+  return { displayName: wine.display_name };
 }
 
 export async function updateSupplierCatalogWorkbenchItems(input: {

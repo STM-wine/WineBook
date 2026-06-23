@@ -55,6 +55,7 @@ export type Recommendation = {
   order_path?: "stateside" | "di" | string | null;
   is_new_item?: boolean | null;
   new_item_warning?: string | null;
+  free_goods?: SupplierCatalogFreeGood[];
 };
 
 export type SupplierGroup = {
@@ -62,6 +63,7 @@ export type SupplierGroup = {
   rows: Recommendation[];
   skuCount: number;
   urgentCount: number;
+  freeGoodProgramCount: number;
   recommendedBottles: number;
   approvedBottles: number;
   suggestedValue: number;
@@ -151,6 +153,7 @@ export type SupplierCatalogFreeGood = {
   ends_on: string | null;
   notes: string | null;
   active: boolean;
+  extension_metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };

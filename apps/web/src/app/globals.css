@@ -1421,6 +1421,37 @@ td {
   gap: 18px;
 }
 
+.supplier-form-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.supplier-form-header h2 {
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.15;
+  margin: 0 0 5px;
+}
+
+.supplier-form-header p {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0;
+  max-width: 680px;
+}
+
+.supplier-form-header-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .supplier-form-grid,
 .request-form-grid {
   align-items: end;
@@ -1592,6 +1623,74 @@ td {
   margin-top: 5px;
 }
 
+.vintage-pricing-comparison {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.pricing-suggestion-pill {
+  align-items: center;
+  background: #fff2cc;
+  border: 1px solid #e7c96b;
+  border-radius: 999px;
+  color: #7a5600;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  padding: 7px 9px;
+  text-transform: uppercase;
+}
+
+.vintage-comparison-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+}
+
+.vintage-comparison-row {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto 1fr;
+  min-width: 0;
+  padding: 12px;
+}
+
+.vintage-comparison-row.changed {
+  background: #fff8df;
+  border-color: #e7c96b;
+}
+
+.vintage-comparison-row span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  grid-column: 1 / -1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vintage-comparison-row strong {
+  color: var(--ink);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.vintage-comparison-row b {
+  color: #7a5600;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .tag-selector {
   align-items: center;
   display: flex;
@@ -1651,7 +1750,7 @@ td {
   align-items: end;
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(6, minmax(100px, 1fr)) minmax(200px, 1.4fr) auto;
+  grid-template-columns: repeat(7, minmax(92px, 1fr)) minmax(200px, 1.4fr) auto;
 }
 
 .free-good-row label {
@@ -1685,7 +1784,9 @@ td {
 }
 
 .new-item-badge,
-.new-item-code {
+.new-item-code,
+.free-goods-badge,
+.free-goods-chip {
   background: #fff2cc;
   border: 1px solid #e7c96b;
   border-radius: 999px;
@@ -1705,6 +1806,26 @@ td {
   margin-left: 0;
 }
 
+.free-goods-badge {
+  margin-left: 8px;
+}
+
+.free-goods-chip {
+  margin-left: 0;
+}
+
+.free-goods-grid-cell {
+  color: #7a5600;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.muted-grid-value {
+  color: var(--muted);
+  font-weight: 750;
+}
+
 .new-item-row,
 .ag-theme-quartz .ag-row.new-item-row {
   background: #fff8df;
@@ -1719,6 +1840,19 @@ td {
   align-items: center;
   display: flex;
   justify-content: flex-end;
+}
+
+.pending-row-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 180px;
+}
+
+.danger-button {
+  color: #8f2c26;
 }
 
 .catalog-table-shell table,
@@ -2151,6 +2285,38 @@ td {
   font-size: 12px;
   font-weight: 750;
   margin-top: 4px;
+}
+
+.free-goods-opportunities {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.free-goods-opportunity {
+  align-items: center;
+  background: #fff8df;
+  border: 1px solid #e7c96b;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 0.55fr) minmax(220px, 1fr);
+  padding: 10px 12px;
+}
+
+.free-goods-opportunity strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.free-goods-opportunity span {
+  color: #7a5600;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .workbench-control-buttons {
@@ -3117,6 +3283,15 @@ tr.has-recommendation .sticky-name {
     overflow: visible;
   }
 
+  .supplier-form-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .supplier-form-header-actions {
+    justify-content: flex-start;
+  }
+
   .metric-grid,
   .supplier-metrics {
     grid-template-columns: repeat(2, minmax(150px, 1fr));
@@ -3139,9 +3314,15 @@ tr.has-recommendation .sticky-name {
   .supplier-form-grid,
   .request-form-grid,
   .catalog-preview-grid,
+  .vintage-comparison-grid,
+  .free-goods-opportunity,
   .grw-summary-grid,
   .rescue-grid-two,
   .rescue-definition-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .free-good-row {
     grid-template-columns: 1fr;
   }
 

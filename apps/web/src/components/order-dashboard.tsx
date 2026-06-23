@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   createSupplierWineRequest,
+  deletePendingSupplierCatalogWine,
   deletePurchaseOrderLine,
   refreshVinosmithReports,
   saveSupplierCatalogWine,
@@ -30,6 +31,7 @@ import {
   asNumber,
   buildMetrics,
   buildSupplierGroups,
+  enrichRecommendationsWithSupplierCatalogPrograms,
   filterRecommendations,
   mergeSupplierCatalogRows,
   sortSupplierGroups,
@@ -85,7 +87,10 @@ export function OrderDashboard({
 }: Props) {
   const router = useRouter();
   const combinedRecommendations = useMemo(
-    () => mergeSupplierCatalogRows(recommendations, supplierCatalogWines, reportRun.id),
+    () => enrichRecommendationsWithSupplierCatalogPrograms(
+      mergeSupplierCatalogRows(recommendations, supplierCatalogWines, reportRun.id),
+      supplierCatalogWines
+    ),
     [recommendations, reportRun.id, supplierCatalogWines]
   );
   const [rows, setRows] = useState(combinedRecommendations);
@@ -565,6 +570,22 @@ export function OrderDashboard({
     });
   }
 
+  function deleteCatalogWine(input: Parameters<typeof deletePendingSupplierCatalogWine>[0]) {
+    setPendingMessage("Deleting pending product...");
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        const result = await deletePendingSupplierCatalogWine(input);
+        setPendingMessage(`Deleted pending product: ${result.displayName}`);
+        router.refresh();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not delete pending product.");
+        setPendingMessage("");
+      }
+    });
+  }
+
   function createWineRequest(input: Parameters<typeof createSupplierWineRequest>[0]) {
     setPendingMessage("Saving wine request...");
     setErrorMessage("");
@@ -649,6 +670,7 @@ export function OrderDashboard({
           priceChangeEvents={priceChangeEvents}
           isPending={isPending}
           onCreateWineRequest={createWineRequest}
+          onDeleteCatalogWine={deleteCatalogWine}
           onSaveCatalogWine={saveCatalogWine}
           onSaveSupplier={saveSupplier}
           onUpdateWineRequestApproval={updateWineRequestApproval}

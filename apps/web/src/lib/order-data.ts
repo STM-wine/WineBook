@@ -1,4 +1,11 @@
-import type { DashboardMetrics, Recommendation, SupplierCatalogWine, SupplierCatalogWorkbenchItem, SupplierGroup } from "./types";
+import type {
+  DashboardMetrics,
+  Recommendation,
+  SupplierCatalogFreeGood,
+  SupplierCatalogWine,
+  SupplierCatalogWorkbenchItem,
+  SupplierGroup
+} from "./types";
 
 export type SupplierGroupSortMode = "default" | "az" | "za";
 
@@ -119,6 +126,36 @@ export function manualCatalogNewItemWarning(wine: Pick<SupplierCatalogWine, "qui
   return hasQuickBooksItemNumber(wine) ? null : "New Item: QuickBooks Item Number required before final entry.";
 }
 
+function todayDateKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function activeFreeGoodsForRow(row: Pick<Recommendation, "free_goods">, dateKey = todayDateKey()): SupplierCatalogFreeGood[] {
+  return (row.free_goods || []).filter((program) => {
+    if (program.active === false) return false;
+    if (program.starts_on && program.starts_on > dateKey) return false;
+    if (program.ends_on && program.ends_on < dateKey) return false;
+    return true;
+  });
+}
+
+export function freeGoodProgramLabel(program: SupplierCatalogFreeGood): string {
+  const name = program.program_name?.trim();
+  const unit = program.unit === "case" ? "case" : "bottle";
+  const buyQty = asNumber(program.buy_quantity);
+  const freeQty = asNumber(program.free_quantity);
+  const terms = buyQty > 0 || freeQty > 0
+    ? `Buy ${formatDecimal(buyQty, buyQty % 1 === 0 ? 0 : 1)} get ${formatDecimal(freeQty, freeQty % 1 === 0 ? 0 : 1)} ${unit}${freeQty === 1 ? "" : "s"}`
+    : "Free goods program";
+
+  return name ? `${name}: ${terms}` : terms;
+}
+
+export function freeGoodsSummary(programs: SupplierCatalogFreeGood[]): string {
+  if (programs.length === 0) return "";
+  return programs.map(freeGoodProgramLabel).join("; ");
+}
+
 function workbenchItemForRun(wine: SupplierCatalogWine, reportRunId: string): SupplierCatalogWorkbenchItem | null {
   return (
     wine.workbench_items?.find((item) => item.report_run_id === reportRunId && item.active !== false) || null
@@ -175,7 +212,8 @@ export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, r
     landed_cost: landedCost,
     order_path: workbenchItem?.order_path || "stateside",
     is_new_item: Boolean(warning),
-    new_item_warning: warning
+    new_item_warning: warning,
+    free_goods: wine.free_goods || []
   };
 }
 
@@ -187,6 +225,33 @@ export function mergeSupplierCatalogRows(recommendations: Recommendation[], cata
     .map((wine) => supplierCatalogWineToRecommendation(wine, reportRunId));
 
   return [...recommendations, ...manualRows];
+}
+
+export function enrichRecommendationsWithSupplierCatalogPrograms(rows: Recommendation[], catalogWines: SupplierCatalogWine[]): Recommendation[] {
+  const byId = new Map<string, SupplierCatalogWine>();
+  const bySku = new Map<string, SupplierCatalogWine>();
+  const byItemNumber = new Map<string, SupplierCatalogWine>();
+
+  catalogWines.forEach((wine) => {
+    byId.set(wine.id, wine);
+    if (wine.planning_sku) bySku.set(wine.planning_sku, wine);
+    if (wine.quickbooks_item_number?.trim()) byItemNumber.set(wine.quickbooks_item_number.trim(), wine);
+  });
+
+  return rows.map((row) => {
+    const catalogWine =
+      (row.supplier_catalog_wine_id ? byId.get(row.supplier_catalog_wine_id) : null) ||
+      (row.planning_sku ? bySku.get(row.planning_sku) : null) ||
+      (row.product_code ? byItemNumber.get(row.product_code) : null);
+
+    if (!catalogWine?.free_goods?.length) return row;
+
+    return {
+      ...row,
+      supplier_catalog_wine_id: row.supplier_catalog_wine_id || catalogWine.id,
+      free_goods: catalogWine.free_goods
+    };
+  });
 }
 
 export function uniqueSorted(values: Array<string | null | undefined>): string[] {
@@ -338,11 +403,13 @@ export function buildSupplierGroups(rows: Recommendation[]): SupplierGroup[] {
       const approvedBottles = approvedRows.reduce((sum, row) => sum + rowRecommendedQty(row), 0);
       const suggestedValue = sorted.reduce((sum, row) => sum + rowSuggestedValue(row), 0);
       const approvedValue = approvedRows.reduce((sum, row) => sum + rowApprovedEstimate(row), 0);
+      const freeGoodProgramCount = sorted.reduce((sum, row) => sum + activeFreeGoodsForRow(row).length, 0);
       return {
         supplier,
         rows: sorted,
         skuCount: sorted.length,
         urgentCount: sorted.filter((row) => row.risk_level === "High" || row.reorder_status === "URGENT").length,
+        freeGoodProgramCount,
         recommendedBottles,
         approvedBottles,
         suggestedValue,

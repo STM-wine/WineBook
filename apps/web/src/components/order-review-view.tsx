@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import type { DashboardMetrics, Recommendation, SupplierGroup } from "@/lib/types";
-import { formatCurrency, formatInteger, type SupplierGroupSortMode } from "@/lib/order-data";
+import {
+  activeFreeGoodsForRow,
+  formatCurrency,
+  formatInteger,
+  freeGoodsSummary,
+  type SupplierGroupSortMode
+} from "@/lib/order-data";
 import { MetricCard } from "./metric-card";
 import { WorkbenchGrid } from "./workbench-grid";
 
@@ -174,6 +180,7 @@ function SummaryTable({ groups }: { groups: SupplierGroup[] }) {
               <th>Supplier</th>
               <th>SKUs</th>
               <th>Urgent</th>
+              <th>Free Goods</th>
               <th>Suggested Qty</th>
               <th>Suggested Value</th>
               <th>Approved Qty</th>
@@ -186,6 +193,7 @@ function SummaryTable({ groups }: { groups: SupplierGroup[] }) {
                 <td>{group.supplier}</td>
                 <td>{formatInteger(group.skuCount)}</td>
                 <td>{formatInteger(group.urgentCount)}</td>
+                <td>{formatInteger(group.freeGoodProgramCount)}</td>
                 <td>{formatInteger(group.recommendedBottles)}</td>
                 <td>{formatCurrency(group.suggestedValue)}</td>
                 <td>{formatInteger(group.approvedBottles)}</td>
@@ -234,6 +242,9 @@ function SupplierSection({
   const tdmLabel = tdmNames.length === 0 ? "Unassigned" : tdmNames.length === 1 ? tdmNames[0] : "Multiple";
   const hasApprovedOrders = group.approvedBottles > 0;
   const approvedPercent = group.suggestedValue > 0 ? Math.round((group.approvedValue / group.suggestedValue) * 100) : 0;
+  const freeGoodsRows = group.rows
+    .map((row) => ({ row, programs: activeFreeGoodsForRow(row) }))
+    .filter((entry) => entry.programs.length > 0);
 
   useEffect(() => {
     setIsOpen(expandAll);
@@ -250,6 +261,7 @@ function SupplierSection({
           <span className={hasApprovedOrders ? "supplier-approved-value" : "supplier-approved-value is-empty"}>
             {formatCurrency(group.approvedValue)} approved
           </span>
+          {group.freeGoodProgramCount > 0 ? <span className="free-goods-chip">{formatInteger(group.freeGoodProgramCount)} free-goods</span> : null}
         </div>
         <div className="supplier-summary-actions">
           <button
@@ -282,6 +294,16 @@ function SupplierSection({
               tone="plum"
             />
           </div>
+          {freeGoodsRows.length > 0 ? (
+            <div className="free-goods-opportunities">
+              {freeGoodsRows.map(({ row, programs }) => (
+                <div className="free-goods-opportunity" key={row.id}>
+                  <strong>{row.product_name || row.planning_sku || "Unnamed wine"}</strong>
+                  <span>{freeGoodsSummary(programs)}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="supplier-workbench-options">
             <label className="target-weeks-control">
               Target weeks

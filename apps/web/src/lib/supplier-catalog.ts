@@ -76,6 +76,7 @@ export type SupplierCatalogFreeGoodInput = {
   endsOn?: string | null;
   notes?: string | null;
   active?: boolean;
+  extensionMetadata?: Record<string, unknown> | null;
 };
 
 export type SupplierCatalogWineInput = {
@@ -432,7 +433,8 @@ export function normalizeFreeGoods(freeGoods: SupplierCatalogFreeGoodInput[] = [
       startsOn: freeGood.startsOn || null,
       endsOn: freeGood.endsOn || null,
       notes: normalizeSpaces(freeGood.notes || "") || null,
-      active: freeGood.active ?? true
+      active: freeGood.active ?? true,
+      extensionMetadata: freeGood.extensionMetadata || {}
     }))
     .filter((freeGood) => Number(freeGood.buyQuantity) > 0 || Number(freeGood.freeQuantity) > 0 || Boolean(freeGood.programName));
 }
@@ -561,6 +563,7 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
       ends_on: freeGood.endsOn || null,
       notes: freeGood.notes || null,
       active: freeGood.active ?? true,
+      extension_metadata: freeGood.extensionMetadata || {},
       created_at: "",
       updated_at: ""
     })) satisfies SupplierCatalogFreeGood[]

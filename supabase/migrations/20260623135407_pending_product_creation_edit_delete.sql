@@ -1,129 +1,23 @@
--- Supplier Hub SKU-first catalog workflow.
---
--- V1 keeps supplier_catalog_wines as the durable orderable SKU row while adding
--- flexible child tables for price levels/free goods and a separate manual
--- workbench bridge for rows that are not reorder_recommendations.
+-- Support stable-ID edits and protected deletion for pending product creation.
 
-alter table public.supplier_catalog_wines
-    add column if not exists system_tags text[] not null default '{}',
-    add column if not exists copied_from_supplier_catalog_wine_id uuid references public.supplier_catalog_wines(id),
-    add column if not exists source_system text
-        check (source_system is null or source_system in ('quickbooks_desktop', 'vinosmith', 'email', 'manual', 'stem')),
-    add column if not exists source_id text,
-    add column if not exists quickbooks_item_number text;
+grant select, insert, update, delete on public.supplier_catalog_wines to authenticated;
+grant select, insert, update, delete on public.supplier_catalog_workbench_items to authenticated;
 
-create table if not exists public.supplier_catalog_price_levels (
-    id uuid primary key default gen_random_uuid(),
-    supplier_catalog_wine_id uuid not null references public.supplier_catalog_wines(id) on delete cascade,
-    name text not null,
-    bottle_price numeric(12, 2) not null default 0 check (bottle_price >= 0),
-    depletion_allowance numeric(12, 2) not null default 0 check (depletion_allowance >= 0),
-    target_gp_margin numeric(8, 4) check (target_gp_margin is null or (target_gp_margin >= 0 and target_gp_margin < 1)),
-    calculated_gp_margin numeric(8, 4) not null default 0,
-    is_frontline boolean not null default false,
-    is_best boolean not null default false,
-    display_order integer not null default 0,
-    active boolean not null default true,
-    source_system text
-        check (source_system is null or source_system in ('quickbooks_desktop', 'vinosmith', 'email', 'manual', 'stem')),
-    source_id text,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
-);
+alter table public.supplier_catalog_free_goods
+    add column if not exists extension_metadata jsonb not null default '{}'::jsonb;
 
-create table if not exists public.supplier_catalog_free_goods (
-    id uuid primary key default gen_random_uuid(),
-    supplier_catalog_wine_id uuid not null references public.supplier_catalog_wines(id) on delete cascade,
-    buy_quantity numeric(12, 2) not null default 0 check (buy_quantity >= 0),
-    free_quantity numeric(12, 2) not null default 0 check (free_quantity >= 0),
-    unit text not null default 'bottle' check (unit in ('bottle', 'case')),
-    program_name text,
-    starts_on date,
-    ends_on date,
-    notes text,
-    active boolean not null default true,
-    extension_metadata jsonb not null default '{}'::jsonb,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    check (ends_on is null or starts_on is null or ends_on >= starts_on)
-);
+drop policy if exists "buyer and admin profiles can delete pending supplier catalog wines"
+    on public.supplier_catalog_wines;
 
-create table if not exists public.supplier_catalog_workbench_items (
-    id uuid primary key default gen_random_uuid(),
-    report_run_id uuid references public.report_runs(id) on delete cascade,
-    supplier_catalog_wine_id uuid not null references public.supplier_catalog_wines(id) on delete cascade,
-    recommendation_status text not null default 'rejected'
-        check (recommendation_status in ('rejected', 'approved', 'edited', 'deferred')),
-    recommended_qty integer not null default 0 check (recommended_qty >= 0),
-    approved_qty integer not null default 0 check (approved_qty >= 0),
-    order_path text not null default 'stateside'
-        check (order_path in ('stateside', 'di')),
-    active boolean not null default true,
-    notes text,
-    created_by uuid references auth.users(id),
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    unique (report_run_id, supplier_catalog_wine_id)
-);
-
-alter table public.purchase_order_lines
-    add column if not exists supplier_catalog_wine_id uuid references public.supplier_catalog_wines(id),
-    add column if not exists is_new_item boolean not null default false,
-    add column if not exists new_item_warning text;
-
-create index if not exists idx_supplier_catalog_wines_copied_from
-    on public.supplier_catalog_wines(copied_from_supplier_catalog_wine_id);
-
-create index if not exists idx_supplier_catalog_wines_system_tags
-    on public.supplier_catalog_wines using gin(system_tags);
-
-create index if not exists idx_supplier_catalog_price_levels_wine
-    on public.supplier_catalog_price_levels(supplier_catalog_wine_id, active, display_order);
-
-create index if not exists idx_supplier_catalog_free_goods_wine
-    on public.supplier_catalog_free_goods(supplier_catalog_wine_id, active);
-
-create index if not exists idx_supplier_catalog_workbench_items_report
-    on public.supplier_catalog_workbench_items(report_run_id, active);
-
-create index if not exists idx_supplier_catalog_workbench_items_wine
-    on public.supplier_catalog_workbench_items(supplier_catalog_wine_id);
-
-create index if not exists idx_po_lines_supplier_catalog_wine
-    on public.purchase_order_lines(supplier_catalog_wine_id);
-
-alter table public.supplier_catalog_price_levels enable row level security;
-alter table public.supplier_catalog_free_goods enable row level security;
-alter table public.supplier_catalog_workbench_items enable row level security;
-
-grant select, insert, update, delete on public.supplier_catalog_price_levels to authenticated;
-grant select, insert, update, delete on public.supplier_catalog_free_goods to authenticated;
-grant select, insert, update on public.supplier_catalog_workbench_items to authenticated;
-
-drop policy if exists "authenticated users can read supplier catalog price levels"
-    on public.supplier_catalog_price_levels;
-
-create policy "authenticated users can read supplier catalog price levels"
-    on public.supplier_catalog_price_levels for select
-    to authenticated
-    using (true);
-
-drop policy if exists "buyer and admin profiles can manage supplier catalog price levels"
-    on public.supplier_catalog_price_levels;
-
-create policy "buyer and admin profiles can manage supplier catalog price levels"
-    on public.supplier_catalog_price_levels for all
+create policy "buyer and admin profiles can delete pending supplier catalog wines"
+    on public.supplier_catalog_wines for delete
     to authenticated
     using (
-        exists (
-            select 1
-            from public.app_profiles profile
-            where profile.id = (select auth.uid())
-              and profile.role in ('buyer', 'admin')
-        )
-    )
-    with check (
-        exists (
+        product_lifecycle_status = 'pending_product_creation'
+        and quickbooks_sync_status not in ('created', 'linked')
+        and quickbooks_item_id is null
+        and quickbooks_item_number is null
+        and exists (
             select 1
             from public.app_profiles profile
             where profile.id = (select auth.uid())
@@ -131,75 +25,13 @@ create policy "buyer and admin profiles can manage supplier catalog price levels
         )
     );
 
-drop policy if exists "authenticated users can read supplier catalog free goods"
-    on public.supplier_catalog_free_goods;
+drop policy if exists "buyer and admin profiles can delete supplier catalog workbench items"
+    on public.supplier_catalog_workbench_items;
 
-create policy "authenticated users can read supplier catalog free goods"
-    on public.supplier_catalog_free_goods for select
-    to authenticated
-    using (true);
-
-drop policy if exists "buyer and admin profiles can manage supplier catalog free goods"
-    on public.supplier_catalog_free_goods;
-
-create policy "buyer and admin profiles can manage supplier catalog free goods"
-    on public.supplier_catalog_free_goods for all
+create policy "buyer and admin profiles can delete supplier catalog workbench items"
+    on public.supplier_catalog_workbench_items for delete
     to authenticated
     using (
-        exists (
-            select 1
-            from public.app_profiles profile
-            where profile.id = (select auth.uid())
-              and profile.role in ('buyer', 'admin')
-        )
-    )
-    with check (
-        exists (
-            select 1
-            from public.app_profiles profile
-            where profile.id = (select auth.uid())
-              and profile.role in ('buyer', 'admin')
-        )
-    );
-
-drop policy if exists "authenticated users can read supplier catalog workbench items"
-    on public.supplier_catalog_workbench_items;
-
-create policy "authenticated users can read supplier catalog workbench items"
-    on public.supplier_catalog_workbench_items for select
-    to authenticated
-    using (true);
-
-drop policy if exists "buyer and admin profiles can create supplier catalog workbench items"
-    on public.supplier_catalog_workbench_items;
-
-create policy "buyer and admin profiles can create supplier catalog workbench items"
-    on public.supplier_catalog_workbench_items for insert
-    to authenticated
-    with check (
-        exists (
-            select 1
-            from public.app_profiles profile
-            where profile.id = (select auth.uid())
-              and profile.role in ('buyer', 'admin')
-        )
-    );
-
-drop policy if exists "buyer and admin profiles can update supplier catalog workbench items"
-    on public.supplier_catalog_workbench_items;
-
-create policy "buyer and admin profiles can update supplier catalog workbench items"
-    on public.supplier_catalog_workbench_items for update
-    to authenticated
-    using (
-        exists (
-            select 1
-            from public.app_profiles profile
-            where profile.id = (select auth.uid())
-              and profile.role in ('buyer', 'admin')
-        )
-    )
-    with check (
         exists (
             select 1
             from public.app_profiles profile
@@ -233,11 +65,32 @@ begin
         raise exception 'Buyer or admin access required.';
     end if;
 
-    select *
-      into v_existing
-      from public.supplier_catalog_wines
-     where planning_sku = p_catalog->>'planning_sku'
-     limit 1;
+    if nullif(p_catalog->>'id', '') is not null then
+        select *
+          into v_existing
+          from public.supplier_catalog_wines
+         where id = nullif(p_catalog->>'id', '')::uuid
+         limit 1;
+
+        if v_existing.id is null then
+            raise exception 'Supplier catalog wine not found for edit.';
+        end if;
+    end if;
+
+    if v_existing.id is null then
+        select *
+          into v_existing
+          from public.supplier_catalog_wines
+         where planning_sku = p_catalog->>'planning_sku'
+         limit 1;
+    elsif exists (
+        select 1
+          from public.supplier_catalog_wines duplicate
+         where duplicate.planning_sku = p_catalog->>'planning_sku'
+           and duplicate.id <> v_existing.id
+    ) then
+        raise exception 'Planning SKU already belongs to another supplier wine.';
+    end if;
 
     if v_existing.id is null then
         insert into public.supplier_catalog_wines (
@@ -333,11 +186,20 @@ begin
                planning_sku = p_catalog->>'planning_sku',
                planning_sku_without_vintage = p_catalog->>'planning_sku_without_vintage',
                diagnostics = coalesce(p_catalog->'diagnostics', '{}'::jsonb),
-               quickbooks_item_id = coalesce(nullif(p_catalog->>'quickbooks_item_id', ''), v_existing.quickbooks_item_id),
-               quickbooks_item_name = coalesce(nullif(p_catalog->>'quickbooks_item_name', ''), v_existing.quickbooks_item_name),
-               quickbooks_item_number = coalesce(nullif(p_catalog->>'quickbooks_item_number', ''), v_existing.quickbooks_item_number),
+               quickbooks_item_id = case
+                   when v_existing.quickbooks_sync_status in ('created', 'linked') then v_existing.quickbooks_item_id
+                   else nullif(p_catalog->>'quickbooks_item_id', '')
+               end,
+               quickbooks_item_name = case
+                   when v_existing.quickbooks_sync_status in ('created', 'linked') then v_existing.quickbooks_item_name
+                   else nullif(p_catalog->>'quickbooks_item_name', '')
+               end,
+               quickbooks_item_number = case
+                   when v_existing.quickbooks_sync_status in ('created', 'linked') then v_existing.quickbooks_item_number
+                   else nullif(p_catalog->>'quickbooks_item_number', '')
+               end,
                quickbooks_sync_status = case
-                   when v_existing.quickbooks_sync_status = 'linked' then 'linked'
+                   when v_existing.quickbooks_sync_status in ('created', 'linked') then v_existing.quickbooks_sync_status
                    else coalesce(nullif(p_catalog->>'quickbooks_sync_status', ''), 'not_created')
                end,
                product_lifecycle_status = case
@@ -346,12 +208,9 @@ begin
                end,
                accounting_create_payload = coalesce(p_catalog->'accounting_create_payload', '{}'::jsonb),
                system_tags = coalesce(array(select jsonb_array_elements_text(coalesce(p_catalog->'system_tags', '[]'::jsonb))), '{}'),
-               copied_from_supplier_catalog_wine_id = coalesce(
-                   nullif(p_catalog->>'copied_from_supplier_catalog_wine_id', '')::uuid,
-                   v_existing.copied_from_supplier_catalog_wine_id
-               ),
-               source_system = coalesce(nullif(p_catalog->>'source_system', ''), v_existing.source_system),
-               source_id = coalesce(nullif(p_catalog->>'source_id', ''), v_existing.source_id),
+               copied_from_supplier_catalog_wine_id = nullif(p_catalog->>'copied_from_supplier_catalog_wine_id', '')::uuid,
+               source_system = nullif(p_catalog->>'source_system', ''),
+               source_id = nullif(p_catalog->>'source_id', ''),
                updated_at = now()
          where id = v_existing.id
          returning * into v_saved;

@@ -14,11 +14,13 @@ import {
 import type { Recommendation } from "@/lib/types";
 import { diEligibility, isDiOpportunity, orderPath } from "@/lib/di-planning";
 import {
+  activeFreeGoodsForRow,
   asNumber,
   displayWineName,
   formatCurrency,
   formatDecimal,
   formatInteger,
+  freeGoodsSummary,
   rowApprovedEstimate,
   rowRecommendedQty
 } from "@/lib/order-data";
@@ -42,6 +44,7 @@ type WorkbenchRow = Recommendation & {
   working_weeks: number;
   approved: boolean;
   estimated_cost: number;
+  free_goods_summary: string;
 };
 
 type ManualEditState = Record<string, { qty?: boolean; weeks?: boolean }>;
@@ -53,6 +56,7 @@ const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
   <span className="wine-cell-value">
     <span>{params.valueFormatted ?? params.value ?? ""}</span>
     {params.data?.is_new_item ? <span className="new-item-badge">New Item</span> : null}
+    {params.data && activeFreeGoodsForRow(params.data).length > 0 ? <span className="free-goods-badge">Free Goods</span> : null}
     {params.data && isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}
   </span>
 );
@@ -145,7 +149,8 @@ export function WorkbenchGrid({
         working_qty: rowRecommendedQty(row),
         working_weeks: weeksFromQty(row, rowRecommendedQty(row)),
         approved: row.recommendation_status === "approved" || row.recommendation_status === "edited",
-        estimated_cost: rowApprovedEstimate(row)
+        estimated_cost: rowApprovedEstimate(row),
+        free_goods_summary: freeGoodsSummary(activeFreeGoodsForRow(row))
       }));
     },
     [rows]
@@ -258,6 +263,16 @@ export function WorkbenchGrid({
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
         valueFormatter: currencyFormatter
+      },
+      {
+        headerName: "Free Goods",
+        field: "free_goods_summary",
+        width: 210,
+        headerTooltip: "Active catalog free-goods programs. Informational only; PO quantities and financials are unchanged.",
+        cellClass: "text-cell free-goods-grid-cell",
+        cellStyle: LEFT_CELL_STYLE,
+        cellRenderer: (params: ICellRendererParams<WorkbenchRow>) =>
+          params.value ? <span title={params.value}>{params.value}</span> : <span className="muted-grid-value">None</span>
       },
       {
         headerName: "True Available",

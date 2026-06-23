@@ -19,7 +19,13 @@ import {
 } from "@/lib/supplier-catalog";
 
 type HubArea = "search" | "add" | "requests" | "pending" | "price-changes" | "logistics";
-type SaveCatalogWineInput = Parameters<typeof buildSupplierCatalogWine>[0] & { priceChangeReason?: string };
+type SaveCatalogWineInput = Parameters<typeof buildSupplierCatalogWine>[0] & {
+  existingCatalogWineId?: string | null;
+  priceChangeReason?: string;
+};
+type DeleteCatalogWineInput = {
+  id: string;
+};
 type CreateWineRequestInput = {
   sourceType: "net_new_wine" | "supplier_available_wine";
   supplierCatalogWineId?: string | null;
@@ -61,6 +67,7 @@ export function SupplierHubView({
   priceChangeEvents,
   isPending,
   onCreateWineRequest,
+  onDeleteCatalogWine,
   onSaveCatalogWine,
   onSaveSupplier,
   onUpdateWineRequestApproval
@@ -71,11 +78,13 @@ export function SupplierHubView({
   priceChangeEvents: PriceChangeEvent[];
   isPending: boolean;
   onCreateWineRequest: (input: CreateWineRequestInput) => void;
+  onDeleteCatalogWine: (input: DeleteCatalogWineInput) => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
   onSaveSupplier: (supplier: SupplierLogistics) => void;
   onUpdateWineRequestApproval: (input: UpdateWineRequestApprovalInput) => void;
 }) {
   const [activeArea, setActiveArea] = useState<HubArea>("search");
+  const [pendingEditWineId, setPendingEditWineId] = useState<string | null>(null);
   const pendingWineCount = supplierCatalogWines.filter((wine) => PENDING_CONVERSION_STATUSES.has(wine.conversion_status)).length;
   const pendingRequestCount = wineRequests.filter((request) => request.request_status === "pending_review").length;
   const draftPriceChanges = priceChangeEvents.filter((event) => event.status === "draft").length;
@@ -127,6 +136,8 @@ export function SupplierHubView({
           suppliers={suppliers}
           wines={supplierCatalogWines}
           isPending={isPending}
+          editWine={supplierCatalogWines.find((wine) => wine.id === pendingEditWineId) || null}
+          onClearPendingEdit={() => setPendingEditWineId(null)}
           onSaveCatalogWine={onSaveCatalogWine}
         />
       ) : null}
@@ -139,7 +150,18 @@ export function SupplierHubView({
           onUpdateWineRequestApproval={onUpdateWineRequestApproval}
         />
       ) : null}
-      {activeArea === "pending" ? <PendingProductCreationPanel wines={supplierCatalogWines} requests={wineRequests} /> : null}
+      {activeArea === "pending" ? (
+        <PendingProductCreationPanel
+          wines={supplierCatalogWines}
+          requests={wineRequests}
+          isPending={isPending}
+          onDeleteCatalogWine={onDeleteCatalogWine}
+          onEditCatalogWine={(wine) => {
+            setPendingEditWineId(wine.id);
+            setActiveArea("add");
+          }}
+        />
+      ) : null}
       {activeArea === "price-changes" ? <PriceChangesPanel events={priceChangeEvents} /> : null}
       {activeArea === "logistics" ? <SupplierLogisticsPanel suppliers={suppliers} isPending={isPending} onSaveSupplier={onSaveSupplier} /> : null}
     </section>
@@ -150,11 +172,15 @@ function AddWinePanel({
   suppliers,
   wines,
   isPending,
+  editWine,
+  onClearPendingEdit,
   onSaveCatalogWine
 }: {
   suppliers: SupplierLogistics[];
   wines: SupplierCatalogWine[];
   isPending: boolean;
+  editWine: SupplierCatalogWine | null;
+  onClearPendingEdit: () => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
 }) {
   const firstSupplier = suppliers[0] || null;
@@ -174,10 +200,13 @@ function AddWinePanel({
   const [quickbooksItemNumber, setQuickbooksItemNumber] = useState("");
   const [copiedFromSupplierCatalogWineId, setCopiedFromSupplierCatalogWineId] = useState<string | null>(null);
   const [templateWine, setTemplateWine] = useState<SupplierCatalogWine | null>(null);
+  const [pendingEditId, setPendingEditId] = useState<string | null>(null);
+  const [pendingEditConversionStatus, setPendingEditConversionStatus] = useState<SupplierCatalogWineInput["conversionStatus"] | null>(null);
   const [wineNameMatches, setWineNameMatches] = useState<ProductIdentityMatch[]>([]);
   const [wineMatchError, setWineMatchError] = useState("");
   const [isSearchingWineMatches, setIsSearchingWineMatches] = useState(false);
   const [priceLevels, setPriceLevels] = useState<PriceLevelDraft[]>(() => defaultPriceLevelDrafts());
+  const [priceLevelsFollowPricing, setPriceLevelsFollowPricing] = useState(false);
   const [freeGoods, setFreeGoods] = useState<FreeGoodDraft[]>([]);
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
   const sortedCloneOptions = useMemo(() => [...wines].sort(sortNewestVintageFirst), [wines]);
@@ -188,9 +217,6 @@ function AddWinePanel({
     fobCase: parseOptionalNumber(fobCase),
     laidInPerBottle: parseOptionalNumber(laidInPerBottle) || 0
   });
-  const draftPriceLevels = priceLevels
-    .map((level, index) => priceLevelDraftToInput(level, index, computedPricing))
-    .filter((level) => level.active && (money(level.bottlePrice) > 0 || level.isFrontline));
   const copiedFromWine = templateWine;
   const showWineNameMatches = wineName.trim().length >= 3 && !templateWine;
   const currentIdentity = normalizeWineIdentity({
@@ -205,7 +231,14 @@ function AddWinePanel({
     copiedSkuChanged && quickbooksItemNumber.trim() === (copiedFromWine?.quickbooks_item_number || "").trim()
       ? ""
       : quickbooksItemNumber;
-  const conversionStatus = conversionStatusForDraft(copiedFromWine, currentIdentity);
+  const conversionStatus =
+    pendingEditId && pendingEditConversionStatus
+      ? pendingEditConversionStatus
+      : conversionStatusForDraft(copiedFromWine, currentIdentity);
+  const priceLevelsForDraft = priceLevelsFollowPricing && conversionStatus === "new_vintage" ? defaultPriceLevelDrafts() : priceLevels;
+  const draftPriceLevels = priceLevelsForDraft
+    .map((level, index) => priceLevelDraftToInput(level, index, computedPricing))
+    .filter((level) => level.active && (money(level.bottlePrice) > 0 || level.isFrontline));
 
   useEffect(() => {
     const query = wineName.trim();
@@ -262,7 +295,7 @@ function AddWinePanel({
     setLaidInPerBottle("0");
   }
 
-  function applyWineTemplate(wine: SupplierCatalogWine, catalogWineId: string | null = null) {
+  function applyWineTemplate(wine: SupplierCatalogWine, catalogWineId: string | null = null, options: { followPricing?: boolean } = {}) {
     const nextProducer = wine.producer;
     const nextWineName = wine.wine_name;
     const nextVintage = wine.vintage || "NV";
@@ -287,19 +320,31 @@ function AddWinePanel({
     setQuickbooksItemId(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_id || wine.quickbooks_item_number || "" : "");
     setQuickbooksItemName(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_name || "" : "");
     setQuickbooksItemNumber(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_number || wine.quickbooks_item_id || "" : "");
-    setPriceLevels(priceLevelDraftsFromWine(wine));
-    setFreeGoods(freeGoodDraftsFromWine(wine));
+    setPriceLevels(options.followPricing ? defaultPriceLevelDrafts() : priceLevelDraftsFromWine(wine));
+    setPriceLevelsFollowPricing(Boolean(options.followPricing));
+    setFreeGoods(freeGoodDraftsFromWine(wine, { expirePastPrograms: Boolean(options.followPricing) }));
     setPriceChangeReason(`Matched from ${wine.display_name}`);
   }
+
+  useEffect(() => {
+    if (!editWine || editWine.id === pendingEditId) return;
+    applyWineTemplate(editWine, editWine.copied_from_supplier_catalog_wine_id || null, { followPricing: false });
+    setPendingEditId(editWine.id);
+    setPendingEditConversionStatus(normalizeConversionStatus(editWine.conversion_status));
+    setPriceChangeReason(`Editing pending product: ${editWine.display_name}`);
+  }, [editWine, pendingEditId]);
 
   function selectClone(value: string) {
     const wine = wines.find((row) => row.id === value || row.display_name === value || row.planning_sku === value);
     if (!wine) return;
 
-    applyWineTemplate(wine, wine.id);
+    applyWineTemplate(wine, wine.id, { followPricing: true });
   }
 
   function startNewSku() {
+    setPendingEditId(null);
+    setPendingEditConversionStatus(null);
+    onClearPendingEdit();
     setCopiedFromSupplierCatalogWineId(null);
     setTemplateWine(null);
     setWineNameMatches([]);
@@ -316,6 +361,7 @@ function AddWinePanel({
     setQuickbooksItemName("");
     setQuickbooksItemNumber("");
     setPriceLevels(defaultPriceLevelDrafts());
+    setPriceLevelsFollowPricing(false);
     setFreeGoods([]);
     setPriceChangeReason("Manual catalog update");
     if (supplierId) {
@@ -324,11 +370,44 @@ function AddWinePanel({
     }
   }
 
+  function clearForm() {
+    const supplier = suppliers.find((row) => row.id === supplierId) || firstSupplier;
+    const nextSupplierId = supplier?.id || "";
+    const nextSupplierName = supplier?.name || "Manual Supplier";
+
+    setPendingEditId(null);
+    setPendingEditConversionStatus(null);
+    onClearPendingEdit();
+    setCopiedFromSupplierCatalogWineId(null);
+    setTemplateWine(null);
+    setWineNameMatches([]);
+    setWineMatchError("");
+    setSupplierId(nextSupplierId);
+    setSupplierName(nextSupplierName);
+    setProducer("");
+    setWineName("");
+    setVintage("NV");
+    setPackSize("12");
+    setBottleSize("750ml");
+    setFobBottle("");
+    setFobCase("");
+    setLaidInPerBottle(String(defaultLaidInForSupplier(suppliers, supplier?.id || null, nextSupplierName)));
+    setSystemTags([]);
+    setQuickbooksItemId("");
+    setQuickbooksItemName("");
+    setQuickbooksItemNumber("");
+    setPriceLevels(defaultPriceLevelDrafts());
+    setPriceLevelsFollowPricing(false);
+    setFreeGoods([]);
+    setPriceChangeReason("Manual catalog update");
+  }
+
   function toggleSystemTag(tag: string) {
     setSystemTags((current) => (current.includes(tag) ? current.filter((value) => value !== tag) : [...current, tag]));
   }
 
   function patchPriceLevel(id: string, patch: Partial<PriceLevelDraft>) {
+    setPriceLevelsFollowPricing(false);
     setPriceLevels((current) =>
       current.map((level) => {
         if (level.id !== id) return level;
@@ -341,6 +420,7 @@ function AddWinePanel({
   }
 
   function addPriceLevel() {
+    setPriceLevelsFollowPricing(false);
     setPriceLevels((current) => [
       ...current,
       {
@@ -357,6 +437,7 @@ function AddWinePanel({
   }
 
   function removePriceLevel(id: string) {
+    setPriceLevelsFollowPricing(false);
     setPriceLevels((current) => (current.length <= 1 ? current : current.filter((level) => level.id !== id)));
   }
 
@@ -412,22 +493,69 @@ function AddWinePanel({
     priceChangeReason
   };
   const preview = buildSupplierCatalogWine(draftInput);
-  const existing = wines.find((wine) => wine.planning_sku === preview.planning_sku);
+  const existing = wines.find((wine) => wine.planning_sku === preview.planning_sku && wine.id !== pendingEditId);
   const previewDiagnostics = preview.diagnostics as Record<string, unknown>;
   const warnings = Array.isArray(previewDiagnostics.warnings) ? (previewDiagnostics.warnings as string[]) : [];
   const isBelowMinimumGp = warnings.some((warning) => warning.includes("below 28%"));
+  const vintagePricingComparisonRows = copiedFromWine && conversionStatus === "new_vintage"
+    ? [
+        {
+          label: "FOB",
+          from: formatCurrencyCents(asNumber(copiedFromWine.fob_bottle)),
+          to: formatCurrencyCents(asNumber(preview.fob_bottle)),
+          changed: money(copiedFromWine.fob_bottle) !== money(preview.fob_bottle)
+        },
+        {
+          label: "Frontline Price",
+          from: formatCurrencyCents(asNumber(copiedFromWine.frontline_bottle_price)),
+          to: formatCurrencyCents(asNumber(preview.frontline_bottle_price)),
+          changed: money(copiedFromWine.frontline_bottle_price) !== money(preview.frontline_bottle_price)
+        },
+        {
+          label: "Best Price",
+          from: copiedFromWine.best_price === null ? "Frontline only" : formatCurrencyCents(asNumber(copiedFromWine.best_price)),
+          to: preview.best_price === null ? "Frontline only" : formatCurrencyCents(asNumber(preview.best_price)),
+          changed: money(copiedFromWine.best_price) !== money(preview.best_price)
+        },
+        {
+          label: "GP%",
+          from: formatPercent(copiedFromWine.gross_profit_margin),
+          to: formatPercent(preview.gross_profit_margin),
+          changed: Number(copiedFromWine.gross_profit_margin || 0) !== Number(preview.gross_profit_margin || 0)
+        }
+      ]
+    : [];
 
   function saveWine(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isBelowMinimumGp) return;
-    onSaveCatalogWine({ ...draftInput, priceChangeReason });
+    onSaveCatalogWine({ ...draftInput, existingCatalogWineId: pendingEditId, priceChangeReason });
   }
 
   return (
     <form className="supplier-hub-workspace" onSubmit={saveWine}>
+      <div className="supplier-form-header">
+        <div>
+          <h2>{pendingEditId ? "Edit Pending Product" : "Add Wine"}</h2>
+          <p>
+            {pendingEditId
+              ? "Changes save back to this pending product record until it is cleared."
+              : "Draft form values stay in this workflow only. They are not searchable catalog rows until Save Wine succeeds."}
+          </p>
+        </div>
+        <div className="supplier-form-header-actions">
+          <button className="ghost-button" disabled={isPending} onClick={clearForm} type="button">
+            Clear Form
+          </button>
+          <button className="ghost-button" disabled={isPending} onClick={startNewSku} type="button">
+            Create New
+          </button>
+        </div>
+      </div>
+
       <div className="supplier-form-grid">
         <label className="wide-field">
-          Wine Name
+          Fantasy Name
           <input
             list="supplier-catalog-clone-options"
             required
@@ -436,7 +564,7 @@ function AddWinePanel({
               setWineName(event.target.value);
               selectClone(event.target.value);
             }}
-            placeholder="Create new or search existing SKU"
+            placeholder="Create new or search existing fantasy name"
           />
           <datalist id="supplier-catalog-clone-options">
             {sortedCloneOptions.map((wine) => (
@@ -468,7 +596,8 @@ function AddWinePanel({
                     onClick={() =>
                       applyWineTemplate(
                         productIdentityMatchToTemplateWine(match, wineName),
-                        match.source === "supplier_catalog" ? match.sourceId : null
+                        match.source === "supplier_catalog" ? match.sourceId : null,
+                        { followPricing: match.source === "supplier_catalog" }
                       )
                     }
                     type="button"
@@ -590,7 +719,7 @@ function AddWinePanel({
 
       <div className="catalog-preview-grid">
         <div>
-          <span>QuickBooks Item Preview</span>
+          <span>Item Name</span>
           <strong>{preview.display_name || "Producer Wine NV 12/750ml"}</strong>
         </div>
         <div>
@@ -621,6 +750,28 @@ function AddWinePanel({
           <small>{effectiveQuickbooksItemNumber.trim() ? "Linked Item" : "New Item"}</small>
         </div>
       </div>
+
+      {vintagePricingComparisonRows.length > 0 ? (
+        <div className="vintage-pricing-comparison">
+          <div className="section-heading compact-heading">
+            <div>
+              <h2>New Vintage Pricing</h2>
+              <p>Previous SKU stays unchanged. New FOB values generate fresh Frontline, Best, and GP suggestions.</p>
+            </div>
+            {priceLevelsFollowPricing ? <span className="pricing-suggestion-pill">Calculated</span> : <span className="pricing-suggestion-pill">Edited</span>}
+          </div>
+          <div className="vintage-comparison-grid">
+            {vintagePricingComparisonRows.map((row) => (
+              <div className={row.changed ? "vintage-comparison-row changed" : "vintage-comparison-row"} key={row.label}>
+                <span>{row.label}</span>
+                <strong>{row.from}</strong>
+                <b>{"->"}</b>
+                <strong>{row.to}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="price-level-editor">
         <div className="section-heading compact-heading">
@@ -782,6 +933,15 @@ function AddWinePanel({
               Ends
               <input type="date" value={freeGood.endsOn} onChange={(event) => patchFreeGood(freeGood.id, { endsOn: event.target.value })} />
             </label>
+            <label>
+              Active
+              <input
+                className="approval-input"
+                type="checkbox"
+                checked={freeGood.active}
+                onChange={(event) => patchFreeGood(freeGood.id, { active: event.target.checked })}
+              />
+            </label>
             <label className="wide-field">
               Notes
               <input value={freeGood.notes} onChange={(event) => patchFreeGood(freeGood.id, { notes: event.target.value })} />
@@ -805,7 +965,7 @@ function AddWinePanel({
       ) : null}
       {existing ? (
         <div className="inline-info">
-          Existing planning SKU found. Saving updates the existing supplier wine and creates a draft price-change event if FOB or frontline changed.
+          Existing planning SKU found. Save Wine updates the existing supplier wine and creates a draft price-change event if FOB or frontline changed.
         </div>
       ) : null}
       {!effectiveQuickbooksItemNumber.trim() ? (
@@ -818,13 +978,15 @@ function AddWinePanel({
           Copied from an existing SKU. Changing vintage, pack, or bottle size will save a separate orderable SKU row.
         </div>
       ) : null}
+      {pendingEditId ? (
+        <div className="inline-info">
+          Pending edit mode is using the saved record ID, so Item Name changes update the original pending row instead of creating a duplicate.
+        </div>
+      ) : null}
 
       <div className="form-actions">
-        <button className="ghost-button" disabled={isPending} onClick={startNewSku} type="button">
-          Create New
-        </button>
         <button className="button" disabled={isPending || isBelowMinimumGp || !producer.trim() || !wineName.trim()} type="submit">
-          {existing ? "Update SKU" : "Save SKU"}
+          {pendingEditId ? "Save Changes" : existing ? "Update Wine" : "Save Wine"}
         </button>
       </div>
     </form>
@@ -994,7 +1156,8 @@ function priceLevelDraftsFromWine(wine: SupplierCatalogWine): PriceLevelDraft[] 
   }));
 }
 
-function freeGoodDraftsFromWine(wine: SupplierCatalogWine): FreeGoodDraft[] {
+function freeGoodDraftsFromWine(wine: SupplierCatalogWine, options: { expirePastPrograms?: boolean } = {}): FreeGoodDraft[] {
+  const today = new Date().toISOString().slice(0, 10);
   return (wine.free_goods || []).map((freeGood, index) => ({
     id: `${freeGood.id || "free"}-${index}`,
     buyQuantity: asNumber(freeGood.buy_quantity).toString(),
@@ -1004,7 +1167,7 @@ function freeGoodDraftsFromWine(wine: SupplierCatalogWine): FreeGoodDraft[] {
     startsOn: freeGood.starts_on || "",
     endsOn: freeGood.ends_on || "",
     notes: freeGood.notes || "",
-    active: freeGood.active !== false
+    active: options.expirePastPrograms && freeGood.ends_on && freeGood.ends_on < today ? false : freeGood.active !== false
   }));
 }
 
@@ -1025,6 +1188,10 @@ function conversionStatusForDraft(
   if (currentIdentity.packFormat !== copiedIdentity.packFormat) return "new_format";
   if (currentIdentity.normalizedVintage !== copiedIdentity.normalizedVintage) return "new_vintage";
   return "possible_match_needs_review";
+}
+
+function normalizeConversionStatus(value: string): SupplierCatalogWineInput["conversionStatus"] {
+  return PENDING_CONVERSION_STATUSES.has(value) ? (value as SupplierCatalogWineInput["conversionStatus"]) : "net_new_product";
 }
 
 function parseOptionalPercent(value: string) {
@@ -1230,7 +1397,7 @@ function RequestsPanel({
           <input value={supplierName} onChange={(event) => setSupplierName(event.target.value)} />
         </label>
         <label>
-          Wine display name
+          Item Name
           <input required value={wineDisplayName} onChange={(event) => setWineDisplayName(event.target.value)} />
         </label>
         <label>
@@ -1352,11 +1519,29 @@ function RequestRow({
   );
 }
 
-function PendingProductCreationPanel({ wines, requests }: { wines: SupplierCatalogWine[]; requests: WineRequest[] }) {
+function PendingProductCreationPanel({
+  wines,
+  requests,
+  isPending,
+  onDeleteCatalogWine,
+  onEditCatalogWine
+}: {
+  wines: SupplierCatalogWine[];
+  requests: WineRequest[];
+  isPending: boolean;
+  onDeleteCatalogWine: (input: DeleteCatalogWineInput) => void;
+  onEditCatalogWine: (wine: SupplierCatalogWine) => void;
+}) {
   const pendingWines = wines.filter((wine) => PENDING_CONVERSION_STATUSES.has(wine.conversion_status));
   const pendingRequests = requests.filter(
     (request) => request.request_status === "approved" && request.approval_decision === "approve_as_new_stem_product"
   );
+
+  function confirmDelete(wine: SupplierCatalogWine) {
+    const message = `Delete pending product "${wine.display_name}"? This removes only the pending catalog draft and draft-only pricing/free-good/workbench records.`;
+    if (!window.confirm(message)) return;
+    onDeleteCatalogWine({ id: wine.id });
+  }
 
   return (
     <div className="supplier-hub-workspace">
@@ -1370,6 +1555,7 @@ function PendingProductCreationPanel({ wines, requests }: { wines: SupplierCatal
               <th>Reason</th>
               <th>QB Status</th>
               <th>Lifecycle</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1384,6 +1570,16 @@ function PendingProductCreationPanel({ wines, requests }: { wines: SupplierCatal
                 <td><StatusPill value={wine.conversion_status} /></td>
                 <td><StatusPill value={wine.quickbooks_sync_status} /></td>
                 <td><StatusPill value={wine.product_lifecycle_status} /></td>
+                <td>
+                  <div className="pending-row-actions">
+                    <button className="ghost-button button-tiny" disabled={isPending} onClick={() => onEditCatalogWine(wine)} type="button">
+                      Edit
+                    </button>
+                    <button className="ghost-button button-tiny danger-button" disabled={isPending} onClick={() => confirmDelete(wine)} type="button">
+                      Delete
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
             {pendingRequests.map((request) => (
@@ -1397,16 +1593,19 @@ function PendingProductCreationPanel({ wines, requests }: { wines: SupplierCatal
                 <td><StatusPill value="approve_as_new_stem_product" /></td>
                 <td><StatusPill value="not_created" /></td>
                 <td><StatusPill value="pending_product_creation" /></td>
+                <td>
+                  <span className="muted">Request only</span>
+                </td>
               </tr>
             ))}
             {pendingWines.length + pendingRequests.length === 0 ? (
-              <EmptyRow colSpan={6} label="No wines are waiting on official QuickBooks product creation." />
+              <EmptyRow colSpan={7} label="No wines are waiting on official QuickBooks product creation." />
             ) : null}
           </tbody>
         </table>
       </div>
       <div className="inline-info">
-        Items in this queue are not official Stem products yet. QuickBooks creation/linking is intentionally held behind the accounting integration boundary.
+        Items in this queue are saved pending records, not official Stem products. Delete is limited to draft-only records without linked QuickBooks items.
       </div>
     </div>
   );
