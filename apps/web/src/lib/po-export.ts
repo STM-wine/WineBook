@@ -81,7 +81,7 @@ export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[]
 
   await workbook.xlsx.readFile(existingTemplate);
   const sheet = workbook.worksheets[0] || workbook.addWorksheet("POs");
-  const startRow = 3;
+  const startRow = 4;
   const templateStyleRow = 4;
   const maxColumn = Math.max(sheet.columnCount, 23);
 
@@ -108,12 +108,11 @@ export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[]
     sheet.getCell(excelRow, 2).value = line.producer;
     sheet.getCell(excelRow, 3).value = line.quantity;
     sheet.getCell(excelRow, 4).value = line.code;
-    sheet.getCell(excelRow, 5).value = line.itemWarning;
-    sheet.getCell(excelRow, 6).value = line.wine;
-    sheet.getCell(excelRow, 7).value = line.fob;
-    sheet.getCell(excelRow, 8).value = line.laidInPerBottle;
+    sheet.getCell(excelRow, 5).value = line.wine;
+    sheet.getCell(excelRow, 6).value = line.fob;
+    sheet.getCell(excelRow, 7).value = line.laidInPerBottle;
     if (line.itemWarning) {
-      for (let column = 1; column <= 8; column += 1) {
+      for (let column = 1; column <= 7; column += 1) {
         sheet.getCell(excelRow, column).fill = {
           type: "pattern",
           pattern: "solid",
