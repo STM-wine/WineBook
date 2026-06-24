@@ -165,7 +165,7 @@ export async function GET(request: Request) {
     (supplierResult.data || []).map((supplier) => [
       String(supplier.id),
       {
-        name: String(supplier.name || "Manual Supplier"),
+        name: String(supplier.name || "No supplier"),
         truckingCostPerBottle: Number(supplier.trucking_cost_per_bottle || 0)
       }
     ])

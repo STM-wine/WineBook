@@ -125,7 +125,7 @@ export function OrderReviewView({
           <label className="compact-select-control">
             Sort
             <select value={supplierSort} onChange={(event) => setSupplierSort(event.target.value as SupplierGroupSortMode)}>
-              <option value="default">Default: Needs</option>
+              <option value="default">Supplier Suggested Orders</option>
               <option value="az">A-Z</option>
               <option value="za">Z-A</option>
             </select>

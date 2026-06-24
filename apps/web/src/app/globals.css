@@ -1068,6 +1068,64 @@ textarea {
   margin-bottom: 18px;
 }
 
+.processing-modal {
+  align-items: center;
+  background: rgba(31, 29, 25, 0.32);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 80;
+}
+
+.processing-modal-panel {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(31, 29, 25, 0.22);
+  display: flex;
+  gap: 16px;
+  max-width: 440px;
+  padding: 20px;
+  width: 100%;
+}
+
+.processing-modal-panel strong,
+.processing-modal-panel span {
+  display: block;
+}
+
+.processing-modal-panel strong {
+  color: var(--ink);
+  font-size: 18px;
+  margin-bottom: 4px;
+}
+
+.processing-modal-panel span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.processing-spinner {
+  animation: processing-spin 0.9s linear infinite;
+  border: 3px solid #e9e1d2;
+  border-radius: 999px;
+  border-top-color: var(--green);
+  flex: 0 0 auto;
+  height: 34px;
+  width: 34px;
+}
+
+@keyframes processing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 h1 {
   font-size: 28px;
   line-height: 1.1;
@@ -1732,6 +1790,10 @@ td {
   font-weight: 850;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.priced-field small.price-suggestion-value {
+  color: var(--ink);
 }
 
 .danger-cell {

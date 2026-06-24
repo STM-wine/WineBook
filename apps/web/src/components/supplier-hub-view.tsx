@@ -88,7 +88,7 @@ export function SupplierHubView({
   onCreateWineRequest,
   onDeleteCatalogWine,
   onSaveCatalogWine,
-  onSaveSupplier,
+  onSaveSuppliers,
   onUpdateWineRequestApproval
 }: {
   suppliers: SupplierLogistics[];
@@ -99,7 +99,7 @@ export function SupplierHubView({
   onCreateWineRequest: (input: CreateWineRequestInput) => void;
   onDeleteCatalogWine: (input: DeleteCatalogWineInput) => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
-  onSaveSupplier: (supplier: SupplierLogistics) => void;
+  onSaveSuppliers: (suppliers: SupplierLogistics[]) => void;
   onUpdateWineRequestApproval: (input: UpdateWineRequestApprovalInput) => void;
 }) {
   const [activeArea, setActiveArea] = useState<HubArea>("search");
@@ -183,7 +183,7 @@ export function SupplierHubView({
         />
       ) : null}
       {activeArea === "price-changes" ? <PriceChangesPanel events={priceChangeEvents} /> : null}
-      {activeArea === "logistics" ? <SupplierLogisticsPanel suppliers={suppliers} isPending={isPending} onSaveSupplier={onSaveSupplier} /> : null}
+      {activeArea === "logistics" ? <SupplierLogisticsPanel suppliers={suppliers} isPending={isPending} onSaveSuppliers={onSaveSuppliers} /> : null}
     </section>
   );
 }
@@ -203,17 +203,17 @@ function AddWinePanel({
   onClearPendingEdit: () => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
 }) {
-  const firstSupplier = suppliers[0] || null;
-  const [supplierId, setSupplierId] = useState(firstSupplier?.id || "");
-  const [supplierName, setSupplierName] = useState(firstSupplier?.name || "Manual Supplier");
+  const [supplierId, setSupplierId] = useState("");
+  const [supplierName, setSupplierName] = useState("");
   const [producer, setProducer] = useState("");
+  const [searchItem, setSearchItem] = useState("");
   const [wineName, setWineName] = useState("");
   const [vintage, setVintage] = useState("NV");
   const [packSize, setPackSize] = useState("12");
   const [bottleSize, setBottleSize] = useState("750ml");
   const [fobBottle, setFobBottle] = useState("");
   const [fobCase, setFobCase] = useState("");
-  const [laidInPerBottle, setLaidInPerBottle] = useState(() => String(defaultLaidInForSupplier(suppliers, firstSupplier?.id || null, firstSupplier?.name || "")));
+  const [laidInPerBottle, setLaidInPerBottle] = useState("0");
   const [systemTags, setSystemTags] = useState<string[]>([]);
   const [quickbooksItemId, setQuickbooksItemId] = useState("");
   const [quickbooksItemName, setQuickbooksItemName] = useState("");
@@ -238,7 +238,7 @@ function AddWinePanel({
     laidInPerBottle: parseOptionalNumber(laidInPerBottle) || 0
   });
   const copiedFromWine = templateWine;
-  const showWineNameMatches = wineName.trim().length >= 3 && !templateWine;
+  const showWineNameMatches = searchItem.trim().length >= 3 && !templateWine;
   const currentIdentity = normalizeWineIdentity({
     producer,
     wineName,
@@ -255,13 +255,13 @@ function AddWinePanel({
     pendingEditId && pendingEditConversionStatus
       ? pendingEditConversionStatus
       : conversionStatusForDraft(copiedFromWine, currentIdentity);
-  const priceLevelsForDraft = priceLevelsFollowPricing && conversionStatus === "new_vintage" ? defaultPriceLevelDrafts() : priceLevels;
+  const priceLevelsForDraft = priceLevelsFollowPricing ? defaultPriceLevelDrafts() : priceLevels;
   const draftPriceLevels = priceLevelsForDraft
     .map((level, index) => priceLevelDraftToInput(level, index, computedPricing))
     .filter((level) => level.active && (money(level.bottlePrice) > 0 || level.isFrontline));
 
   useEffect(() => {
-    const query = wineName.trim();
+    const query = searchItem.trim();
     if (query.length < 3 || templateWine) {
       setWineNameMatches([]);
       setWineMatchError("");
@@ -301,7 +301,7 @@ function AddWinePanel({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [bottleSize, packSize, producer, supplierId, supplierName, templateWine, vintage, wineName]);
+  }, [bottleSize, packSize, producer, searchItem, supplierId, supplierName, templateWine, vintage]);
 
   function selectSupplier(nextSupplierId: string) {
     setSupplierId(nextSupplierId);
@@ -311,7 +311,7 @@ function AddWinePanel({
       setLaidInPerBottle(String(defaultLaidInForSupplier(suppliers, supplier.id, supplier.name)));
       return;
     }
-    setSupplierName("Manual Supplier");
+    setSupplierName("");
     setLaidInPerBottle("0");
   }
 
@@ -326,6 +326,7 @@ function AddWinePanel({
     setCopiedFromSupplierCatalogWineId(catalogWineId);
     setWineNameMatches([]);
     setWineMatchError("");
+    setSearchItem(wine.display_name);
     setSupplierId(wine.supplier_id || "");
     setSupplierName(wine.supplier_name);
     setProducer(nextProducer);
@@ -369,6 +370,7 @@ function AddWinePanel({
     setTemplateWine(null);
     setWineNameMatches([]);
     setWineMatchError("");
+    setSearchItem("");
     setProducer("");
     setWineName("");
     setVintage("NV");
@@ -391,10 +393,6 @@ function AddWinePanel({
   }
 
   function clearForm() {
-    const supplier = suppliers.find((row) => row.id === supplierId) || firstSupplier;
-    const nextSupplierId = supplier?.id || "";
-    const nextSupplierName = supplier?.name || "Manual Supplier";
-
     setPendingEditId(null);
     setPendingEditConversionStatus(null);
     onClearPendingEdit();
@@ -402,8 +400,9 @@ function AddWinePanel({
     setTemplateWine(null);
     setWineNameMatches([]);
     setWineMatchError("");
-    setSupplierId(nextSupplierId);
-    setSupplierName(nextSupplierName);
+    setSearchItem("");
+    setSupplierId("");
+    setSupplierName("");
     setProducer("");
     setWineName("");
     setVintage("NV");
@@ -411,7 +410,7 @@ function AddWinePanel({
     setBottleSize("750ml");
     setFobBottle("");
     setFobCase("");
-    setLaidInPerBottle(String(defaultLaidInForSupplier(suppliers, supplier?.id || null, nextSupplierName)));
+    setLaidInPerBottle("0");
     setSystemTags([]);
     setQuickbooksItemId("");
     setQuickbooksItemName("");
@@ -490,7 +489,7 @@ function AddWinePanel({
 
   const draftInput: SupplierCatalogWineInput = {
     supplierId: supplierId || null,
-    supplierName,
+    supplierName: supplierName.trim(),
     producer,
     wineName,
     vintage,
@@ -575,16 +574,12 @@ function AddWinePanel({
 
       <div className="supplier-form-grid">
         <label className="wide-field">
-          Fantasy Name
+          Search Item
           <input
             list="supplier-catalog-clone-options"
-            required
-            value={wineName}
-            onChange={(event) => {
-              setWineName(event.target.value);
-              selectClone(event.target.value);
-            }}
-            placeholder="Create new or search existing fantasy name"
+            value={searchItem}
+            onChange={(event) => setSearchItem(event.target.value)}
+            placeholder="Search existing item or SKU"
           />
           <datalist id="supplier-catalog-clone-options">
             {sortedCloneOptions.map((wine) => (
@@ -615,7 +610,7 @@ function AddWinePanel({
                     className="ghost-button button-small"
                     onClick={() =>
                       applyWineTemplate(
-                        productIdentityMatchToTemplateWine(match, wineName),
+                        productIdentityMatchToTemplateWine(match, searchItem),
                         match.source === "supplier_catalog" ? match.sourceId : null,
                         { followPricing: match.source === "supplier_catalog" }
                       )
@@ -639,7 +634,7 @@ function AddWinePanel({
         <label>
           Supplier
           <select value={supplierId} onChange={(event) => selectSupplier(event.target.value)}>
-            <option value="">Manual Supplier</option>
+            <option value="">No supplier selected</option>
             {suppliers.map((supplier) => (
               <option key={supplier.id} value={supplier.id}>
                 {supplier.name}
@@ -648,8 +643,17 @@ function AddWinePanel({
           </select>
         </label>
         <label className={supplierId ? "is-hidden-field" : undefined}>
-          Supplier
+          Supplier Name
           <input value={supplierName} onChange={(event) => setSupplierName(event.target.value)} />
+        </label>
+        <label className="wide-field">
+          Fantasy Name
+          <input
+            required
+            value={wineName}
+            onChange={(event) => setWineName(event.target.value)}
+            placeholder="Saved wine/fantasy name"
+          />
         </label>
         <label>
           Producer
@@ -841,7 +845,13 @@ function AddWinePanel({
                           value={level.bottlePrice}
                           onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value })}
                         />
-                        <small>{bottlePriceEntered && effective.calculatedField !== "frontline" ? "Entered" : "Calculated"}</small>
+                        <small className={effective.calculatedField === "frontline" ? "price-suggestion-value" : undefined}>
+                          {effective.calculatedField === "frontline"
+                            ? `Suggested ${formatCurrencyCents(effective.bottlePrice)}`
+                            : bottlePriceEntered
+                              ? "Entered"
+                              : "Calculated"}
+                        </small>
                       </div>
                     </td>
                     <td>
@@ -855,7 +865,13 @@ function AddWinePanel({
                           value={level.depletionAllowance}
                           onChange={(event) => patchPriceLevel(level.id, { depletionAllowance: event.target.value })}
                         />
-                        <small>{daEntered && effective.calculatedField !== "da" ? "Entered" : "Calculated"}</small>
+                        <small className={effective.calculatedField === "da" ? "price-suggestion-value" : undefined}>
+                          {effective.calculatedField === "da"
+                            ? `Suggested ${formatCurrencyCents(effective.depletionAllowance)}`
+                            : daEntered
+                              ? "Entered"
+                              : "Calculated"}
+                        </small>
                       </div>
                     </td>
                     <td>
@@ -1677,17 +1693,24 @@ function PriceChangesPanel({ events }: { events: PriceChangeEvent[] }) {
 function SupplierLogisticsPanel({
   suppliers,
   isPending,
-  onSaveSupplier
+  onSaveSuppliers
 }: {
   suppliers: SupplierLogistics[];
   isPending: boolean;
-  onSaveSupplier: (supplier: SupplierLogistics) => void;
+  onSaveSuppliers: (suppliers: SupplierLogistics[]) => void;
 }) {
   const [draftRows, setDraftRows] = useState<SupplierLogistics[]>([]);
+  const [editedRows, setEditedRows] = useState<SupplierLogistics[]>(suppliers);
   const [search, setSearch] = useState("");
   const [pickupLocation, setPickupLocation] = useState("All");
   const [showInactive, setShowInactive] = useState(false);
-  const rows = useMemo(() => [...draftRows, ...suppliers], [draftRows, suppliers]);
+  const originalById = useMemo(() => new Map(suppliers.map((supplier) => [supplier.id, supplier])), [suppliers]);
+  const rows = useMemo(() => [...draftRows, ...editedRows], [draftRows, editedRows]);
+  const changedRows = useMemo(
+    () => rows.filter((row) => row.id.startsWith("new-") || JSON.stringify(row) !== JSON.stringify(originalById.get(row.id))),
+    [originalById, rows]
+  );
+  const invalidChangedRows = changedRows.filter((row) => !row.name.trim());
   const pickupOptions = useMemo(
     () => ["All", ...uniqueSorted(rows.map((supplier) => supplier.pick_up_location))],
     [rows]
@@ -1725,6 +1748,10 @@ function SupplierLogisticsPanel({
           .reduce((sum, supplier) => sum + asNumber(supplier.trucking_cost_per_bottle), 0) / activeCount
       : 0;
 
+  useEffect(() => {
+    setEditedRows(suppliers);
+  }, [suppliers]);
+
   function addDraftRow() {
     setDraftRows((current) => [
       {
@@ -1748,6 +1775,22 @@ function SupplierLogisticsPanel({
     setDraftRows((current) => current.filter((supplier) => supplier.id !== id));
   }
 
+  function patchSupplier(id: string, patch: Partial<SupplierLogistics>) {
+    const setter = id.startsWith("new-") ? setDraftRows : setEditedRows;
+    setter((current) => current.map((supplier) => (supplier.id === id ? { ...supplier, ...patch } : supplier)));
+  }
+
+  function resetSupplier(id: string) {
+    const original = originalById.get(id);
+    if (!original) return;
+    setEditedRows((current) => current.map((supplier) => (supplier.id === id ? original : supplier)));
+  }
+
+  function saveChanges() {
+    if (changedRows.length === 0 || invalidChangedRows.length > 0) return;
+    onSaveSuppliers(changedRows);
+  }
+
   return (
     <div className="supplier-hub-workspace">
       <div className="section-heading compact-heading">
@@ -1755,9 +1798,19 @@ function SupplierLogisticsPanel({
           <h2>Supplier Logistics</h2>
           <p>Maintain supplier defaults used by purchasing and laid-in calculations.</p>
         </div>
-        <button className="button button-small" onClick={addDraftRow} disabled={isPending} type="button">
-          Add Supplier
-        </button>
+        <div className="supplier-form-header-actions">
+          <button className="ghost-button" onClick={addDraftRow} disabled={isPending} type="button">
+            Add Supplier
+          </button>
+          <button
+            className="button button-small"
+            onClick={saveChanges}
+            disabled={isPending || changedRows.length === 0 || invalidChangedRows.length > 0}
+            type="button"
+          >
+            Save Changes
+          </button>
+        </div>
       </div>
       <div className="supplier-hub-summary logistics-summary">
         <div>
@@ -1795,6 +1848,7 @@ function SupplierLogisticsPanel({
           Show inactive
         </label>
         <span>{formatInteger(filteredRows.length)} shown</span>
+        <span>{formatInteger(changedRows.length)} unsaved</span>
       </div>
       <div className="table-shell logistics-table-shell">
         <table className="logistics-table">
@@ -1810,7 +1864,7 @@ function SupplierLogisticsPanel({
               <th>Laid In / Bottle</th>
               <th>Active</th>
               <th>Notes</th>
-              <th>Save</th>
+              <th>State</th>
             </tr>
           </thead>
           <tbody>
@@ -1818,8 +1872,10 @@ function SupplierLogisticsPanel({
               <SupplierLogisticsRow
                 key={supplier.id}
                 supplier={supplier}
+                original={originalById.get(supplier.id) || null}
                 disabled={isPending}
-                onSaveSupplier={onSaveSupplier}
+                onPatchSupplier={patchSupplier}
+                onResetSupplier={resetSupplier}
                 onDiscardDraft={discardDraftRow}
               />
             ))}
@@ -1833,27 +1889,26 @@ function SupplierLogisticsPanel({
 
 function SupplierLogisticsRow({
   supplier,
+  original,
   disabled,
-  onSaveSupplier,
+  onPatchSupplier,
+  onResetSupplier,
   onDiscardDraft
 }: {
   supplier: SupplierLogistics;
+  original: SupplierLogistics | null;
   disabled: boolean;
-  onSaveSupplier: (supplier: SupplierLogistics) => void;
+  onPatchSupplier: (id: string, patch: Partial<SupplierLogistics>) => void;
+  onResetSupplier: (id: string) => void;
   onDiscardDraft: (id: string) => void;
 }) {
-  const [row, setRow] = useState(supplier);
-
-  useEffect(() => {
-    setRow(supplier);
-  }, [supplier]);
-
   function patch(patchRow: Partial<SupplierLogistics>) {
-    setRow((current) => ({ ...current, ...patchRow }));
+    onPatchSupplier(supplier.id, patchRow);
   }
 
+  const row = supplier;
   const isNew = row.id.startsWith("new-");
-  const isDirty = JSON.stringify(row) !== JSON.stringify(supplier);
+  const isDirty = isNew || JSON.stringify(row) !== JSON.stringify(original);
   const isActive = row.active ?? true;
   const rowClassName = [
     row.active === false ? "inactive-row" : "",
@@ -1918,17 +1973,14 @@ function SupplierLogisticsRow({
         <div className="supplier-row-actions">
           {isNew ? <span className="row-state-badge">New</span> : null}
           {!isNew && isDirty ? <span className="row-state-badge">Unsaved</span> : null}
-          <button className="button button-tiny" disabled={disabled || !row.name.trim() || (!isNew && !isDirty)} onClick={() => onSaveSupplier(row)} type="button">
-            {isNew ? "Add" : "Save"}
-          </button>
           {!isNew ? (
             <button
               className={isActive ? "ghost-button supplier-delete-button" : "ghost-button supplier-reset-button"}
               disabled={disabled}
-              onClick={() => onSaveSupplier({ ...row, active: !isActive })}
+              onClick={() => patch({ active: !isActive })}
               type="button"
             >
-              {isActive ? "Delete" : "Restore"}
+              {isActive ? "Deactivate" : "Restore"}
             </button>
           ) : null}
           {isNew ? (
@@ -1937,7 +1989,7 @@ function SupplierLogisticsRow({
             </button>
           ) : null}
           {!isNew && isDirty ? (
-            <button className="ghost-button supplier-reset-button" disabled={disabled} onClick={() => setRow(supplier)} type="button">
+            <button className="ghost-button supplier-reset-button" disabled={disabled} onClick={() => onResetSupplier(row.id)} type="button">
               Reset
             </button>
           ) : null}

@@ -332,7 +332,35 @@ export async function saveSupplierLogistics(input: {
   }
 
   const { supabase } = await requireWriteAccess();
-  const payload = {
+  const payload = supplierLogisticsPayload(input);
+
+  const query = input.id
+    ? supabase.from("suppliers").update(payload).eq("id", input.id)
+    : supabase.from("suppliers").insert(payload);
+
+  const { error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/");
+}
+
+function supplierLogisticsPayload(input: {
+  name: string;
+  importerId?: string;
+  etaDays?: number;
+  pickUpLocation?: string;
+  freightForwarder?: string;
+  orderFrequency?: string;
+  tdm?: string;
+  truckingCostPerBottle?: number;
+  notes?: string;
+  active?: boolean;
+}) {
+  const name = input.name.trim();
+
+  return {
     name,
     importer_id: input.importerId?.trim() || null,
     eta_days: Math.max(0, Math.round(Number(input.etaDays) || 0)),
@@ -345,17 +373,52 @@ export async function saveSupplierLogistics(input: {
     active: input.active ?? true,
     updated_at: new Date().toISOString()
   };
+}
 
-  const query = input.id
-    ? supabase.from("suppliers").update(payload).eq("id", input.id)
-    : supabase.from("suppliers").insert(payload);
+export async function saveSupplierLogisticsBatch(input: {
+  suppliers: Array<{
+    id?: string;
+    name: string;
+    importerId?: string;
+    etaDays?: number;
+    pickUpLocation?: string;
+    freightForwarder?: string;
+    orderFrequency?: string;
+    tdm?: string;
+    truckingCostPerBottle?: number;
+    notes?: string;
+    active?: boolean;
+  }>;
+}) {
+  const suppliers = input.suppliers
+    .map((supplier) => ({
+      ...supplier,
+      id: supplier.id?.startsWith("new-") ? undefined : supplier.id,
+      name: supplier.name.trim()
+    }))
+    .filter((supplier) => supplier.name);
 
-  const { error } = await query;
-  if (error) {
-    throw new Error(error.message);
+  if (suppliers.length === 0) {
+    throw new Error("No supplier logistics changes are ready to save.");
+  }
+
+  const { supabase } = await requireWriteAccess();
+  const results = await Promise.all(
+    suppliers.map((supplier) => {
+      const payload = supplierLogisticsPayload(supplier);
+      return supplier.id
+        ? supabase.from("suppliers").update(payload).eq("id", supplier.id)
+        : supabase.from("suppliers").insert(payload);
+    })
+  );
+  const failed = results.find((result) => result.error);
+
+  if (failed?.error) {
+    throw new Error(failed.error.message);
   }
 
   revalidatePath("/");
+  return { saved: suppliers.length };
 }
 
 export async function saveSupplierCatalogWine(input: {

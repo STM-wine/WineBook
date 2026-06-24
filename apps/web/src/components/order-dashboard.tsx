@@ -8,7 +8,7 @@ import {
   deletePurchaseOrderLine,
   refreshVinosmithReports,
   saveSupplierCatalogWine,
-  saveSupplierLogistics,
+  saveSupplierLogisticsBatch,
   updateSupplierCatalogWorkbenchItems,
   updateSupplierWineRequestApproval,
   updatePurchaseOrderDraftStatus,
@@ -28,6 +28,7 @@ import type {
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
 import {
   applySupplierTargetWeeks,
+  applySupplierTdmAssignments,
   asNumber,
   buildMetrics,
   buildSupplierGroups,
@@ -87,11 +88,15 @@ export function OrderDashboard({
 }: Props) {
   const router = useRouter();
   const combinedRecommendations = useMemo(
-    () => enrichRecommendationsWithSupplierCatalogPrograms(
-      mergeSupplierCatalogRows(recommendations, supplierCatalogWines, reportRun.id),
-      supplierCatalogWines
-    ),
-    [recommendations, reportRun.id, supplierCatalogWines]
+    () =>
+      applySupplierTdmAssignments(
+        enrichRecommendationsWithSupplierCatalogPrograms(
+          mergeSupplierCatalogRows(recommendations, supplierCatalogWines, reportRun.id),
+          supplierCatalogWines
+        ),
+        suppliers
+      ),
+    [recommendations, reportRun.id, supplierCatalogWines, suppliers]
   );
   const [rows, setRows] = useState(combinedRecommendations);
   const [draftRows, setDraftRows] = useState(poDrafts);
@@ -105,6 +110,7 @@ export function OrderDashboard({
   const [supplierTargetWeeks, setSupplierTargetWeeks] = useState<Record<string, string>>({});
   const [pendingMessage, setPendingMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [showPoDraftProgress, setShowPoDraftProgress] = useState(false);
   const approvalQueueRef = useRef(new Map<string, { recommendationStatus: string; approvedQty: number }>());
   const approvalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const approvalFlushRef = useRef<Promise<void> | null>(null);
@@ -408,6 +414,7 @@ export function OrderDashboard({
   function createDrafts() {
     setPendingMessage("Creating PO drafts...");
     setErrorMessage("");
+    setShowPoDraftProgress(true);
 
     startTransition(async () => {
       try {
@@ -451,10 +458,13 @@ export function OrderDashboard({
         } else {
           setPendingMessage("No approved quantities are ready for PO drafts.");
         }
+        selectView("po-drafts");
         router.refresh();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not create PO drafts.");
         setPendingMessage("");
+      } finally {
+        setShowPoDraftProgress(false);
       }
     });
   }
@@ -475,6 +485,7 @@ export function OrderDashboard({
         setPendingMessage(
           `Refresh queued for ${result.reportDate}. New report emails will be ingested as soon as GitHub Actions runs.`
         );
+        router.refresh();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not queue Vinosmith report refresh.");
         setPendingMessage("");
@@ -523,26 +534,28 @@ export function OrderDashboard({
     });
   }
 
-  function saveSupplier(row: SupplierLogistics) {
-    setPendingMessage("Saving supplier logistics...");
+  function saveSuppliers(updatedSuppliers: SupplierLogistics[]) {
+    setPendingMessage(`Saving ${updatedSuppliers.length.toLocaleString()} supplier logistics change(s)...`);
     setErrorMessage("");
 
     startTransition(async () => {
       try {
-        await saveSupplierLogistics({
-          id: row.id?.startsWith("new-") ? undefined : row.id,
-          name: row.name,
-          importerId: row.importer_id || undefined,
-          etaDays: asNumber(row.eta_days),
-          pickUpLocation: row.pick_up_location || undefined,
-          freightForwarder: row.freight_forwarder || undefined,
-          orderFrequency: row.order_frequency || undefined,
-          tdm: row.tdm || undefined,
-          truckingCostPerBottle: asNumber(row.trucking_cost_per_bottle),
-          notes: row.notes || undefined,
-          active: row.active ?? true
+        const result = await saveSupplierLogisticsBatch({
+          suppliers: updatedSuppliers.map((row) => ({
+            id: row.id,
+            name: row.name,
+            importerId: row.importer_id || undefined,
+            etaDays: asNumber(row.eta_days),
+            pickUpLocation: row.pick_up_location || undefined,
+            freightForwarder: row.freight_forwarder || undefined,
+            orderFrequency: row.order_frequency || undefined,
+            tdm: row.tdm || undefined,
+            truckingCostPerBottle: asNumber(row.trucking_cost_per_bottle),
+            notes: row.notes || undefined,
+            active: row.active ?? true
+          }))
         });
-        setPendingMessage("Supplier logistics saved");
+        setPendingMessage(`Supplier logistics saved (${result.saved.toLocaleString()} change(s)).`);
         router.refresh();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save supplier logistics.");
@@ -632,6 +645,17 @@ export function OrderDashboard({
       />
 
       <StatusMessages errorMessage={errorMessage} pendingMessage={isPending ? pendingMessage || "Working..." : pendingMessage} />
+      {showPoDraftProgress ? (
+        <div className="processing-modal" role="status" aria-live="assertive">
+          <div className="processing-modal-panel">
+            <div className="processing-spinner" aria-hidden="true" />
+            <div>
+              <strong>Create PO Drafts</strong>
+              <span>{pendingMessage || "Building supplier PO drafts..."}</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {activeView === "order-review" ? (
         <OrderReviewView
@@ -672,7 +696,7 @@ export function OrderDashboard({
           onCreateWineRequest={createWineRequest}
           onDeleteCatalogWine={deleteCatalogWine}
           onSaveCatalogWine={saveCatalogWine}
-          onSaveSupplier={saveSupplier}
+          onSaveSuppliers={saveSuppliers}
           onUpdateWineRequestApproval={updateWineRequestApproval}
         />
       ) : null}

@@ -420,6 +420,7 @@ export function WorkbenchGrid({
     () => ({
       resizable: true,
       sortable: true,
+      sortingOrder: ["desc", "asc", null],
       suppressMovable: true,
       cellClass: "center-cell"
     }),

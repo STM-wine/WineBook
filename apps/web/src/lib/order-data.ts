@@ -4,6 +4,7 @@ import type {
   SupplierCatalogFreeGood,
   SupplierCatalogWine,
   SupplierCatalogWorkbenchItem,
+  SupplierLogistics,
   SupplierGroup
 } from "./types";
 
@@ -100,6 +101,26 @@ export function applySupplierTargetWeeks(
       recommended_qty_rounded: qty,
       order_cost: orderCost,
       landed_cost: landedCost
+    };
+  });
+}
+
+export function applySupplierTdmAssignments(rows: Recommendation[], suppliers: SupplierLogistics[]): Recommendation[] {
+  const tdmBySupplier = new Map(
+    suppliers.map((supplier) => [
+      supplier.name.trim().toLowerCase(),
+      supplier.tdm?.trim() || null
+    ])
+  );
+
+  if (tdmBySupplier.size === 0) return rows;
+
+  return rows.map((row) => {
+    const supplierKey = (row.supplier_name?.trim() || "Unknown Supplier").toLowerCase();
+    if (!tdmBySupplier.has(supplierKey)) return row;
+    return {
+      ...row,
+      brand_manager: tdmBySupplier.get(supplierKey) || null
     };
   });
 }
