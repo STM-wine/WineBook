@@ -231,6 +231,7 @@ function AddWinePanel({
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
   const sortedCloneOptions = useMemo(() => [...wines].sort(sortNewestVintageFirst), [wines]);
   const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
+  const supplierOptions = useMemo(() => uniqueSorted(suppliers.map((supplier) => supplier.name)), [suppliers]);
   const computedPricing = calculatePricing({
     packSize: Math.max(1, Math.trunc(Number(packSize) || 12)),
     fobBottle: parseOptionalNumber(fobBottle),
@@ -303,16 +304,21 @@ function AddWinePanel({
     };
   }, [bottleSize, packSize, producer, searchItem, supplierId, supplierName, templateWine, vintage]);
 
-  function selectSupplier(nextSupplierId: string) {
-    setSupplierId(nextSupplierId);
-    const supplier = suppliers.find((row) => row.id === nextSupplierId);
+  function supplierByName(name: string) {
+    const normalizedName = name.trim().toLowerCase();
+    if (!normalizedName) return null;
+    return suppliers.find((row) => row.name.trim().toLowerCase() === normalizedName) || null;
+  }
+
+  function setSupplierValue(nextSupplierName: string) {
+    const supplier = supplierByName(nextSupplierName);
+    setSupplierName(nextSupplierName);
+    setSupplierId(supplier?.id || "");
     if (supplier) {
-      setSupplierName(supplier.name);
       setLaidInPerBottle(String(defaultLaidInForSupplier(suppliers, supplier.id, supplier.name)));
-      return;
+    } else if (!nextSupplierName.trim()) {
+      setLaidInPerBottle("0");
     }
-    setSupplierName("");
-    setLaidInPerBottle("0");
   }
 
   function applyWineTemplate(wine: SupplierCatalogWine, catalogWineId: string | null = null, options: { followPricing?: boolean } = {}) {
@@ -327,8 +333,12 @@ function AddWinePanel({
     setWineNameMatches([]);
     setWineMatchError("");
     setSearchItem(wine.display_name);
-    setSupplierId(wine.supplier_id || "");
-    setSupplierName(wine.supplier_name);
+    const supplier = (wine.supplier_id ? suppliers.find((row) => row.id === wine.supplier_id) : null) || supplierByName(wine.supplier_name);
+    const nextSupplierId = supplier?.id || wine.supplier_id || "";
+    const nextSupplierName = supplier?.name || wine.supplier_name || "";
+
+    setSupplierId(nextSupplierId);
+    setSupplierName(nextSupplierName);
     setProducer(nextProducer);
     setWineName(nextWineName);
     setVintage(nextVintage);
@@ -336,7 +346,7 @@ function AddWinePanel({
     setBottleSize(nextBottleSize);
     setFobBottle(String(asNumber(wine.fob_bottle) || ""));
     setFobCase(String(asNumber(wine.fob_case) || ""));
-    setLaidInPerBottle(String(asNumber(wine.laid_in_per_bottle) || 0));
+    setLaidInPerBottle(String(asNumber(wine.laid_in_per_bottle) || defaultLaidInForSupplier(suppliers, nextSupplierId || null, nextSupplierName)));
     setSystemTags(wine.system_tags || []);
     setQuickbooksItemId(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_id || wine.quickbooks_item_number || "" : "");
     setQuickbooksItemName(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_name || "" : "");
@@ -631,20 +641,19 @@ function AddWinePanel({
             )}
           </div>
         ) : null}
-        <label>
+        <label className="wide-field">
           Supplier
-          <select value={supplierId} onChange={(event) => selectSupplier(event.target.value)}>
-            <option value="">No supplier selected</option>
-            {suppliers.map((supplier) => (
-              <option key={supplier.id} value={supplier.id}>
-                {supplier.name}
-              </option>
+          <input
+            list="supplier-options"
+            value={supplierName}
+            onChange={(event) => setSupplierValue(event.target.value)}
+            placeholder="No supplier selected"
+          />
+          <datalist id="supplier-options">
+            {supplierOptions.map((option) => (
+              <option key={option} value={option} />
             ))}
-          </select>
-        </label>
-        <label className={supplierId ? "is-hidden-field" : undefined}>
-          Supplier Name
-          <input value={supplierName} onChange={(event) => setSupplierName(event.target.value)} />
+          </datalist>
         </label>
         <label className="wide-field">
           Fantasy Name
