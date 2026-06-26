@@ -2169,6 +2169,48 @@ td {
   max-height: 420px;
 }
 
+.freight-supplier-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.freight-supplier-card {
+  background: var(--paper, #faf7f3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.freight-supplier-card summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+}
+
+.freight-supplier-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.freight-supplier-card summary div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.freight-supplier-card summary > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.freight-supplier-card .freight-supplier-shell {
+  margin-top: 12px;
+}
+
 .logistics-table-shell {
   max-height: 560px;
 }
