@@ -15,6 +15,7 @@ const SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/";
 const QBWC_NS = "http://developer.intuit.com/";
 const DEFAULT_USERNAME = "stem-qbwc";
 const DEFAULT_CAPTURE_RAW_RESPONSES = true;
+const RECENT_SESSION_LIMIT = 10;
 
 const SUPPORTED_METHODS = [
   "clientVersion",
@@ -45,8 +46,26 @@ type QuickBooksWebConnectorSession = {
   }>;
 };
 
+type QuickBooksWebConnectorSessionSummary = {
+  ticketSuffix: string;
+  username: string;
+  createdAt: string;
+  closedAt?: string;
+  requestCount: number;
+  completedRequestCount: number;
+  lastError: string | null;
+  responses: Array<{
+    requestType: string;
+    requestId?: string;
+    receivedAt: string;
+    responseChecksum: string;
+    status: QuickBooksQbxmlResponseStatus[];
+  }>;
+};
+
 type QuickBooksWebConnectorGlobal = typeof globalThis & {
   __stemQuickBooksWebConnectorSessions?: Map<string, QuickBooksWebConnectorSession>;
+  __stemQuickBooksWebConnectorRecentSessions?: QuickBooksWebConnectorSessionSummary[];
 };
 
 export type QuickBooksWebConnectorResult = {
@@ -60,6 +79,7 @@ const sessionStore =
     string,
     QuickBooksWebConnectorSession
   >());
+const recentSessions = ((globalThis as QuickBooksWebConnectorGlobal).__stemQuickBooksWebConnectorRecentSessions ||= []);
 
 export async function handleQuickBooksWebConnectorSoapRequest(soapRequest: string): Promise<QuickBooksWebConnectorResult> {
   const method = extractSoapMethod(soapRequest);
@@ -97,8 +117,15 @@ export function buildQuickBooksWebConnectorStatus() {
   return {
     service: "Stem Intelligence QuickBooks Desktop Web Connector",
     mode: "read-only-sales-dashboard-discovery",
+    configuration: {
+      appUrlConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_APP_URL),
+      passwordConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_PASSWORD),
+      username: process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_USERNAME || DEFAULT_USERNAME,
+      rawCaptureEnabled: process.env.QUICKBOOKS_DESKTOP_CAPTURE_RAW_RESPONSES !== "false" && DEFAULT_CAPTURE_RAW_RESPONSES
+    },
     activeSessions: sessionStore.size,
-    requestTypes: buildSalesDashboardRequests().map((request) => request.requestType)
+    requestTypes: buildSalesDashboardRequests().map((request) => request.requestType),
+    recentSessions
   };
 }
 
@@ -149,6 +176,7 @@ async function receiveResponseXML(soapRequest: string) {
   const message = extractSoapValue(soapRequest, "message");
   if (hresult || message) {
     session.lastError = [hresult, message].filter(Boolean).join(": ");
+    rememberSession(session);
     return -1;
   }
 
@@ -176,6 +204,7 @@ async function receiveResponseXML(soapRequest: string) {
   }
 
   session.requestIndex += 1;
+  rememberSession(session);
   return Math.min(100, Math.round((session.requestIndex / session.requests.length) * 100));
 }
 
@@ -186,6 +215,8 @@ function getLastError(soapRequest: string) {
 
 function closeConnection(soapRequest: string) {
   const ticket = extractSoapValue(soapRequest, "ticket");
+  const session = getSession(ticket);
+  if (session) rememberSession(session, new Date().toISOString());
   sessionStore.delete(ticket);
   return "Stem Intelligence QuickBooks Desktop discovery session closed.";
 }
@@ -196,6 +227,7 @@ function connectionError(soapRequest: string) {
   const message = extractSoapValue(soapRequest, "message");
   if (session) {
     session.lastError = [hresult, message].filter(Boolean).join(": ");
+    rememberSession(session);
   }
   return "done";
 }
@@ -216,6 +248,32 @@ function isAuthorized(username: string, password: string) {
 
 function getSession(ticket: string) {
   return ticket ? sessionStore.get(ticket) || null : null;
+}
+
+function rememberSession(session: QuickBooksWebConnectorSession, closedAt?: string) {
+  const summary: QuickBooksWebConnectorSessionSummary = {
+    ticketSuffix: session.ticket.slice(-8),
+    username: session.username,
+    createdAt: session.createdAt,
+    ...(closedAt ? { closedAt } : {}),
+    requestCount: session.requests.length,
+    completedRequestCount: session.responses.length,
+    lastError: session.lastError || null,
+    responses: session.responses.map((response) => ({
+      requestType: response.requestType,
+      requestId: response.requestId,
+      receivedAt: response.receivedAt,
+      responseChecksum: response.responseChecksum,
+      status: response.status
+    }))
+  };
+
+  const existingIndex = recentSessions.findIndex((recent) => recent.ticketSuffix === summary.ticketSuffix);
+  if (existingIndex >= 0) {
+    recentSessions.splice(existingIndex, 1);
+  }
+  recentSessions.unshift(summary);
+  recentSessions.splice(RECENT_SESSION_LIMIT);
 }
 
 async function writeRawResponse(

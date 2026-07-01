@@ -293,6 +293,8 @@ The Next.js app now has a minimal read-only QBWC proof-of-concept surface:
   `/api/integrations/quickbooks-desktop/qwc`
 - Web Connector SOAP endpoint:
   `/api/integrations/quickbooks-desktop/web-connector`
+- Setup and troubleshooting checklist:
+  `docs/quickbooks-web-connector-setup.md`
 - Initial read-only request queue:
   `CustomerQueryRq`, `ItemQueryRq`, `InvoiceQueryRq`, `CreditMemoQueryRq`, and
   `ReceivePaymentQueryRq`
