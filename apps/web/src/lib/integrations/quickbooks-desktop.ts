@@ -87,6 +87,10 @@ export type QuickBooksDesktopQbxmlRequest = {
   qbxml: string;
 };
 
+export type QuickBooksSalesDashboardDiscoveryOptions = {
+  maxReturned?: number;
+};
+
 type QuickBooksRequestBuildParts = {
   requestId?: string;
   iterator?: QuickBooksIteratorOptions;
@@ -160,6 +164,45 @@ export function createQuickBooksDesktopReadOnlyClient(options: QuickBooksDesktop
 }
 
 export type QuickBooksDesktopReadOnlyClient = ReturnType<typeof createQuickBooksDesktopReadOnlyClient>;
+
+export function buildQuickBooksSalesDashboardDiscoveryRequests(
+  options: QuickBooksSalesDashboardDiscoveryOptions = {}
+): QuickBooksDesktopQbxmlRequest[] {
+  const maxReturned = options.maxReturned || 10;
+  const client = createQuickBooksDesktopReadOnlyClient();
+
+  return [
+    client.buildCustomerQuery({
+      requestId: "sales-dashboard-customers",
+      maxReturned,
+      activeStatus: "All"
+    }),
+    client.buildItemQuery({
+      requestId: "sales-dashboard-items",
+      maxReturned,
+      activeStatus: "All"
+    }),
+    client.buildInvoiceQuery({
+      requestId: "sales-dashboard-invoices",
+      maxReturned,
+      paidStatus: "All",
+      includeLineItems: true,
+      includeLinkedTxns: true
+    }),
+    client.buildCreditMemoQuery({
+      requestId: "sales-dashboard-credit-memos",
+      maxReturned,
+      includeLineItems: true,
+      includeLinkedTxns: true
+    }),
+    client.buildReceivePaymentQuery({
+      requestId: "sales-dashboard-payments",
+      maxReturned,
+      includeLineItems: false,
+      includeLinkedTxns: true
+    })
+  ];
+}
 
 export function buildQuickBooksDesktopQwcFile(options: QuickBooksQwcFileOptions) {
   const qbType = options.qbType || "QBFS";

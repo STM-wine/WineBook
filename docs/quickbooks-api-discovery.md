@@ -285,6 +285,46 @@ validation against Stem's product version and company-file population.
 This is the recommended delivery plan for Junaid. Each phase should be reviewed and
 accepted before work begins on the next phase.
 
+## Initial Stem QBWC service skeleton
+
+The Next.js app now has a minimal read-only QBWC proof-of-concept surface:
+
+- `.qwc` download route:
+  `/api/integrations/quickbooks-desktop/qwc`
+- Web Connector SOAP endpoint:
+  `/api/integrations/quickbooks-desktop/web-connector`
+- Initial read-only request queue:
+  `CustomerQueryRq`, `ItemQueryRq`, `InvoiceQueryRq`, `CreditMemoQueryRq`, and
+  `ReceivePaymentQueryRq`
+
+This first queue is intentionally aligned with the future sales dashboard rather
+than a generic connectivity demo. Invoices alone are not enough for Stem because
+credits and payments must be pulled from QuickBooks Desktop to calculate net sales
+and avoid the current Vinosmith/QuickBooks credit mismatch.
+
+Required environment variables before downloading/installing the `.qwc` file:
+
+- `QUICKBOOKS_DESKTOP_APP_URL`: hosted HTTPS URL for
+  `/api/integrations/quickbooks-desktop/web-connector`
+- `QUICKBOOKS_DESKTOP_WEB_CONNECTOR_PASSWORD`: password typed into QBWC
+
+Optional environment variables:
+
+- `QUICKBOOKS_DESKTOP_WEB_CONNECTOR_USERNAME`, defaults to `stem-qbwc`
+- `QUICKBOOKS_DESKTOP_APP_NAME`, defaults to `Stem Intelligence`
+- `QUICKBOOKS_DESKTOP_APP_DESCRIPTION`
+- `QUICKBOOKS_DESKTOP_APP_SUPPORT_URL`
+- `QUICKBOOKS_DESKTOP_OWNER_ID`
+- `QUICKBOOKS_DESKTOP_FILE_ID`
+- `QUICKBOOKS_DESKTOP_QBXML_VERSION`, defaults to `16.0`
+- `QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED`, defaults to `10`
+- `QUICKBOOKS_DESKTOP_CAPTURE_RAW_RESPONSES`, set to `false` to disable local raw
+  response capture
+
+Raw qbXML requests, responses, and status summaries are written under ignored
+`tmp/quickbooks-desktop/<session-ticket>/` for the POC. These files may contain
+customer and financial data and must not be committed or shared broadly.
+
 ### Phase 1: Read-only QBWC proof of concept
 
 - Create a minimal Stem-controlled HTTPS QBWC web service.
