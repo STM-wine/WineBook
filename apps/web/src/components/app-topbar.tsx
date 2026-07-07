@@ -6,7 +6,7 @@ import { ActiveView, NAV_VIEW_LABELS } from "./dashboard-types";
 import { SignOutButton } from "./sign-out-button";
 
 type AppTopbarProps = {
-  activeModule?: "grw-converter" | "settings";
+  activeModule?: "grw-converter" | "supplier-offer-compiler" | "settings";
   activeView?: ActiveView;
   canViewSettings?: boolean;
   dataLabel?: string;
@@ -68,7 +68,7 @@ export function AppTopbar({
         )}
         <div className="nav-dropdown">
           <button
-            className={activeModule === "grw-converter" ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"}
+            className={activeModule === "grw-converter" || activeModule === "supplier-offer-compiler" ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"}
             type="button"
             aria-haspopup="menu"
           >
@@ -77,6 +77,9 @@ export function AppTopbar({
           <div className="nav-dropdown-menu" role="menu">
             <Link href="/modules/grw-converter" role="menuitem">
               GRW Converter
+            </Link>
+            <Link href="/modules/supplier-offer-compiler" role="menuitem">
+              Supplier Offer Compiler
             </Link>
           </div>
         </div>
