@@ -77,6 +77,7 @@ export function SupplierOfferCompilerView() {
   const [isLoading, setIsLoading] = useState(true);
   const [isCompiling, setIsCompiling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [initializationMessage, setInitializationMessage] = useState<string | null>(null);
 
   const selectedSupplier = useMemo(() => payload.suppliers.find((supplier) => supplier.id === supplierId) || null, [payload.suppliers, supplierId]);
 
@@ -84,22 +85,32 @@ export function SupplierOfferCompilerView() {
     () => payload.candidates.find((candidate) => candidate.id === selectedCandidateId) || payload.candidates[0] || null,
     [payload.candidates, selectedCandidateId]
   );
+  const hasRequiredInputs = Boolean(supplierId && documentType && file);
+  const canCompile = hasRequiredInputs && !isCompiling;
+  const compileButtonLabel = isCompiling ? "Compiling..." : hasRequiredInputs ? "Compile" : "Select supplier and file";
+  const compileButtonClassName = isCompiling || hasRequiredInputs ? "button" : "button button-outline";
 
   async function load(documentId = selectedDocumentId) {
     setIsLoading(true);
-    const suffix = documentId ? `?documentId=${encodeURIComponent(documentId)}` : "";
-    const response = await fetch(`/api/supplier-offer-compiler/documents${suffix}`);
-    const data = await response.json();
-    if (!response.ok) {
-      setMessage(data.error || "Could not load supplier offer compiler data.");
-    } else {
+    try {
+      const suffix = documentId ? `?documentId=${encodeURIComponent(documentId)}` : "";
+      const response = await fetch(`/api/supplier-offer-compiler/documents${suffix}`);
+      const contentType = response.headers.get("content-type") || "";
+      const data = contentType.includes("application/json") ? await response.json() : { error: await response.text() };
+      if (!response.ok) {
+        setInitializationMessage(data.error || "Could not load supplier offer compiler data.");
+        return;
+      }
+
       setPayload(data);
       setSelectedDocumentId(data.selectedDocumentId);
-      if (!supplierId && data.suppliers?.[0]?.id) setSupplierId(data.suppliers[0].id);
       setSelectedCandidateId(data.candidates?.[0]?.id || null);
-      if (data.compilerTablesAvailable === false && data.migrationMessage) setMessage(data.migrationMessage);
+      setInitializationMessage(data.compilerTablesAvailable === false && data.migrationMessage ? data.migrationMessage : null);
+    } catch (error) {
+      setInitializationMessage(error instanceof Error ? error.message : "Could not load supplier offer compiler data.");
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }
 
   useEffect(() => {
@@ -110,12 +121,9 @@ export function SupplierOfferCompilerView() {
   async function compile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
-    if (!file) {
-      setMessage("Choose a CSV or XLSX supplier offer first.");
-      return;
-    }
-    if (!supplierId) {
-      setMessage("Select a supplier before compiling.");
+    const compileFile = file;
+    if (!supplierId || !documentType || !compileFile) {
+      setMessage("Select a supplier and choose a CSV or XLSX file before compiling.");
       return;
     }
     if (payload.compilerTablesAvailable === false) {
@@ -124,13 +132,15 @@ export function SupplierOfferCompilerView() {
     }
 
     setIsCompiling(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 60000);
     try {
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", compileFile);
       form.append("supplierId", supplierId);
       form.append("supplierName", selectedSupplier?.name || "");
       form.append("documentType", documentType);
-      const response = await fetch("/api/supplier-offer-compiler/compile", { method: "POST", body: form });
+      const response = await fetch("/api/supplier-offer-compiler/compile", { method: "POST", body: form, signal: controller.signal });
       const contentType = response.headers.get("content-type") || "";
       const data = contentType.includes("application/json") ? await response.json() : { error: await response.text() };
       if (!response.ok) {
@@ -140,8 +150,13 @@ export function SupplierOfferCompilerView() {
         await load(data.documentId);
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Compile failed before the server returned a response.");
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setMessage("Compile timed out after 60 seconds. Try a smaller CSV/XLSX file, or apply/check the Supabase migration and reload.");
+      } else {
+        setMessage(error instanceof Error ? error.message : "Compile failed before the server returned a response.");
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       setIsCompiling(false);
     }
   }
@@ -177,15 +192,26 @@ export function SupplierOfferCompilerView() {
           </label>
           <label>
             <span>Supplier File</span>
-            <input accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => setFile(event.target.files?.[0] || null)} type="file" />
+            <input
+              accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              disabled={isCompiling}
+              onChange={(event) => {
+                const nextFile = event.target.files?.[0] || null;
+                setFile(nextFile);
+                if (nextFile) setMessage(`Ready to compile ${nextFile.name}.`);
+              }}
+              type="file"
+            />
           </label>
           <div className="form-actions">
-            <button className="button" disabled={isCompiling || payload.compilerTablesAvailable === false} type="submit">{isCompiling ? "Compiling..." : "Compile"}</button>
+            <button className={compileButtonClassName} disabled={!canCompile} type="submit">{compileButtonLabel}</button>
             <a className="button button-outline" href="/api/supplier-offer-compiler/export?format=csv">Export CSV</a>
             <a className="button button-outline" href="/api/supplier-offer-compiler/export?format=xlsx">Export XLSX</a>
           </div>
         </form>
+        {initializationMessage ? <p className="muted">{initializationMessage}</p> : null}
         {message ? <p className="muted">{message}</p> : null}
+        {isCompiling ? <p className="muted">Uploading and compiling. This should finish or timeout within 60 seconds.</p> : null}
       </section>
 
       <section className="panel">

@@ -162,6 +162,45 @@ Important implementation notes:
 - Local development requires the Next.js app env in `apps/web/.env.local` plus the Python dependencies from `requirements.txt`/the local virtualenv.
 - Useful local checks include `npm run build` from `apps/web`, direct bridge testing with a known GRW PDF, and opening `/modules/grw-converter` on localhost.
 
+
+
+## Supplier Offer Compiler MVP
+
+Active branch: `supplier-offer-compiler-mvp`.
+
+The Supplier Offer Compiler is a trust-first compiler for supplier CSV/XLSX offers. It is intentionally not a direct importer: supplier documents should become evidence-backed, reviewed offer candidates before anything touches QuickBooks, VinoSmith, official products, or `supplier_catalog_wines`.
+
+Current MVP state:
+
+- Route: `/modules/supplier-offer-compiler` in the Next.js app.
+- Upload support: CSV and XLSX only.
+- Supplier selector reuses Supplier Hub logistics data from Supabase `suppliers`, merged with `importers.csv` defaults via `loadImporterDefaults()` / `mergeSupplierDefaults()`.
+- Parser foundation lives in `apps/web/src/lib/supplier-offer-compiler/`.
+- Compiler API routes live in `apps/web/src/app/api/supplier-offer-compiler/`.
+- UI currently has stable form state: idle, ready, and compiling states are distinct.
+- The first migration for durable compiler tables is `supabase/migrations/20260706120000_supplier_offer_compiler_foundation.sql`.
+- Do not apply that migration automatically during development unless explicitly requested.
+
+Important current constraint:
+
+The next product change should split parsing from persistence. The first user action should preview extraction JSON without requiring the `supplier_offer_*` tables. Only a later human approval/save action should persist compiler records to Supabase, and that save action should be disabled with a clear migration-needed message when the compiler tables are unavailable.
+
+Next recommended step:
+
+1. Add a preview-only API route, likely `apps/web/src/app/api/supplier-offer-compiler/preview/route.ts`.
+2. Reuse the existing CSV/XLSX parser, normalization, validation, and pricing preview helpers.
+3. Return temporary JSON containing document metadata, detected headers, extracted rows, extracted fields, normalized candidate fields, confidence/validation flags, and pricing preview.
+4. Update `SupplierOfferCompilerView` so the primary button previews extraction, similar to the GRW converter.
+5. Add a separate approval/save action that calls the persistence route only after human review.
+6. Keep QuickBooks, VinoSmith, official products, and `supplier_catalog_wines` untouched.
+
+Local verification:
+
+```bash
+cd apps/web
+npx tsc --noEmit
+```
+
 ## Supabase
 
 Project URL:
