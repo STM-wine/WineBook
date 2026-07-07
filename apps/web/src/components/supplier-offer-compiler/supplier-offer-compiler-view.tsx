@@ -16,6 +16,9 @@ type Validation = { id: string; severity: "blocker" | "warning" | "info"; messag
 type MatchCandidate = { id: string; match_status: string; score: number; rank: number; matched_display_name?: string | null; matched_supplier?: string | null; explanation?: Record<string, unknown> | null };
 type PricingTrace = { id: string; suggested_wholesale?: number | null; suggested_frontline?: number | null; calculated_margin?: number | null; trace_steps?: Array<Record<string, unknown>> | null; warnings?: string[] | null };
 type CandidateField = { id: string; canonical_field: string; original_value?: string | null; normalized_value?: string | null; final_value?: string | null; confidence: number; source_header?: string | null };
+type PreviewField = { canonicalField: string; sourceHeader?: string | null; originalValue?: string | null; normalizedValue?: string | null; confidence: number };
+type PreviewCandidate = { previewId: string; sourceRow: { sheetName?: string | null; rowNumber?: number | null; rawRow?: Record<string, unknown>; rowConfidence: number }; displayName?: string | null; candidate: { producer?: string | null; wineName?: string | null; vintage?: string | null; bottleSize?: string | null; packSize?: number | null; fob?: number | null; quantity?: number | null; overallConfidence: number; fields: PreviewField[] }; pricingPreview?: { frontlineBottlePrice?: number | null; frontlineMargin?: number | null; bestPrice?: number | null; bestMargin?: number | null; landedBottleCost?: number | null; helper?: string | null }; pricingTrace?: PricingTrace; validations?: Array<{ severity: string; message: string; ruleCode?: string }>; matches?: MatchCandidate[] };
+type PreviewPayload = { document: { fileName: string; supplierName: string; documentType: string; byteSize: number }; parse: { parserType: string; parserVersion: string; diagnostics: Record<string, unknown>; detectedHeaders: unknown }; rows: unknown[]; candidates: PreviewCandidate[] };
 type Candidate = {
   id: string;
   producer?: string | null;
@@ -73,11 +76,13 @@ export function SupplierOfferCompilerView() {
   const [documentType, setDocumentType] = useState("price_list");
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCompiling, setIsCompiling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [initializationMessage, setInitializationMessage] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewPayload | null>(null);
+  const [historyMessage, setHistoryMessage] = useState<string | null>(null);
 
   const selectedSupplier = useMemo(() => payload.suppliers.find((supplier) => supplier.id === supplierId) || null, [payload.suppliers, supplierId]);
 
@@ -85,9 +90,10 @@ export function SupplierOfferCompilerView() {
     () => payload.candidates.find((candidate) => candidate.id === selectedCandidateId) || payload.candidates[0] || null,
     [payload.candidates, selectedCandidateId]
   );
+  const selectedPreview = useMemo(() => preview?.candidates.find((candidate) => candidate.previewId === selectedPreviewId) || preview?.candidates[0] || null, [preview, selectedPreviewId]);
   const hasRequiredInputs = Boolean(supplierId && documentType && file);
   const canCompile = hasRequiredInputs && !isCompiling;
-  const compileButtonLabel = isCompiling ? "Compiling..." : hasRequiredInputs ? "Compile" : "Select supplier and file";
+  const compileButtonLabel = isCompiling ? "Previewing..." : hasRequiredInputs ? "Preview extraction" : "Select supplier and file";
   const compileButtonClassName = isCompiling || hasRequiredInputs ? "button" : "button button-outline";
 
   async function load(documentId = selectedDocumentId) {
@@ -98,16 +104,16 @@ export function SupplierOfferCompilerView() {
       const contentType = response.headers.get("content-type") || "";
       const data = contentType.includes("application/json") ? await response.json() : { error: await response.text() };
       if (!response.ok) {
-        setInitializationMessage(data.error || "Could not load supplier offer compiler data.");
+        setHistoryMessage(data.error || "Could not load supplier offer compiler data.");
         return;
       }
 
       setPayload(data);
       setSelectedDocumentId(data.selectedDocumentId);
       setSelectedCandidateId(data.candidates?.[0]?.id || null);
-      setInitializationMessage(data.compilerTablesAvailable === false && data.migrationMessage ? data.migrationMessage : null);
+      setHistoryMessage(data.compilerTablesAvailable === false ? "Save/approval history is unavailable until compiler tables are migrated. Preview extraction still works." : null);
     } catch (error) {
-      setInitializationMessage(error instanceof Error ? error.message : "Could not load supplier offer compiler data.");
+      setHistoryMessage(error instanceof Error ? error.message : "Could not load supplier offer compiler data.");
     } finally {
       setIsLoading(false);
     }
@@ -118,16 +124,12 @@ export function SupplierOfferCompilerView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function compile(event: FormEvent<HTMLFormElement>) {
+  async function previewExtraction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
     const compileFile = file;
     if (!supplierId || !documentType || !compileFile) {
       setMessage("Select a supplier and choose a CSV or XLSX file before compiling.");
-      return;
-    }
-    if (payload.compilerTablesAvailable === false) {
-      setMessage(payload.migrationMessage || "Supplier Offer Compiler tables are not available yet. Apply the latest Supabase migration, then reload.");
       return;
     }
 
@@ -140,20 +142,21 @@ export function SupplierOfferCompilerView() {
       form.append("supplierId", supplierId);
       form.append("supplierName", selectedSupplier?.name || "");
       form.append("documentType", documentType);
-      const response = await fetch("/api/supplier-offer-compiler/compile", { method: "POST", body: form, signal: controller.signal });
+      const response = await fetch("/api/supplier-offer-compiler/preview", { method: "POST", body: form, signal: controller.signal });
       const contentType = response.headers.get("content-type") || "";
       const data = contentType.includes("application/json") ? await response.json() : { error: await response.text() };
       if (!response.ok) {
         setMessage(data.error || "Compile failed.");
       } else {
-        setMessage(`Compiled ${data.candidateCount} candidate(s) from ${data.rowCount} row(s).`);
-        await load(data.documentId);
+        setPreview(data);
+        setSelectedPreviewId(data.candidates?.[0]?.previewId || null);
+        setMessage(`Previewed ${data.candidates?.length || 0} candidate(s) from ${data.rows?.length || 0} row(s).`);
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setMessage("Compile timed out after 60 seconds. Try a smaller CSV/XLSX file, or apply/check the Supabase migration and reload.");
+        setMessage("Preview timed out after 60 seconds. Try a smaller CSV/XLSX file.");
       } else {
-        setMessage(error instanceof Error ? error.message : "Compile failed before the server returned a response.");
+        setMessage(error instanceof Error ? error.message : "Preview failed before the server returned a response.");
       }
     } finally {
       window.clearTimeout(timeoutId);
@@ -176,7 +179,7 @@ export function SupplierOfferCompilerView() {
   return (
     <div className="module-stack">
       <section className="panel">
-        <form className="settings-grid" onSubmit={compile}>
+        <form className="settings-grid" onSubmit={previewExtraction}>
           <label>
             <span>Supplier</span>
             <select value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required>
@@ -198,7 +201,9 @@ export function SupplierOfferCompilerView() {
               onChange={(event) => {
                 const nextFile = event.target.files?.[0] || null;
                 setFile(nextFile);
-                if (nextFile) setMessage(`Ready to compile ${nextFile.name}.`);
+                setPreview(null);
+                setSelectedPreviewId(null);
+                if (nextFile) setMessage(`Ready to preview ${nextFile.name}.`);
               }}
               type="file"
             />
@@ -209,10 +214,58 @@ export function SupplierOfferCompilerView() {
             <a className="button button-outline" href="/api/supplier-offer-compiler/export?format=xlsx">Export XLSX</a>
           </div>
         </form>
-        {initializationMessage ? <p className="muted">{initializationMessage}</p> : null}
         {message ? <p className="muted">{message}</p> : null}
-        {isCompiling ? <p className="muted">Uploading and compiling. This should finish or timeout within 60 seconds.</p> : null}
+        {isCompiling ? <p className="muted">Uploading and previewing. This should finish or timeout within 60 seconds.</p> : null}
       </section>
+
+
+      {preview ? (
+        <section className="panel">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Extraction Preview</p>
+              <h2>{preview.document.fileName}</h2>
+              <p className="muted">{preview.parse.parserType} parser, {preview.rows.length} extracted row(s), {preview.candidates.length} candidate(s)</p>
+            </div>
+            <button className="button" disabled={payload.compilerTablesAvailable === false} type="button">
+              Approve preview and save
+            </button>
+          </div>
+          {payload.compilerTablesAvailable === false && historyMessage ? <p className="muted">{historyMessage}</p> : null}
+          <div className="table-shell">
+            <table>
+              <thead>
+                <tr><th>Display Name</th><th>Vintage</th><th>Size</th><th>Pack</th><th>FOB</th><th>Qty</th><th>FL</th><th>FL margin</th><th>Best</th><th>Best margin</th><th>Flags</th><th>Confidence</th></tr>
+              </thead>
+              <tbody>
+                {preview.candidates.map((item) => (
+                  <tr key={item.previewId} className={item.previewId === selectedPreview?.previewId ? "selected" : ""} onClick={() => setSelectedPreviewId(item.previewId)}>
+                    <td>{item.displayName || "-"}</td>
+                    <td>{item.candidate.vintage || "-"}</td>
+                    <td>{item.candidate.bottleSize || "-"}</td>
+                    <td>{item.candidate.packSize || "-"}</td>
+                    <td>{money(item.candidate.fob)}</td>
+                    <td>{item.candidate.quantity || "-"}</td>
+                    <td>{money(item.pricingPreview?.frontlineBottlePrice)}</td>
+                    <td>{percent(item.pricingPreview?.frontlineMargin)}</td>
+                    <td>{item.pricingPreview?.bestPrice ? money(item.pricingPreview.bestPrice) : "-"}</td>
+                    <td>{item.pricingPreview?.bestMargin ? percent(item.pricingPreview.bestMargin) : "-"}</td>
+                    <td>{item.validations?.length || 0}</td>
+                    <td>{Math.round(Number(item.candidate.overallConfidence || 0) * 100)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {selectedPreview ? (
+            <div className="settings-grid three-column">
+              <div><p className="eyebrow">Fields</p>{selectedPreview.candidate.fields.map((field, index) => <p key={`${field.canonicalField}-${index}`} className="muted"><strong>{field.canonicalField}</strong>: {field.originalValue || "-"} {"->"} {field.normalizedValue || "-"} ({Math.round(Number(field.confidence) * 100)}%)</p>)}</div>
+              <div><p className="eyebrow">Pricing</p><p className="muted"><strong>Helper</strong>: {selectedPreview.pricingPreview?.helper || "calculatePricing"}</p><p className="muted"><strong>FL</strong>: {money(selectedPreview.pricingPreview?.frontlineBottlePrice)} ({percent(selectedPreview.pricingPreview?.frontlineMargin)})</p><p className="muted"><strong>Best</strong>: {selectedPreview.pricingPreview?.bestPrice ? money(selectedPreview.pricingPreview.bestPrice) : "-"} {selectedPreview.pricingPreview?.bestMargin ? `(${percent(selectedPreview.pricingPreview.bestMargin)})` : ""}</p><p className="eyebrow">Validation</p>{(selectedPreview.validations || []).map((validation, index) => <p key={index} className="muted"><strong>{validation.severity}</strong>: {validation.message}</p>)}</div>
+              <div><p className="eyebrow">Source Row</p><pre className="muted">{JSON.stringify(selectedPreview.sourceRow.rawRow || {}, null, 2)}</pre></div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="panel">
         <div className="section-heading-row">
@@ -222,6 +275,7 @@ export function SupplierOfferCompilerView() {
           </div>
           <p className="muted">Approved offers: {payload.approvedCount}</p>
         </div>
+        {historyMessage ? <p className="muted">{historyMessage}</p> : null}
         <div className="table-shell">
           <table>
             <thead>
@@ -270,7 +324,7 @@ export function SupplierOfferCompilerView() {
                   </tr>
                 );
               })}
-              {payload.candidates.length === 0 ? <tr><td colSpan={13}>Compile a supplier file to see candidates.</td></tr> : null}
+              {payload.candidates.length === 0 ? <tr><td colSpan={13}>Saved compiler candidates will appear here after approval/save.</td></tr> : null}
             </tbody>
           </table>
         </div>

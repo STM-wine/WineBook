@@ -1,4 +1,5 @@
 import {
+  buildDisplayName,
   money,
   normalizePackFormat,
   normalizeSpaces,
@@ -11,6 +12,17 @@ import type {
   SupplierOfferExtractedRowDraft
 } from "./types";
 import { clampConfidence } from "./evidence";
+
+
+const TRAILING_VINTAGE_RE = /(?:^|\s)((?:19|20)\d{2}|NV|N\/V)\s*$/i;
+
+function splitTrailingVintage(value: unknown) {
+  const text = normalizeSpaces(value);
+  const match = text.match(TRAILING_VINTAGE_RE);
+  if (!match) return { wineName: text, vintage: null };
+  const vintage = normalizeVintage(match[1]);
+  return { wineName: normalizeSpaces(text.slice(0, match.index).trim()), vintage };
+}
 
 const HEADER_ALIASES: Record<SupplierOfferCanonicalField, string[]> = {
   producer: ["producer", "winery", "estate", "domaine", "chateau", "brand"],
@@ -103,6 +115,12 @@ export function rowToCandidate(input: {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  const wineNameValue = text("wine_name");
+  const vintageValue = text("vintage");
+  const splitWine = splitTrailingVintage(wineNameValue);
+  const normalizedWineName = splitWine.wineName || wineNameValue;
+  const normalizedVintage = vintageValue || splitWine.vintage || "NV";
+
   const requiredConfidences = ["producer", "wine_name", "vintage", "fob"].map((field) =>
     valueByField.get(field as SupplierOfferCanonicalField)?.confidence ?? 0
   );
@@ -115,8 +133,8 @@ export function rowToCandidate(input: {
     supplierName: normalizeSpaces(input.supplierName),
     documentType: input.documentType,
     producer: text("producer"),
-    wineName: text("wine_name"),
-    vintage: text("vintage") || "NV",
+    wineName: normalizedWineName,
+    vintage: normalizedVintage,
     appellation: text("appellation"),
     region: text("region"),
     country: text("country"),
@@ -135,7 +153,17 @@ export function rowToCandidate(input: {
     notes: text("notes"),
     overallConfidence,
     fields: input.row.fields,
-    metadata: {}
+    metadata: {
+      displayName: buildDisplayName({
+        producer: text("producer") || "",
+        wineName: normalizedWineName || "",
+        vintage: normalizedVintage,
+        packSize: number("pack_size") || 12,
+        bottleSize: text("bottle_size") || "750ml"
+      }),
+      originalWineName: wineNameValue,
+      vintageExtractedFromWineName: !vintageValue && Boolean(splitWine.vintage)
+    }
   };
 }
 
