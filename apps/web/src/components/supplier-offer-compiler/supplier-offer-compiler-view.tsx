@@ -66,6 +66,36 @@ function topMatch(candidate: Candidate) {
   return [...(candidate.match_candidates || [])].sort((a, b) => Number(a.rank) - Number(b.rank))[0] || null;
 }
 
+
+function reviewSummary(validations: Array<{ severity: string }> = []) {
+  const counts = validations.reduce((summary, validation) => {
+    const severity = validation.severity.toLowerCase();
+    if (severity === "blocker") summary.blocker += 1;
+    else if (severity === "warning") summary.warning += 1;
+    else summary.info += 1;
+    return summary;
+  }, { blocker: 0, warning: 0, info: 0 });
+  if (counts.blocker) return `Blocker ${counts.blocker}${counts.warning ? ` / Warning ${counts.warning}` : ""}`;
+  if (counts.warning) return `Warning ${counts.warning}${counts.info ? ` / Info ${counts.info}` : ""}`;
+  if (counts.info) return `Info ${counts.info}`;
+  return "Clean";
+}
+
+function validationTooltip(validations: Array<{ severity: string; message: string; ruleCode?: string }> = []) {
+  if (validations.length === 0) return "Clean: no validation findings.";
+  return validations.map((validation) => {
+    const rule = validation.ruleCode ? ` (${validation.ruleCode})` : "";
+    return `${validation.severity}${rule}: ${validation.message}`;
+  }).join("\n");
+}
+
+function reviewStatusClassName(validations: Array<{ severity: string }> = []) {
+  if (validations.some((validation) => validation.severity.toLowerCase() === "blocker")) return "review-status review-status-blocker";
+  if (validations.some((validation) => validation.severity.toLowerCase() === "warning")) return "review-status review-status-warning";
+  if (validations.some((validation) => validation.severity.toLowerCase() === "info")) return "review-status review-status-info";
+  return "review-status review-status-clean";
+}
+
 function unresolvedBlockers(candidate: Candidate) {
   return (candidate.validations || []).filter((validation) => validation.severity === "blocker" && !validation.resolved);
 }
@@ -235,7 +265,7 @@ export function SupplierOfferCompilerView() {
           <div className="table-shell">
             <table>
               <thead>
-                <tr><th>Display Name</th><th>Vintage</th><th>Size</th><th>Pack</th><th>FOB</th><th>Qty</th><th>FL</th><th>FL margin</th><th>Best</th><th>Best margin</th><th>Flags</th><th>Confidence</th></tr>
+                <tr><th>Display Name</th><th>Vintage</th><th>Size</th><th>Pack</th><th>FOB</th><th>Qty</th><th>FL</th><th>FL margin</th><th>Best</th><th>Best margin</th><th>Review Status</th><th>Compiler Confidence</th></tr>
               </thead>
               <tbody>
                 {preview.candidates.map((item) => (
@@ -250,7 +280,20 @@ export function SupplierOfferCompilerView() {
                     <td>{percent(item.pricingPreview?.frontlineMargin)}</td>
                     <td>{item.pricingPreview?.bestPrice ? money(item.pricingPreview.bestPrice) : "-"}</td>
                     <td>{item.pricingPreview?.bestMargin ? percent(item.pricingPreview.bestMargin) : "-"}</td>
-                    <td>{item.validations?.length || 0}</td>
+                    <td>
+                      <button
+                        aria-label={validationTooltip(item.validations)}
+                        className={reviewStatusClassName(item.validations)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedPreviewId(item.previewId);
+                        }}
+                        title={validationTooltip(item.validations)}
+                        type="button"
+                      >
+                        {reviewSummary(item.validations)}
+                      </button>
+                    </td>
                     <td>{Math.round(Number(item.candidate.overallConfidence || 0) * 100)}%</td>
                   </tr>
                 ))}
@@ -259,8 +302,8 @@ export function SupplierOfferCompilerView() {
           </div>
           {selectedPreview ? (
             <div className="settings-grid three-column">
-              <div><p className="eyebrow">Fields</p>{selectedPreview.candidate.fields.map((field, index) => <p key={`${field.canonicalField}-${index}`} className="muted"><strong>{field.canonicalField}</strong>: {field.originalValue || "-"} {"->"} {field.normalizedValue || "-"} ({Math.round(Number(field.confidence) * 100)}%)</p>)}</div>
-              <div><p className="eyebrow">Pricing</p><p className="muted"><strong>Helper</strong>: {selectedPreview.pricingPreview?.helper || "calculatePricing"}</p><p className="muted"><strong>FL</strong>: {money(selectedPreview.pricingPreview?.frontlineBottlePrice)} ({percent(selectedPreview.pricingPreview?.frontlineMargin)})</p><p className="muted"><strong>Best</strong>: {selectedPreview.pricingPreview?.bestPrice ? money(selectedPreview.pricingPreview.bestPrice) : "-"} {selectedPreview.pricingPreview?.bestMargin ? `(${percent(selectedPreview.pricingPreview.bestMargin)})` : ""}</p><p className="eyebrow">Validation</p>{(selectedPreview.validations || []).map((validation, index) => <p key={index} className="muted"><strong>{validation.severity}</strong>: {validation.message}</p>)}</div>
+              <div><p className="eyebrow">Fields</p><p className="muted"><strong>Compiler Confidence</strong>: {Math.round(Number(selectedPreview.candidate.overallConfidence || 0) * 100)}%</p>{selectedPreview.candidate.fields.map((field, index) => <p key={`${field.canonicalField}-${index}`} className="muted"><strong>{field.canonicalField}</strong>: {field.originalValue || "-"} {"->"} {field.normalizedValue || "-"} ({Math.round(Number(field.confidence) * 100)}%)</p>)}</div>
+              <div><p className="eyebrow">Pricing</p><p className="muted"><strong>Helper</strong>: {selectedPreview.pricingPreview?.helper || "calculatePricing"}</p><p className="muted"><strong>FL</strong>: {money(selectedPreview.pricingPreview?.frontlineBottlePrice)} ({percent(selectedPreview.pricingPreview?.frontlineMargin)})</p><p className="muted"><strong>Best</strong>: {selectedPreview.pricingPreview?.bestPrice ? money(selectedPreview.pricingPreview.bestPrice) : "-"} {selectedPreview.pricingPreview?.bestMargin ? `(${percent(selectedPreview.pricingPreview.bestMargin)})` : ""}</p><p className="eyebrow">Validation</p>{(selectedPreview.validations || []).length ? (selectedPreview.validations || []).map((validation, index) => <p key={index} className="muted"><strong>{validation.severity}</strong>{validation.ruleCode ? ` (${validation.ruleCode})` : ""}: {validation.message}</p>) : <p className="muted"><strong>Clean</strong>: no validation findings.</p>}</div>
               <div><p className="eyebrow">Source Row</p><pre className="muted">{JSON.stringify(selectedPreview.sourceRow.rawRow || {}, null, 2)}</pre></div>
             </div>
           ) : null}
@@ -320,7 +363,7 @@ export function SupplierOfferCompilerView() {
                 const blockers = unresolvedBlockers(candidate);
                 return (
                   <tr key={candidate.id} className={candidate.id === selectedCandidate?.id ? "selected" : ""} onClick={() => setSelectedCandidateId(candidate.id)}>
-                    <td>{candidate.producer || "-"}</td><td>{candidate.wine_name || "-"}</td><td>{candidate.vintage || "-"}</td><td>{candidate.bottle_size || "-"}</td><td>{candidate.pack_size || "-"}</td><td>{money(candidate.fob)}</td><td>{candidate.quantity || "-"}</td><td>{match ? `${match.match_status} (${Math.round(Number(match.score) * 100)}%)` : "new/review"}</td><td>{money(pricing?.suggested_wholesale)}</td><td>{money(pricing?.suggested_frontline)}</td><td>{blockers.some((validation) => validation.rule_code === "margin_below_target") ? "Blocker" : percent(pricing?.calculated_margin)}</td><td>{candidate.review_status}</td><td>{validations.length}</td>
+                    <td>{candidate.producer || "-"}</td><td>{candidate.wine_name || "-"}</td><td>{candidate.vintage || "-"}</td><td>{candidate.bottle_size || "-"}</td><td>{candidate.pack_size || "-"}</td><td>{money(candidate.fob)}</td><td>{candidate.quantity || "-"}</td><td>{match ? `${match.match_status} (${Math.round(Number(match.score) * 100)}%)` : "new/review"}</td><td>{money(pricing?.suggested_wholesale)}</td><td>{money(pricing?.suggested_frontline)}</td><td>{blockers.some((validation) => validation.rule_code === "margin_below_target") ? "Blocker" : percent(pricing?.calculated_margin)}</td><td>{candidate.review_status}</td><td title={validationTooltip(validations.map((validation) => ({ severity: validation.severity, message: validation.message, ruleCode: validation.rule_code })))}>{validations.length}</td>
                   </tr>
                 );
               })}
@@ -342,7 +385,7 @@ export function SupplierOfferCompilerView() {
           <div className="settings-grid three-column">
             <div><p className="eyebrow">Extraction</p>{(selectedCandidate.candidate_fields || []).map((field) => <p key={field.id} className="muted"><strong>{field.canonical_field}</strong>: {field.original_value || "-"} {"->"} {field.normalized_value || "-"} ({Math.round(Number(field.confidence) * 100)}%)</p>)}</div>
             <div><p className="eyebrow">Pricing Trace</p>{(newestPricing(selectedCandidate)?.trace_steps || []).map((step, index) => <p key={index} className="muted"><strong>{String(step.label || "Step")}</strong>: {String(step.value ?? step.formula ?? "-")}</p>)}</div>
-            <div><p className="eyebrow">Review</p>{(selectedCandidate.match_candidates || []).slice(0, 3).map((match) => <p key={match.id} className="muted"><strong>{match.match_status}</strong>: {match.matched_display_name || "Unknown"} ({Math.round(Number(match.score) * 100)}%)</p>)}{(selectedCandidate.validations || []).map((validation) => <p key={validation.id} className="muted"><strong>{validation.severity}</strong>: {validation.message}</p>)}</div>
+            <div><p className="eyebrow">Review</p>{(selectedCandidate.match_candidates || []).slice(0, 3).map((match) => <p key={match.id} className="muted"><strong>{match.match_status}</strong>: {match.matched_display_name || "Unknown"} ({Math.round(Number(match.score) * 100)}%)</p>)}{(selectedCandidate.validations || []).map((validation) => <p key={validation.id} className="muted"><strong>{validation.severity}</strong>{validation.rule_code ? ` (${validation.rule_code})` : ""}: {validation.message}</p>)}</div>
           </div>
         </section>
       ) : null}

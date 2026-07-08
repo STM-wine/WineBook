@@ -3503,3 +3503,36 @@ tr.has-recommendation .sticky-name {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+
+.review-status {
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+.review-status-clean {
+  background: #e8f1ea;
+  color: #34523a;
+}
+
+.review-status-info {
+  background: #e9eef6;
+  color: #31506f;
+}
+
+.review-status-warning {
+  background: #fff3cf;
+  color: #75540f;
+}
+
+.review-status-blocker {
+  background: #fde8e5;
+  color: #8f2c26;
+}
