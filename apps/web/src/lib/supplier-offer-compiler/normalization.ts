@@ -5,6 +5,7 @@ import {
   normalizeSpaces,
   normalizeVintage
 } from "@/lib/supplier-catalog";
+import { normalizeBottleSize, normalizePackSize } from "@/lib/product-identity-search";
 import type {
   SupplierOfferCanonicalField,
   SupplierOfferCandidateDraft,
@@ -85,7 +86,7 @@ export function normalizeFieldValue(field: SupplierOfferCanonicalField, value: u
 
   if (field === "vintage") return normalizeVintage(text);
   if (field === "pack_size") return String(Math.max(1, Math.trunc(Number(text) || 0)) || "");
-  if (field === "bottle_size") return normalizePackFormat(1, text).replace(/^1\//, "");
+  if (field === "bottle_size") return normalizeBottleSize(text);
   if (field === "fob" || field === "wholesale_price" || field === "srp") return String(money(text.replace(/[$,]/g, "")));
   if (field === "quantity") return String(Number(text.replace(/[,]/g, "")) || "");
 
@@ -137,6 +138,8 @@ export function rowToCandidate(input: {
     return sum + weight * (extracted ?? 0);
   }, 0);
   const overallConfidence = clampConfidence(confidenceScore);
+  const normalizedPackSize = normalizePackSize(number("pack_size") || 12);
+  const normalizedBottleSize = normalizeBottleSize(text("bottle_size") || "750ml");
 
   return {
     supplierId: input.supplierId || null,
@@ -149,8 +152,8 @@ export function rowToCandidate(input: {
     region: text("region"),
     country: text("country"),
     grape: text("grape"),
-    bottleSize: text("bottle_size") || "750ml",
-    packSize: number("pack_size") || 12,
+    bottleSize: normalizedBottleSize,
+    packSize: normalizedPackSize,
     fob: number("fob"),
     wholesalePrice: number("wholesale_price"),
     srp: number("srp"),
@@ -168,8 +171,8 @@ export function rowToCandidate(input: {
         producer: text("producer") || "",
         wineName: normalizedWineName || "",
         vintage: normalizedVintage,
-        packSize: number("pack_size") || 12,
-        bottleSize: text("bottle_size") || "750ml"
+        packSize: normalizedPackSize,
+        bottleSize: normalizedBottleSize
       }),
       originalWineName: wineNameValue,
       vintageExtractedFromWineName: !vintageValue && Boolean(splitWine.vintage)
