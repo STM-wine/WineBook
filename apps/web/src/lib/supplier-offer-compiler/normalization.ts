@@ -121,12 +121,22 @@ export function rowToCandidate(input: {
   const normalizedWineName = splitWine.wineName || wineNameValue;
   const normalizedVintage = vintageValue || splitWine.vintage || "NV";
 
-  const requiredConfidences = ["producer", "wine_name", "vintage", "fob"].map((field) =>
-    valueByField.get(field as SupplierOfferCanonicalField)?.confidence ?? 0
-  );
-  const overallConfidence = clampConfidence(
-    requiredConfidences.reduce((sum, confidence) => sum + confidence, 0) / requiredConfidences.length
-  );
+  const tierOneConfidence: Array<[SupplierOfferCanonicalField, number]> = [
+    ["wine_name", 0.24],
+    ["vintage", 0.16],
+    ["pack_size", 0.14],
+    ["bottle_size", 0.14],
+    ["fob", 0.18],
+    ["quantity", 0.14]
+  ];
+  const confidenceScore = tierOneConfidence.reduce((sum, [field, weight]) => {
+    const extracted = valueByField.get(field)?.confidence;
+    if (field === "vintage" && !extracted && splitWine.vintage) return sum + weight * 0.92;
+    if (field === "pack_size" && !extracted && number("pack_size")) return sum + weight * 0.72;
+    if (field === "bottle_size" && !extracted && text("bottle_size")) return sum + weight * 0.72;
+    return sum + weight * (extracted ?? 0);
+  }, 0);
+  const overallConfidence = clampConfidence(confidenceScore);
 
   return {
     supplierId: input.supplierId || null,
