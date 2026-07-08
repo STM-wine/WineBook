@@ -1,25 +1,20 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import {
-  buildSupplierOfferMatchCandidates,
+  classifySupplierOfferIdentityMatches,
   buildSupplierOfferPricingTrace,
   csvSupplierOfferParser,
   rowToCandidate,
+  supplierOfferIdentityQuery,
   validateSupplierOfferCandidate,
   xlsxSupplierOfferParser,
   type SupplierOfferDocumentType,
   type SupplierOfferParser
 } from "@/lib/supplier-offer-compiler";
-import {
-  productRowToCandidate,
-  quickbooksItemRowToCandidate,
-  recommendationRowToCandidate,
-  supplierCatalogRowToCandidate,
-  vinosmithWineRowToCandidate,
-  type ProductIdentityCandidate
-} from "@/lib/product-identity-search";
-import { calculateGpMargin, calculatePricing } from "@/lib/supplier-catalog";
-import { createClient } from "@/lib/supabase/server";
+import { searchProductIdentityCandidates } from "@/lib/product-identity-search";
+import { fetchProductIdentitySearchCandidates } from "@/lib/product-identity-search-sources";
+import { calculateGpMargin, calculatePricing, normalizeSpaces } from "@/lib/supplier-catalog";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -70,28 +65,14 @@ async function fetchSupplier(supabase: Supabase, supplierId: string, supplierNam
   return data || { id: null, name: normalizedName, trucking_cost_per_bottle: 0, active: true };
 }
 
-async function fetchIdentityCandidates(supabase: Supabase): Promise<ProductIdentityCandidate[]> {
-  const { data: suppliers } = await supabase.from("suppliers").select("id,name,trucking_cost_per_bottle").returns<SupplierRecord[]>();
-  const supplierById = new Map((suppliers || []).filter((supplier): supplier is SupplierRecord & { id: string } => Boolean(supplier.id)).map((supplier) => [supplier.id, { name: supplier.name, truckingCostPerBottle: Number(supplier.trucking_cost_per_bottle || 0) }]));
-  const candidates: ProductIdentityCandidate[] = [];
-  const [catalog, products, recommendations, quickbooks, vinosmith] = await Promise.all([
-    supabase.from("supplier_catalog_wines").select("*").limit(500),
-    supabase.from("products").select("*").limit(500),
-    supabase.from("reorder_recommendations").select("*, products(name,planning_sku,product_code,pack_size,vintage,is_core,is_btg), suppliers(name,trucking_cost_per_bottle)").order("created_at", { ascending: false }).limit(250),
-    supabase.from("quickbooks_items").select("list_id,name,full_name,is_active,sales_price,purchase_cost,custom_fields,last_seen_at,time_modified").limit(500),
-    supabase.from("vinosmith_wines").select("wine_id,code,name,vintage,supplier_id,importer_name,producer_name,unit_set,bottle_size,bottle_size_label,fob_price,active,orderable,core,last_seen_at,source_updated_at").limit(500)
-  ]);
-  if (!catalog.error) for (const row of catalog.data || []) candidates.push(supplierCatalogRowToCandidate(row));
-  if (!products.error) for (const row of products.data || []) candidates.push(productRowToCandidate(row, supplierById));
-  if (!recommendations.error) for (const row of recommendations.data || []) {
-    const record = row as Record<string, unknown>;
-    const product = record.products && typeof record.products === "object" ? record.products as Record<string, unknown> : {};
-    const supplier = record.suppliers && typeof record.suppliers === "object" ? record.suppliers as Record<string, unknown> : {};
-    candidates.push(recommendationRowToCandidate({ ...record, product_name: product.name, planning_sku: product.planning_sku, product_code: product.product_code, pack_size: product.pack_size, vintage: product.vintage, is_core: product.is_core, is_btg: product.is_btg, supplier_name: supplier.name, trucking_cost_per_bottle: supplier.trucking_cost_per_bottle }));
-  }
-  if (!quickbooks.error) for (const row of quickbooks.data || []) candidates.push(quickbooksItemRowToCandidate(row));
-  if (!vinosmith.error) for (const row of vinosmith.data || []) candidates.push(vinosmithWineRowToCandidate(row));
-  return candidates;
+
+function normalizeSearchKey(value: unknown) {
+  return normalizeSpaces(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 export async function POST(request: Request) {
@@ -119,10 +100,31 @@ export async function POST(request: Request) {
   const parser = selectParser(file.name, contentType);
   if (!parser) return jsonError("No compiler parser is available for this file type.");
 
-  const [parseResult, identityCandidates] = await Promise.all([
-    parser.parse({ fileName: file.name, contentType, bytes, supplierId: supplier.id, supplierName: supplier.name, documentType: docType }),
-    fetchIdentityCandidates(supabase)
-  ]);
+  let searchSupabase: ReturnType<typeof createServiceRoleClient> | Supabase = supabase;
+  let matchSourceMode: "service_role" | "signed_in_user" = "signed_in_user";
+  let matchSourceWarning: string | null = null;
+  const skippedMatchSources: string[] = [];
+  try {
+    searchSupabase = createServiceRoleClient();
+    matchSourceMode = "service_role";
+  } catch (error) {
+    matchSourceWarning = error instanceof Error ? error.message : "Product match search is using the signed-in Supabase client.";
+  }
+
+  let parseResult;
+  let identityCandidates;
+  try {
+    [parseResult, identityCandidates] = await Promise.all([
+      parser.parse({ fileName: file.name, contentType, bytes, supplierId: supplier.id, supplierName: supplier.name, documentType: docType }),
+      fetchProductIdentitySearchCandidates(searchSupabase, {
+        ignoreSourceErrors: matchSourceMode === "signed_in_user",
+        onSourceError: (source, message) => skippedMatchSources.push(`${source}: ${message}`)
+      })
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not load Add Wine identity search sources.";
+    return jsonError(message, 500);
+  }
 
   const candidates = parseResult.rows.filter((row) => !row.isSkipped && row.fields.length > 0).map((row, index) => {
     const candidate = rowToCandidate({ supplierId: supplier.id, supplierName: supplier.name, documentType: docType, row });
@@ -130,7 +132,42 @@ export async function POST(request: Request) {
     const pricing = calculatePricing({ packSize: candidate.packSize, fobBottle: candidate.fob, laidInPerBottle });
     const pricingTrace = buildSupplierOfferPricingTrace({ candidate, freight: laidInPerBottle, targetGp: 0.32 });
     const validations = validateSupplierOfferCandidate({ candidate, pricingTrace });
-    const matches = buildSupplierOfferMatchCandidates(candidate, identityCandidates, 3);
+    const identityQuery = supplierOfferIdentityQuery(candidate);
+    const canonicalMatches = searchProductIdentityCandidates(
+      {
+        query: identityQuery,
+        producer: candidate.producer,
+        vintage: candidate.vintage,
+        packSize: candidate.packSize,
+        bottleSize: candidate.bottleSize,
+        supplierId: candidate.supplierId,
+        supplierName: candidate.supplierName,
+        limit: 8
+      },
+      identityCandidates
+    );
+    const matches = classifySupplierOfferIdentityMatches(candidate, canonicalMatches);
+    const topMatches = matches.slice(0, 3);
+    const topMatch = topMatches[0] || null;
+    const matchDiagnostics = {
+      normalizedCandidateSearchKey: normalizeSearchKey(identityQuery),
+      canonicalIdentityQuery: identityQuery,
+      addWineSourceMode: matchSourceMode,
+      addWineSourceWarning: [matchSourceWarning, ...skippedMatchSources].filter(Boolean).join("; ") || null,
+      skippedMatchSources,
+      addWineSourceCandidateCount: identityCandidates.length,
+      resultCount: matches.length,
+      topResults: topMatches.map((match) => ({
+        sourceTable: match.explanation?.source_table || match.source,
+        sourceId: match.sourceId,
+        name: match.matchedDisplayName,
+        score: match.score,
+        status: match.explanation?.classification || match.matchStatus,
+        explanation: match.explanation
+      })),
+      finalStatus: topMatch?.explanation?.classification || "New wine",
+      finalReason: topMatch ? String((topMatch.explanation?.reasons as string[] | undefined)?.[0] || "Top Add Wine search result selected for review.") : "No strong Add Wine search result matched the normalized producer/name key."
+    };
     return {
       previewId: `preview-${index + 1}`,
       sourceRow: { sourceKind: row.sourceKind, sheetName: row.sheetName, rowNumber: row.rowNumber, rawRow: row.rawRow, rawText: row.rawText, rowConfidence: row.rowConfidence },
@@ -146,7 +183,8 @@ export async function POST(request: Request) {
       },
       pricingTrace,
       validations,
-      matches
+      matches,
+      matchDiagnostics
     };
   });
 

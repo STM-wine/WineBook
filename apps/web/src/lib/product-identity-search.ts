@@ -38,6 +38,28 @@ export type ProductIdentityCandidate = {
 export type ProductIdentityMatch = ProductIdentityCandidate & {
   score: number;
   sourceLabel: string;
+  identityDiagnostics?: ProductIdentityScoreDiagnostics;
+};
+
+export type ProductIdentityScoreDiagnostics = {
+  uploadedNormalizedIdentity: string;
+  matchedNormalizedIdentity: string;
+  uploadedTokens: string[];
+  matchedTokens: string[];
+  sharedTokens: string[];
+  uploadedOnlyIdentityTokens: string[];
+  matchedOnlyIdentityTokens: string[];
+  missingCandidateIdentityTokens: string[];
+  extraUploadedTokens: string[];
+  directionalPenalty: number;
+  penaltyReasons: string[];
+  packMatches: boolean | null;
+  bottleMatches: boolean | null;
+  vintageMatches: boolean | null;
+  baseScore: number;
+  attributeScore: number;
+  supplierScore: number;
+  sourceWeight: number;
 };
 
 export type ParsedProductIdentityQuery = {
@@ -78,6 +100,8 @@ const SOURCE_LABEL: Record<ProductIdentitySource, string> = {
 const VINTAGE_RE = /\b(?:(?:19|20)\d{2}|NV|N\/V)\b/gi;
 const PACK_RE = /\b\d+\s*[/xX]\s*[0-9.]+\s*(?:ml|mL|ML|l|L)\b/g;
 const PACK_PARSE_RE = /\b(\d+)\s*[/xX]\s*([0-9.]+)\s*(ml|mL|ML|l|L)\b/i;
+const BROAD_WINE_TOKENS = new Set(["barolo", "barbaresco", "chianti", "brunello", "rosso", "bianco", "blanc", "rouge", "red", "white", "wine", "wines", "docg", "doc", "aoc", "aop"]);
+const LOW_IDENTITY_TOKENS = new Set(["the", "and", "de", "del", "della", "di", "la", "le", "les", "il", "el", "los", "las", "da", "do", "dos", "of"]);
 
 export function searchProductIdentityCandidates(
   input: SearchInput,
@@ -101,8 +125,16 @@ export function searchProductIdentityCandidates(
       const attributeScore = scoreIdentityAttributes(candidate, input);
       const supplierScore = supplierBonus(candidate, input);
       const activeScore = candidate.active ? 0.02 : 0;
-      const score = Math.min(1, baseScore + attributeScore + supplierScore + SOURCE_WEIGHT[candidate.source] + activeScore);
-      return { ...candidate, score, sourceLabel: SOURCE_LABEL[candidate.source] };
+      const sourceWeight = SOURCE_WEIGHT[candidate.source];
+      const identityDiagnostics = scoreIdentityDirection(input, candidate, { baseScore, attributeScore, supplierScore, sourceWeight });
+      const rawScore = baseScore + attributeScore + supplierScore + sourceWeight + activeScore - identityDiagnostics.directionalPenalty;
+      const identityMismatchCount = identityDiagnostics.uploadedOnlyIdentityTokens.length + identityDiagnostics.matchedOnlyIdentityTokens.length;
+      const identityScoreCap = identityMismatchCount
+        ? identityMismatchCount >= 2 ? 0.44 : 0.49
+        : 1;
+      const packBottleScoreCap = identityDiagnostics.packMatches === false || identityDiagnostics.bottleMatches === false ? 0.74 : 1;
+      const score = Math.max(0, Math.min(identityScoreCap, packBottleScoreCap, rawScore));
+      return { ...candidate, score, sourceLabel: SOURCE_LABEL[candidate.source], identityDiagnostics };
     })
     .filter((match) => match.score >= minimumScore(queryTokens.length));
 
@@ -114,8 +146,8 @@ export function searchProductIdentityCandidates(
 export function quickbooksItemRowToCandidate(row: Record<string, unknown>): ProductIdentityCandidate {
   const name = normalizeSpaces(textValue(row.full_name) || textValue(row.name));
   const parsed = parseDisplayName(name);
-  const packSize = parsed.packSize || numberFromCustomFields(row.custom_fields, ["pack_size", "pack", "unit_set"]) || 12;
-  const bottleSize = parsed.bottleSize || textFromCustomFields(row.custom_fields, ["bottle_size", "size"]) || "750ml";
+  const packSize = normalizePackSize(parsed.packSize || numberFromCustomFields(row.custom_fields, ["pack_size", "pack", "unit_set"]) || 12);
+  const bottleSize = normalizeBottleSize(parsed.bottleSize || textFromCustomFields(row.custom_fields, ["bottle_size", "size"]) || "750ml");
   const displayName = buildDisplayName({
     producer: parsed.producer,
     wineName: parsed.wineName,
@@ -157,8 +189,8 @@ export function quickbooksItemRowToCandidate(row: Record<string, unknown>): Prod
 }
 
 export function supplierCatalogRowToCandidate(row: Record<string, unknown>): ProductIdentityCandidate {
-  const packSize = Math.max(1, Math.trunc(numberValue(row.pack_size) || 12));
-  const bottleSize = normalizeSpaces(textValue(row.bottle_size) || "750ml");
+  const packSize = normalizePackSize(numberValue(row.pack_size) || 12);
+  const bottleSize = normalizeBottleSize(textValue(row.bottle_size) || "750ml");
   const displayName = normalizeSpaces(textValue(row.display_name));
   const planningSku = normalizeSpaces(textValue(row.planning_sku)) || buildPlanningSku(displayName);
   const pricing = calculatePricing({
@@ -204,8 +236,8 @@ export function productRowToCandidate(
   const supplierId = stringOrNull(row.supplier_id);
   const supplier = supplierId ? supplierById.get(supplierId) : null;
   const parsed = parseDisplayName(String(row.name || row.planning_sku || ""));
-  const packSize = Math.max(1, Math.trunc(numberValue(row.pack_size) || parsed.packSize || 12));
-  const bottleSize = parsed.bottleSize || "750ml";
+  const packSize = normalizePackSize(numberValue(row.pack_size) || parsed.packSize || 12);
+  const bottleSize = normalizeBottleSize(parsed.bottleSize || "750ml");
   const pricing = calculatePricing({
     packSize,
     fobBottle: numberValue(row.current_fob),
@@ -250,8 +282,8 @@ export function productRowToCandidate(
 export function recommendationRowToCandidate(row: Record<string, unknown>): ProductIdentityCandidate {
   const displaySource = String(row.product_name || row.planning_sku || "");
   const parsed = parseDisplayName(displaySource);
-  const packSize = Math.max(1, Math.trunc(numberValue(row.pack_size) || parsed.packSize || 12));
-  const bottleSize = parsed.bottleSize || "750ml";
+  const packSize = normalizePackSize(numberValue(row.pack_size) || parsed.packSize || 12);
+  const bottleSize = normalizeBottleSize(parsed.bottleSize || "750ml");
   const pricing = calculatePricing({
     packSize,
     fobBottle: numberValue(row.fob),
@@ -297,8 +329,8 @@ export function vinosmithWineRowToCandidate(row: Record<string, unknown>): Produ
   const parsed = parseDisplayName(String(row.name || ""));
   const producer = normalizeSpaces(textValue(row.producer_name)) || parsed.producer;
   const wineName = parsed.wineName || normalizeSpaces(textValue(row.name)) || "Unnamed Wine";
-  const packSize = Math.max(1, Math.trunc(numberValue(row.unit_set) || parsed.packSize || 12));
-  const bottleSize = normalizeSpaces(textValue(row.bottle_size_label) || textValue(row.bottle_size) || parsed.bottleSize || "750ml");
+  const packSize = normalizePackSize(numberValue(row.unit_set) || parsed.packSize || 12);
+  const bottleSize = normalizeBottleSize(textValue(row.bottle_size_label) || textValue(row.bottle_size) || parsed.bottleSize || "750ml");
   const pricing = calculatePricing({ packSize, fobBottle: numberValue(row.fob_price) });
   const displayName = buildDisplayName({
     producer,
@@ -341,16 +373,16 @@ function parseDisplayName(value: string) {
     producer: parsed.producer,
     wineName: parsed.wineName,
     vintage: parsed.vintage || "NV",
-    packSize: parsed.packSize || 12,
-    bottleSize: parsed.bottleSize || "750ml"
+    packSize: normalizePackSize(parsed.packSize || 12),
+    bottleSize: normalizeBottleSize(parsed.bottleSize || "750ml")
   };
 }
 
 export function parseProductIdentityQuery(value: string): ParsedProductIdentityQuery {
   let remaining = normalizeSpaces(value);
   const packMatch = remaining.match(PACK_PARSE_RE);
-  const packSize = packMatch ? Math.max(1, Math.trunc(Number(packMatch[1]) || 12)) : null;
-  const bottleSize = packMatch ? `${packMatch[2]}${packMatch[3].toLowerCase() === "ml" ? "ml" : "L"}` : null;
+  const packSize = packMatch ? normalizePackSize(packMatch[1]) : null;
+  const bottleSize = packMatch ? normalizeBottleSize(`${packMatch[2]}${packMatch[3]}`) : null;
   remaining = normalizeSpaces(remaining.replace(PACK_RE, " "));
   const vintageMatch = remaining.match(VINTAGE_RE);
   const vintage = vintageMatch?.[0] || null;
@@ -405,13 +437,91 @@ function scoreIdentityAttributes(candidate: ProductIdentityCandidate, input: Sea
   if (input.vintage && normalizeVintage(input.vintage) === normalizeVintage(candidate.vintage)) {
     score += 0.06;
   }
-  if (input.packSize && Number(candidate.packSize) === Number(input.packSize)) {
+  if (input.packSize && normalizePackSize(candidate.packSize) === normalizePackSize(input.packSize)) {
     score += 0.04;
   }
-  if (input.bottleSize && normalizePackFormatBottle(input.bottleSize) === normalizePackFormatBottle(candidate.bottleSize)) {
+  if (input.bottleSize && normalizeBottleSize(input.bottleSize) === normalizeBottleSize(candidate.bottleSize)) {
     score += 0.04;
   }
   return score;
+}
+
+function scoreIdentityDirection(
+  input: SearchInput,
+  candidate: ProductIdentityCandidate,
+  scores: Pick<ProductIdentityScoreDiagnostics, "baseScore" | "attributeScore" | "supplierScore" | "sourceWeight">
+): ProductIdentityScoreDiagnostics {
+  const uploadedNormalizedIdentity = searchKey([input.producer, input.query].filter(Boolean).join(" ")).trim();
+  const matchedNormalizedIdentity = searchKey([candidate.producer, candidate.wineName].filter(Boolean).join(" ")).trim();
+  const uploadedTokens = identityTokens(uploadedNormalizedIdentity);
+  const matchedTokens = identityTokens(matchedNormalizedIdentity);
+  const uploadedSet = new Set(uploadedTokens);
+  const matchedSet = new Set(matchedTokens);
+  const sharedTokens = matchedTokens.filter((token) => uploadedSet.has(token));
+  const matchedOnlyIdentityTokens = matchedTokens.filter((token) => !uploadedSet.has(token) && importantIdentityToken(token));
+  const uploadedOnlyIdentityTokens = uploadedTokens.filter((token) => !matchedSet.has(token) && importantIdentityToken(token));
+  const matchedImportantCount = matchedTokens.filter(importantIdentityToken).length;
+  const uploadedImportantCount = uploadedTokens.filter(importantIdentityToken).length;
+  const matchedOnlyRatio = matchedOnlyIdentityTokens.length / Math.max(1, matchedImportantCount);
+  const uploadedOnlyRatio = uploadedOnlyIdentityTokens.length / Math.max(1, uploadedImportantCount);
+  const sharedImportantCount = sharedTokens.filter(importantIdentityToken).length;
+  const broadOnlyMatch = sharedImportantCount > 0
+    && (matchedOnlyIdentityTokens.length > 0 || uploadedOnlyIdentityTokens.length > 0)
+    && sharedTokens.some((token) => BROAD_WINE_TOKENS.has(token));
+  const penaltyReasons: string[] = [];
+  let directionalPenalty = Math.min(0.62,
+    matchedOnlyIdentityTokens.length * 0.16 + matchedOnlyRatio * 0.22
+    + uploadedOnlyIdentityTokens.length * 0.16 + uploadedOnlyRatio * 0.22
+  );
+  if (matchedOnlyIdentityTokens.length) {
+    penaltyReasons.push(`matched record has extra identity terms: ${matchedOnlyIdentityTokens.join(", ")}`);
+  }
+  if (uploadedOnlyIdentityTokens.length) {
+    penaltyReasons.push(`uploaded row has identity terms missing from matched record: ${uploadedOnlyIdentityTokens.join(", ")}`);
+  }
+  if (broadOnlyMatch) {
+    directionalPenalty += 0.16;
+    penaltyReasons.push("only broad producer/appellation tokens overlap");
+  }
+  const packMatches = input.packSize ? normalizePackSize(input.packSize) === normalizePackSize(candidate.packSize) : null;
+  const bottleMatches = input.bottleSize ? normalizeBottleSize(input.bottleSize) === normalizeBottleSize(candidate.bottleSize) : null;
+  const vintageMatches = input.vintage ? normalizeVintage(input.vintage) === normalizeVintage(candidate.vintage) : null;
+  if (packMatches === false) penaltyReasons.push(`pack differs: ${normalizePackSize(input.packSize)} vs ${normalizePackSize(candidate.packSize)}`);
+  if (bottleMatches === false) penaltyReasons.push(`bottle differs: ${normalizeBottleSize(input.bottleSize)} vs ${normalizeBottleSize(candidate.bottleSize)}`);
+  directionalPenalty = Math.min(0.72, directionalPenalty);
+  return {
+    uploadedNormalizedIdentity,
+    matchedNormalizedIdentity,
+    uploadedTokens,
+    matchedTokens,
+    sharedTokens,
+    uploadedOnlyIdentityTokens,
+    matchedOnlyIdentityTokens,
+    missingCandidateIdentityTokens: matchedOnlyIdentityTokens,
+    extraUploadedTokens: uploadedOnlyIdentityTokens,
+    directionalPenalty,
+    penaltyReasons,
+    packMatches,
+    bottleMatches,
+    vintageMatches,
+    ...scores
+  };
+}
+
+function identityTokens(value: unknown) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const token of tokens(searchKey(value)).filter((token) => !LOW_IDENTITY_TOKENS.has(token))) {
+    if (!seen.has(token)) {
+      seen.add(token);
+      result.push(token);
+    }
+  }
+  return result;
+}
+
+function importantIdentityToken(token: string) {
+  return token.length > 2 && !BROAD_WINE_TOKENS.has(token) && !LOW_IDENTITY_TOKENS.has(token);
 }
 
 function minimumScore(queryTokenCount: number) {
@@ -460,6 +570,16 @@ function numberFromCustomFields(value: unknown, keys: string[]) {
   return text ? numberValue(text) : 0;
 }
 
-function normalizePackFormatBottle(value: unknown) {
-  return normalizeSpaces(value).toLowerCase().replace(/\s+/g, "");
+export function normalizePackSize(value: unknown) {
+  return Math.max(1, Math.trunc(Number(value) || 12));
+}
+
+export function normalizeBottleSize(value: unknown) {
+  const compact = normalizeSpaces(value || "750ml").toLowerCase().replace(/\s+/g, "");
+  const match = compact.match(/^([0-9.]+)(ml|l)$/i);
+  if (!match) return "750ml";
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return "750ml";
+  const ml = match[2].toLowerCase() === "l" ? amount * 1000 : amount;
+  return `${Math.round(ml)}ml`;
 }
