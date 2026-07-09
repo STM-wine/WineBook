@@ -23,7 +23,14 @@ from modules.po_tools.grw_invoice_converter.grw_converter import (  # noqa: E402
 )
 from modules.po_tools.grw_invoice_converter.parser import extract_invoice_summary, parse_grw_pdf  # noqa: E402
 from modules.po_tools.grw_invoice_converter.pricing import apply_pricing  # noqa: E402
-from modules.po_tools.grw_invoice_converter.validator import validate_invoice  # noqa: E402
+from modules.po_tools.grw_invoice_converter.validator import (  # noqa: E402
+    ValidationError,
+    validate_bordeaux_markup,
+    validate_ext_cost_sum,
+    validate_no_duplicate_skus,
+    validate_pack_math,
+    validate_required_fields,
+)
 
 
 TEMPLATE_PATH = (
@@ -138,6 +145,42 @@ def resolve_item_number(
     return "NEW"
 
 
+def validate_invoice_for_export(items: list[dict[str, Any]], expected_subtotal: float) -> dict[str, Any]:
+    warnings: list[dict[str, str]] = []
+
+    validate_required_fields(items)
+    try:
+        validate_no_duplicate_skus(items)
+        duplicate_check = "no_duplicates"
+    except ValidationError as exc:
+        duplicate_check = "duplicate_warning"
+        warnings.append(
+            {
+                "type": "duplicate_line_item",
+                "severity": "warning",
+                "message": str(exc),
+            }
+        )
+
+    validate_pack_math(items)
+    validate_bordeaux_markup(items)
+    validate_ext_cost_sum(items, expected_subtotal)
+
+    return {
+        "valid": True,
+        "line_count": len(items),
+        "total_ext_cost": round(sum(item.get("ext_cost", 0) for item in items), 2),
+        "checks_passed": [
+            "required_fields",
+            duplicate_check,
+            "pack_math",
+            "bordeaux_markup",
+            "ext_cost_sum",
+        ],
+        "warnings": warnings,
+    }
+
+
 def build_export_rows(
     priced_items: list[dict[str, Any]],
     resolution: FileResolution,
@@ -220,7 +263,7 @@ def build_export(
     expected_subtotal = invoice_summary.get("subtotal")
     if expected_subtotal is None:
         expected_subtotal = sum(item.get("ext_cost", 0) for item in priced_items)
-    validation_result = validate_invoice(priced_items, expected_subtotal)
+    validation_result = validate_invoice_for_export(priced_items, expected_subtotal)
 
     resolution = resolve_file_details(pdf_path, original_filename)
     item_number_overrides = load_item_number_overrides(item_numbers_path)

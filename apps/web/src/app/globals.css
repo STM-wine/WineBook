@@ -629,6 +629,30 @@ textarea {
   color: #8f2c26;
 }
 
+.grw-warning-card {
+  background: #fff7df;
+  border: 1px solid #e8cc82;
+  border-radius: 10px;
+  box-shadow: 0 14px 32px rgba(138, 101, 22, 0.10);
+  color: #5d4716;
+  order: 3;
+  padding: 16px 18px;
+}
+
+.grw-warning-card strong {
+  color: #4b390f;
+  display: block;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.grw-warning-card p {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin: 0;
+}
+
 .grw-parse-summary {
   display: grid;
   gap: 12px;

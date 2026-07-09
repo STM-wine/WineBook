@@ -90,6 +90,30 @@ def build_invoice_summary(summary, pdf_text, order_number):
     }
 
 
+def build_duplicate_warnings(items):
+    seen = {}
+    warnings = []
+
+    for index, item in enumerate(items, 1):
+        key = f"{item.get('clean_description', '')}_{item.get('vintage', 0)}"
+        if key in seen:
+            first_item = seen[key]
+            warnings.append(
+                {
+                    "message": "Duplicate line item found. Review before importing, but export is still available.",
+                    "description": item.get("clean_description") or "",
+                    "vintage": str(item.get("vintage") or ""),
+                    "firstLine": first_item.get("line_number") or first_item.get("_row_index"),
+                    "duplicateLine": item.get("line_number") or index,
+                }
+            )
+            continue
+
+        seen[key] = {**item, "_row_index": index}
+
+    return warnings
+
+
 def build_line_item(item):
     pack_size = as_int(item.get("pack_size")) or 1
     return {
@@ -129,6 +153,7 @@ def main() -> int:
     order_number = extract_order_number(str(pdf_path))
     pdf_text = extract_pdf_text(str(pdf_path))
     invoice_summary = build_invoice_summary(summary, pdf_text, order_number)
+    duplicate_warnings = build_duplicate_warnings(priced_items)
 
     payload = {
         "items": [build_line_item(item) for item in priced_items],
@@ -141,6 +166,7 @@ def main() -> int:
             "itemNumbers": debug_info.get("item_numbers", []),
             "missingItemNumbers": debug_info.get("missing_item_numbers", []),
             "unparsedBlocksCount": debug_info.get("unparsed_blocks_count", 0),
+            "warnings": duplicate_warnings,
             "invoiceSummary": invoice_summary,
         },
     }

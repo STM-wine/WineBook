@@ -32,6 +32,14 @@ type ParsedLineItem = {
   extPrice: number;
 };
 
+type ParseWarning = {
+  description?: string;
+  duplicateLine?: number | null;
+  firstLine?: number | null;
+  message: string;
+  vintage?: string;
+};
+
 type ParseMetadata = {
   orderNumber?: string;
   pagesParsed?: number;
@@ -41,6 +49,7 @@ type ParseMetadata = {
   itemNumbers?: number[];
   missingItemNumbers?: number[];
   unparsedBlocksCount?: number;
+  warnings?: ParseWarning[];
   invoiceSummary?: InvoiceSummary;
 };
 
@@ -260,6 +269,7 @@ export function GrwConverterUploader() {
   const canDownload = Boolean(file && status === "success" && parsedItems.length > 0);
   const invoiceSummary = metadata?.invoiceSummary;
   const paymentRows = invoiceSummary?.payment_rows || [];
+  const parseWarnings = metadata?.warnings || [];
   const hasCreditOrPayment = Boolean(
     paymentRows.length > 0 || invoiceSummary?.paid_amount || invoiceSummary?.credit_amount
   );
@@ -384,6 +394,21 @@ export function GrwConverterUploader() {
               <p className="muted">No credit/payment found.</p>
             )}
           </div>
+        </section>
+      ) : null}
+
+      {parseWarnings.length > 0 ? (
+        <section className="grw-warning-card" aria-label="Invoice review notes">
+          <strong>FYI: duplicate line item found</strong>
+          {parseWarnings.map((warning, index) => (
+            <p key={`${warning.duplicateLine || "duplicate"}-${index}`}>
+              {warning.description || "Duplicate item"}
+              {warning.vintage ? ` ${warning.vintage}` : ""}
+              {warning.firstLine && warning.duplicateLine
+                ? ` appears on lines ${warning.firstLine} and ${warning.duplicateLine}.`
+                : "."} Export is still available.
+            </p>
+          ))}
         </section>
       ) : null}
 
