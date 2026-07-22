@@ -430,6 +430,7 @@ export function OrderDashboard({
           updated?: string[];
           skipped?: string[];
           errors?: string[];
+          drafts?: PurchaseOrderDraftWithLines[];
           error?: string;
         };
 
@@ -458,6 +459,7 @@ export function OrderDashboard({
         } else {
           setPendingMessage("No approved quantities are ready for PO drafts.");
         }
+        setDraftRows(result.drafts || []);
         selectView("po-drafts");
         router.refresh();
       } catch (error) {

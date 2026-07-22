@@ -6,7 +6,12 @@ import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import { createClient } from "@/lib/supabase/server";
-import type { Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
+import type {
+  PurchaseOrderDraftWithLines,
+  Recommendation,
+  SupplierCatalogWine,
+  SupplierLogistics
+} from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 
@@ -322,5 +327,45 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ created, updated, skipped, errors });
+  const { data: drafts, error: draftsError } = await supabase
+    .from("purchase_order_drafts")
+    .select(`
+      id,
+      report_run_id,
+      supplier_name,
+      status,
+      po_number,
+      notes,
+      created_at,
+      updated_at,
+      lines:purchase_order_lines (
+        id,
+        purchase_order_draft_id,
+        recommendation_id,
+        supplier_catalog_wine_id,
+        producer_name,
+        product_name,
+        product_code,
+        planning_sku,
+        recommended_qty,
+        approved_qty,
+        fob,
+        line_cost,
+        trucking_cost_per_bottle,
+        wine_cost,
+        laid_in_cost,
+        landed_cost,
+        is_new_item,
+        new_item_warning
+      )
+    `)
+    .eq("report_run_id", reportRunId)
+    .order("created_at", { ascending: false })
+    .returns<PurchaseOrderDraftWithLines[]>();
+
+  if (draftsError) {
+    return NextResponse.json({ error: draftsError.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ created, updated, skipped, errors, drafts: drafts || [] });
 }
