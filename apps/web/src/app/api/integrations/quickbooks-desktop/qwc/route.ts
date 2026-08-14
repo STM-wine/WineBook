@@ -31,7 +31,9 @@ export async function GET(request: Request) {
       fileId: process.env.QUICKBOOKS_DESKTOP_FILE_ID || DEFAULT_FILE_ID,
       qbType: "QBFS",
       style: "Document",
-      isReadOnly: true
+      // QBWC needs write permission during setup to register its FileID in the company file.
+      // The Stem service itself remains read-only through the qbXML allowlist.
+      isReadOnly: false
     });
 
     return new NextResponse(qwc, {
