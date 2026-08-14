@@ -185,7 +185,6 @@ export function buildQuickBooksSalesDashboardDiscoveryRequests(
     client.buildInvoiceQuery({
       requestId: "sales-dashboard-invoices",
       maxReturned,
-      paidStatus: "All",
       includeLineItems: true,
       includeLinkedTxns: true
     }),
@@ -364,23 +363,18 @@ function buildTransactionQueryBody(
     if ("paidStatus" in params && params.paidStatus) {
       filter.push(xmlElement("PaidStatus", params.paidStatus));
     }
-    if (filter.length) {
-      body.push(xmlAggregate(transactionFilterName(requestType), filter));
-    }
+    body.push(...filter);
   }
 
   body.push(xmlElement("IncludeLineItems", params.includeLineItems ?? true));
-  body.push(xmlElement("IncludeLinkedTxns", params.includeLinkedTxns ?? true));
+  if (requestType !== "ReceivePaymentQueryRq") {
+    body.push(xmlElement("IncludeLinkedTxns", params.includeLinkedTxns ?? true));
+  }
   pushIncludeRetElements(body, params.includeRetElements);
   pushOwnerIds(body, params.ownerIds);
   return { requestId: params.requestId, iterator: params.iterator, body };
 }
 
-function transactionFilterName(
-  requestType: "InvoiceQueryRq" | "CreditMemoQueryRq" | "ReceivePaymentQueryRq" | "PurchaseOrderQueryRq"
-) {
-  return requestType.replace(/QueryRq$/, "Filter");
-}
 
 function buildTxnDeletedQueryBody(params: QuickBooksTxnDeletedQueryOptions) {
   const body: string[] = [];
