@@ -212,7 +212,15 @@ function cleanLabel(value: string | null | undefined, fallback: string) {
 
 function refName(value: Record<string, unknown> | null | undefined) {
   if (!value) return null;
-  return stringValue(value.FullName) || stringValue(value.fullName) || stringValue(value.Name) || stringValue(value.name);
+  return (
+    stringValue(value.ResolvedFullName) ||
+    stringValue(value.SalesRepEntityFullName) ||
+    stringValue(value.resolvedFullName) ||
+    stringValue(value.FullName) ||
+    stringValue(value.fullName) ||
+    stringValue(value.Name) ||
+    stringValue(value.name)
+  );
 }
 
 function creditMemoRepName(rawData: Record<string, unknown> | null | undefined) {

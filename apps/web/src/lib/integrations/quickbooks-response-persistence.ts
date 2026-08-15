@@ -18,6 +18,15 @@ type PersistQuickBooksResponseInput = {
   rawStoragePath?: string | null;
 };
 
+type SalesRepLookup = {
+  initial: string | null;
+  fullName: string | null;
+  listId: string | null;
+};
+
+const salesRepLookupByInitial = new Map<string, SalesRepLookup>();
+const salesRepLookupByListId = new Map<string, SalesRepLookup>();
+
 type ParsedLine = {
   txn_line_id: string | null;
   line_sequence: number;
@@ -38,7 +47,9 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
   const supabase: SupabaseClient = createServiceRoleClient();
 
   const rawResponse = await recordRawResponse(supabase, input);
-  if (input.request.requestType === "InvoiceQueryRq") {
+  if (input.request.requestType === "SalesRepQueryRq") {
+    persistSalesRepLookup(input.response);
+  } else if (input.request.requestType === "InvoiceQueryRq") {
     await persistInvoices(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "CreditMemoQueryRq") {
     await persistCreditMemos(supabase, input.response, rawResponse.id);
@@ -48,7 +59,7 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
 }
 
 function shouldPersistRequest(requestType: string) {
-  return ["InvoiceQueryRq", "CreditMemoQueryRq", "ReceivePaymentQueryRq"].includes(requestType);
+  return ["SalesRepQueryRq", "InvoiceQueryRq", "CreditMemoQueryRq", "ReceivePaymentQueryRq"].includes(requestType);
 }
 
 async function recordRawResponse(supabase: SupabaseClient, input: PersistQuickBooksResponseInput) {
@@ -83,6 +94,20 @@ async function recordRawResponse(supabase: SupabaseClient, input: PersistQuickBo
   return data;
 }
 
+function persistSalesRepLookup(response: string) {
+  for (const salesRepBlock of extractBlocks(response, "SalesRepRet")) {
+    const initial = text(salesRepBlock, "Initial");
+    const entityRef = ref(salesRepBlock, "SalesRepEntityRef");
+    const lookup: SalesRepLookup = {
+      initial,
+      fullName: entityRef.FullName || initial,
+      listId: text(salesRepBlock, "ListID")
+    };
+    if (lookup.initial) salesRepLookupByInitial.set(lookup.initial.toLowerCase(), lookup);
+    if (lookup.listId) salesRepLookupByListId.set(lookup.listId, lookup);
+  }
+}
+
 async function persistInvoices(supabase: SupabaseClient, response: string, rawResponseId: string) {
   const invoiceBlocks = extractBlocks(response, "InvoiceRet");
   for (const invoiceBlock of invoiceBlocks) {
@@ -106,7 +131,7 @@ async function persistInvoices(supabase: SupabaseClient, response: string, rawRe
         customer_list_id: customerRef.ListID || null,
         customer_full_name: customerRef.FullName || null,
         terms_ref: termsRef,
-        sales_rep_ref: salesRepRef,
+        sales_rep_ref: enrichSalesRepRef(salesRepRef),
         subtotal: numberText(invoiceBlock, "Subtotal"),
         total_amount: numberText(invoiceBlock, "TotalAmount"),
         balance_remaining: numberText(invoiceBlock, "BalanceRemaining"),
@@ -118,7 +143,7 @@ async function persistInvoices(supabase: SupabaseClient, response: string, rawRe
         raw_response_id: rawResponseId,
         raw_data: {
           customer_ref: customerRef,
-          sales_rep_ref: salesRepRef,
+          sales_rep_ref: enrichSalesRepRef(salesRepRef),
           line_count: lines.length
         },
         last_seen_at: new Date().toISOString()
@@ -159,7 +184,7 @@ async function persistCreditMemos(supabase: SupabaseClient, response: string, ra
         raw_response_id: rawResponseId,
         raw_data: {
           customer_ref: customerRef,
-          sales_rep_ref: salesRepRef,
+          sales_rep_ref: enrichSalesRepRef(salesRepRef),
           line_count: lines.length
         },
         last_seen_at: new Date().toISOString()
@@ -254,6 +279,23 @@ function parseLines(parentBlock: string, lineTag: "InvoiceLineRet" | "CreditMemo
   });
 }
 
+function enrichSalesRepRef(salesRepRef: QbRef) {
+  const lookup = salesRepRef.ListID
+    ? salesRepLookupByListId.get(salesRepRef.ListID)
+    : salesRepRef.FullName
+      ? salesRepLookupByInitial.get(salesRepRef.FullName.toLowerCase())
+      : null;
+
+  if (!lookup?.fullName || lookup.fullName === salesRepRef.FullName) return salesRepRef;
+
+  return {
+    ...salesRepRef,
+    Initial: lookup.initial,
+    ResolvedFullName: lookup.fullName,
+    SalesRepEntityFullName: lookup.fullName
+  };
+}
+
 function rawLinkedTxn(block: string) {
   return {
     TxnID: text(block, "TxnID"),
@@ -266,6 +308,7 @@ function rawLinkedTxn(block: string) {
 }
 
 function countReturnedRecords(requestType: string, response: string) {
+  if (requestType === "SalesRepQueryRq") return extractBlocks(response, "SalesRepRet").length;
   if (requestType === "InvoiceQueryRq") return extractBlocks(response, "InvoiceRet").length;
   if (requestType === "CreditMemoQueryRq") return extractBlocks(response, "CreditMemoRet").length;
   if (requestType === "ReceivePaymentQueryRq") return extractBlocks(response, "ReceivePaymentRet").length;

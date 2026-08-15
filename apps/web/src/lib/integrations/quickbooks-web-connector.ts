@@ -257,6 +257,7 @@ function connectionError(soapRequest: string) {
 function countReturnedRecords(requestType: string, response: string) {
   if (requestType === "CustomerQueryRq") return countXmlBlocks(response, "CustomerRet");
   if (requestType === "ItemQueryRq") return countItemRecords(response);
+  if (requestType === "SalesRepQueryRq") return countXmlBlocks(response, "SalesRepRet");
   if (requestType === "InvoiceQueryRq") return countXmlBlocks(response, "InvoiceRet");
   if (requestType === "CreditMemoQueryRq") return countXmlBlocks(response, "CreditMemoRet");
   if (requestType === "ReceivePaymentQueryRq") return countXmlBlocks(response, "ReceivePaymentRet");

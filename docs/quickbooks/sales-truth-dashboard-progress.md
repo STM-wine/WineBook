@@ -46,6 +46,7 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 
 ## Daily Delivery-Date Pull Update
 
+- Added SalesRepQueryRq to resolve QuickBooks sales rep initials to the SalesRepEntityRef full name, based on Intuit QuickBooks Desktop SDK SalesRepQuery behavior. The next Web Connector run should overwrite daily invoice/credit memo rows with enriched rep names.
 - The August MTD pull returned 505 invoices and timed out in Web Connector, so the next proof is scoped to one delivery day at a time.
 - Changed the next Web Connector pull target to delivery date 2026-08-13.
 - QuickBooks transaction queries pull 2026-08-13 through 2026-08-14 to catch invoices that may appear the day after delivery.
