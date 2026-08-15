@@ -17,7 +17,7 @@ const DEFAULT_MAX_RETURNED = 200;
 const STALE_RUNNING_MINUTES = 30;
 const SALES_TRUTH_PRIORITY_YEAR = 2025;
 const SALES_TRUTH_WEEKLY_CHUNK_DAYS = 7;
-const SALES_TRUTH_WEEKLY_KEY_PREFIX = "weekv2";
+const SALES_TRUTH_WEEKLY_KEY_PREFIX = "weekv3";
 
 export type QuickBooksRecoveryResource =
   | "quickbooks_sales_reps"
@@ -56,6 +56,11 @@ export type QuickBooksRecoveryJob = {
 
 export type QuickBooksRecoveryRequest = QuickBooksDesktopQbxmlRequest & {
   recoveryJob?: QuickBooksRecoveryJob;
+};
+
+export type QuickBooksRecoveryCompletion = {
+  hasMore: boolean;
+  continuationRequest?: QuickBooksRecoveryRequest;
 };
 
 export type QuickBooksRecoveryQueueStatus = {
@@ -160,9 +165,14 @@ export async function completeQuickBooksRecoveryJob(
   recordCount: number | null,
   responseChecksum: string,
   receivedAt: string
-) {
+): Promise<QuickBooksRecoveryCompletion> {
   const supabase = createServiceRoleClient();
   const firstStatus = statuses[0] || null;
+  if (isQuickBooksErrorStatus(firstStatus)) {
+    await failQuickBooksRecoveryJob(job, firstStatus?.statusMessage || "QuickBooks recovery request failed.");
+    throw new Error(firstStatus?.statusMessage || "QuickBooks recovery request failed.");
+  }
+
   const iteratorId = firstStatus?.iteratorId || null;
   const remaining = firstStatus?.iteratorRemainingCount ?? null;
   const priorRecordCount = numberValue(job.diagnostics.recordCount);
@@ -178,13 +188,19 @@ export async function completeQuickBooksRecoveryJob(
   };
 
   if (iteratorId && remaining && remaining > 0) {
+    const continuationJob = {
+      ...job,
+      cursorData: { iteratorId, iteratorMode: "Continue" },
+      diagnostics
+    };
     await updateJob(supabase, job.id, {
-      status: "pending",
-      cursor_data: { iteratorId, iteratorMode: "Continue" },
+      status: "running",
+      cursor_data: continuationJob.cursorData,
       diagnostics,
       last_synced_at: receivedAt
     });
-    return;
+    const continuationRequest = buildRequestForJob(continuationJob);
+    return { hasMore: true, continuationRequest: { ...continuationRequest, recoveryJob: continuationJob } };
   }
 
   await updateJob(supabase, job.id, {
@@ -193,6 +209,7 @@ export async function completeQuickBooksRecoveryJob(
     diagnostics,
     last_synced_at: receivedAt
   });
+  return { hasMore: false };
 }
 
 export async function failQuickBooksRecoveryJob(job: QuickBooksRecoveryJob, errorMessage: string) {
@@ -221,10 +238,10 @@ async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
     });
     if (error) throw new Error(error.message);
   }
-  await completeSupersededDailySalesTruthRows(supabase);
+  await completeSupersededSalesTruthRows(supabase);
 }
 
-async function completeSupersededDailySalesTruthRows(supabase: SupabaseClient) {
+async function completeSupersededSalesTruthRows(supabase: SupabaseClient) {
   for (const window of salesTruthPriorityWindows()) {
     for (const resourceName of salesTruthRecoveryResources()) {
       const supersededAt = new Date().toISOString();
@@ -771,4 +788,8 @@ function stringValue(value: unknown) {
 
 function currentDateString() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function isQuickBooksErrorStatus(status: QuickBooksQbxmlResponseStatus | null) {
+  return status?.statusSeverity === "Error" || Boolean(status?.statusCode && status.statusCode >= 3000);
 }

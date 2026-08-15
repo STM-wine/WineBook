@@ -9,6 +9,7 @@ import {
   buildQuickBooksRecoveryQueueStatus,
   completeQuickBooksRecoveryJob,
   failQuickBooksRecoveryJob,
+  type QuickBooksRecoveryCompletion,
   type QuickBooksRecoveryRequest
 } from "@/lib/integrations/quickbooks-recovery-queue";
 import {
@@ -237,7 +238,8 @@ async function receiveResponseXML(soapRequest: string) {
       receivedAt
     });
     if (request.recoveryJob) {
-      await completeQuickBooksRecoveryJob(request.recoveryJob, status, recordCount, responseChecksum, receivedAt);
+      const completion = await completeQuickBooksRecoveryJob(request.recoveryJob, status, recordCount, responseChecksum, receivedAt);
+      queueContinuationRequest(session, completion);
     }
   } catch (error) {
     session.lastError = "QuickBooks response persistence failed: " + (error instanceof Error ? error.message : "unknown persistence error");
@@ -249,6 +251,11 @@ async function receiveResponseXML(soapRequest: string) {
   session.requestIndex += 1;
   rememberSession(session);
   return Math.min(100, Math.round((session.requestIndex / session.requests.length) * 100));
+}
+
+function queueContinuationRequest(session: QuickBooksWebConnectorSession, completion: QuickBooksRecoveryCompletion) {
+  if (!completion.hasMore || !completion.continuationRequest) return;
+  session.requests.splice(session.requestIndex + 1, 0, completion.continuationRequest);
 }
 
 function getLastError(soapRequest: string) {
