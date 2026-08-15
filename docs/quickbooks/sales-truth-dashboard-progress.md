@@ -72,6 +72,15 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 - Added safe diagnostics to the Web Connector status payload: `persistenceConfigured` and per-response `recordCount`.
 - Changed missing service-role persistence config from a silent skip into a visible Web Connector session error for future runs.
 
+## Recovery Queue Implementation
+
+- Added a QuickBooks recovery queue using the existing private source_sync_checkpoints table.
+- The queue seeds sales reps, customers, items, and one daily invoice plus one daily credit memo job from 2018-08-14 through 2026-08-14 by default.
+- Web Connector now claims one recovery job per session, so long historical recovery runs are broken into small safe requests.
+- Invoice and credit memo recovery jobs also pull SalesRepQueryRq in the same session so rep initials can be resolved to full names during persistence.
+- CustomerQueryRq and ItemQueryRq responses now persist into the existing quickbooks_customers and quickbooks_items tables.
+- Jobs store iterator continuation state in source_sync_checkpoints.cursor_data and record counts/status diagnostics in source_sync_checkpoints.diagnostics.
+
 ## Next Steps
 
 1. Deploy this dashboard/parser commit to Render.

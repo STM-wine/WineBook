@@ -49,6 +49,10 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
   const rawResponse = await recordRawResponse(supabase, input);
   if (input.request.requestType === "SalesRepQueryRq") {
     persistSalesRepLookup(input.response);
+  } else if (input.request.requestType === "CustomerQueryRq") {
+    await persistCustomers(supabase, input.response, rawResponse.id);
+  } else if (input.request.requestType === "ItemQueryRq") {
+    await persistItems(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "InvoiceQueryRq") {
     await persistInvoices(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "CreditMemoQueryRq") {
@@ -59,7 +63,7 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
 }
 
 function shouldPersistRequest(requestType: string) {
-  return ["SalesRepQueryRq", "InvoiceQueryRq", "CreditMemoQueryRq", "ReceivePaymentQueryRq"].includes(requestType);
+  return ["SalesRepQueryRq", "CustomerQueryRq", "ItemQueryRq", "InvoiceQueryRq", "CreditMemoQueryRq", "ReceivePaymentQueryRq"].includes(requestType);
 }
 
 async function recordRawResponse(supabase: SupabaseClient, input: PersistQuickBooksResponseInput) {
@@ -105,6 +109,79 @@ function persistSalesRepLookup(response: string) {
     };
     if (lookup.initial) salesRepLookupByInitial.set(lookup.initial.toLowerCase(), lookup);
     if (lookup.listId) salesRepLookupByListId.set(lookup.listId, lookup);
+  }
+}
+
+async function persistCustomers(supabase: SupabaseClient, response: string, rawResponseId: string) {
+  const customerBlocks = extractBlocks(response, "CustomerRet");
+  for (const customerBlock of customerBlocks) {
+    const listId = text(customerBlock, "ListID");
+    const fullName = text(customerBlock, "FullName");
+    if (!listId || !fullName) continue;
+
+    const { error } = await supabase.from("quickbooks_customers").upsert(
+      {
+        list_id: listId,
+        edit_sequence: text(customerBlock, "EditSequence"),
+        name: text(customerBlock, "Name"),
+        full_name: fullName,
+        is_active: boolText(customerBlock, "IsActive"),
+        account_number: text(customerBlock, "AccountNumber"),
+        terms_ref: ref(customerBlock, "TermsRef"),
+        balance: numberText(customerBlock, "Balance"),
+        time_created: dateTimeText(customerBlock, "TimeCreated"),
+        time_modified: dateTimeText(customerBlock, "TimeModified"),
+        raw_response_id: rawResponseId,
+        raw_data: {
+          parent_ref: ref(customerBlock, "ParentRef"),
+          sales_rep_ref: enrichSalesRepRef(ref(customerBlock, "SalesRepRef"))
+        },
+        last_seen_at: new Date().toISOString()
+      },
+      { onConflict: "list_id" }
+    );
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function persistItems(supabase: SupabaseClient, response: string, rawResponseId: string) {
+  for (const itemType of itemRetTypes()) {
+    const itemBlocks = extractBlocks(response, itemType);
+    for (const itemBlock of itemBlocks) {
+      const listId = text(itemBlock, "ListID");
+      const fullName = text(itemBlock, "FullName");
+      if (!listId || !fullName) continue;
+
+      const { error } = await supabase.from("quickbooks_items").upsert(
+        {
+          list_id: listId,
+          edit_sequence: text(itemBlock, "EditSequence"),
+          item_type: itemType.replace(/^Item/, "").replace(/Ret$/, ""),
+          name: text(itemBlock, "Name"),
+          full_name: fullName,
+          is_active: boolText(itemBlock, "IsActive"),
+          sales_desc: text(itemBlock, "SalesDesc") || text(itemBlock, "Desc"),
+          purchase_desc: text(itemBlock, "PurchaseDesc"),
+          sales_price: numberText(itemBlock, "SalesPrice") || numberText(itemBlock, "Price"),
+          purchase_cost: numberText(itemBlock, "PurchaseCost"),
+          average_cost: numberText(itemBlock, "AverageCost"),
+          quantity_on_hand: numberText(itemBlock, "QuantityOnHand"),
+          quantity_on_order: numberText(itemBlock, "QuantityOnOrder"),
+          quantity_on_sales_order: numberText(itemBlock, "QuantityOnSalesOrder"),
+          income_account_ref: ref(itemBlock, "IncomeAccountRef"),
+          cogs_account_ref: ref(itemBlock, "COGSAccountRef"),
+          asset_account_ref: ref(itemBlock, "AssetAccountRef"),
+          custom_fields: {},
+          time_created: dateTimeText(itemBlock, "TimeCreated"),
+          time_modified: dateTimeText(itemBlock, "TimeModified"),
+          raw_response_id: rawResponseId,
+          raw_data: { parent_ref: ref(itemBlock, "ParentRef") },
+          last_seen_at: new Date().toISOString()
+        },
+        { onConflict: "list_id" }
+      );
+      if (error) throw new Error(error.message);
+    }
   }
 }
 
@@ -309,10 +386,29 @@ function rawLinkedTxn(block: string) {
 
 function countReturnedRecords(requestType: string, response: string) {
   if (requestType === "SalesRepQueryRq") return extractBlocks(response, "SalesRepRet").length;
+  if (requestType === "CustomerQueryRq") return extractBlocks(response, "CustomerRet").length;
+  if (requestType === "ItemQueryRq") return itemRetTypes().reduce((sum, tagName) => sum + extractBlocks(response, tagName).length, 0);
   if (requestType === "InvoiceQueryRq") return extractBlocks(response, "InvoiceRet").length;
   if (requestType === "CreditMemoQueryRq") return extractBlocks(response, "CreditMemoRet").length;
   if (requestType === "ReceivePaymentQueryRq") return extractBlocks(response, "ReceivePaymentRet").length;
   return null;
+}
+
+function itemRetTypes() {
+  return [
+    "ItemServiceRet",
+    "ItemInventoryRet",
+    "ItemNonInventoryRet",
+    "ItemOtherChargeRet",
+    "ItemSubtotalRet",
+    "ItemDiscountRet",
+    "ItemPaymentRet",
+    "ItemSalesTaxRet",
+    "ItemGroupRet",
+    "ItemSalesTaxGroupRet",
+    "ItemFixedAssetRet",
+    "ItemInventoryAssemblyRet"
+  ];
 }
 
 function ref(block: string, tagName: string): QbRef {

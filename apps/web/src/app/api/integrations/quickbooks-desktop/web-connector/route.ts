@@ -7,7 +7,7 @@ import {
 export const runtime = "nodejs";
 
 export async function GET() {
-  return NextResponse.json(buildQuickBooksWebConnectorStatus());
+  return NextResponse.json(await buildQuickBooksWebConnectorStatus());
 }
 
 export async function POST(request: Request) {

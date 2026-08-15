@@ -5,10 +5,16 @@ import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { persistQuickBooksResponse } from "@/lib/integrations/quickbooks-response-persistence";
 import {
+  buildNextQuickBooksRecoveryRequests,
+  buildQuickBooksRecoveryQueueStatus,
+  completeQuickBooksRecoveryJob,
+  failQuickBooksRecoveryJob,
+  type QuickBooksRecoveryRequest
+} from "@/lib/integrations/quickbooks-recovery-queue";
+import {
   assertQuickBooksReadOnlyQbxml,
   buildQuickBooksSalesDashboardDiscoveryRequests,
   parseQbxmlResponseStatuses,
-  type QuickBooksDesktopQbxmlRequest,
   type QuickBooksQbxmlResponseStatus
 } from "@/lib/integrations/quickbooks-desktop";
 
@@ -38,7 +44,7 @@ type QuickBooksWebConnectorSession = {
   username: string;
   createdAt: string;
   requestIndex: number;
-  requests: QuickBooksDesktopQbxmlRequest[];
+  requests: QuickBooksRecoveryRequest[];
   lastError: string;
   responses: Array<{
     requestType: string;
@@ -99,7 +105,7 @@ export async function handleQuickBooksWebConnectorSoapRequest(soapRequest: strin
       case "serverVersion":
         return soapOk(method, scalarResult("serverVersionResult", "Stem Intelligence QBWC 0.1"));
       case "authenticate":
-        return soapOk(method, arrayResult("authenticateResult", authenticate(soapRequest)));
+        return soapOk(method, arrayResult("authenticateResult", await authenticate(soapRequest)));
       case "sendRequestXML":
         return soapOk(method, scalarResult("sendRequestXMLResult", sendRequestXML(soapRequest)));
       case "receiveResponseXML":
@@ -118,10 +124,14 @@ export async function handleQuickBooksWebConnectorSoapRequest(soapRequest: strin
   }
 }
 
-export function buildQuickBooksWebConnectorStatus() {
+export async function buildQuickBooksWebConnectorStatus() {
+  const recoveryQueue = await buildQuickBooksRecoveryQueueStatus();
+  const requestTypes = recoveryQueue.pending || recoveryQueue.running
+    ? recoveryQueue.nextJobs.slice(0, 1).map((job) => requestTypeForRecoveryResource(job.resourceName))
+    : buildSalesDashboardRequests().map((request) => request.requestType);
   return {
     service: "Stem Intelligence QuickBooks Desktop Web Connector",
-    mode: "read-only-sales-dashboard-daily-delivery",
+    mode: recoveryQueue.pending || recoveryQueue.running ? "quickbooks-recovery-queue" : "read-only-sales-dashboard-daily-delivery",
     configuration: {
       appUrlConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_APP_URL),
       passwordConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_PASSWORD),
@@ -132,12 +142,13 @@ export function buildQuickBooksWebConnectorStatus() {
       salesTxnDateRange: getSalesDashboardTxnDateRange()
     },
     activeSessions: sessionStore.size,
-    requestTypes: buildSalesDashboardRequests().map((request) => request.requestType),
+    requestTypes,
+    recoveryQueue,
     recentSessions
   };
 }
 
-function authenticate(soapRequest: string) {
+async function authenticate(soapRequest: string) {
   const username = extractSoapValue(soapRequest, "strUserName").trim();
   const password = extractSoapValue(soapRequest, "strPassword");
 
@@ -151,7 +162,7 @@ function authenticate(soapRequest: string) {
     username,
     createdAt: new Date().toISOString(),
     requestIndex: 0,
-    requests: buildSalesDashboardRequests(),
+    requests: await buildQuickBooksSessionRequests(),
     lastError: "",
     responses: []
   });
@@ -184,6 +195,10 @@ async function receiveResponseXML(soapRequest: string) {
   const message = extractSoapValue(soapRequest, "message");
   if (hresult || message) {
     session.lastError = [hresult, message].filter(Boolean).join(": ");
+    const failedJob = session.requests[session.requestIndex]?.recoveryJob;
+    if (failedJob) {
+      await failQuickBooksRecoveryJob(failedJob, session.lastError);
+    }
     rememberSession(session);
     return -1;
   }
@@ -221,8 +236,14 @@ async function receiveResponseXML(soapRequest: string) {
       responseChecksum,
       receivedAt
     });
+    if (request.recoveryJob) {
+      await completeQuickBooksRecoveryJob(request.recoveryJob, status, recordCount, responseChecksum, receivedAt);
+    }
   } catch (error) {
     session.lastError = "QuickBooks response persistence failed: " + (error instanceof Error ? error.message : "unknown persistence error");
+    if (request.recoveryJob) {
+      await failQuickBooksRecoveryJob(request.recoveryJob, session.lastError);
+    }
   }
 
   session.requestIndex += 1;
@@ -297,6 +318,23 @@ function addDays(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function requestTypeForRecoveryResource(resourceName: string) {
+  if (resourceName === "quickbooks_sales_reps") return "SalesRepQueryRq";
+  if (resourceName === "quickbooks_customers") return "CustomerQueryRq";
+  if (resourceName === "quickbooks_items") return "ItemQueryRq";
+  if (resourceName === "quickbooks_invoices") return "InvoiceQueryRq";
+  if (resourceName === "quickbooks_credit_memos") return "CreditMemoQueryRq";
+  return "UnknownRecoveryRq";
+}
+
+async function buildQuickBooksSessionRequests() {
+  try {
+    return await buildNextQuickBooksRecoveryRequests();
+  } catch {
+    return buildSalesDashboardRequests();
+  }
+}
+
 function buildSalesDashboardRequests() {
   const maxReturned = Number(process.env.QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED || 1000);
   return buildQuickBooksSalesDashboardDiscoveryRequests({
@@ -345,7 +383,7 @@ function rememberSession(session: QuickBooksWebConnectorSession, closedAt?: stri
 
 async function writeRawResponse(
   session: QuickBooksWebConnectorSession,
-  request: QuickBooksDesktopQbxmlRequest,
+  request: QuickBooksRecoveryRequest,
   response: string,
   status: QuickBooksQbxmlResponseStatus[],
   responseChecksum: string,
