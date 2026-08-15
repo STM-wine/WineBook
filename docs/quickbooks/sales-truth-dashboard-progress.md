@@ -55,6 +55,10 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 
 ## Inspection Update
 
+- Daily delivery proof run completed at 2026-08-15T01:07:50.334Z for delivery date 2026-08-13.
+- Web Connector completed 2 of 2 requests and closed cleanly with lastError null.
+- The run returned 139 invoice headers and 4 credit memo headers.
+
 - After Render deployed diagnostics, a follow-up QBWC run completed at `2026-08-15T00:49:07.370Z` with `lastError: null`.
 - Live status reported `persistenceConfigured: true`.
 - The follow-up run returned `recordCount: 10` for invoices, `recordCount: 10` for credit memos, and `recordCount: 10` for payments.
