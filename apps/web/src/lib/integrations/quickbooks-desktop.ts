@@ -89,6 +89,8 @@ export type QuickBooksDesktopQbxmlRequest = {
 
 export type QuickBooksSalesDashboardDiscoveryOptions = {
   maxReturned?: number;
+  listMaxReturned?: number;
+  txnDateRange?: QuickBooksDateRange;
 };
 
 type QuickBooksRequestBuildParts = {
@@ -168,35 +170,40 @@ export type QuickBooksDesktopReadOnlyClient = ReturnType<typeof createQuickBooks
 export function buildQuickBooksSalesDashboardDiscoveryRequests(
   options: QuickBooksSalesDashboardDiscoveryOptions = {}
 ): QuickBooksDesktopQbxmlRequest[] {
-  const maxReturned = options.maxReturned || 10;
+  const maxReturned = options.maxReturned || 1000;
+  const listMaxReturned = options.listMaxReturned || 10;
+  const txnDateRange = options.txnDateRange;
   const client = createQuickBooksDesktopReadOnlyClient();
 
   return [
     client.buildCustomerQuery({
       requestId: "sales-dashboard-customers",
-      maxReturned,
+      maxReturned: listMaxReturned,
       activeStatus: "All"
     }),
     client.buildItemQuery({
       requestId: "sales-dashboard-items",
-      maxReturned,
+      maxReturned: listMaxReturned,
       activeStatus: "All"
     }),
     client.buildInvoiceQuery({
       requestId: "sales-dashboard-invoices",
       maxReturned,
+      txnDateRange,
       includeLineItems: true,
       includeLinkedTxns: true
     }),
     client.buildCreditMemoQuery({
       requestId: "sales-dashboard-credit-memos",
       maxReturned,
+      txnDateRange,
       includeLineItems: true,
       includeLinkedTxns: true
     }),
     client.buildReceivePaymentQuery({
       requestId: "sales-dashboard-payments",
       maxReturned,
+      txnDateRange,
       includeLineItems: false,
       includeLinkedTxns: true
     })

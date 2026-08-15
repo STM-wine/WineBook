@@ -11,6 +11,7 @@ type QuickBooksInvoiceRow = {
   txn_id: string;
   ref_number: string | null;
   txn_date: string | null;
+  ship_date: string | null;
   customer_full_name: string | null;
   sales_rep_ref: Record<string, unknown> | null;
   subtotal: number | string | null;
@@ -35,11 +36,23 @@ type QuickBooksCreditMemoRow = {
 
 type MutableSummary = QuickBooksSalesSummaryRow;
 
+const DEFAULT_SALES_DELIVERY_FROM = "2026-08-01";
+const DEFAULT_SALES_DELIVERY_TO = "2026-08-14";
+const SALES_DATE_BASIS = "Invoice delivery date / ShipDate; credit memo transaction date";
+
+function getSalesDashboardDeliveryDateRange() {
+  return {
+    from: process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_DELIVERY_FROM || DEFAULT_SALES_DELIVERY_FROM,
+    to: process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_DELIVERY_TO || DEFAULT_SALES_DELIVERY_TO
+  };
+}
+
 export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient): Promise<QuickBooksSalesDashboardData> {
+  const salesDateRange = getSalesDashboardDeliveryDateRange();
   const [invoiceResult, creditMemoResult] = await Promise.all([
     supabase
       .from("quickbooks_invoices")
-      .select("txn_id,ref_number,txn_date,customer_full_name,sales_rep_ref,subtotal,total_amount,balance_remaining,is_paid,time_modified,last_seen_at")
+      .select("txn_id,ref_number,txn_date,ship_date,customer_full_name,sales_rep_ref,subtotal,total_amount,balance_remaining,is_paid,time_modified,last_seen_at")
       .order("txn_date", { ascending: false, nullsFirst: false })
       .limit(5000)
       .returns<QuickBooksInvoiceRow[]>(),
@@ -54,8 +67,8 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
   if (invoiceResult.error) throw new Error(invoiceResult.error.message);
   if (creditMemoResult.error) throw new Error(creditMemoResult.error.message);
 
-  const invoices = invoiceResult.data || [];
-  const creditMemos = creditMemoResult.data || [];
+  const invoices = (invoiceResult.data || []).filter((row) => dateInRange(invoiceDeliveryDate(row), salesDateRange));
+  const creditMemos = (creditMemoResult.data || []).filter((row) => dateInRange(row.txn_date, salesDateRange));
   const byRep = new Map<string, MutableSummary>();
   const byAccount = new Map<string, MutableSummary>();
   const transactions: QuickBooksSalesTransactionRow[] = [];
@@ -99,6 +112,9 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
 
   return {
     generatedAt: new Date().toISOString(),
+    salesDateFrom: salesDateRange.from,
+    salesDateTo: salesDateRange.to,
+    dateBasis: SALES_DATE_BASIS,
     invoiceCount: invoices.length,
     creditMemoCount: creditMemos.length,
     invoiceSales,
@@ -116,8 +132,12 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
 }
 
 export function unavailableQuickBooksSalesDashboardData(reason: string): QuickBooksSalesDashboardData {
+  const salesDateRange = getSalesDashboardDeliveryDateRange();
   return {
     generatedAt: new Date().toISOString(),
+    salesDateFrom: salesDateRange.from,
+    salesDateTo: salesDateRange.to,
+    dateBasis: SALES_DATE_BASIS,
     invoiceCount: 0,
     creditMemoCount: 0,
     invoiceSales: 0,
@@ -130,6 +150,14 @@ export function unavailableQuickBooksSalesDashboardData(reason: string): QuickBo
     recentTransactions: [],
     unavailableReason: reason
   };
+}
+
+function invoiceDeliveryDate(row: QuickBooksInvoiceRow) {
+  return row.ship_date || row.txn_date;
+}
+
+function dateInRange(value: string | null | undefined, range: { from: string; to: string }) {
+  return Boolean(value && value >= range.from && value <= range.to);
 }
 
 function summaryFor(map: Map<string, MutableSummary>, label: string) {

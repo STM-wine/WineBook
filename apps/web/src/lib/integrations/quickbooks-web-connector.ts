@@ -16,6 +16,8 @@ const SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/";
 const QBWC_NS = "http://developer.intuit.com/";
 const DEFAULT_USERNAME = "stem-qbwc";
 const DEFAULT_CAPTURE_RAW_RESPONSES = true;
+const DEFAULT_SALES_DELIVERY_FROM = "2026-08-01";
+const DEFAULT_SALES_DELIVERY_TO = "2026-08-14";
 const RECENT_SESSION_LIMIT = 10;
 
 const SUPPORTED_METHODS = [
@@ -119,13 +121,15 @@ export async function handleQuickBooksWebConnectorSoapRequest(soapRequest: strin
 export function buildQuickBooksWebConnectorStatus() {
   return {
     service: "Stem Intelligence QuickBooks Desktop Web Connector",
-    mode: "read-only-sales-dashboard-discovery",
+    mode: "read-only-sales-dashboard-mtd-delivery",
     configuration: {
       appUrlConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_APP_URL),
       passwordConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_PASSWORD),
       username: process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_USERNAME || DEFAULT_USERNAME,
       rawCaptureEnabled: process.env.QUICKBOOKS_DESKTOP_CAPTURE_RAW_RESPONSES !== "false" && DEFAULT_CAPTURE_RAW_RESPONSES,
-      persistenceConfigured: Boolean((process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) && process.env.SUPABASE_SERVICE_ROLE_KEY)
+      persistenceConfigured: Boolean((process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) && process.env.SUPABASE_SERVICE_ROLE_KEY),
+      salesDeliveryDateRange: getSalesDashboardDeliveryDateRange(),
+      salesTxnDateRange: getSalesDashboardTxnDateRange()
     },
     activeSessions: sessionStore.size,
     requestTypes: buildSalesDashboardRequests().map((request) => request.requestType),
@@ -271,10 +275,33 @@ function countXmlBlocks(xml: string, tagName: string) {
   return xml.match(pattern)?.length || 0;
 }
 
+function getSalesDashboardDeliveryDateRange() {
+  return {
+    from: process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_DELIVERY_FROM || DEFAULT_SALES_DELIVERY_FROM,
+    to: process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_DELIVERY_TO || DEFAULT_SALES_DELIVERY_TO
+  };
+}
+
+function getSalesDashboardTxnDateRange() {
+  const deliveryRange = getSalesDashboardDeliveryDateRange();
+  return {
+    from: process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_TXN_FROM || deliveryRange.from,
+    to: process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_TXN_TO || addDays(deliveryRange.to, 1)
+  };
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(value + "T00:00:00.000Z");
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function buildSalesDashboardRequests() {
-  const maxReturned = Number(process.env.QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED || 10);
+  const maxReturned = Number(process.env.QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED || 1000);
   return buildQuickBooksSalesDashboardDiscoveryRequests({
-    maxReturned: Number.isFinite(maxReturned) && maxReturned > 0 ? maxReturned : 10
+    maxReturned: Number.isFinite(maxReturned) && maxReturned > 0 ? maxReturned : 1000,
+    listMaxReturned: 10,
+    txnDateRange: getSalesDashboardTxnDateRange()
   });
 }
 

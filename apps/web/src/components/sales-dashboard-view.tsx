@@ -35,14 +35,14 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
           <p className="eyebrow">QuickBooks Sales Truth</p>
           <h1>Sales Dashboard</h1>
           <p className="muted">
-            QuickBooks Desktop invoices minus credit memos, grouped by sales rep and account.
+            QuickBooks Desktop invoices minus credit memos for {formatDate(data.salesDateFrom)} through {formatDate(data.salesDateTo)}, grouped by sales rep and account.
           </p>
         </div>
         <div className="sales-dashboard-sync-card">
           <span>Last Sync View</span>
           <strong>{formatDateTime(data.generatedAt)}</strong>
           <small>
-            Invoices through {formatDate(data.lastInvoiceDate)} | Credits through {formatDate(data.lastCreditMemoDate)}
+            Date basis: {data.dateBasis}. Synced invoices through {formatDate(data.lastInvoiceDate)} | credits through {formatDate(data.lastCreditMemoDate)}
           </small>
         </div>
       </div>
@@ -62,7 +62,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
 
       {data.invoiceCount === 0 && data.creditMemoCount === 0 ? (
         <div className="empty-inline">
-          No parsed QuickBooks sales rows are available yet. Run the Stem Intelligence row in QuickBooks Web Connector once after this deploy.
+          No QuickBooks sales rows are available for this date window yet. Run the Stem Intelligence row in QuickBooks Web Connector once after this deploy.
         </div>
       ) : null}
 

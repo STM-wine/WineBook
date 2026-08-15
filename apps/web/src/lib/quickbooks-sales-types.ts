@@ -21,6 +21,9 @@ export type QuickBooksSalesTransactionRow = {
 
 export type QuickBooksSalesDashboardData = {
   generatedAt: string;
+  salesDateFrom: string;
+  salesDateTo: string;
+  dateBasis: string;
   invoiceCount: number;
   creditMemoCount: number;
   invoiceSales: number;
