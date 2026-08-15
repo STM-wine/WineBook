@@ -106,11 +106,8 @@ export async function fetchQuickBooksSalesDashboardData(
     shouldLoadLines ? fetchLinesByTxnId(supabase, "quickbooks_invoice_lines", invoices.map((row) => row.txn_id)) : Promise.resolve(new Map<string, QuickBooksSalesLineRow[]>()),
     shouldLoadLines ? fetchLinesByTxnId(supabase, "quickbooks_credit_memo_lines", creditMemos.map((row) => row.txn_id)) : Promise.resolve(new Map<string, QuickBooksSalesLineRow[]>())
   ]);
-  const byRep = new Map<string, MutableSummary>();
-  const byAccount = new Map<string, MutableSummary>();
   const byItem = new Map<string, MutableSummary>();
   const monthColumns = buildMonthColumns(salesDateRange);
-  const byRepMonthly = new Map<string, MutableMonthlyRepRow>();
   const transactions: QuickBooksSalesTransactionRow[] = [];
 
   for (const invoice of invoices) {
@@ -132,10 +129,7 @@ export async function fetchQuickBooksSalesDashboardData(
       items
     });
     if (matchesItemFilter(items, filters.item)) {
-      addInvoice(summaryFor(byRep, rep), amount);
-      addInvoice(summaryFor(byAccount, account), amount);
       addItemSummary(byItem, items, amount, "invoice", filters.item);
-      addMonthlyRepAmount(byRepMonthly, monthColumns, rep, salesDate, amount);
     }
   }
 
@@ -157,14 +151,14 @@ export async function fetchQuickBooksSalesDashboardData(
       items
     });
     if (matchesItemFilter(items, filters.item)) {
-      addCredit(summaryFor(byRep, rep), amount);
-      addCredit(summaryFor(byAccount, account), amount);
       addItemSummary(byItem, items, amount, "credit_memo", filters.item);
-      addMonthlyRepAmount(byRepMonthly, monthColumns, rep, creditMemo.txn_date, -amount);
     }
   }
 
   const matchingTransactions = transactions.filter((row) => matchesItemFilter(row.items, filters.item));
+  const byRep = buildTransactionSummaries(matchingTransactions, (transaction) => transaction.rep);
+  const byAccount = buildTransactionSummaries(matchingTransactions, (transaction) => transaction.account);
+  const byRepMonthly = buildMonthlyRepRows(matchingTransactions, monthColumns);
   const invoiceSales = matchingTransactions
     .filter((row) => row.type === "invoice")
     .reduce((sum, row) => sum + Math.max(0, row.amount), 0);
@@ -192,7 +186,7 @@ export async function fetchQuickBooksSalesDashboardData(
     byAccount: sortedSummaries(byAccount),
     byItem: sortedSummaries(byItem),
     monthColumns,
-    byRepMonthly: sortedMonthlyRows(byRepMonthly),
+    byRepMonthly,
     transactions: visibleTransactions,
     recentTransactions: visibleTransactions.slice(0, 50),
     unavailableReason: null
@@ -359,6 +353,19 @@ function sortedSummaries(map: Map<string, MutableSummary>) {
   return Array.from(map.values()).sort((a, b) => Math.abs(b.netSales) - Math.abs(a.netSales));
 }
 
+function buildTransactionSummaries(
+  transactions: QuickBooksSalesTransactionRow[],
+  labelForTransaction: (transaction: QuickBooksSalesTransactionRow) => string
+) {
+  const summaries = new Map<string, MutableSummary>();
+  for (const transaction of transactions) {
+    const summary = summaryFor(summaries, labelForTransaction(transaction));
+    if (transaction.type === "credit_memo") addCredit(summary, Math.abs(transaction.amount));
+    else addInvoice(summary, Math.max(0, transaction.amount));
+  }
+  return summaries;
+}
+
 function buildMonthColumns(range: { from: string; to: string }): QuickBooksSalesMonthColumn[] {
   const start = parseDateParts(range.from);
   const end = parseDateParts(range.to);
@@ -440,6 +447,14 @@ function addMonthlyRepAmount(
   const row = monthlyRowFor(map, columns, rep);
   row.months[key] = (row.months[key] || 0) + amount;
   row.total += amount;
+}
+
+function buildMonthlyRepRows(transactions: QuickBooksSalesTransactionRow[], columns: QuickBooksSalesMonthColumn[]) {
+  const rows = new Map<string, MutableMonthlyRepRow>();
+  for (const transaction of transactions) {
+    addMonthlyRepAmount(rows, columns, transaction.rep, transaction.salesDate || transaction.txnDate, transaction.amount);
+  }
+  return sortedMonthlyRows(rows);
 }
 
 function sortedMonthlyRows(map: Map<string, MutableMonthlyRepRow>) {
