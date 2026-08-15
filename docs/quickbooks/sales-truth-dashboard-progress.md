@@ -56,6 +56,8 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 
 ## Inspection Update
 
+- Sales rep enrichment run completed at 2026-08-15T01:30:40.763Z. SalesRepQueryRq returned 28 reps, InvoiceQueryRq returned 139 invoices, CreditMemoQueryRq returned 4 credit memos, and lastError was null.
+
 - Daily delivery proof run completed at 2026-08-15T01:07:50.334Z for delivery date 2026-08-13.
 - Web Connector completed 2 of 2 requests and closed cleanly with lastError null.
 - The run returned 139 invoice headers and 4 credit memo headers.
