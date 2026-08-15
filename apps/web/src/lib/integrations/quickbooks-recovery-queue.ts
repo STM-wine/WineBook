@@ -17,6 +17,7 @@ const DEFAULT_MAX_RETURNED = 200;
 const STALE_RUNNING_MINUTES = 30;
 const SALES_TRUTH_PRIORITY_YEAR = 2025;
 const SALES_TRUTH_WEEKLY_CHUNK_DAYS = 7;
+const SALES_TRUTH_WEEKLY_KEY_PREFIX = "weekv2";
 
 export type QuickBooksRecoveryResource =
   | "quickbooks_sales_reps"
@@ -242,8 +243,7 @@ async function completeSupersededDailySalesTruthRows(supabase: SupabaseClient) {
         .eq("source_system", SOURCE_SYSTEM)
         .eq("resource_name", resourceName)
         .eq("status", "pending")
-        .gte("checkpoint_key", window.from || "")
-        .lte("checkpoint_key", window.to || "")
+        .not("checkpoint_key", "like", `${SALES_TRUTH_WEEKLY_KEY_PREFIX}:%`)
         .gte("requested_start_date", window.from || "")
         .lte("requested_start_date", window.to || "");
       if (error) throw new Error(error.message);
@@ -580,7 +580,7 @@ function salesTruthWeeklyWindows() {
 }
 
 function salesTruthWeeklyKey(window: { start: string; end: string }) {
-  return `week:${window.start}:${window.end}`;
+  return `${SALES_TRUTH_WEEKLY_KEY_PREFIX}:${window.start}:${window.end}`;
 }
 
 function isPrioritySalesTruthDate(date: string) {
@@ -601,7 +601,7 @@ function dayBefore(value: string) {
 
 function iteratorFor(cursorData: Record<string, unknown>) {
   const iteratorId = stringValue(cursorData.iteratorId);
-  if (!iteratorId) return undefined;
+  if (!iteratorId) return { mode: "Start" as QuickBooksIteratorMode };
   return { mode: "Continue" as QuickBooksIteratorMode, iteratorId };
 }
 

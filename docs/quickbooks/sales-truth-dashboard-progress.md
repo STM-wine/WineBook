@@ -85,6 +85,7 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 - Fixed queue status/claiming after the first expanded run showed Supabase's default 1,000-row select limit was undercounting total queue progress and the claimer could skip higher-priority resource rows. Status now uses exact count queries and claims jobs by resource priority directly.
 - Changed recovery claiming to work backward from the current backfill end date instead of forward from 2018. The queue now defaults the backfill end to the current server date unless `QUICKBOOKS_RECOVERY_BACKFILL_END` is set, prioritizes current-year YTD first, then all of 2025, then older history, and walks invoice/credit-memo jobs by newest sales dates so early manual runs produce useful net-sales facts quickly.
 - After validating real `2026-08-14` invoice and credit memo reads, changed current-year YTD and 2025 sales-truth recovery from daily jobs to 7-day windows. Auto-seeding now inserts weekly invoice/credit-memo checkpoints for those priority windows and marks still-pending daily sales jobs inside those windows as completed/superseded, while keeping completed daily proof jobs intact.
+- After the first larger weekly invoice run returned exactly the 200-record cap, changed first-page recovery requests to start QuickBooks iterators and bumped weekly sales checkpoint keys to `weekv2:*` so capped weekly windows are re-queued with continuation support.
 
 ## Historical Mirror Source Rules
 
