@@ -1,6 +1,9 @@
-export type ActiveView = "order-review" | "supplier-hub" | "vinosmith-rescue" | "supplier-board" | "freight" | "po-drafts";
+export type ActiveView = "sales-dashboard" | "order-review" | "supplier-hub" | "vinosmith-rescue" | "supplier-board" | "freight" | "po-drafts";
+
+export const DEFAULT_VIEW: ActiveView = "sales-dashboard";
 
 export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolean }> = [
+  { id: "sales-dashboard", label: "Sales Dashboard" },
   { id: "order-review", label: "Order Review" },
   { id: "supplier-hub", label: "Supplier Hub" },
   { id: "vinosmith-rescue", label: "Vinosmith Rescue" },

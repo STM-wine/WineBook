@@ -3,6 +3,7 @@ import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { fetchVinosmithExplorerData, unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
+import { fetchQuickBooksSalesDashboardData, unavailableQuickBooksSalesDashboardData } from "@/lib/supabase/quickbooks-sales-dashboard";
 import type {
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
@@ -53,6 +54,16 @@ export default async function HomePage() {
     .limit(100)
     .returns<PriceChangeEvent[]>();
 
+  const quickBooksSalesPromise = (() => {
+    try {
+      return fetchQuickBooksSalesDashboardData(createServiceRoleClient());
+    } catch (error) {
+      return Promise.resolve(
+        unavailableQuickBooksSalesDashboardData(error instanceof Error ? error.message : "QuickBooks Sales Dashboard is not configured.")
+      );
+    }
+  })();
+
   const vinosmithExplorerPromise = (() => {
     try {
       return fetchVinosmithExplorerData(createServiceRoleClient());
@@ -68,13 +79,15 @@ export default async function HomePage() {
     { data: supplierCatalogWines },
     { data: wineRequests },
     { data: priceChangeEvents },
-    vinosmithExplorer
+    vinosmithExplorer,
+    quickBooksSales
   ] = await Promise.all([
     reportRunsPromise,
     supplierCatalogPromise,
     wineRequestsPromise,
     priceChangeEventsPromise,
-    vinosmithExplorerPromise
+    vinosmithExplorerPromise,
+    quickBooksSalesPromise
   ]);
 
   const latestRun = reportRuns?.[0] || null;
@@ -161,6 +174,7 @@ export default async function HomePage() {
       vinosmithExplorer={vinosmithExplorer}
       wineRequests={wineRequests || []}
       priceChangeEvents={priceChangeEvents || []}
+      quickBooksSales={quickBooksSales}
       canViewSettings={hasPermission(permissions, "view_settings")}
     />
   );

@@ -15,6 +15,7 @@ import {
   updateRecommendationOrderPath,
   updateRecommendationApprovals
 } from "@/app/actions";
+import type { QuickBooksSalesDashboardData } from "@/lib/quickbooks-sales-types";
 import type {
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
@@ -41,11 +42,12 @@ import {
   uniqueSorted
 } from "@/lib/order-data";
 import { AppTopbar } from "./app-topbar";
-import { ActiveView, isActiveView } from "./dashboard-types";
+import { ActiveView, DEFAULT_VIEW, isActiveView } from "./dashboard-types";
 import { FreightView } from "./freight-view";
 import { OrderReviewView } from "./order-review-view";
 import { PoDraftsView } from "./po-drafts-view";
 import { StatusMessages } from "./status-messages";
+import { SalesDashboardView } from "./sales-dashboard-view";
 import { SupplierBoardView } from "./supplier-board-view";
 import { SupplierHubView } from "./supplier-hub-view";
 import { VinosmithRescueExplorerView } from "./vinosmith-rescue-explorer-view";
@@ -59,6 +61,7 @@ type Props = {
   vinosmithExplorer: VinosmithExplorerData;
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
+  quickBooksSales: QuickBooksSalesDashboardData;
   canViewSettings?: boolean;
 };
 
@@ -84,6 +87,7 @@ export function OrderDashboard({
   vinosmithExplorer,
   wineRequests,
   priceChangeEvents,
+  quickBooksSales,
   canViewSettings
 }: Props) {
   const router = useRouter();
@@ -100,7 +104,7 @@ export function OrderDashboard({
   );
   const [rows, setRows] = useState(combinedRecommendations);
   const [draftRows, setDraftRows] = useState(poDrafts);
-  const [activeView, setActiveView] = useState<ActiveView>("order-review");
+  const [activeView, setActiveView] = useState<ActiveView>(DEFAULT_VIEW);
   const [supplier, setSupplier] = useState("All");
   const [brandManager, setBrandManager] = useState("All");
   const [search, setSearch] = useState("");
@@ -128,7 +132,7 @@ export function OrderDashboard({
   useEffect(() => {
     const syncViewFromUrl = () => {
       const view = new URLSearchParams(window.location.search).get("view");
-      setActiveView(isActiveView(view) ? view : "order-review");
+      setActiveView(isActiveView(view) ? view : DEFAULT_VIEW);
     };
 
     syncViewFromUrl();
@@ -176,7 +180,7 @@ export function OrderDashboard({
   function selectView(view: ActiveView) {
     setActiveView(view);
     const url = new URL(window.location.href);
-    if (view === "order-review") {
+    if (view === DEFAULT_VIEW) {
       url.searchParams.delete("view");
     } else {
       url.searchParams.set("view", view);
@@ -658,6 +662,8 @@ export function OrderDashboard({
           </div>
         </div>
       ) : null}
+
+      {activeView === "sales-dashboard" ? <SalesDashboardView data={quickBooksSales} /> : null}
 
       {activeView === "order-review" ? (
         <OrderReviewView

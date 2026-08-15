@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { AccountMenu } from "./account-menu";
-import { ActiveView, NAV_VIEW_LABELS } from "./dashboard-types";
+import { ActiveView, DEFAULT_VIEW, NAV_VIEW_LABELS } from "./dashboard-types";
 import { SignOutButton } from "./sign-out-button";
 
 type AppTopbarProps = {
-  activeModule?: "grw-converter" | "settings";
+  activeModule?: "grw-converter" | "supplier-offer-compiler" | "settings";
   activeView?: ActiveView;
   canViewSettings?: boolean;
   dataLabel?: string;
@@ -18,7 +18,7 @@ type AppTopbarProps = {
 };
 
 function viewHref(view: ActiveView) {
-  return view === "order-review" ? "/" : `/?view=${view}`;
+  return view === DEFAULT_VIEW ? "/" : "/?view=" + view;
 }
 
 export function AppTopbar({
@@ -41,7 +41,7 @@ export function AppTopbar({
   return (
     <header className="topbar">
       {onSelectView ? (
-        <button className="brand brand-home-button" onClick={() => onSelectView("order-review")} type="button">
+        <button className="brand brand-home-button" onClick={() => onSelectView(DEFAULT_VIEW)} type="button">
           {brandContent}
         </button>
       ) : (

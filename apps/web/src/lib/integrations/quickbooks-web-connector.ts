@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomUUID } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
+import { persistQuickBooksResponse } from "@/lib/integrations/quickbooks-response-persistence";
 import {
   assertQuickBooksReadOnlyQbxml,
   buildQuickBooksSalesDashboardDiscoveryRequests,
@@ -201,6 +202,18 @@ async function receiveResponseXML(soapRequest: string) {
     session.lastError = `Raw QuickBooks response capture failed: ${
       error instanceof Error ? error.message : "unknown write error"
     }`;
+  }
+
+  try {
+    await persistQuickBooksResponse({
+      request,
+      response,
+      status,
+      responseChecksum,
+      receivedAt
+    });
+  } catch (error) {
+    session.lastError = "QuickBooks response persistence failed: " + (error instanceof Error ? error.message : "unknown persistence error");
   }
 
   session.requestIndex += 1;
