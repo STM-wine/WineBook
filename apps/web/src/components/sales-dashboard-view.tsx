@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   QuickBooksSalesDashboardData,
   QuickBooksSalesDashboardFilters,
@@ -16,6 +16,10 @@ type SalesDashboardViewProps = {
 
 type SummaryMode = "rep" | "account" | "item" | "month";
 type DocumentTypeFilter = "all" | "invoice" | "credit_memo";
+type LoadSalesDashboardOptions = {
+  includeTransactions?: boolean;
+  showLoading?: boolean;
+};
 
 const MAX_VISIBLE_TRANSACTIONS = 300;
 
@@ -78,6 +82,12 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     itemFilter.trim() ||
     documentFilter.trim();
 
+  useEffect(() => {
+    void loadSalesDashboard({}, { includeTransactions: false, showLoading: false });
+    // The first screen should refresh from the same API used by drilldowns without loading transaction detail.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function resetFilters() {
     setDateFrom(data.salesDateFrom);
     setDateTo(data.salesDateTo);
@@ -91,6 +101,18 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     setMode("rep");
     setErrorMessage("");
     setDashboardData(data);
+    void loadSalesDashboard(
+      {
+        dateFrom: data.salesDateFrom,
+        dateTo: data.salesDateTo,
+        rep: "All",
+        documentType: "all",
+        account: "",
+        item: "",
+        document: ""
+      },
+      { includeTransactions: false, showLoading: false }
+    );
   }
 
   function setYtd() {
@@ -186,7 +208,12 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     });
   }
 
-  async function loadSalesDashboard(overrides: Partial<QuickBooksSalesDashboardFilters> = {}) {
+  async function loadSalesDashboard(
+    overrides: Partial<QuickBooksSalesDashboardFilters> = {},
+    options: LoadSalesDashboardOptions = {}
+  ) {
+    const includeTransactions = options.includeTransactions ?? true;
+    const showLoading = options.showLoading ?? true;
     const filters = {
       dateFrom,
       dateTo,
@@ -201,13 +228,13 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     params.set("from", filters.dateFrom || data.salesDateFrom);
     params.set("to", filters.dateTo || data.salesDateTo);
     params.set("type", filters.documentType || "all");
-    params.set("includeTransactions", "true");
+    params.set("includeTransactions", includeTransactions ? "true" : "false");
     if (filters.rep && filters.rep !== "All") params.set("rep", filters.rep);
     if (filters.account?.trim()) params.set("account", filters.account.trim());
     if (filters.item?.trim()) params.set("item", filters.item.trim());
     if (filters.document?.trim()) params.set("document", filters.document.trim());
 
-    setIsLoading(true);
+    if (showLoading) setIsLoading(true);
     setErrorMessage("");
     try {
       const response = await fetch(`/api/sales-dashboard?${params.toString()}`);
@@ -220,11 +247,11 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
       }
       setDashboardData(result);
       setAppliedItemFilter(filters.item || "");
-      setHasRequestedTransactions(true);
+      setHasRequestedTransactions(includeTransactions);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not load sales.");
     } finally {
-      setIsLoading(false);
+      if (showLoading) setIsLoading(false);
     }
   }
 
@@ -237,7 +264,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
         </div>
         <div className="sales-report-meta">
           <span>Last Updated</span>
-          <strong>{formatDateTime(data.generatedAt)}</strong>
+          <strong>{formatDateTime(dashboardData.generatedAt)}</strong>
         </div>
       </div>
 

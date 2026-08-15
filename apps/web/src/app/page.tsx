@@ -15,6 +15,9 @@ import type {
 } from "@/lib/types";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function HomePage() {
   const context = await getAppContext();
   if ("pendingEmail" in context) {

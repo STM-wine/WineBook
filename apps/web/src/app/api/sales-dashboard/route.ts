@@ -3,6 +3,9 @@ import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchQuickBooksSalesDashboardData } from "@/lib/supabase/quickbooks-sales-dashboard";
 import type { QuickBooksSalesDashboardFilters } from "@/lib/quickbooks-sales-types";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   const authSupabase = await createClient();
   const {
@@ -40,13 +43,19 @@ export async function GET(request: NextRequest) {
     };
 
     const data = await fetchQuickBooksSalesDashboardData(createServiceRoleClient(), filters);
-    return NextResponse.json(data);
+    return noStoreJson(data);
   } catch (error) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: error instanceof Error ? error.message : "Could not load sales dashboard." },
       { status: 500 }
     );
   }
+}
+
+function noStoreJson(body: unknown, init?: ResponseInit) {
+  const response = NextResponse.json(body, init);
+  response.headers.set("Cache-Control", "no-store, max-age=0");
+  return response;
 }
 
 function cleanParam(value: string | null) {
