@@ -3462,17 +3462,39 @@ tr.has-recommendation .sticky-name {
   padding: 20px 24px 32px;
 }
 
-.sales-dashboard-view .view-heading {
+.sales-report-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
 }
 
-.sales-dashboard-view .view-heading h1 {
-  margin: 4px 0 6px;
-  font-size: 28px;
-  line-height: 1.15;
+.sales-report-heading h1 {
+  margin: 4px 0 0;
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.sales-report-meta {
+  display: flex;
+  min-width: 180px;
+  flex-direction: column;
+  gap: 3px;
+  text-align: right;
+}
+
+.sales-report-meta span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sales-report-meta strong {
+  color: var(--ink);
+  font-size: 15px;
 }
 
 .sales-dashboard-sync-card {
@@ -3502,13 +3524,13 @@ tr.has-recommendation .sticky-name {
 
 .sales-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 12px;
 }
 
 .sales-kpi {
   display: flex;
-  min-height: 108px;
+  min-height: 118px;
   flex-direction: column;
   justify-content: space-between;
   border: 1px solid var(--line);
@@ -3519,7 +3541,7 @@ tr.has-recommendation .sticky-name {
 
 .sales-kpi strong {
   color: var(--ink);
-  font-size: 24px;
+  font-size: 28px;
   line-height: 1.1;
 }
 
@@ -3532,12 +3554,6 @@ tr.has-recommendation .sticky-name {
 .sales-kpi-strong {
   border-color: rgba(40, 116, 89, 0.35);
   background: #f3faf7;
-}
-
-.sales-dashboard-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.85fr);
-  gap: 16px;
 }
 
 .sales-dashboard-panel {
@@ -3593,6 +3609,20 @@ tr.has-recommendation .sticky-name {
   color: white;
 }
 
+.sales-dashboard-panel-main .sales-summary-table th:first-child,
+.sales-dashboard-panel-main .sales-summary-table td:first-child {
+  min-width: 260px;
+}
+
+.sales-dashboard-panel-main .sales-summary-table td,
+.sales-dashboard-panel-main .sales-summary-table th {
+  font-size: 14px;
+}
+
+.sales-dashboard-panel-main .sales-summary-table tbody tr:first-child td {
+  font-weight: 800;
+}
+
 .sales-summary-table th:first-child,
 .sales-summary-table td:first-child {
   min-width: 190px;
@@ -3609,7 +3639,7 @@ tr.has-recommendation .sticky-name {
 }
 
 @media (max-width: 1100px) {
-  .sales-dashboard-view .view-heading,
+  .sales-report-heading,
   .panel-heading-row {
     flex-direction: column;
   }
@@ -3619,8 +3649,7 @@ tr.has-recommendation .sticky-name {
     text-align: left;
   }
 
-  .sales-kpi-grid,
-  .sales-dashboard-layout {
+  .sales-kpi-grid {
     grid-template-columns: 1fr;
   }
 }

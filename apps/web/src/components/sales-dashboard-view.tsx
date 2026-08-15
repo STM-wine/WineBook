@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { QuickBooksSalesDashboardData, QuickBooksSalesSummaryRow } from "@/lib/quickbooks-sales-types";
 
 type SalesDashboardViewProps = {
@@ -24,41 +24,27 @@ const percent = new Intl.NumberFormat("en-US", {
 export function SalesDashboardView({ data }: SalesDashboardViewProps) {
   const [mode, setMode] = useState<SummaryMode>("rep");
   const rows = mode === "rep" ? data.byRep : data.byAccount;
-  const topCreditRows = useMemo(
-    () => [...rows].sort((a, b) => b.creditMemos - a.creditMemos).slice(0, 8),
-    [rows]
-  );
+  const salesDateLabel = formatDateRange(data.salesDateFrom, data.salesDateTo);
 
   return (
     <section className="sales-dashboard-view">
-      <div className="view-heading">
+      <div className="sales-report-heading">
         <div>
           <p className="eyebrow">QuickBooks Sales Truth</p>
-          <h1>Sales Dashboard</h1>
-          <p className="muted">
-            QuickBooks Desktop invoices minus credit memos for {formatDate(data.salesDateFrom)} through {formatDate(data.salesDateTo)}, grouped by sales rep and account.
-          </p>
+          <h1>Daily Sales Report</h1>
         </div>
-        <div className="sales-dashboard-sync-card">
-          <span>Last Sync View</span>
+        <div className="sales-report-meta">
+          <span>Last Sync</span>
           <strong>{formatDateTime(data.generatedAt)}</strong>
-          <small>
-            Date basis: {data.dateBasis}. Synced invoices through {formatDate(data.lastInvoiceDate)} | credits through {formatDate(data.lastCreditMemoDate)}
-          </small>
         </div>
       </div>
 
       {data.unavailableReason ? <div className="status-card error">{data.unavailableReason}</div> : null}
 
-      <div className="sales-kpi-grid">
-        <Metric label="Invoice Sales" value={currency.format(data.invoiceSales)} detail={`${data.invoiceCount} invoices`} />
-        <Metric label="Credit Memos" value={currency.format(data.creditMemos)} detail={`${data.creditMemoCount} credit memos`} tone="warning" />
-        <Metric label="Net Sales" value={currency.format(data.netSales)} detail="Invoices minus credit memos" tone="strong" />
-        <Metric
-          label="Credit Memo Rate"
-          value={percent.format(data.invoiceSales > 0 ? data.creditMemos / data.invoiceSales : 0)}
-          detail="Credit memos / invoice sales"
-        />
+      <div className="sales-kpi-grid sales-kpi-grid-primary">
+        <Metric label="Date of Sale" value={salesDateLabel} detail={data.dateBasis} />
+        <Metric label="Total Sales" value={currency.format(data.invoiceSales)} detail={data.invoiceCount + " invoices"} />
+        <Metric label="Net Sales" value={currency.format(data.netSales)} detail={currency.format(data.creditMemos) + " in credit memos"} tone="strong" />
       </div>
 
       {data.invoiceCount === 0 && data.creditMemoCount === 0 ? (
@@ -67,35 +53,23 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
         </div>
       ) : null}
 
-      <div className="sales-dashboard-layout">
-        <section className="sales-dashboard-panel">
-          <div className="panel-heading-row">
-            <div>
-              <h2>{mode === "rep" ? "By Sales Rep" : "By Account"}</h2>
-              <p>Invoice sales, credit memos, and net sales from QuickBooks.</p>
-            </div>
-            <div className="segmented-control" aria-label="Summary mode">
-              <button className={mode === "rep" ? "active" : ""} onClick={() => setMode("rep")} type="button">
-                Rep
-              </button>
-              <button className={mode === "account" ? "active" : ""} onClick={() => setMode("account")} type="button">
-                Account
-              </button>
-            </div>
+      <section className="sales-dashboard-panel sales-dashboard-panel-main">
+        <div className="panel-heading-row">
+          <div>
+            <h2>{mode === "rep" ? "Sales By Rep" : "Sales By Account"}</h2>
+            <p>Sorted by net sales, highest to lowest.</p>
           </div>
-          <SummaryTable rows={rows} labelHeader={mode === "rep" ? "Rep" : "Account"} />
-        </section>
-
-        <section className="sales-dashboard-panel">
-          <div className="panel-heading-row">
-            <div>
-              <h2>Largest Credit Memo Impact</h2>
-              <p>Fast proof of where gross sales and net sales diverge.</p>
-            </div>
+          <div className="segmented-control" aria-label="Summary mode">
+            <button className={mode === "rep" ? "active" : ""} onClick={() => setMode("rep")} type="button">
+              Rep
+            </button>
+            <button className={mode === "account" ? "active" : ""} onClick={() => setMode("account")} type="button">
+              Account
+            </button>
           </div>
-          <SummaryTable rows={topCreditRows} labelHeader={mode === "rep" ? "Rep" : "Account"} compact />
-        </section>
-      </div>
+        </div>
+        <SummaryTable rows={rows} labelHeader={mode === "rep" ? "Rep" : "Account"} />
+      </section>
 
       <section className="sales-dashboard-panel">
         <div className="panel-heading-row">
@@ -184,6 +158,12 @@ function SummaryTable({ rows, labelHeader, compact }: { rows: QuickBooksSalesSum
       </table>
     </div>
   );
+}
+
+function formatDateRange(from: string | null, to: string | null) {
+  if (!from && !to) return "-";
+  if (from === to) return formatDate(from);
+  return formatDate(from) + " - " + formatDate(to);
 }
 
 function formatDate(value: string | null) {
