@@ -83,6 +83,7 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 - TxnDeletedQueryRq responses are captured as raw QuickBooks responses for audit/reprocessing while a first-class deleted-transaction table is still pending.
 - Jobs store iterator continuation state in source_sync_checkpoints.cursor_data and record counts/status diagnostics in source_sync_checkpoints.diagnostics.
 - Fixed queue status/claiming after the first expanded run showed Supabase's default 1,000-row select limit was undercounting total queue progress and the claimer could skip higher-priority resource rows. Status now uses exact count queries and claims jobs by resource priority directly.
+- Changed recovery claiming to work backward from the current backfill end date instead of forward from 2018. The queue now defaults the backfill end to the current server date unless `QUICKBOOKS_RECOVERY_BACKFILL_END` is set, prioritizes current-year YTD first, then all of 2025, then older history, and walks invoice/credit-memo jobs by newest sales dates so early manual runs produce useful net-sales facts quickly.
 
 ## Historical Mirror Source Rules
 

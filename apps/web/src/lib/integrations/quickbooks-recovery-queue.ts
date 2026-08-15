@@ -13,9 +13,9 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 
 const SOURCE_SYSTEM = "quickbooks_desktop";
 const DEFAULT_BACKFILL_START = "2018-08-14";
-const DEFAULT_BACKFILL_END = "2026-08-14";
 const DEFAULT_MAX_RETURNED = 200;
 const STALE_RUNNING_MINUTES = 30;
+const SALES_TRUTH_PRIORITY_YEAR = 2025;
 
 export type QuickBooksRecoveryResource =
   | "quickbooks_sales_reps"
@@ -238,28 +238,44 @@ async function resetStaleRunningJobs(supabase: SupabaseClient) {
 }
 
 async function claimNextRecoveryJob(supabase: SupabaseClient): Promise<QuickBooksRecoveryJob | null> {
-  for (const resourceName of recoveryResources()) {
+  for (const resourceName of initialRecoveryResources()) {
     const row = await readFirstPendingJobForResource(supabase, resourceName);
     if (!row) continue;
+    const job = await claimPendingRecoveryRow(supabase, row);
+    if (job) return job;
+  }
 
-    const diagnostics = {
-      ...(row.diagnostics || {}),
-      attempts: numberValue(row.diagnostics?.attempts) + 1,
-      claimedAt: new Date().toISOString()
-    };
-    const { data: updated, error: updateError } = await supabase
-      .from("source_sync_checkpoints")
-      .update({ status: "running", diagnostics, updated_at: new Date().toISOString() })
-      .eq("id", row.id)
-      .eq("status", "pending")
-      .select("id,resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,last_synced_at,updated_at,created_at")
-      .single<SourceSyncCheckpointRow>();
+  const salesTruthRow = await readFirstPendingSalesTruthJob(supabase);
+  if (salesTruthRow) {
+    const job = await claimPendingRecoveryRow(supabase, salesTruthRow);
+    if (job) return job;
+  }
 
-    if (updateError || !updated) continue;
-    return toRecoveryJob(updated);
+  for (const resourceName of followUpRecoveryResources()) {
+    const row = await readFirstPendingJobForResource(supabase, resourceName);
+    if (!row) continue;
+    const job = await claimPendingRecoveryRow(supabase, row);
+    if (job) return job;
   }
 
   return null;
+}
+
+async function claimPendingRecoveryRow(supabase: SupabaseClient, row: SourceSyncCheckpointRow) {
+  const diagnostics = {
+    ...(row.diagnostics || {}),
+    attempts: numberValue(row.diagnostics?.attempts) + 1,
+    claimedAt: new Date().toISOString()
+  };
+  const { data: updated, error: updateError } = await supabase
+    .from("source_sync_checkpoints")
+    .update({ status: "running", diagnostics, updated_at: new Date().toISOString() })
+    .eq("id", row.id)
+    .eq("status", "pending")
+    .select("id,resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,last_synced_at,updated_at,created_at")
+    .single<SourceSyncCheckpointRow>();
+
+  return updateError || !updated ? null : toRecoveryJob(updated);
 }
 
 async function countJobsByStatus(supabase: SupabaseClient, statuses: SourceSyncCheckpointRow["status"][]) {
@@ -275,37 +291,98 @@ async function countJobsByStatus(supabase: SupabaseClient, statuses: SourceSyncC
 
 async function readNextPendingJobs(supabase: SupabaseClient, limit: number) {
   const jobs: QuickBooksRecoveryQueueStatus["nextJobs"] = [];
-  for (const resourceName of recoveryResources()) {
-    const rows = await readPendingJobsForResource(supabase, resourceName, limit - jobs.length);
-    jobs.push(
-      ...rows.map((row) => ({
-        resourceName: row.resource_name,
-        checkpointKey: row.checkpoint_key,
-        requestedStartDate: row.requested_start_date,
-        requestedEndDate: row.requested_end_date,
-        status: row.status
-      }))
-    );
+  for (const resourceName of initialRecoveryResources()) {
+    jobs.push(...toNextJobs(await readPendingJobsForResource(supabase, resourceName, limit - jobs.length)));
+    if (jobs.length >= limit) return jobs;
+  }
+
+  jobs.push(...toNextJobs(await readPendingSalesTruthJobs(supabase, limit - jobs.length)));
+  if (jobs.length >= limit) return jobs;
+
+  for (const resourceName of followUpRecoveryResources()) {
+    jobs.push(...toNextJobs(await readPendingJobsForResource(supabase, resourceName, limit - jobs.length)));
     if (jobs.length >= limit) break;
   }
   return jobs;
+}
+
+function toNextJobs(rows: SourceSyncCheckpointRow[]): QuickBooksRecoveryQueueStatus["nextJobs"] {
+  return rows.map((row) => ({
+    resourceName: row.resource_name,
+    checkpointKey: row.checkpoint_key,
+    requestedStartDate: row.requested_start_date,
+    requestedEndDate: row.requested_end_date,
+    status: row.status
+  }));
 }
 
 async function readFirstPendingJobForResource(supabase: SupabaseClient, resourceName: QuickBooksRecoveryResource) {
   return (await readPendingJobsForResource(supabase, resourceName, 1))[0] || null;
 }
 
+async function readFirstPendingSalesTruthJob(supabase: SupabaseClient) {
+  return (await readPendingSalesTruthJobs(supabase, 1))[0] || null;
+}
+
+async function readPendingSalesTruthJobs(supabase: SupabaseClient, limit: number) {
+  if (limit <= 0) return [];
+
+  const requestedRows: SourceSyncCheckpointRow[] = [];
+  for (const window of recoveryPriorityWindows()) {
+    if (requestedRows.length >= limit) break;
+    const rows = await readPendingJobsForResourceWindow(supabase, salesTruthRecoveryResources(), limit - requestedRows.length, window);
+    requestedRows.push(...rows);
+  }
+  return requestedRows;
+}
+
 async function readPendingJobsForResource(supabase: SupabaseClient, resourceName: QuickBooksRecoveryResource, limit: number) {
   if (limit <= 0) return [];
 
-  const { data, error } = await supabase
+  const requestedRows: SourceSyncCheckpointRow[] = [];
+  for (const window of recoveryPriorityWindows()) {
+    if (requestedRows.length >= limit) break;
+    const rows = await readPendingJobsForResourceWindow(supabase, resourceName, limit - requestedRows.length, window);
+    requestedRows.push(...rows);
+  }
+  if (requestedRows.length >= limit) return requestedRows;
+
+  const rows = await readPendingJobsForResourceWindow(supabase, resourceName, limit - requestedRows.length, null);
+  requestedRows.push(...rows);
+  return requestedRows;
+}
+
+async function readPendingJobsForResourceWindow(
+  supabase: SupabaseClient,
+  resourceName: QuickBooksRecoveryResource | QuickBooksRecoveryResource[],
+  limit: number,
+  window: QuickBooksDateRange | null
+) {
+  if (limit <= 0) return [];
+
+  let query = supabase
     .from("source_sync_checkpoints")
     .select("id,resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,last_synced_at,updated_at,created_at")
     .eq("source_system", SOURCE_SYSTEM)
-    .eq("resource_name", resourceName)
-    .eq("status", "pending")
-    .order("requested_start_date", { ascending: true, nullsFirst: true })
-    .order("checkpoint_key", { ascending: true })
+    .eq("status", "pending");
+
+  if (Array.isArray(resourceName)) {
+    query = query.in("resource_name", resourceName);
+  } else {
+    query = query.eq("resource_name", resourceName);
+  }
+
+  if (window?.from || window?.to) {
+    if (window.from) query = query.gte("requested_start_date", window.from);
+    if (window.to) query = query.lte("requested_start_date", window.to);
+  } else {
+    query = query.is("requested_start_date", null);
+  }
+
+  const { data, error } = await query
+    .order("requested_start_date", { ascending: false, nullsFirst: true })
+    .order("resource_name", { ascending: false })
+    .order("checkpoint_key", { ascending: false })
     .limit(limit)
     .returns<SourceSyncCheckpointRow[]>();
   if (error) throw new Error(error.message);
@@ -404,39 +481,64 @@ function checkpointRow(resourceName: QuickBooksRecoveryResource, checkpointKey: 
   };
 }
 
-function compareRecoveryRows(a: Pick<SourceSyncCheckpointRow, "resource_name" | "requested_start_date" | "checkpoint_key" | "created_at">, b: Pick<SourceSyncCheckpointRow, "resource_name" | "requested_start_date" | "checkpoint_key" | "created_at">) {
-  const priority = resourcePriority(a.resource_name) - resourcePriority(b.resource_name);
-  if (priority !== 0) return priority;
-  const dateCompare = (a.requested_start_date || "0000-00-00").localeCompare(b.requested_start_date || "0000-00-00");
-  if (dateCompare !== 0) return dateCompare;
-  return a.checkpoint_key.localeCompare(b.checkpoint_key);
-}
-
-function resourcePriority(resourceName: string) {
-  if (resourceName === "quickbooks_sales_reps") return 0;
-  if (resourceName === "quickbooks_customers") return 1;
-  if (resourceName === "quickbooks_vendors") return 2;
-  if (resourceName === "quickbooks_items") return 3;
-  if (resourceName === "quickbooks_credit_memos") return 4;
-  if (resourceName === "quickbooks_invoices") return 5;
-  if (resourceName === "quickbooks_receive_payments") return 6;
-  if (resourceName === "quickbooks_purchase_orders") return 7;
-  if (resourceName === "quickbooks_txn_deleted") return 8;
-  return 99;
-}
-
 function recoveryResources(): QuickBooksRecoveryResource[] {
   return [
+    ...initialRecoveryResources(),
+    ...salesTruthRecoveryResources(),
+    ...followUpRecoveryResources()
+  ];
+}
+
+function initialRecoveryResources(): QuickBooksRecoveryResource[] {
+  return [
     "quickbooks_sales_reps",
-    "quickbooks_customers",
-    "quickbooks_vendors",
-    "quickbooks_items",
-    "quickbooks_credit_memos",
+    "quickbooks_customers"
+  ];
+}
+
+function salesTruthRecoveryResources(): QuickBooksRecoveryResource[] {
+  return [
     "quickbooks_invoices",
+    "quickbooks_credit_memos"
+  ];
+}
+
+function followUpRecoveryResources(): QuickBooksRecoveryResource[] {
+  return [
+    "quickbooks_items",
     "quickbooks_receive_payments",
+    "quickbooks_vendors",
     "quickbooks_purchase_orders",
     "quickbooks_txn_deleted"
   ];
+}
+
+function recoveryPriorityWindows(): QuickBooksDateRange[] {
+  const backfillStart = getBackfillStart();
+  const backfillEnd = getBackfillEnd();
+  const ytdYear = Number(backfillEnd.slice(0, 4));
+  const ytdStart = `${ytdYear}-01-01`;
+  const priorityYearStart = `${SALES_TRUTH_PRIORITY_YEAR}-01-01`;
+  const priorityYearEnd = `${SALES_TRUTH_PRIORITY_YEAR}-12-31`;
+  const olderEnd = dayBefore(priorityYearStart);
+
+  return [
+    clampDateRange({ from: ytdStart, to: backfillEnd }, backfillStart, backfillEnd),
+    clampDateRange({ from: priorityYearStart, to: priorityYearEnd }, backfillStart, backfillEnd),
+    clampDateRange({ from: backfillStart, to: olderEnd }, backfillStart, backfillEnd)
+  ].filter((window): window is QuickBooksDateRange => Boolean(window));
+}
+
+function clampDateRange(range: QuickBooksDateRange, minimum: string, maximum: string): QuickBooksDateRange | null {
+  const from = maxDateString(range.from || minimum, minimum);
+  const to = minDateString(range.to || maximum, maximum);
+  return from <= to ? { from, to } : null;
+}
+
+function dayBefore(value: string) {
+  const date = new Date(value + "T00:00:00.000Z");
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
 }
 
 function iteratorFor(cursorData: Record<string, unknown>) {
@@ -514,7 +616,7 @@ function getBackfillStart() {
 }
 
 function getBackfillEnd() {
-  return process.env.QUICKBOOKS_RECOVERY_BACKFILL_END || DEFAULT_BACKFILL_END;
+  return process.env.QUICKBOOKS_RECOVERY_BACKFILL_END || currentDateString();
 }
 
 function getMaxReturned() {
@@ -533,4 +635,8 @@ function numberValue(value: unknown) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function currentDateString() {
+  return new Date().toISOString().slice(0, 10);
 }
