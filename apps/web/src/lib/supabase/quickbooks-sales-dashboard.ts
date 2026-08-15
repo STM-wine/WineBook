@@ -36,8 +36,8 @@ type QuickBooksCreditMemoRow = {
 
 type MutableSummary = QuickBooksSalesSummaryRow;
 
-const DEFAULT_SALES_DELIVERY_FROM = "2026-08-01";
-const DEFAULT_SALES_DELIVERY_TO = "2026-08-14";
+const DEFAULT_SALES_DELIVERY_FROM = "2026-08-13";
+const DEFAULT_SALES_DELIVERY_TO = "2026-08-13";
 const SALES_DATE_BASIS = "Invoice delivery date / ShipDate; credit memo transaction date";
 
 function getSalesDashboardDeliveryDateRange() {

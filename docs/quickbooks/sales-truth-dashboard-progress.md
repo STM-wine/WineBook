@@ -42,14 +42,16 @@ Implemented pieces:
 
 The successful QBWC run before this dashboard existed only proved connectivity and returned status checks. It did not persist parsed rows. After this deploy, run the `Stem Intelligence` row in QuickBooks Web Connector again manually so the new parser can populate Supabase.
 
-The current QBWC queue is now a focused August MTD proof pull. Customer and item discovery remains capped at 10 records, while invoice, credit memo, and payment queries default to a 1,000-record cap over the configured transaction window. This still is not yet a full historical sales replacement.
+The current QBWC queue is now a focused daily delivery-date proof pull. Invoice and credit memo header queries default to a 1,000-record cap over the configured transaction window. This still is not yet a full historical sales replacement.
 
-## MTD Delivery-Date Pull Update
+## Daily Delivery-Date Pull Update
 
-- Changed the next Web Connector pull target to August month-to-date: delivery dates 2026-08-01 through 2026-08-14.
-- QuickBooks transaction queries pull 2026-08-01 through 2026-08-15 to catch invoices that may appear the day after delivery.
+- The August MTD pull returned 505 invoices and timed out in Web Connector, so the next proof is scoped to one delivery day at a time.
+- Changed the next Web Connector pull target to delivery date 2026-08-13.
+- QuickBooks transaction queries pull 2026-08-13 through 2026-08-14 to catch invoices that may appear the day after delivery.
 - The dashboard now filters invoices by QuickBooks ShipDate when present, falling back to invoice transaction date when ShipDate is blank.
-- Credit memos are still filtered by transaction date for the same MTD window.
+- Credit memos are filtered by transaction date for the same daily window.
+- The Web Connector now requests only invoice and credit memo headers for the proof dashboard; line items, linked transactions, customers, items, and payments are excluded for now to avoid timeout.
 
 ## Inspection Update
 

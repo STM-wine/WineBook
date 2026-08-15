@@ -16,8 +16,8 @@ const SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/";
 const QBWC_NS = "http://developer.intuit.com/";
 const DEFAULT_USERNAME = "stem-qbwc";
 const DEFAULT_CAPTURE_RAW_RESPONSES = true;
-const DEFAULT_SALES_DELIVERY_FROM = "2026-08-01";
-const DEFAULT_SALES_DELIVERY_TO = "2026-08-14";
+const DEFAULT_SALES_DELIVERY_FROM = "2026-08-13";
+const DEFAULT_SALES_DELIVERY_TO = "2026-08-13";
 const RECENT_SESSION_LIMIT = 10;
 
 const SUPPORTED_METHODS = [
@@ -121,7 +121,7 @@ export async function handleQuickBooksWebConnectorSoapRequest(soapRequest: strin
 export function buildQuickBooksWebConnectorStatus() {
   return {
     service: "Stem Intelligence QuickBooks Desktop Web Connector",
-    mode: "read-only-sales-dashboard-mtd-delivery",
+    mode: "read-only-sales-dashboard-daily-delivery",
     configuration: {
       appUrlConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_APP_URL),
       passwordConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_PASSWORD),
@@ -300,7 +300,6 @@ function buildSalesDashboardRequests() {
   const maxReturned = Number(process.env.QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED || 1000);
   return buildQuickBooksSalesDashboardDiscoveryRequests({
     maxReturned: Number.isFinite(maxReturned) && maxReturned > 0 ? maxReturned : 1000,
-    listMaxReturned: 10,
     txnDateRange: getSalesDashboardTxnDateRange()
   });
 }
