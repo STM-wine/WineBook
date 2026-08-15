@@ -73,3 +73,7 @@ The current QBWC queue is still a small discovery sample, controlled by `QUICKBO
 
 - `npm ci` completed after network approval.
 - `npm run typecheck` passed.
+- Commit `7fe077a` was pushed to `main`.
+- After the deploy, the `Stem Intelligence` QuickBooks Web Connector row was run manually.
+- The live connector status endpoint showed a completed session at `2026-08-15T00:39:57.232Z` with `requestCount: 5`, `completedRequestCount: 5`, and `lastError: null`.
+- The post-dashboard run returned `Status OK` for `CustomerQueryRq`, `ItemQueryRq`, `InvoiceQueryRq`, `CreditMemoQueryRq`, and `ReceivePaymentQueryRq`.
