@@ -16,6 +16,7 @@ const DEFAULT_BACKFILL_START = "2018-08-14";
 const DEFAULT_MAX_RETURNED = 200;
 const STALE_RUNNING_MINUTES = 30;
 const SALES_TRUTH_PRIORITY_YEAR = 2025;
+const SALES_TRUTH_WEEKLY_CHUNK_DAYS = 7;
 
 export type QuickBooksRecoveryResource =
   | "quickbooks_sales_reps"
@@ -218,6 +219,33 @@ async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
       ignoreDuplicates: true
     });
     if (error) throw new Error(error.message);
+  }
+  await cancelPendingDailySalesTruthRows(supabase);
+}
+
+async function cancelPendingDailySalesTruthRows(supabase: SupabaseClient) {
+  for (const window of salesTruthPriorityWindows()) {
+    for (const resourceName of salesTruthRecoveryResources()) {
+      const { error } = await supabase
+        .from("source_sync_checkpoints")
+        .update({
+          status: "cancelled",
+          diagnostics: {
+            recovery: true,
+            supersededBy: "weekly_sales_truth_recovery",
+            supersededAt: new Date().toISOString()
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq("source_system", SOURCE_SYSTEM)
+        .eq("resource_name", resourceName)
+        .eq("status", "pending")
+        .gte("checkpoint_key", window.from || "")
+        .lte("checkpoint_key", window.to || "")
+        .gte("requested_start_date", window.from || "")
+        .lte("requested_start_date", window.to || "");
+      if (error) throw new Error(error.message);
+    }
   }
 }
 
@@ -454,7 +482,13 @@ function buildSeedRows() {
     checkpointRow("quickbooks_items", "all", null, null)
   ];
 
+  for (const week of salesTruthWeeklyWindows()) {
+    rows.push(checkpointRow("quickbooks_credit_memos", salesTruthWeeklyKey(week), week.start, week.end));
+    rows.push(checkpointRow("quickbooks_invoices", salesTruthWeeklyKey(week), week.start, week.end));
+  }
+
   for (const date of eachDate(getBackfillStart(), getBackfillEnd())) {
+    if (isPrioritySalesTruthDate(date)) continue;
     rows.push(checkpointRow("quickbooks_credit_memos", date, date, date));
     rows.push(checkpointRow("quickbooks_invoices", date, date, date));
   }
@@ -516,17 +550,39 @@ function followUpRecoveryResources(): QuickBooksRecoveryResource[] {
 function recoveryPriorityWindows(): QuickBooksDateRange[] {
   const backfillStart = getBackfillStart();
   const backfillEnd = getBackfillEnd();
+  const priorityYearStart = `${SALES_TRUTH_PRIORITY_YEAR}-01-01`;
+  const olderEnd = dayBefore(priorityYearStart);
+
+  return [
+    ...salesTruthPriorityWindows(),
+    clampDateRange({ from: backfillStart, to: olderEnd }, backfillStart, backfillEnd)
+  ].filter((window): window is QuickBooksDateRange => Boolean(window));
+}
+
+function salesTruthPriorityWindows(): QuickBooksDateRange[] {
+  const backfillStart = getBackfillStart();
+  const backfillEnd = getBackfillEnd();
   const ytdYear = Number(backfillEnd.slice(0, 4));
   const ytdStart = `${ytdYear}-01-01`;
   const priorityYearStart = `${SALES_TRUTH_PRIORITY_YEAR}-01-01`;
   const priorityYearEnd = `${SALES_TRUTH_PRIORITY_YEAR}-12-31`;
-  const olderEnd = dayBefore(priorityYearStart);
 
   return [
     clampDateRange({ from: ytdStart, to: backfillEnd }, backfillStart, backfillEnd),
-    clampDateRange({ from: priorityYearStart, to: priorityYearEnd }, backfillStart, backfillEnd),
-    clampDateRange({ from: backfillStart, to: olderEnd }, backfillStart, backfillEnd)
+    clampDateRange({ from: priorityYearStart, to: priorityYearEnd }, backfillStart, backfillEnd)
   ].filter((window): window is QuickBooksDateRange => Boolean(window));
+}
+
+function salesTruthWeeklyWindows() {
+  return salesTruthPriorityWindows().flatMap((window) => eachFixedWindow(window.from || "", window.to || "", SALES_TRUTH_WEEKLY_CHUNK_DAYS));
+}
+
+function salesTruthWeeklyKey(window: { start: string; end: string }) {
+  return `week:${window.start}:${window.end}`;
+}
+
+function isPrioritySalesTruthDate(date: string) {
+  return salesTruthPriorityWindows().some((window) => (!window.from || date >= window.from) && (!window.to || date <= window.to));
 }
 
 function clampDateRange(range: QuickBooksDateRange, minimum: string, maximum: string): QuickBooksDateRange | null {
@@ -578,6 +634,26 @@ function eachDate(start: string, end: string) {
     current.setUTCDate(current.getUTCDate() + 1);
   }
   return dates;
+}
+
+function eachFixedWindow(start: string, end: string, days: number) {
+  const windows: Array<{ start: string; end: string }> = [];
+  const first = new Date(start + "T00:00:00.000Z");
+  const final = new Date(end + "T00:00:00.000Z");
+  const current = new Date(first);
+
+  while (current <= final) {
+    const windowStart = new Date(current);
+    const windowEnd = new Date(current);
+    windowEnd.setUTCDate(windowEnd.getUTCDate() + days - 1);
+    windows.push({
+      start: windowStart.toISOString().slice(0, 10),
+      end: minDateString(windowEnd.toISOString().slice(0, 10), end)
+    });
+    current.setUTCDate(current.getUTCDate() + days);
+  }
+
+  return windows;
 }
 
 function eachMonth(start: string, end: string) {
