@@ -75,11 +75,23 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 ## Recovery Queue Implementation
 
 - Added a QuickBooks recovery queue using the existing private source_sync_checkpoints table.
-- The queue seeds sales reps, customers, items, and one daily invoice plus one daily credit memo job from 2018-08-14 through 2026-08-14 by default.
+- The queue seeds sales reps, customers, vendors, items, one daily invoice job, one daily credit memo job, and monthly receive payment, purchase order, and deleted-transaction jobs from 2018-08-14 through 2026-08-14 by default.
 - Web Connector now claims one recovery job per session, so long historical recovery runs are broken into small safe requests.
 - Invoice and credit memo recovery jobs also pull SalesRepQueryRq in the same session so rep initials can be resolved to full names during persistence.
-- CustomerQueryRq and ItemQueryRq responses now persist into the existing quickbooks_customers and quickbooks_items tables.
+- Historical invoice, credit memo, and purchase order jobs now request line items and linked transactions; the proof dashboard fallback remains scoped separately.
+- CustomerQueryRq, VendorQueryRq, ItemQueryRq, PurchaseOrderQueryRq, invoice, credit memo, and receive payment responses persist into the existing QuickBooks tables.
+- TxnDeletedQueryRq responses are captured as raw QuickBooks responses for audit/reprocessing while a first-class deleted-transaction table is still pending.
 - Jobs store iterator continuation state in source_sync_checkpoints.cursor_data and record counts/status diagnostics in source_sync_checkpoints.diagnostics.
+
+## Historical Mirror Source Rules
+
+- Goal: read-only QuickBooks historical mirror as far back as the Stem Wine Company QuickBooks file will allow.
+- There is one active QuickBooks company file: Stem Wine Company.
+- QuickBooks is the first source for customers, vendors/suppliers, items, sales reps, invoices, credit memos, payments, purchase orders, sales price, total sales, and net sales.
+- Canonical sales date is invoice delivery/ShipDate when present, falling back to transaction date.
+- Vinosmith follows QuickBooks for supplier/importer/producer/wine-name/pack-size/FOB/catalog detail, sales rep enrichment, and price levels.
+- Credit card fields and SSNs are intentionally out of scope; normal customer/vendor operating data is in scope.
+- Raw QuickBooks XML should be retained during recovery so records can be re-parsed without re-querying QuickBooks.
 
 ## Next Steps
 

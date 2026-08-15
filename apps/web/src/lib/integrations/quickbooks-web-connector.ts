@@ -277,11 +277,14 @@ function connectionError(soapRequest: string) {
 
 function countReturnedRecords(requestType: string, response: string) {
   if (requestType === "CustomerQueryRq") return countXmlBlocks(response, "CustomerRet");
+  if (requestType === "VendorQueryRq") return countXmlBlocks(response, "VendorRet");
   if (requestType === "ItemQueryRq") return countItemRecords(response);
   if (requestType === "SalesRepQueryRq") return countXmlBlocks(response, "SalesRepRet");
   if (requestType === "InvoiceQueryRq") return countXmlBlocks(response, "InvoiceRet");
   if (requestType === "CreditMemoQueryRq") return countXmlBlocks(response, "CreditMemoRet");
   if (requestType === "ReceivePaymentQueryRq") return countXmlBlocks(response, "ReceivePaymentRet");
+  if (requestType === "PurchaseOrderQueryRq") return countXmlBlocks(response, "PurchaseOrderRet");
+  if (requestType === "TxnDeletedQueryRq") return countXmlBlocks(response, "TxnDeletedRet");
   return null;
 }
 
@@ -321,9 +324,13 @@ function addDays(value: string, days: number) {
 function requestTypeForRecoveryResource(resourceName: string) {
   if (resourceName === "quickbooks_sales_reps") return "SalesRepQueryRq";
   if (resourceName === "quickbooks_customers") return "CustomerQueryRq";
+  if (resourceName === "quickbooks_vendors") return "VendorQueryRq";
   if (resourceName === "quickbooks_items") return "ItemQueryRq";
   if (resourceName === "quickbooks_invoices") return "InvoiceQueryRq";
   if (resourceName === "quickbooks_credit_memos") return "CreditMemoQueryRq";
+  if (resourceName === "quickbooks_receive_payments") return "ReceivePaymentQueryRq";
+  if (resourceName === "quickbooks_purchase_orders") return "PurchaseOrderQueryRq";
+  if (resourceName === "quickbooks_txn_deleted") return "TxnDeletedQueryRq";
   return "UnknownRecoveryRq";
 }
 

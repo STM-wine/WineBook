@@ -20,9 +20,13 @@ const STALE_RUNNING_MINUTES = 30;
 export type QuickBooksRecoveryResource =
   | "quickbooks_sales_reps"
   | "quickbooks_customers"
+  | "quickbooks_vendors"
   | "quickbooks_items"
   | "quickbooks_invoices"
-  | "quickbooks_credit_memos";
+  | "quickbooks_credit_memos"
+  | "quickbooks_receive_payments"
+  | "quickbooks_purchase_orders"
+  | "quickbooks_txn_deleted";
 
 type SourceSyncCheckpointRow = {
   id: string;
@@ -214,16 +218,6 @@ export async function failQuickBooksRecoveryJob(job: QuickBooksRecoveryJob, erro
 async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
   if (!isAutoSeedEnabled()) return;
 
-  const { data: existing, error: existingError } = await supabase
-    .from("source_sync_checkpoints")
-    .select("id")
-    .eq("source_system", SOURCE_SYSTEM)
-    .eq("resource_name", "quickbooks_invoices")
-    .eq("checkpoint_key", getBackfillStart())
-    .limit(1);
-  if (existingError) throw new Error(existingError.message);
-  if (existing?.length) return;
-
   const rows = buildSeedRows();
   for (let index = 0; index < rows.length; index += 500) {
     const chunk = rows.slice(index, index + 500);
@@ -290,6 +284,7 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
 
   if (job.resourceName === "quickbooks_sales_reps") return client.buildSalesRepQuery();
   if (job.resourceName === "quickbooks_customers") return client.buildCustomerQuery({ maxReturned, activeStatus: "All", iterator });
+  if (job.resourceName === "quickbooks_vendors") return client.buildVendorQuery({ maxReturned, activeStatus: "All", iterator });
   if (job.resourceName === "quickbooks_items") return client.buildItemQuery({ maxReturned, activeStatus: "All", iterator });
   if (job.resourceName === "quickbooks_invoices") {
     return client.buildInvoiceQuery({
@@ -297,17 +292,44 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
       maxReturned,
       iterator,
       ...(iterator?.mode === "Continue" ? {} : { txnDateRange }),
-      includeLineItems: false,
-      includeLinkedTxns: false
+      includeLineItems: true,
+      includeLinkedTxns: true
     });
   }
-  return client.buildCreditMemoQuery({
+  if (job.resourceName === "quickbooks_credit_memos") {
+    return client.buildCreditMemoQuery({
+      requestId: job.checkpointKey,
+      maxReturned,
+      iterator,
+      ...(iterator?.mode === "Continue" ? {} : { txnDateRange }),
+      includeLineItems: true,
+      includeLinkedTxns: true
+    });
+  }
+  if (job.resourceName === "quickbooks_receive_payments") {
+    return client.buildReceivePaymentQuery({
+      requestId: job.checkpointKey,
+      maxReturned,
+      iterator,
+      ...(iterator?.mode === "Continue" ? {} : { txnDateRange })
+    });
+  }
+  if (job.resourceName === "quickbooks_purchase_orders") {
+    return client.buildPurchaseOrderQuery({
+      requestId: job.checkpointKey,
+      maxReturned,
+      iterator,
+      ...(iterator?.mode === "Continue" ? {} : { txnDateRange }),
+      includeLineItems: true,
+      includeLinkedTxns: true
+    });
+  }
+  return client.buildTxnDeletedQuery({
     requestId: job.checkpointKey,
     maxReturned,
     iterator,
-    ...(iterator?.mode === "Continue" ? {} : { txnDateRange }),
-    includeLineItems: false,
-    includeLinkedTxns: false
+    ...(iterator?.mode === "Continue" ? {} : { deletedDateRange: txnDateRange }),
+    txnDeletedTypes: ["Invoice", "CreditMemo", "ReceivePayment", "PurchaseOrder", "Bill", "VendorCredit"]
   });
 }
 
@@ -315,12 +337,19 @@ function buildSeedRows() {
   const rows = [
     checkpointRow("quickbooks_sales_reps", "all", null, null),
     checkpointRow("quickbooks_customers", "all", null, null),
+    checkpointRow("quickbooks_vendors", "all", null, null),
     checkpointRow("quickbooks_items", "all", null, null)
   ];
 
   for (const date of eachDate(getBackfillStart(), getBackfillEnd())) {
     rows.push(checkpointRow("quickbooks_credit_memos", date, date, date));
     rows.push(checkpointRow("quickbooks_invoices", date, date, date));
+  }
+
+  for (const month of eachMonth(getBackfillStart(), getBackfillEnd())) {
+    rows.push(checkpointRow("quickbooks_receive_payments", month.key, month.start, month.end));
+    rows.push(checkpointRow("quickbooks_purchase_orders", month.key, month.start, month.end));
+    rows.push(checkpointRow("quickbooks_txn_deleted", month.key, month.start, month.end));
   }
 
   return rows;
@@ -350,14 +379,28 @@ function compareRecoveryRows(a: Pick<SourceSyncCheckpointRow, "resource_name" | 
 function resourcePriority(resourceName: string) {
   if (resourceName === "quickbooks_sales_reps") return 0;
   if (resourceName === "quickbooks_customers") return 1;
-  if (resourceName === "quickbooks_items") return 2;
-  if (resourceName === "quickbooks_credit_memos") return 3;
-  if (resourceName === "quickbooks_invoices") return 4;
+  if (resourceName === "quickbooks_vendors") return 2;
+  if (resourceName === "quickbooks_items") return 3;
+  if (resourceName === "quickbooks_credit_memos") return 4;
+  if (resourceName === "quickbooks_invoices") return 5;
+  if (resourceName === "quickbooks_receive_payments") return 6;
+  if (resourceName === "quickbooks_purchase_orders") return 7;
+  if (resourceName === "quickbooks_txn_deleted") return 8;
   return 99;
 }
 
 function recoveryResources(): QuickBooksRecoveryResource[] {
-  return ["quickbooks_sales_reps", "quickbooks_customers", "quickbooks_items", "quickbooks_credit_memos", "quickbooks_invoices"];
+  return [
+    "quickbooks_sales_reps",
+    "quickbooks_customers",
+    "quickbooks_vendors",
+    "quickbooks_items",
+    "quickbooks_credit_memos",
+    "quickbooks_invoices",
+    "quickbooks_receive_payments",
+    "quickbooks_purchase_orders",
+    "quickbooks_txn_deleted"
+  ];
 }
 
 function iteratorFor(cursorData: Record<string, unknown>) {
@@ -397,6 +440,37 @@ function eachDate(start: string, end: string) {
     current.setUTCDate(current.getUTCDate() + 1);
   }
   return dates;
+}
+
+function eachMonth(start: string, end: string) {
+  const months: Array<{ key: string; start: string; end: string }> = [];
+  const first = new Date(start + "T00:00:00.000Z");
+  const final = new Date(end + "T00:00:00.000Z");
+  const current = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+
+  while (current <= final) {
+    const monthStart = new Date(current);
+    const nextMonth = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 1, 1));
+    const monthEnd = new Date(nextMonth);
+    monthEnd.setUTCDate(monthEnd.getUTCDate() - 1);
+
+    months.push({
+      key: monthStart.toISOString().slice(0, 7),
+      start: maxDateString(monthStart.toISOString().slice(0, 10), start),
+      end: minDateString(monthEnd.toISOString().slice(0, 10), end)
+    });
+    current.setUTCMonth(current.getUTCMonth() + 1);
+  }
+
+  return months;
+}
+
+function maxDateString(a: string, b: string) {
+  return a >= b ? a : b;
+}
+
+function minDateString(a: string, b: string) {
+  return a <= b ? a : b;
 }
 
 function getBackfillStart() {

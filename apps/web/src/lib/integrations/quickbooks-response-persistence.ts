@@ -41,6 +41,10 @@ type ParsedLine = {
   raw_data: Record<string, unknown>;
 };
 
+type ParsedPurchaseOrderLine = ParsedLine & {
+  received_quantity: number | null;
+};
+
 export async function persistQuickBooksResponse(input: PersistQuickBooksResponseInput) {
   if (!shouldPersistRequest(input.request.requestType)) return;
 
@@ -51,6 +55,8 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
     persistSalesRepLookup(input.response);
   } else if (input.request.requestType === "CustomerQueryRq") {
     await persistCustomers(supabase, input.response, rawResponse.id);
+  } else if (input.request.requestType === "VendorQueryRq") {
+    await persistVendors(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "ItemQueryRq") {
     await persistItems(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "InvoiceQueryRq") {
@@ -59,11 +65,23 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
     await persistCreditMemos(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "ReceivePaymentQueryRq") {
     await persistReceivePayments(supabase, input.response, rawResponse.id);
+  } else if (input.request.requestType === "PurchaseOrderQueryRq") {
+    await persistPurchaseOrders(supabase, input.response, rawResponse.id);
   }
 }
 
 function shouldPersistRequest(requestType: string) {
-  return ["SalesRepQueryRq", "CustomerQueryRq", "ItemQueryRq", "InvoiceQueryRq", "CreditMemoQueryRq", "ReceivePaymentQueryRq"].includes(requestType);
+  return [
+    "SalesRepQueryRq",
+    "CustomerQueryRq",
+    "VendorQueryRq",
+    "ItemQueryRq",
+    "InvoiceQueryRq",
+    "CreditMemoQueryRq",
+    "ReceivePaymentQueryRq",
+    "PurchaseOrderQueryRq",
+    "TxnDeletedQueryRq"
+  ].includes(requestType);
 }
 
 async function recordRawResponse(supabase: SupabaseClient, input: PersistQuickBooksResponseInput) {
@@ -135,6 +153,38 @@ async function persistCustomers(supabase: SupabaseClient, response: string, rawR
         raw_data: {
           parent_ref: ref(customerBlock, "ParentRef"),
           sales_rep_ref: enrichSalesRepRef(ref(customerBlock, "SalesRepRef"))
+        },
+        last_seen_at: new Date().toISOString()
+      },
+      { onConflict: "list_id" }
+    );
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function persistVendors(supabase: SupabaseClient, response: string, rawResponseId: string) {
+  const vendorBlocks = extractBlocks(response, "VendorRet");
+  for (const vendorBlock of vendorBlocks) {
+    const listId = text(vendorBlock, "ListID");
+    const fullName = text(vendorBlock, "FullName");
+    if (!listId || !fullName) continue;
+
+    const { error } = await supabase.from("quickbooks_vendors").upsert(
+      {
+        list_id: listId,
+        edit_sequence: text(vendorBlock, "EditSequence"),
+        name: text(vendorBlock, "Name"),
+        full_name: fullName,
+        is_active: boolText(vendorBlock, "IsActive"),
+        account_number: text(vendorBlock, "AccountNumber"),
+        terms_ref: ref(vendorBlock, "TermsRef"),
+        balance: numberText(vendorBlock, "Balance"),
+        time_created: dateTimeText(vendorBlock, "TimeCreated"),
+        time_modified: dateTimeText(vendorBlock, "TimeModified"),
+        raw_response_id: rawResponseId,
+        raw_data: {
+          vendor_address: address(vendorBlock, "VendorAddress"),
+          vendor_address_block: addressBlock(vendorBlock, "VendorAddressBlock")
         },
         last_seen_at: new Date().toISOString()
       },
@@ -309,6 +359,48 @@ async function persistReceivePayments(supabase: SupabaseClient, response: string
   }
 }
 
+async function persistPurchaseOrders(supabase: SupabaseClient, response: string, rawResponseId: string) {
+  const purchaseOrderBlocks = extractBlocks(response, "PurchaseOrderRet");
+  for (const purchaseOrderBlock of purchaseOrderBlocks) {
+    const txnId = text(purchaseOrderBlock, "TxnID");
+    if (!txnId) continue;
+
+    const vendorRef = ref(purchaseOrderBlock, "VendorRef");
+    const linkedTxns = extractBlocks(purchaseOrderBlock, "LinkedTxn").map((block) => rawLinkedTxn(block));
+    const lines = parsePurchaseOrderLines(purchaseOrderBlock);
+
+    const { error } = await supabase.from("quickbooks_purchase_orders").upsert(
+      {
+        txn_id: txnId,
+        edit_sequence: text(purchaseOrderBlock, "EditSequence"),
+        ref_number: text(purchaseOrderBlock, "RefNumber"),
+        txn_date: dateText(purchaseOrderBlock, "TxnDate"),
+        due_date: dateText(purchaseOrderBlock, "DueDate"),
+        expected_date: dateText(purchaseOrderBlock, "ExpectedDate"),
+        vendor_list_id: vendorRef.ListID || null,
+        vendor_full_name: vendorRef.FullName || null,
+        subtotal: numberText(purchaseOrderBlock, "Subtotal"),
+        total_amount: numberText(purchaseOrderBlock, "TotalAmount"),
+        is_fully_received: boolText(purchaseOrderBlock, "IsFullyReceived"),
+        linked_txns: linkedTxns,
+        custom_fields: {},
+        time_created: dateTimeText(purchaseOrderBlock, "TimeCreated"),
+        time_modified: dateTimeText(purchaseOrderBlock, "TimeModified"),
+        raw_response_id: rawResponseId,
+        raw_data: {
+          vendor_ref: vendorRef,
+          line_count: lines.length
+        },
+        last_seen_at: new Date().toISOString()
+      },
+      { onConflict: "txn_id" }
+    );
+    if (error) throw new Error(error.message);
+
+    await replacePurchaseOrderLines(supabase, txnId, lines);
+  }
+}
+
 async function replaceLines(supabase: SupabaseClient, table: string, txnId: string, lines: ParsedLine[]) {
   const { error: deleteError } = await supabase.from(table).delete().eq("txn_id", txnId);
   if (deleteError) throw new Error(deleteError.message);
@@ -334,26 +426,60 @@ async function replaceLines(supabase: SupabaseClient, table: string, txnId: stri
 }
 
 function parseLines(parentBlock: string, lineTag: "InvoiceLineRet" | "CreditMemoLineRet") {
-  return extractBlocks(parentBlock, lineTag).map((lineBlock, index): ParsedLine => {
-    const itemRef = ref(lineBlock, "ItemRef");
-    const classRef = ref(lineBlock, "ClassRef");
-    return {
-      txn_line_id: text(lineBlock, "TxnLineID"),
-      line_sequence: index + 1,
-      item_list_id: itemRef.ListID || null,
-      item_full_name: itemRef.FullName || null,
-      description: text(lineBlock, "Desc"),
-      quantity: numberText(lineBlock, "Quantity"),
-      unit_of_measure: text(lineBlock, "UnitOfMeasure"),
-      rate: numberText(lineBlock, "Rate"),
-      amount: numberText(lineBlock, "Amount"),
-      class_ref: classRef,
-      raw_data: {
-        item_ref: itemRef,
-        class_ref: classRef
-      }
-    };
-  });
+  return extractBlocks(parentBlock, lineTag).map((lineBlock, index): ParsedLine => parseLine(lineBlock, index));
+}
+
+function parsePurchaseOrderLines(parentBlock: string) {
+  return extractBlocks(parentBlock, "PurchaseOrderLineRet").map((lineBlock, index): ParsedPurchaseOrderLine => ({
+    ...parseLine(lineBlock, index),
+    received_quantity: numberText(lineBlock, "ReceivedQuantity")
+  }));
+}
+
+function parseLine(lineBlock: string, index: number): ParsedLine {
+  const itemRef = ref(lineBlock, "ItemRef");
+  const classRef = ref(lineBlock, "ClassRef");
+  return {
+    txn_line_id: text(lineBlock, "TxnLineID"),
+    line_sequence: index + 1,
+    item_list_id: itemRef.ListID || null,
+    item_full_name: itemRef.FullName || null,
+    description: text(lineBlock, "Desc"),
+    quantity: numberText(lineBlock, "Quantity"),
+    unit_of_measure: text(lineBlock, "UnitOfMeasure"),
+    rate: numberText(lineBlock, "Rate"),
+    amount: numberText(lineBlock, "Amount"),
+    class_ref: classRef,
+    raw_data: {
+      item_ref: itemRef,
+      class_ref: classRef
+    }
+  };
+}
+
+async function replacePurchaseOrderLines(supabase: SupabaseClient, txnId: string, lines: ParsedPurchaseOrderLine[]) {
+  const { error: deleteError } = await supabase.from("quickbooks_purchase_order_lines").delete().eq("txn_id", txnId);
+  if (deleteError) throw new Error(deleteError.message);
+  if (lines.length === 0) return;
+
+  const { error: insertError } = await supabase.from("quickbooks_purchase_order_lines").insert(
+    lines.map((line) => ({
+      txn_id: txnId,
+      txn_line_id: line.txn_line_id,
+      line_sequence: line.line_sequence,
+      item_list_id: line.item_list_id,
+      item_full_name: line.item_full_name,
+      description: line.description,
+      quantity: line.quantity,
+      received_quantity: line.received_quantity,
+      unit_of_measure: line.unit_of_measure,
+      rate: line.rate,
+      amount: line.amount,
+      class_ref: line.class_ref,
+      raw_data: line.raw_data
+    }))
+  );
+  if (insertError) throw new Error(insertError.message);
 }
 
 function enrichSalesRepRef(salesRepRef: QbRef) {
@@ -387,10 +513,13 @@ function rawLinkedTxn(block: string) {
 function countReturnedRecords(requestType: string, response: string) {
   if (requestType === "SalesRepQueryRq") return extractBlocks(response, "SalesRepRet").length;
   if (requestType === "CustomerQueryRq") return extractBlocks(response, "CustomerRet").length;
+  if (requestType === "VendorQueryRq") return extractBlocks(response, "VendorRet").length;
   if (requestType === "ItemQueryRq") return itemRetTypes().reduce((sum, tagName) => sum + extractBlocks(response, tagName).length, 0);
   if (requestType === "InvoiceQueryRq") return extractBlocks(response, "InvoiceRet").length;
   if (requestType === "CreditMemoQueryRq") return extractBlocks(response, "CreditMemoRet").length;
   if (requestType === "ReceivePaymentQueryRq") return extractBlocks(response, "ReceivePaymentRet").length;
+  if (requestType === "PurchaseOrderQueryRq") return extractBlocks(response, "PurchaseOrderRet").length;
+  if (requestType === "TxnDeletedQueryRq") return extractBlocks(response, "TxnDeletedRet").length;
   return null;
 }
 
@@ -409,6 +538,34 @@ function itemRetTypes() {
     "ItemFixedAssetRet",
     "ItemInventoryAssemblyRet"
   ];
+}
+
+function address(block: string, tagName: string) {
+  const address = firstBlock(block, tagName);
+  if (!address) return {};
+  return {
+    Addr1: text(address, "Addr1"),
+    Addr2: text(address, "Addr2"),
+    Addr3: text(address, "Addr3"),
+    Addr4: text(address, "Addr4"),
+    Addr5: text(address, "Addr5"),
+    City: text(address, "City"),
+    State: text(address, "State"),
+    PostalCode: text(address, "PostalCode"),
+    Country: text(address, "Country")
+  };
+}
+
+function addressBlock(block: string, tagName: string) {
+  const address = firstBlock(block, tagName);
+  if (!address) return {};
+  return {
+    Addr1: text(address, "Addr1"),
+    Addr2: text(address, "Addr2"),
+    Addr3: text(address, "Addr3"),
+    Addr4: text(address, "Addr4"),
+    Addr5: text(address, "Addr5")
+  };
 }
 
 function ref(block: string, tagName: string): QbRef {
