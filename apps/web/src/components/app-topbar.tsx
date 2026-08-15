@@ -32,6 +32,7 @@ export function AppTopbar({
   onRefreshReports,
   onSelectView
 }: AppTopbarProps) {
+  const navViews = NAV_VIEW_LABELS.filter((view) => !view.requiresSettings || canViewSettings);
   const brandContent = (
     <div className="brand-mark">
       <img alt="Stem home" src="/brand/stem-intelligence-logo-cropped.png" />
@@ -50,7 +51,7 @@ export function AppTopbar({
         </Link>
       )}
       <nav className="nav-tabs" aria-label="Primary">
-        {NAV_VIEW_LABELS.map((view) =>
+        {navViews.map((view) =>
           onSelectView ? (
             <button
               key={view.id}
