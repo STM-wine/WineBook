@@ -28,6 +28,58 @@ type QuickBooksItemMasterSummary = {
     last_synced_at: string | null;
     updated_at: string | null;
   } | null;
+  salesCoverage: {
+    currentYear: QuickBooksSalesCoverageRange;
+    priorYear: QuickBooksSalesCoverageRange;
+    checkpointCoverage: Array<{
+      resourceName: string;
+      status: string;
+      count: number;
+    }>;
+  };
+  orderingShadow: {
+    latestReport: {
+      id: string;
+      report_date: string | null;
+      completed_at: string | null;
+    } | null;
+    recommendationRows: number;
+    productCodeRows: number;
+    missingProductCodeRows: number;
+    exactMatchRows: number;
+    noMatchRows: number;
+    activeMatchRows: number;
+    inactiveOnlyRows: number;
+    duplicateActiveRows: number;
+    duplicateInactiveRows: number;
+    costMismatchRows: number;
+    quantityMismatchRows: number;
+    onOrderMismatchRows: number;
+    examples: Array<{
+      productCode: string | null;
+      productName: string | null;
+      supplierName: string | null;
+      issue: string;
+      currentValue: string | number | null;
+      quickbooksValue: string | number | null;
+    }>;
+  };
+};
+
+type QuickBooksSalesCoverageRange = {
+  label: string;
+  from: string;
+  to: string;
+  invoices: {
+    count: number;
+    earliestTxnDate: string | null;
+    latestTxnDate: string | null;
+  };
+  creditMemos: {
+    count: number;
+    earliestTxnDate: string | null;
+    latestTxnDate: string | null;
+  };
 };
 
 type LoadState =
@@ -135,6 +187,7 @@ function QuickBooksItemMasterSummaryView({ summary }: { summary: QuickBooksItemM
         <MetricCard label="Snapshots" value={formatInteger(summary.inventorySnapshots)} detail="Inventory history rows" tone={summary.inventorySnapshots > 0 ? "blue" : "red"} />
         <MetricCard label="Missing Fields" value={formatInteger(activeMissingAny)} detail="Max active-item gap" tone={activeMissingAny > 0 ? "gold" : "green"} />
         <MetricCard label="Pull Status" value={itemPullStatus} detail={itemPullFreshness || "No checkpoint time"} tone={itemPullStatus === "completed" ? "blue" : "red"} />
+        <MetricCard label="2025 QB Sales" value={formatInteger(summary.salesCoverage.priorYear.invoices.count)} detail={`${formatInteger(summary.salesCoverage.priorYear.creditMemos.count)} credit memos`} tone={summary.salesCoverage.priorYear.invoices.count > 0 ? "green" : "red"} />
       </section>
 
       <section className="panel">
@@ -180,6 +233,144 @@ function QuickBooksItemMasterSummaryView({ summary }: { summary: QuickBooksItemM
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <h1>QuickBooks Sales Coverage</h1>
+            <p>Backfill coverage needed before YOY ordering recommendations can be compared against QuickBooks sales truth.</p>
+          </div>
+        </div>
+        <div className="inline-warning">
+          Ordering should continue to use the current report workflow until 2025 QuickBooks invoices and credit memos are complete enough for year-over-year comparisons.
+        </div>
+        <div className="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Range</th>
+                <th>Invoices</th>
+                <th>Invoice Dates</th>
+                <th>Credit Memos</th>
+                <th>Credit Memo Dates</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[summary.salesCoverage.currentYear, summary.salesCoverage.priorYear].map((range) => (
+                <tr key={range.label}>
+                  <td>{range.label}</td>
+                  <td>{formatInteger(range.invoices.count)}</td>
+                  <td>{dateSpan(range.invoices.earliestTxnDate, range.invoices.latestTxnDate)}</td>
+                  <td>{formatInteger(range.creditMemos.count)}</td>
+                  <td>{dateSpan(range.creditMemos.earliestTxnDate, range.creditMemos.latestTxnDate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="table-shell quickbooks-health-table">
+          <table>
+            <thead>
+              <tr>
+                <th>2025 Backfill Queue</th>
+                <th>Pending</th>
+                <th>Running</th>
+                <th>Completed</th>
+                <th>Failed / Repair</th>
+              </tr>
+            </thead>
+            <tbody>
+              {["quickbooks_invoices", "quickbooks_credit_memos"].map((resourceName) => (
+                <tr key={resourceName}>
+                  <td>{resourceName.replace("quickbooks_", "").replace("_", " ")}</td>
+                  <td>{formatInteger(checkpointCount(summary, resourceName, "pending"))}</td>
+                  <td>{formatInteger(checkpointCount(summary, resourceName, "running"))}</td>
+                  <td>{formatInteger(checkpointCount(summary, resourceName, "completed"))}</td>
+                  <td>{formatInteger(checkpointCount(summary, resourceName, "failed") + checkpointCount(summary, resourceName, "needs_repair"))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <h1>Ordering Shadow Comparison</h1>
+            <p>Read-only comparison of current report recommendation rows against exact QuickBooks item matches.</p>
+          </div>
+        </div>
+        <div className="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Rows</th>
+                <th>Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Recommendations</td>
+                <td>{formatInteger(summary.orderingShadow.recommendationRows)}</td>
+                <td>Rows from latest completed report.</td>
+              </tr>
+              <tr>
+                <td>Exact QB matches</td>
+                <td>{formatInteger(summary.orderingShadow.exactMatchRows)}</td>
+                <td>Matched by current product code to QB item name/full name/custom item code.</td>
+              </tr>
+              <tr>
+                <td>No QB match</td>
+                <td>{formatInteger(summary.orderingShadow.noMatchRows)}</td>
+                <td>Needs identity review before QuickBooks can become item truth.</td>
+              </tr>
+              <tr>
+                <td>Inactive-only matches</td>
+                <td>{formatInteger(summary.orderingShadow.inactiveOnlyRows)}</td>
+                <td>Current ordering row maps only to inactive QuickBooks items.</td>
+              </tr>
+              <tr>
+                <td>Cost mismatches</td>
+                <td>{formatInteger(summary.orderingShadow.costMismatchRows)}</td>
+                <td>Current FOB differs from QB purchase/average cost.</td>
+              </tr>
+              <tr>
+                <td>Inventory mismatches</td>
+                <td>{formatInteger(summary.orderingShadow.quantityMismatchRows + summary.orderingShadow.onOrderMismatchRows)}</td>
+                <td>Current available/on-order differs from QB item quantities.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {summary.orderingShadow.examples.length > 0 ? (
+          <div className="table-shell quickbooks-health-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th>Item</th>
+                  <th>Supplier</th>
+                  <th>Current</th>
+                  <th>QuickBooks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.orderingShadow.examples.map((example, index) => (
+                  <tr key={`${example.issue}-${example.productCode || index}`}>
+                    <td>{example.issue}</td>
+                    <td>{example.productCode ? `${example.productCode} - ${example.productName || "Unnamed"}` : example.productName || "Unnamed"}</td>
+                    <td>{example.supplierName || "Unknown"}</td>
+                    <td>{displayValue(example.currentValue)}</td>
+                    <td>{displayValue(example.quickbooksValue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </section>
 
       <section className="panel">
@@ -267,4 +458,19 @@ function numberValue(value: unknown) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function dateSpan(earliest: string | null, latest: string | null) {
+  if (!earliest && !latest) return "No rows";
+  if (earliest === latest) return earliest || latest || "";
+  return `${earliest || "?"} to ${latest || "?"}`;
+}
+
+function checkpointCount(summary: QuickBooksItemMasterSummary, resourceName: string, status: string) {
+  return summary.salesCoverage.checkpointCoverage.find((row) => row.resourceName === resourceName && row.status === status)?.count || 0;
+}
+
+function displayValue(value: string | number | null) {
+  if (value === null || value === "") return "-";
+  return typeof value === "number" ? value.toLocaleString("en-US") : value;
 }

@@ -54,6 +54,14 @@ Current completed ordering data:
 - Latest report diagnostics: `rb6_rows: 1603`, `rads_rows: 55091`, `recommendation_rows: 1363`.
 - This confirms Order Review is still driven by report-generated `reorder_recommendations`, not QuickBooks item master rows.
 
+QuickBooks sales-history requirement:
+
+- Item master coverage is necessary but not sufficient for QuickBooks-backed ordering.
+- Year-over-year ordering recommendations need QuickBooks invoice and credit memo history, especially the full 2025 calendar year.
+- The recovery queue already treats 2025 as the sales-truth priority year for `InvoiceQueryRq` and `CreditMemoQueryRq` windows.
+- Before replacing RADs/Vinosmith report sales inputs, verify 2025 QuickBooks invoices and credit memos are complete and reconcile to the sales dashboard.
+- Until that coverage is confirmed, QuickBooks should be used for item identity/cost/inventory shadow checks, not YOY recommendation generation.
+
 ## Current Ordering Path
 
 Current buyer workflow:
@@ -178,6 +186,26 @@ Acceptance criteria:
 
 - Current PO Draft generation remains unchanged.
 - The app can answer, "What would QuickBooks say for this item?" without using that answer to order wine.
+
+### Phase 4A: QuickBooks Sales Coverage And YOY Readiness
+
+Build explicit coverage checks before any QuickBooks-based recommendation logic.
+
+Requirements:
+
+- Show QuickBooks invoice and credit memo coverage for:
+  - Current year to date.
+  - Full 2025 calendar year.
+- Show 2025 backfill queue status for invoices and credit memos.
+- Treat invoice sales minus credit memos as the QuickBooks sales truth basis.
+- Compare QuickBooks sales history against RADs/Vinosmith report sales in shadow mode before replacement.
+- Do not use QuickBooks sales history to compute recommended quantities until the 2025 coverage is complete and reconciled.
+
+Acceptance criteria:
+
+- The app can answer whether 2025 QuickBooks sales history is complete enough for YOY comparisons.
+- Recommendation generation remains report-driven while coverage is incomplete.
+- Any future YOY recommendation logic can point to a verified QuickBooks sales-history source.
 
 ### Phase 5: Feature-Flagged QuickBooks Enrichment
 
