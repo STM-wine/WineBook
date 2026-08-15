@@ -82,6 +82,7 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 - CustomerQueryRq, VendorQueryRq, ItemQueryRq, PurchaseOrderQueryRq, invoice, credit memo, and receive payment responses persist into the existing QuickBooks tables.
 - TxnDeletedQueryRq responses are captured as raw QuickBooks responses for audit/reprocessing while a first-class deleted-transaction table is still pending.
 - Jobs store iterator continuation state in source_sync_checkpoints.cursor_data and record counts/status diagnostics in source_sync_checkpoints.diagnostics.
+- Fixed queue status/claiming after the first expanded run showed Supabase's default 1,000-row select limit was undercounting total queue progress and the claimer could skip higher-priority resource rows. Status now uses exact count queries and claims jobs by resource priority directly.
 
 ## Historical Mirror Source Rules
 

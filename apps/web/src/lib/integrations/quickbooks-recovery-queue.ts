@@ -96,32 +96,24 @@ export async function buildQuickBooksRecoveryQueueStatus(): Promise<QuickBooksRe
 
   try {
     if (isAutoSeedEnabled()) await ensureQuickBooksRecoveryQueue(supabase);
-    const { data, error } = await supabase
-      .from("source_sync_checkpoints")
-      .select("resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,updated_at,created_at")
-      .eq("source_system", SOURCE_SYSTEM)
-      .in("resource_name", recoveryResources())
-      .returns<Array<Omit<SourceSyncCheckpointRow, "id" | "last_synced_at">>>();
+    const [pending, running, completed, failed, nextJobs] = await Promise.all([
+      countJobsByStatus(supabase, ["pending"]),
+      countJobsByStatus(supabase, ["running"]),
+      countJobsByStatus(supabase, ["completed"]),
+      countJobsByStatus(supabase, ["failed", "needs_repair"]),
+      readNextPendingJobs(supabase, 8)
+    ]);
 
-    if (error) throw new Error(error.message);
-    const rows = data || [];
-    const pendingRows = rows.filter((row) => row.status === "pending").sort(compareRecoveryRows).slice(0, 8);
     return {
       configured: true,
       autoSeedEnabled: isAutoSeedEnabled(),
       backfillStart: getBackfillStart(),
       backfillEnd: getBackfillEnd(),
-      pending: rows.filter((row) => row.status === "pending").length,
-      running: rows.filter((row) => row.status === "running").length,
-      completed: rows.filter((row) => row.status === "completed").length,
-      failed: rows.filter((row) => row.status === "failed" || row.status === "needs_repair").length,
-      nextJobs: pendingRows.map((row) => ({
-        resourceName: row.resource_name,
-        checkpointKey: row.checkpoint_key,
-        requestedStartDate: row.requested_start_date,
-        requestedEndDate: row.requested_end_date,
-        status: row.status
-      }))
+      pending,
+      running,
+      completed,
+      failed,
+      nextJobs
     };
   } catch (error) {
     return {
@@ -246,34 +238,78 @@ async function resetStaleRunningJobs(supabase: SupabaseClient) {
 }
 
 async function claimNextRecoveryJob(supabase: SupabaseClient): Promise<QuickBooksRecoveryJob | null> {
+  for (const resourceName of recoveryResources()) {
+    const row = await readFirstPendingJobForResource(supabase, resourceName);
+    if (!row) continue;
+
+    const diagnostics = {
+      ...(row.diagnostics || {}),
+      attempts: numberValue(row.diagnostics?.attempts) + 1,
+      claimedAt: new Date().toISOString()
+    };
+    const { data: updated, error: updateError } = await supabase
+      .from("source_sync_checkpoints")
+      .update({ status: "running", diagnostics, updated_at: new Date().toISOString() })
+      .eq("id", row.id)
+      .eq("status", "pending")
+      .select("id,resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,last_synced_at,updated_at,created_at")
+      .single<SourceSyncCheckpointRow>();
+
+    if (updateError || !updated) continue;
+    return toRecoveryJob(updated);
+  }
+
+  return null;
+}
+
+async function countJobsByStatus(supabase: SupabaseClient, statuses: SourceSyncCheckpointRow["status"][]) {
+  const { count, error } = await supabase
+    .from("source_sync_checkpoints")
+    .select("id", { count: "exact", head: true })
+    .eq("source_system", SOURCE_SYSTEM)
+    .in("resource_name", recoveryResources())
+    .in("status", statuses);
+  if (error) throw new Error(error.message);
+  return count || 0;
+}
+
+async function readNextPendingJobs(supabase: SupabaseClient, limit: number) {
+  const jobs: QuickBooksRecoveryQueueStatus["nextJobs"] = [];
+  for (const resourceName of recoveryResources()) {
+    const rows = await readPendingJobsForResource(supabase, resourceName, limit - jobs.length);
+    jobs.push(
+      ...rows.map((row) => ({
+        resourceName: row.resource_name,
+        checkpointKey: row.checkpoint_key,
+        requestedStartDate: row.requested_start_date,
+        requestedEndDate: row.requested_end_date,
+        status: row.status
+      }))
+    );
+    if (jobs.length >= limit) break;
+  }
+  return jobs;
+}
+
+async function readFirstPendingJobForResource(supabase: SupabaseClient, resourceName: QuickBooksRecoveryResource) {
+  return (await readPendingJobsForResource(supabase, resourceName, 1))[0] || null;
+}
+
+async function readPendingJobsForResource(supabase: SupabaseClient, resourceName: QuickBooksRecoveryResource, limit: number) {
+  if (limit <= 0) return [];
+
   const { data, error } = await supabase
     .from("source_sync_checkpoints")
     .select("id,resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,last_synced_at,updated_at,created_at")
     .eq("source_system", SOURCE_SYSTEM)
-    .in("resource_name", recoveryResources())
+    .eq("resource_name", resourceName)
     .eq("status", "pending")
-    .limit(250)
+    .order("requested_start_date", { ascending: true, nullsFirst: true })
+    .order("checkpoint_key", { ascending: true })
+    .limit(limit)
     .returns<SourceSyncCheckpointRow[]>();
   if (error) throw new Error(error.message);
-
-  const row = (data || []).sort(compareRecoveryRows)[0];
-  if (!row) return null;
-
-  const diagnostics = {
-    ...(row.diagnostics || {}),
-    attempts: numberValue(row.diagnostics?.attempts) + 1,
-    claimedAt: new Date().toISOString()
-  };
-  const { data: updated, error: updateError } = await supabase
-    .from("source_sync_checkpoints")
-    .update({ status: "running", diagnostics, updated_at: new Date().toISOString() })
-    .eq("id", row.id)
-    .eq("status", "pending")
-    .select("id,resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,last_synced_at,updated_at,created_at")
-    .single<SourceSyncCheckpointRow>();
-
-  if (updateError || !updated) return null;
-  return toRecoveryJob(updated);
+  return data || [];
 }
 
 function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlRequest {
