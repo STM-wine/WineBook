@@ -18,6 +18,7 @@ const STALE_RUNNING_MINUTES = 30;
 const SALES_TRUTH_PRIORITY_YEAR = 2025;
 const SALES_TRUTH_WEEKLY_CHUNK_DAYS = 7;
 const SALES_TRUTH_WEEKLY_KEY_PREFIX = "weekv3";
+const SALES_TRUTH_TWO_WEEK_KEY_PREFIX = "span2v1";
 
 export type QuickBooksRecoveryResource =
   | "quickbooks_sales_reps"
@@ -239,6 +240,7 @@ async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
     if (error) throw new Error(error.message);
   }
   await completeSupersededSalesTruthRows(supabase);
+  await consolidatePendingSalesTruthWeeklyRows(supabase);
 }
 
 async function completeSupersededSalesTruthRows(supabase: SupabaseClient) {
@@ -261,9 +263,61 @@ async function completeSupersededSalesTruthRows(supabase: SupabaseClient) {
         .eq("resource_name", resourceName)
         .eq("status", "pending")
         .not("checkpoint_key", "like", `${SALES_TRUTH_WEEKLY_KEY_PREFIX}:%`)
+        .not("checkpoint_key", "like", `${SALES_TRUTH_TWO_WEEK_KEY_PREFIX}:%`)
         .gte("requested_start_date", window.from || "")
         .lte("requested_start_date", window.to || "");
       if (error) throw new Error(error.message);
+    }
+  }
+}
+
+async function consolidatePendingSalesTruthWeeklyRows(supabase: SupabaseClient) {
+  for (const priorityWindow of salesTruthPriorityWindows()) {
+    for (const resourceName of salesTruthRecoveryResources()) {
+      const pendingWeeklyRows = await readPendingWeeklySalesTruthRows(supabase, resourceName, priorityWindow);
+      const groups = groupPendingWeeklyRowsIntoTwoWeekSpans(pendingWeeklyRows);
+
+      for (const group of groups) {
+        if (!group.rows.length) continue;
+
+        const consolidatedAt = new Date().toISOString();
+        const checkpoint = checkpointRow(resourceName, salesTruthTwoWeekKey(group), group.start, group.end);
+        const { error: upsertError } = await supabase.from("source_sync_checkpoints").upsert(
+          {
+            ...checkpoint,
+            diagnostics: {
+              recovery: true,
+              consolidatedFrom: group.rows.map((row) => row.checkpoint_key),
+              consolidatedAt
+            }
+          },
+          {
+            onConflict: "source_system,resource_name,checkpoint_key",
+            ignoreDuplicates: true
+          }
+        );
+        if (upsertError) throw new Error(upsertError.message);
+
+        const { error: updateError } = await supabase
+          .from("source_sync_checkpoints")
+          .update({
+            status: "completed",
+            diagnostics: {
+              recovery: true,
+              supersededBy: "two_week_sales_truth_recovery",
+              supersededAt: consolidatedAt,
+              consolidatedInto: checkpoint.checkpoint_key
+            },
+            last_synced_at: consolidatedAt,
+            updated_at: consolidatedAt
+          })
+          .in(
+            "id",
+            group.rows.map((row) => row.id)
+          )
+          .eq("status", "pending");
+        if (updateError) throw new Error(updateError.message);
+      }
     }
   }
 }
@@ -469,6 +523,51 @@ async function readPendingJobsForResourceWindow(
   return data || [];
 }
 
+async function readPendingWeeklySalesTruthRows(
+  supabase: SupabaseClient,
+  resourceName: QuickBooksRecoveryResource,
+  window: QuickBooksDateRange
+) {
+  const { data, error } = await supabase
+    .from("source_sync_checkpoints")
+    .select("id,resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,last_synced_at,updated_at,created_at")
+    .eq("source_system", SOURCE_SYSTEM)
+    .eq("resource_name", resourceName)
+    .eq("status", "pending")
+    .like("checkpoint_key", `${SALES_TRUTH_WEEKLY_KEY_PREFIX}:%`)
+    .gte("requested_start_date", window.from || "")
+    .lte("requested_start_date", window.to || "")
+    .order("requested_start_date", { ascending: false })
+    .limit(1000)
+    .returns<SourceSyncCheckpointRow[]>();
+  if (error) throw new Error(error.message);
+  return (data || []).filter((row) => row.requested_start_date && row.requested_end_date);
+}
+
+function groupPendingWeeklyRowsIntoTwoWeekSpans(rows: SourceSyncCheckpointRow[]) {
+  const groups: Array<{ start: string; end: string; rows: SourceSyncCheckpointRow[] }> = [];
+  let index = 0;
+
+  while (index < rows.length) {
+    const current = rows[index];
+    const next = rows[index + 1];
+    const canPair =
+      Boolean(next?.requested_start_date && next.requested_end_date && current.requested_start_date) &&
+      dayBefore(current.requested_start_date || "") === next?.requested_end_date;
+    const groupRows = canPair && next ? [current, next] : [current];
+    const dates = groupRows.flatMap((row) => [row.requested_start_date || "", row.requested_end_date || ""]).filter(Boolean);
+
+    groups.push({
+      start: dates.reduce((earliest, date) => minDateString(earliest, date)),
+      end: dates.reduce((latest, date) => maxDateString(latest, date)),
+      rows: groupRows
+    });
+    index += groupRows.length;
+  }
+
+  return groups;
+}
+
 function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlRequest {
   const client = createQuickBooksDesktopReadOnlyClient();
   const maxReturned = getMaxReturned();
@@ -652,6 +751,10 @@ function salesTruthWeeklyWindows() {
 
 function salesTruthWeeklyKey(window: { start: string; end: string }) {
   return `${SALES_TRUTH_WEEKLY_KEY_PREFIX}:${window.start}:${window.end}`;
+}
+
+function salesTruthTwoWeekKey(window: { start: string; end: string }) {
+  return `${SALES_TRUTH_TWO_WEEK_KEY_PREFIX}:${window.start}:${window.end}`;
 }
 
 function isPrioritySalesTruthDate(date: string) {
