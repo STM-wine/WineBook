@@ -28,6 +28,17 @@ export type QuickBooksSalesLineRow = {
   amount: number;
 };
 
+export type QuickBooksSalesDashboardFilters = {
+  dateFrom?: string;
+  dateTo?: string;
+  rep?: string;
+  documentType?: "all" | "invoice" | "credit_memo";
+  account?: string;
+  item?: string;
+  document?: string;
+  includeTransactions?: boolean;
+};
+
 export type QuickBooksSalesDashboardData = {
   generatedAt: string;
   salesDateFrom: string;
@@ -44,6 +55,7 @@ export type QuickBooksSalesDashboardData = {
   lastCreditMemoDate: string | null;
   byRep: QuickBooksSalesSummaryRow[];
   byAccount: QuickBooksSalesSummaryRow[];
+  byItem: QuickBooksSalesSummaryRow[];
   transactions: QuickBooksSalesTransactionRow[];
   recentTransactions: QuickBooksSalesTransactionRow[];
   unavailableReason?: string | null;

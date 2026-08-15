@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   QuickBooksSalesDashboardData,
+  QuickBooksSalesDashboardFilters,
   QuickBooksSalesLineRow,
   QuickBooksSalesSummaryRow,
   QuickBooksSalesTransactionRow
@@ -51,6 +52,7 @@ const DEFAULT_SALES_DELIVERY_TO = new Date().toISOString().slice(0, 10);
 const SALES_DATE_BASIS = "Invoice delivery date; credit memo date";
 const PAGE_SIZE = 1000;
 const TXN_ID_CHUNK_SIZE = 400;
+const DEFAULT_TRANSACTION_LIMIT = 300;
 
 function getSalesDashboardDeliveryDateRange() {
   return {
@@ -59,16 +61,25 @@ function getSalesDashboardDeliveryDateRange() {
   };
 }
 
-export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient): Promise<QuickBooksSalesDashboardData> {
-  const salesDateRange = getSalesDashboardDeliveryDateRange();
+export async function fetchQuickBooksSalesDashboardData(
+  supabase: SupabaseClient,
+  filters: QuickBooksSalesDashboardFilters = {}
+): Promise<QuickBooksSalesDashboardData> {
+  const defaultSalesDateRange = getSalesDashboardDeliveryDateRange();
+  const salesDateRange = {
+    from: filters.dateFrom || defaultSalesDateRange.from,
+    to: filters.dateTo || defaultSalesDateRange.to
+  };
   const historyFrom = process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_HISTORY_FROM || DEFAULT_HISTORY_FROM;
   const historyTo = salesDateRange.to;
+  const includeTransactions = filters.includeTransactions ?? false;
+  const shouldLoadLines = includeTransactions || Boolean(filters.item?.trim());
   const [invoiceRows, creditMemoRows] = await Promise.all([
     fetchAll<QuickBooksInvoiceRow>((from, to) =>
       supabase
         .from("quickbooks_invoices")
         .select("txn_id,ref_number,txn_date,ship_date,customer_full_name,sales_rep_ref,subtotal,total_amount,balance_remaining,is_paid,time_modified,last_seen_at")
-        .or(`ship_date.gte.${historyFrom},txn_date.gte.${historyFrom}`)
+        .or(`ship_date.gte.${salesDateRange.from},txn_date.gte.${salesDateRange.from}`)
         .order("txn_date", { ascending: false, nullsFirst: false })
         .range(from, to)
         .returns<QuickBooksInvoiceRow[]>()
@@ -77,21 +88,23 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
       supabase
         .from("quickbooks_credit_memos")
         .select("txn_id,ref_number,txn_date,customer_full_name,subtotal,total_amount,raw_data,time_modified,last_seen_at")
-        .gte("txn_date", historyFrom)
+        .gte("txn_date", salesDateRange.from)
+        .lte("txn_date", salesDateRange.to)
         .order("txn_date", { ascending: false, nullsFirst: false })
         .range(from, to)
         .returns<QuickBooksCreditMemoRow[]>()
     )
   ]);
 
-  const invoices = invoiceRows.filter((row) => dateInRange(invoiceDeliveryDate(row), { from: historyFrom, to: historyTo }));
-  const creditMemos = creditMemoRows.filter((row) => dateInRange(row.txn_date, { from: historyFrom, to: historyTo }));
+  const invoices = invoiceRows.filter((row) => dateInRange(invoiceDeliveryDate(row), salesDateRange));
+  const creditMemos = creditMemoRows.filter((row) => dateInRange(row.txn_date, salesDateRange));
   const [invoiceLinesByTxnId, creditMemoLinesByTxnId] = await Promise.all([
-    fetchLinesByTxnId(supabase, "quickbooks_invoice_lines", invoices.map((row) => row.txn_id)),
-    fetchLinesByTxnId(supabase, "quickbooks_credit_memo_lines", creditMemos.map((row) => row.txn_id))
+    shouldLoadLines ? fetchLinesByTxnId(supabase, "quickbooks_invoice_lines", invoices.map((row) => row.txn_id)) : Promise.resolve(new Map<string, QuickBooksSalesLineRow[]>()),
+    shouldLoadLines ? fetchLinesByTxnId(supabase, "quickbooks_credit_memo_lines", creditMemos.map((row) => row.txn_id)) : Promise.resolve(new Map<string, QuickBooksSalesLineRow[]>())
   ]);
   const byRep = new Map<string, MutableSummary>();
   const byAccount = new Map<string, MutableSummary>();
+  const byItem = new Map<string, MutableSummary>();
   const transactions: QuickBooksSalesTransactionRow[] = [];
 
   for (const invoice of invoices) {
@@ -100,10 +113,7 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
     const account = cleanLabel(invoice.customer_full_name, "Unknown Account");
     const salesDate = invoiceDeliveryDate(invoice);
     const items = invoiceLinesByTxnId.get(invoice.txn_id) || [];
-    if (dateInRange(salesDate, salesDateRange)) {
-      addInvoice(summaryFor(byRep, rep), amount);
-      addInvoice(summaryFor(byAccount, account), amount);
-    }
+    if (!matchesHeaderFilters({ type: "invoice", refNumber: invoice.ref_number, account, rep }, filters)) continue;
     transactions.push({
       id: invoice.txn_id,
       type: "invoice",
@@ -115,6 +125,11 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
       amount,
       items
     });
+    if (matchesItemFilter(items, filters.item)) {
+      addInvoice(summaryFor(byRep, rep), amount);
+      addInvoice(summaryFor(byAccount, account), amount);
+      addItemSummary(byItem, items, amount, "invoice", filters.item);
+    }
   }
 
   for (const creditMemo of creditMemos) {
@@ -122,10 +137,7 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
     const rep = creditMemoRepName(creditMemo.raw_data) || "Unassigned Rep";
     const account = cleanLabel(creditMemo.customer_full_name, "Unknown Account");
     const items = creditMemoLinesByTxnId.get(creditMemo.txn_id) || [];
-    if (dateInRange(creditMemo.txn_date, salesDateRange)) {
-      addCredit(summaryFor(byRep, rep), amount);
-      addCredit(summaryFor(byAccount, account), amount);
-    }
+    if (!matchesHeaderFilters({ type: "credit_memo", refNumber: creditMemo.ref_number, account, rep }, filters)) continue;
     transactions.push({
       id: creditMemo.txn_id,
       type: "credit_memo",
@@ -137,16 +149,22 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
       amount: -amount,
       items
     });
+    if (matchesItemFilter(items, filters.item)) {
+      addCredit(summaryFor(byRep, rep), amount);
+      addCredit(summaryFor(byAccount, account), amount);
+      addItemSummary(byItem, items, amount, "credit_memo", filters.item);
+    }
   }
 
-  const defaultTransactions = transactions.filter((row) => dateInRange(row.salesDate, salesDateRange));
-  const invoiceSales = defaultTransactions
+  const matchingTransactions = transactions.filter((row) => matchesItemFilter(row.items, filters.item));
+  const invoiceSales = matchingTransactions
     .filter((row) => row.type === "invoice")
     .reduce((sum, row) => sum + Math.max(0, row.amount), 0);
-  const creditMemoTotal = defaultTransactions
+  const creditMemoTotal = matchingTransactions
     .filter((row) => row.type === "credit_memo")
     .reduce((sum, row) => sum + Math.abs(row.amount), 0);
-  const sortedTransactions = transactions.sort((a, b) => (b.salesDate || "").localeCompare(a.salesDate || ""));
+  const sortedTransactions = matchingTransactions.sort((a, b) => (b.salesDate || "").localeCompare(a.salesDate || ""));
+  const visibleTransactions = includeTransactions ? sortedTransactions.slice(0, DEFAULT_TRANSACTION_LIMIT) : [];
 
   return {
     generatedAt: new Date().toISOString(),
@@ -155,8 +173,8 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
     availableDateFrom: historyFrom,
     availableDateTo: historyTo,
     dateBasis: SALES_DATE_BASIS,
-    invoiceCount: defaultTransactions.filter((row) => row.type === "invoice").length,
-    creditMemoCount: defaultTransactions.filter((row) => row.type === "credit_memo").length,
+    invoiceCount: matchingTransactions.filter((row) => row.type === "invoice").length,
+    creditMemoCount: matchingTransactions.filter((row) => row.type === "credit_memo").length,
     invoiceSales,
     creditMemos: creditMemoTotal,
     netSales: invoiceSales - creditMemoTotal,
@@ -164,8 +182,9 @@ export async function fetchQuickBooksSalesDashboardData(supabase: SupabaseClient
     lastCreditMemoDate: latestDate(creditMemos.map((row) => row.txn_date)),
     byRep: sortedSummaries(byRep),
     byAccount: sortedSummaries(byAccount),
-    transactions: sortedTransactions,
-    recentTransactions: sortedTransactions.slice(0, 50),
+    byItem: sortedSummaries(byItem),
+    transactions: visibleTransactions,
+    recentTransactions: visibleTransactions.slice(0, 50),
     unavailableReason: null
   };
 }
@@ -188,6 +207,7 @@ export function unavailableQuickBooksSalesDashboardData(reason: string): QuickBo
     lastCreditMemoDate: null,
     byRep: [],
     byAccount: [],
+    byItem: [],
     transactions: [],
     recentTransactions: [],
     unavailableReason: reason
@@ -237,6 +257,26 @@ async function fetchLinesByTxnId(supabase: SupabaseClient, table: string, txnIds
   return linesByTxnId;
 }
 
+function matchesHeaderFilters(
+  transaction: { type: "invoice" | "credit_memo"; refNumber: string | null; account: string; rep: string },
+  filters: QuickBooksSalesDashboardFilters
+) {
+  if (filters.documentType && filters.documentType !== "all" && transaction.type !== filters.documentType) return false;
+  if (filters.rep && filters.rep !== "All" && transaction.rep !== filters.rep) return false;
+  if (filters.account?.trim() && !includesText(transaction.account, filters.account)) return false;
+  if (filters.document?.trim() && !includesText(transaction.refNumber || "", filters.document)) return false;
+  return true;
+}
+
+function matchesItemFilter(items: QuickBooksSalesLineRow[], itemFilter: string | undefined) {
+  if (!itemFilter?.trim()) return true;
+  return items.some((line) => includesText(line.item, itemFilter) || includesText(line.description || "", itemFilter));
+}
+
+function includesText(value: string, search: string) {
+  return value.trim().toLowerCase().includes(search.trim().toLowerCase());
+}
+
 function invoiceDeliveryDate(row: QuickBooksInvoiceRow) {
   return row.ship_date || row.txn_date;
 }
@@ -275,6 +315,32 @@ function addCredit(summary: MutableSummary, amount: number) {
   summary.netSales -= amount;
   summary.creditMemoCount += 1;
   updateCreditRate(summary);
+}
+
+function addItemSummary(
+  map: Map<string, MutableSummary>,
+  items: QuickBooksSalesLineRow[],
+  transactionAmount: number,
+  type: "invoice" | "credit_memo",
+  itemFilter: string | undefined
+) {
+  const matchingItems = itemFilter?.trim()
+    ? items.filter((line) => includesText(line.item, itemFilter) || includesText(line.description || "", itemFilter))
+    : items;
+
+  if (matchingItems.length === 0) {
+    const summary = summaryFor(map, "Unspecified Item");
+    if (type === "credit_memo") addCredit(summary, Math.abs(transactionAmount));
+    else addInvoice(summary, Math.abs(transactionAmount));
+    return;
+  }
+
+  for (const item of matchingItems) {
+    const amount = Math.abs(item.amount);
+    const summary = summaryFor(map, item.item);
+    if (type === "credit_memo") addCredit(summary, amount);
+    else addInvoice(summary, amount);
+  }
 }
 
 function updateCreditRate(summary: MutableSummary) {

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type {
   QuickBooksSalesDashboardData,
+  QuickBooksSalesDashboardFilters,
   QuickBooksSalesSummaryRow,
   QuickBooksSalesTransactionRow
 } from "@/lib/quickbooks-sales-types";
@@ -36,7 +37,7 @@ const percent = new Intl.NumberFormat("en-US", {
 });
 
 export function SalesDashboardView({ data }: SalesDashboardViewProps) {
-  const transactions = data.transactions?.length ? data.transactions : data.recentTransactions;
+  const [dashboardData, setDashboardData] = useState(data);
   const [mode, setMode] = useState<SummaryMode>("rep");
   const [dateFrom, setDateFrom] = useState(data.salesDateFrom);
   const [dateTo, setDateTo] = useState(data.salesDateTo);
@@ -45,35 +46,26 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
   const [accountFilter, setAccountFilter] = useState("");
   const [itemFilter, setItemFilter] = useState("");
   const [documentFilter, setDocumentFilter] = useState("");
+  const [appliedItemFilter, setAppliedItemFilter] = useState("");
+  const [hasRequestedTransactions, setHasRequestedTransactions] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const repOptions = useMemo(() => ["All", ...uniqueSorted(transactions.map((row) => row.rep))], [transactions]);
-  const selectedItem = itemFilter.trim();
+  const transactions = dashboardData.transactions || [];
+  const repOptions = useMemo(
+    () => ["All", ...uniqueSorted([...dashboardData.byRep.map((row) => row.label), ...transactions.map((row) => row.rep)])],
+    [dashboardData.byRep, transactions]
+  );
+  const selectedItem = appliedItemFilter.trim();
 
-  const filteredTransactions = useMemo(
-    () =>
-      transactions.filter((transaction) =>
-        transactionMatches(transaction, {
-          dateFrom,
-          dateTo,
-          repFilter,
-          documentType,
-          accountFilter,
-          itemFilter,
-          documentFilter
-        })
-      ),
-    [accountFilter, dateFrom, dateTo, documentFilter, documentType, itemFilter, repFilter, transactions]
-  );
-
-  const summaryRows = useMemo(
-    () => buildSummaryRows(filteredTransactions, mode, selectedItem),
-    [filteredTransactions, mode, selectedItem]
-  );
-  const metrics = useMemo(
-    () => buildMetrics(filteredTransactions, selectedItem),
-    [filteredTransactions, selectedItem]
-  );
-  const visibleTransactions = filteredTransactions.slice(0, MAX_VISIBLE_TRANSACTIONS);
+  const summaryRows = useMemo(() => {
+    if (mode === "rep") return dashboardData.byRep;
+    if (mode === "account") return dashboardData.byAccount;
+    return dashboardData.byItem;
+  }, [dashboardData.byAccount, dashboardData.byItem, dashboardData.byRep, mode]);
+  const metrics = useMemo(() => metricsFromDashboardData(dashboardData), [dashboardData]);
+  const visibleTransactions = transactions.slice(0, MAX_VISIBLE_TRANSACTIONS);
+  const matchingDocumentCount = dashboardData.invoiceCount + dashboardData.creditMemoCount;
   const hasFilters =
     dateFrom !== data.salesDateFrom ||
     dateTo !== data.salesDateTo ||
@@ -91,18 +83,70 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     setAccountFilter("");
     setItemFilter("");
     setDocumentFilter("");
+    setAppliedItemFilter("");
+    setHasRequestedTransactions(false);
     setMode("rep");
+    setErrorMessage("");
+    setDashboardData(data);
   }
 
   function setYtd() {
     const year = new Date().getFullYear();
-    setDateFrom(`${year}-01-01`);
-    setDateTo(data.availableDateTo);
+    const nextDateFrom = `${year}-01-01`;
+    const nextDateTo = data.availableDateTo;
+    setDateFrom(nextDateFrom);
+    setDateTo(nextDateTo);
+    void loadSalesDashboard({ dateFrom: nextDateFrom, dateTo: nextDateTo });
   }
 
   function setFullYear2025() {
-    setDateFrom("2025-01-01");
-    setDateTo("2025-12-31");
+    const nextDateFrom = "2025-01-01";
+    const nextDateTo = "2025-12-31";
+    setDateFrom(nextDateFrom);
+    setDateTo(nextDateTo);
+    void loadSalesDashboard({ dateFrom: nextDateFrom, dateTo: nextDateTo });
+  }
+
+  async function loadSalesDashboard(overrides: Partial<QuickBooksSalesDashboardFilters> = {}) {
+    const filters = {
+      dateFrom,
+      dateTo,
+      rep: repFilter,
+      documentType,
+      account: accountFilter,
+      item: itemFilter,
+      document: documentFilter,
+      ...overrides
+    };
+    const params = new URLSearchParams();
+    params.set("from", filters.dateFrom || data.salesDateFrom);
+    params.set("to", filters.dateTo || data.salesDateTo);
+    params.set("type", filters.documentType || "all");
+    params.set("includeTransactions", "true");
+    if (filters.rep && filters.rep !== "All") params.set("rep", filters.rep);
+    if (filters.account?.trim()) params.set("account", filters.account.trim());
+    if (filters.item?.trim()) params.set("item", filters.item.trim());
+    if (filters.document?.trim()) params.set("document", filters.document.trim());
+
+    setIsLoading(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch(`/api/sales-dashboard?${params.toString()}`);
+      const result = (await response.json()) as QuickBooksSalesDashboardData | { error?: string };
+      if (!response.ok || "error" in result) {
+        throw new Error("error" in result && result.error ? result.error : "Could not load sales.");
+      }
+      if (!isSalesDashboardData(result)) {
+        throw new Error("Could not load sales.");
+      }
+      setDashboardData(result);
+      setAppliedItemFilter(filters.item || "");
+      setHasRequestedTransactions(true);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load sales.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
@@ -124,6 +168,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
         <div className="sales-filter-presets">
           <button type="button" onClick={setYtd}>YTD</button>
           <button type="button" onClick={setFullYear2025}>2025</button>
+          <button type="button" onClick={() => void loadSalesDashboard()} disabled={isLoading}>{isLoading ? "Loading" : "Apply"}</button>
           <button type="button" onClick={resetFilters} disabled={!hasFilters}>Reset</button>
         </div>
         <div className="sales-filter-grid">
@@ -166,6 +211,8 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
         </div>
       </section>
 
+      {errorMessage ? <div className="status-card error">{errorMessage}</div> : null}
+
       <div className="sales-kpi-grid">
         <Metric label="Net Sales" value={currency.format(metrics.netSales)} detail={`${formatCount(metrics.documentCount)} documents`} tone="strong" />
         <Metric label="Invoice Sales" value={currency.format(metrics.invoiceSales)} detail={`${formatCount(metrics.invoiceCount)} invoices`} />
@@ -177,7 +224,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
         <div className="panel-heading-row">
           <div>
             <h2>{mode === "rep" ? "By Rep" : mode === "account" ? "By Account" : "By Item"}</h2>
-            <p>{formatCount(filteredTransactions.length)} matching documents</p>
+            <p>{formatCount(matchingDocumentCount)} matching documents</p>
           </div>
           <div className="segmented-control sales-summary-mode" aria-label="Summary mode">
             <button className={mode === "rep" ? "active" : ""} onClick={() => setMode("rep")} type="button">Rep</button>
@@ -194,7 +241,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
             <h2>Transactions</h2>
             <p>
               Showing {formatCount(visibleTransactions.length)}
-              {filteredTransactions.length > visibleTransactions.length ? ` of ${formatCount(filteredTransactions.length)}` : ""}
+              {matchingDocumentCount > visibleTransactions.length ? ` of ${formatCount(matchingDocumentCount)}` : ""}
             </p>
           </div>
         </div>
@@ -228,7 +275,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
               })}
               {visibleTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>No sales match these filters.</td>
+                  <td colSpan={7}>{hasRequestedTransactions ? "No sales match these filters." : "No transactions shown."}</td>
                 </tr>
               ) : null}
             </tbody>
@@ -247,6 +294,10 @@ function Metric({ label, value, detail, tone }: { label: string; value: string; 
       <small>{detail}</small>
     </div>
   );
+}
+
+function isSalesDashboardData(value: QuickBooksSalesDashboardData | { error?: string }): value is QuickBooksSalesDashboardData {
+  return "generatedAt" in value && "invoiceSales" in value && "transactions" in value;
 }
 
 function SummaryTable({ rows, labelHeader }: { rows: QuickBooksSalesSummaryRow[]; labelHeader: string }) {
@@ -285,111 +336,16 @@ function SummaryTable({ rows, labelHeader }: { rows: QuickBooksSalesSummaryRow[]
   );
 }
 
-function transactionMatches(
-  transaction: QuickBooksSalesTransactionRow,
-  filters: {
-    dateFrom: string;
-    dateTo: string;
-    repFilter: string;
-    documentType: DocumentTypeFilter;
-    accountFilter: string;
-    itemFilter: string;
-    documentFilter: string;
-  }
-) {
-  const salesDate = transaction.salesDate || transaction.txnDate || "";
-  if (filters.dateFrom && salesDate < filters.dateFrom) return false;
-  if (filters.dateTo && salesDate > filters.dateTo) return false;
-  if (filters.repFilter !== "All" && transaction.rep !== filters.repFilter) return false;
-  if (filters.documentType !== "all" && transaction.type !== filters.documentType) return false;
-  if (filters.accountFilter.trim() && !includesText(transaction.account, filters.accountFilter)) return false;
-  if (filters.documentFilter.trim() && !includesText(transaction.refNumber || "", filters.documentFilter)) return false;
-  if (filters.itemFilter.trim()) {
-    return transaction.items.some((line) => includesText(line.item, filters.itemFilter) || includesText(line.description || "", filters.itemFilter));
-  }
-  return true;
-}
-
-function buildMetrics(transactions: QuickBooksSalesTransactionRow[], selectedItem: string) {
-  return transactions.reduce(
-    (metrics, transaction) => {
-      const amount = amountForTransaction(transaction, selectedItem);
-      if (transaction.type === "credit_memo") {
-        metrics.creditMemos += Math.abs(amount);
-        metrics.creditMemoCount += 1;
-      } else {
-        metrics.invoiceSales += Math.max(0, amount);
-        metrics.invoiceCount += 1;
-      }
-      metrics.netSales += amount;
-      metrics.documentCount += 1;
-      metrics.averageInvoice = metrics.invoiceCount > 0 ? metrics.invoiceSales / metrics.invoiceCount : 0;
-      return metrics;
-    },
-    {
-      invoiceSales: 0,
-      creditMemos: 0,
-      netSales: 0,
-      invoiceCount: 0,
-      creditMemoCount: 0,
-      documentCount: 0,
-      averageInvoice: 0
-    }
-  );
-}
-
-function buildSummaryRows(transactions: QuickBooksSalesTransactionRow[], mode: SummaryMode, selectedItem: string) {
-  const summaries = new Map<string, QuickBooksSalesSummaryRow>();
-
-  for (const transaction of transactions) {
-    if (mode === "item") {
-      const lines = matchingLines(transaction, selectedItem);
-      if (lines.length === 0) {
-        addSignedAmount(summaryFor(summaries, "Unspecified Item"), transaction.amount, transaction.type);
-      } else {
-        for (const line of lines) {
-          const amount = transaction.type === "credit_memo" ? -Math.abs(line.amount) : Math.max(0, line.amount);
-          addSignedAmount(summaryFor(summaries, line.item), amount, transaction.type);
-        }
-      }
-    } else {
-      const label = mode === "rep" ? transaction.rep : transaction.account;
-      addSignedAmount(summaryFor(summaries, label), amountForTransaction(transaction, selectedItem), transaction.type);
-    }
-  }
-
-  return Array.from(summaries.values()).sort((a, b) => b.netSales - a.netSales);
-}
-
-function summaryFor(map: Map<string, QuickBooksSalesSummaryRow>, label: string) {
-  const cleanLabel = label.trim() || "Unknown";
-  const key = normalize(cleanLabel);
-  const existing = map.get(key);
-  if (existing) return existing;
-  const created: QuickBooksSalesSummaryRow = {
-    key,
-    label: cleanLabel,
-    invoiceSales: 0,
-    creditMemos: 0,
-    netSales: 0,
-    invoiceCount: 0,
-    creditMemoCount: 0,
-    creditMemoRate: 0
+function metricsFromDashboardData(data: QuickBooksSalesDashboardData) {
+  return {
+    invoiceSales: data.invoiceSales,
+    creditMemos: data.creditMemos,
+    netSales: data.netSales,
+    invoiceCount: data.invoiceCount,
+    creditMemoCount: data.creditMemoCount,
+    documentCount: data.invoiceCount + data.creditMemoCount,
+    averageInvoice: data.invoiceCount > 0 ? data.invoiceSales / data.invoiceCount : 0
   };
-  map.set(key, created);
-  return created;
-}
-
-function addSignedAmount(summary: QuickBooksSalesSummaryRow, amount: number, type: "invoice" | "credit_memo") {
-  if (type === "credit_memo" || amount < 0) {
-    summary.creditMemos += Math.abs(amount);
-    summary.creditMemoCount += 1;
-  } else {
-    summary.invoiceSales += Math.max(0, amount);
-    summary.invoiceCount += 1;
-  }
-  summary.netSales += amount;
-  summary.creditMemoRate = summary.invoiceSales > 0 ? summary.creditMemos / summary.invoiceSales : 0;
 }
 
 function amountForTransaction(transaction: QuickBooksSalesTransactionRow, selectedItem: string) {
