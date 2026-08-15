@@ -49,7 +49,7 @@ type MutableSummary = QuickBooksSalesSummaryRow;
 const DEFAULT_HISTORY_FROM = "2025-01-01";
 const DEFAULT_SALES_DELIVERY_FROM = `${new Date().getFullYear()}-01-01`;
 const DEFAULT_SALES_DELIVERY_TO = new Date().toISOString().slice(0, 10);
-const SALES_DATE_BASIS = "Invoice delivery date; credit memo date";
+const SALES_DATE_BASIS = "Transaction date; sales subtotal";
 const PAGE_SIZE = 1000;
 const TXN_ID_CHUNK_SIZE = 400;
 const DEFAULT_TRANSACTION_LIMIT = 300;
@@ -79,7 +79,8 @@ export async function fetchQuickBooksSalesDashboardData(
       supabase
         .from("quickbooks_invoices")
         .select("txn_id,ref_number,txn_date,ship_date,customer_full_name,sales_rep_ref,subtotal,total_amount,balance_remaining,is_paid,time_modified,last_seen_at")
-        .or(`ship_date.gte.${salesDateRange.from},txn_date.gte.${salesDateRange.from}`)
+        .gte("txn_date", salesDateRange.from)
+        .lte("txn_date", salesDateRange.to)
         .order("txn_date", { ascending: false, nullsFirst: false })
         .range(from, to)
         .returns<QuickBooksInvoiceRow[]>()
@@ -96,7 +97,7 @@ export async function fetchQuickBooksSalesDashboardData(
     )
   ]);
 
-  const invoices = invoiceRows.filter((row) => dateInRange(invoiceDeliveryDate(row), salesDateRange));
+  const invoices = invoiceRows.filter((row) => dateInRange(row.txn_date, salesDateRange));
   const creditMemos = creditMemoRows.filter((row) => dateInRange(row.txn_date, salesDateRange));
   const [invoiceLinesByTxnId, creditMemoLinesByTxnId] = await Promise.all([
     shouldLoadLines ? fetchLinesByTxnId(supabase, "quickbooks_invoice_lines", invoices.map((row) => row.txn_id)) : Promise.resolve(new Map<string, QuickBooksSalesLineRow[]>()),
@@ -108,10 +109,10 @@ export async function fetchQuickBooksSalesDashboardData(
   const transactions: QuickBooksSalesTransactionRow[] = [];
 
   for (const invoice of invoices) {
-    const amount = money(invoice.total_amount ?? invoice.subtotal);
+    const amount = money(invoice.subtotal ?? invoice.total_amount);
     const rep = refName(invoice.sales_rep_ref) || "Unassigned Rep";
     const account = cleanLabel(invoice.customer_full_name, "Unknown Account");
-    const salesDate = invoiceDeliveryDate(invoice);
+    const salesDate = invoice.txn_date;
     const items = invoiceLinesByTxnId.get(invoice.txn_id) || [];
     if (!matchesHeaderFilters({ type: "invoice", refNumber: invoice.ref_number, account, rep }, filters)) continue;
     transactions.push({
@@ -133,7 +134,7 @@ export async function fetchQuickBooksSalesDashboardData(
   }
 
   for (const creditMemo of creditMemos) {
-    const amount = Math.abs(money(creditMemo.total_amount ?? creditMemo.subtotal));
+    const amount = Math.abs(money(creditMemo.subtotal ?? creditMemo.total_amount));
     const rep = creditMemoRepName(creditMemo.raw_data) || "Unassigned Rep";
     const account = cleanLabel(creditMemo.customer_full_name, "Unknown Account");
     const items = creditMemoLinesByTxnId.get(creditMemo.txn_id) || [];
@@ -178,7 +179,7 @@ export async function fetchQuickBooksSalesDashboardData(
     invoiceSales,
     creditMemos: creditMemoTotal,
     netSales: invoiceSales - creditMemoTotal,
-    lastInvoiceDate: latestDate(invoices.map((row) => invoiceDeliveryDate(row))),
+    lastInvoiceDate: latestDate(invoices.map((row) => row.txn_date)),
     lastCreditMemoDate: latestDate(creditMemos.map((row) => row.txn_date)),
     byRep: sortedSummaries(byRep),
     byAccount: sortedSummaries(byAccount),
@@ -275,10 +276,6 @@ function matchesItemFilter(items: QuickBooksSalesLineRow[], itemFilter: string |
 
 function includesText(value: string, search: string) {
   return value.trim().toLowerCase().includes(search.trim().toLowerCase());
-}
-
-function invoiceDeliveryDate(row: QuickBooksInvoiceRow) {
-  return row.ship_date || row.txn_date;
 }
 
 function dateInRange(value: string | null | undefined, range: { from: string; to: string }) {
