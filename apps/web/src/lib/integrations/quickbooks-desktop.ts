@@ -145,8 +145,8 @@ export function createQuickBooksDesktopReadOnlyClient(options: QuickBooksDesktop
     buildItemInventoryQuery(params: QuickBooksListQueryOptions = {}) {
       return buildQueryRequest(qbxmlVersion, "ItemInventoryQueryRq", buildListQueryBody(params));
     },
-    buildSalesRepQuery(params: QuickBooksListQueryOptions = {}) {
-      return buildQueryRequest(qbxmlVersion, "SalesRepQueryRq", buildListQueryBody(params));
+    buildSalesRepQuery() {
+      return buildQueryRequest(qbxmlVersion, "SalesRepQueryRq", { body: [] });
     },
     buildInvoiceQuery(params: QuickBooksInvoiceQueryOptions = {}) {
       return buildQueryRequest(qbxmlVersion, "InvoiceQueryRq", buildTransactionQueryBody("InvoiceQueryRq", params));
@@ -179,11 +179,7 @@ export function buildQuickBooksSalesDashboardDiscoveryRequests(
   const client = createQuickBooksDesktopReadOnlyClient();
 
   return [
-    client.buildSalesRepQuery({
-      requestId: "sales-dashboard-sales-reps",
-      maxReturned: 1000,
-      activeStatus: "All"
-    }),
+    client.buildSalesRepQuery(),
     client.buildInvoiceQuery({
       requestId: "sales-dashboard-invoices",
       maxReturned,
