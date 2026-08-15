@@ -19,6 +19,7 @@ const SALES_TRUTH_PRIORITY_YEAR = 2025;
 const SALES_TRUTH_WEEKLY_CHUNK_DAYS = 7;
 const SALES_TRUTH_WEEKLY_KEY_PREFIX = "weekv3";
 const SALES_TRUTH_TWO_WEEK_KEY_PREFIX = "span2v1";
+const SALES_TRUTH_MONTHLY_KEY_PREFIX = "monthv1";
 
 export type QuickBooksRecoveryResource =
   | "quickbooks_sales_reps"
@@ -240,6 +241,7 @@ async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
     if (error) throw new Error(error.message);
   }
   await completeSupersededSalesTruthRows(supabase);
+  await completeSupersededPriorityYearWeeklyRows(supabase);
   await consolidatePendingSalesTruthWeeklyRows(supabase);
 }
 
@@ -264,6 +266,7 @@ async function completeSupersededSalesTruthRows(supabase: SupabaseClient) {
         .eq("status", "pending")
         .not("checkpoint_key", "like", `${SALES_TRUTH_WEEKLY_KEY_PREFIX}:%`)
         .not("checkpoint_key", "like", `${SALES_TRUTH_TWO_WEEK_KEY_PREFIX}:%`)
+        .not("checkpoint_key", "like", `${SALES_TRUTH_MONTHLY_KEY_PREFIX}:%`)
         .gte("requested_start_date", window.from || "")
         .lte("requested_start_date", window.to || "");
       if (error) throw new Error(error.message);
@@ -271,8 +274,45 @@ async function completeSupersededSalesTruthRows(supabase: SupabaseClient) {
   }
 }
 
+async function completeSupersededPriorityYearWeeklyRows(supabase: SupabaseClient) {
+  for (const window of priorityYearSalesTruthWindows()) {
+    for (const resourceName of salesTruthRecoveryResources()) {
+      await completeSupersededPriorityYearRowsByPrefix(supabase, resourceName, window, SALES_TRUTH_WEEKLY_KEY_PREFIX);
+      await completeSupersededPriorityYearRowsByPrefix(supabase, resourceName, window, SALES_TRUTH_TWO_WEEK_KEY_PREFIX);
+    }
+  }
+}
+
+async function completeSupersededPriorityYearRowsByPrefix(
+  supabase: SupabaseClient,
+  resourceName: QuickBooksRecoveryResource,
+  window: QuickBooksDateRange,
+  checkpointPrefix: string
+) {
+  const supersededAt = new Date().toISOString();
+  const { error } = await supabase
+    .from("source_sync_checkpoints")
+    .update({
+      status: "completed",
+      diagnostics: {
+        recovery: true,
+        supersededBy: "monthly_sales_truth_recovery",
+        supersededAt
+      },
+      last_synced_at: supersededAt,
+      updated_at: supersededAt
+    })
+    .eq("source_system", SOURCE_SYSTEM)
+    .eq("resource_name", resourceName)
+    .eq("status", "pending")
+    .like("checkpoint_key", `${checkpointPrefix}:%`)
+    .gte("requested_start_date", window.from || "")
+    .lte("requested_start_date", window.to || "");
+  if (error) throw new Error(error.message);
+}
+
 async function consolidatePendingSalesTruthWeeklyRows(supabase: SupabaseClient) {
-  for (const priorityWindow of salesTruthPriorityWindows()) {
+  for (const priorityWindow of ytdSalesTruthWindows()) {
     for (const resourceName of salesTruthRecoveryResources()) {
       const pendingWeeklyRows = await readPendingWeeklySalesTruthRows(supabase, resourceName, priorityWindow);
       const groups = groupPendingWeeklyRowsIntoTwoWeekSpans(pendingWeeklyRows);
@@ -638,6 +678,11 @@ function buildSeedRows() {
     rows.push(checkpointRow("quickbooks_invoices", salesTruthWeeklyKey(week), week.start, week.end));
   }
 
+  for (const month of salesTruthMonthlyWindows()) {
+    rows.push(checkpointRow("quickbooks_credit_memos", salesTruthMonthlyKey(month), month.start, month.end));
+    rows.push(checkpointRow("quickbooks_invoices", salesTruthMonthlyKey(month), month.start, month.end));
+  }
+
   for (const date of eachDate(getBackfillStart(), getBackfillEnd())) {
     if (isPrioritySalesTruthDate(date)) continue;
     rows.push(checkpointRow("quickbooks_credit_memos", date, date, date));
@@ -746,7 +791,7 @@ function priorityYearSalesTruthWindows(): QuickBooksDateRange[] {
 }
 
 function salesTruthWeeklyWindows() {
-  return salesTruthPriorityWindows().flatMap((window) => eachFixedWindow(window.from || "", window.to || "", SALES_TRUTH_WEEKLY_CHUNK_DAYS));
+  return ytdSalesTruthWindows().flatMap((window) => eachFixedWindow(window.from || "", window.to || "", SALES_TRUTH_WEEKLY_CHUNK_DAYS));
 }
 
 function salesTruthWeeklyKey(window: { start: string; end: string }) {
@@ -755,6 +800,14 @@ function salesTruthWeeklyKey(window: { start: string; end: string }) {
 
 function salesTruthTwoWeekKey(window: { start: string; end: string }) {
   return `${SALES_TRUTH_TWO_WEEK_KEY_PREFIX}:${window.start}:${window.end}`;
+}
+
+function salesTruthMonthlyWindows() {
+  return priorityYearSalesTruthWindows().flatMap((window) => eachMonth(window.from || "", window.to || ""));
+}
+
+function salesTruthMonthlyKey(window: { start: string; end: string }) {
+  return `${SALES_TRUTH_MONTHLY_KEY_PREFIX}:${window.start}:${window.end}`;
 }
 
 function isPrioritySalesTruthDate(date: string) {
