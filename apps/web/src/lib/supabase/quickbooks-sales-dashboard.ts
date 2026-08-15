@@ -5,6 +5,8 @@ import type {
   QuickBooksSalesDashboardData,
   QuickBooksSalesDashboardFilters,
   QuickBooksSalesLineRow,
+  QuickBooksSalesMonthColumn,
+  QuickBooksSalesMonthlyRepRow,
   QuickBooksSalesSummaryRow,
   QuickBooksSalesTransactionRow
 } from "@/lib/quickbooks-sales-types";
@@ -45,6 +47,7 @@ type QuickBooksSalesLineTableRow = {
 };
 
 type MutableSummary = QuickBooksSalesSummaryRow;
+type MutableMonthlyRepRow = QuickBooksSalesMonthlyRepRow;
 
 const DEFAULT_HISTORY_FROM = "2025-01-01";
 const DEFAULT_SALES_DELIVERY_FROM = `${new Date().getFullYear()}-01-01`;
@@ -106,6 +109,8 @@ export async function fetchQuickBooksSalesDashboardData(
   const byRep = new Map<string, MutableSummary>();
   const byAccount = new Map<string, MutableSummary>();
   const byItem = new Map<string, MutableSummary>();
+  const monthColumns = buildMonthColumns(salesDateRange);
+  const byRepMonthly = new Map<string, MutableMonthlyRepRow>();
   const transactions: QuickBooksSalesTransactionRow[] = [];
 
   for (const invoice of invoices) {
@@ -130,6 +135,7 @@ export async function fetchQuickBooksSalesDashboardData(
       addInvoice(summaryFor(byRep, rep), amount);
       addInvoice(summaryFor(byAccount, account), amount);
       addItemSummary(byItem, items, amount, "invoice", filters.item);
+      addMonthlyRepAmount(byRepMonthly, monthColumns, rep, salesDate, amount);
     }
   }
 
@@ -154,6 +160,7 @@ export async function fetchQuickBooksSalesDashboardData(
       addCredit(summaryFor(byRep, rep), amount);
       addCredit(summaryFor(byAccount, account), amount);
       addItemSummary(byItem, items, amount, "credit_memo", filters.item);
+      addMonthlyRepAmount(byRepMonthly, monthColumns, rep, creditMemo.txn_date, -amount);
     }
   }
 
@@ -184,6 +191,8 @@ export async function fetchQuickBooksSalesDashboardData(
     byRep: sortedSummaries(byRep),
     byAccount: sortedSummaries(byAccount),
     byItem: sortedSummaries(byItem),
+    monthColumns,
+    byRepMonthly: sortedMonthlyRows(byRepMonthly),
     transactions: visibleTransactions,
     recentTransactions: visibleTransactions.slice(0, 50),
     unavailableReason: null
@@ -209,6 +218,8 @@ export function unavailableQuickBooksSalesDashboardData(reason: string): QuickBo
     byRep: [],
     byAccount: [],
     byItem: [],
+    monthColumns: buildMonthColumns(salesDateRange),
+    byRepMonthly: [],
     transactions: [],
     recentTransactions: [],
     unavailableReason: reason
@@ -346,6 +357,93 @@ function updateCreditRate(summary: MutableSummary) {
 
 function sortedSummaries(map: Map<string, MutableSummary>) {
   return Array.from(map.values()).sort((a, b) => Math.abs(b.netSales) - Math.abs(a.netSales));
+}
+
+function buildMonthColumns(range: { from: string; to: string }): QuickBooksSalesMonthColumn[] {
+  const start = parseDateParts(range.from);
+  const end = parseDateParts(range.to);
+  if (!start || !end) return [];
+
+  const columns: QuickBooksSalesMonthColumn[] = [];
+  let year = start.year;
+  let month = start.month;
+
+  while (year < end.year || (year === end.year && month <= end.month)) {
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    columns.push({ key, label: monthColumnLabel(year, month, range) });
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+
+  return columns;
+}
+
+function monthColumnLabel(year: number, month: number, range: { from: string; to: string }) {
+  const monthDate = new Date(Date.UTC(year, month - 1, 1));
+  const monthLabel = new Intl.DateTimeFormat("en-US", { month: "short" }).format(monthDate);
+  const start = parseDateParts(range.from);
+  const end = parseDateParts(range.to);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const isStartMonth = Boolean(start && start.year === year && start.month === month && start.day > 1);
+  const isEndMonth = Boolean(end && end.year === year && end.month === month && end.day < lastDay);
+
+  if (isStartMonth || isEndMonth) {
+    const fromDay = isStartMonth && start ? start.day : 1;
+    const toDay = isEndMonth && end ? end.day : lastDay;
+    return `${monthLabel} ${fromDay}-${toDay}`;
+  }
+
+  return monthLabel;
+}
+
+function parseDateParts(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3])
+  };
+}
+
+function monthKey(value: string | null | undefined) {
+  return value ? value.slice(0, 7) : null;
+}
+
+function monthlyRowFor(map: Map<string, MutableMonthlyRepRow>, columns: QuickBooksSalesMonthColumn[], rep: string) {
+  const key = rep.toLowerCase();
+  const existing = map.get(key);
+  if (existing) return existing;
+
+  const created: MutableMonthlyRepRow = {
+    key,
+    label: rep,
+    months: Object.fromEntries(columns.map((column) => [column.key, 0])),
+    total: 0
+  };
+  map.set(key, created);
+  return created;
+}
+
+function addMonthlyRepAmount(
+  map: Map<string, MutableMonthlyRepRow>,
+  columns: QuickBooksSalesMonthColumn[],
+  rep: string,
+  date: string | null | undefined,
+  amount: number
+) {
+  const key = monthKey(date);
+  if (!key || !columns.some((column) => column.key === key)) return;
+  const row = monthlyRowFor(map, columns, rep);
+  row.months[key] = (row.months[key] || 0) + amount;
+  row.total += amount;
+}
+
+function sortedMonthlyRows(map: Map<string, MutableMonthlyRepRow>) {
+  return Array.from(map.values()).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
 }
 
 function money(value: number | string | null | undefined) {

@@ -3596,6 +3596,7 @@ tr.has-recommendation .sticky-name {
 
 .sales-kpi-warning strong,
 .sales-summary-table .negative,
+.sales-monthly-table .negative,
 .sales-transaction-table .negative {
   color: #a0412d;
 }
@@ -3640,7 +3641,7 @@ tr.has-recommendation .sticky-name {
 }
 
 .sales-summary-mode {
-  grid-template-columns: repeat(3, minmax(76px, 1fr));
+  grid-template-columns: repeat(4, minmax(76px, 1fr));
 }
 
 .segmented-control button {
@@ -3686,6 +3687,20 @@ tr.has-recommendation .sticky-name {
 .sales-summary-table.compact th:first-child,
 .sales-summary-table.compact td:first-child {
   min-width: 150px;
+}
+
+.sales-monthly-table {
+  min-width: 1180px;
+}
+
+.sales-monthly-table th:first-child,
+.sales-monthly-table td:first-child {
+  min-width: 210px;
+}
+
+.sales-monthly-table th,
+.sales-monthly-table td {
+  min-width: 108px;
 }
 
 .sales-transaction-table {

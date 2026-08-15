@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type {
   QuickBooksSalesDashboardData,
   QuickBooksSalesDashboardFilters,
+  QuickBooksSalesMonthColumn,
+  QuickBooksSalesMonthlyRepRow,
   QuickBooksSalesSummaryRow,
   QuickBooksSalesTransactionRow
 } from "@/lib/quickbooks-sales-types";
@@ -12,7 +14,7 @@ type SalesDashboardViewProps = {
   data: QuickBooksSalesDashboardData;
 };
 
-type SummaryMode = "rep" | "account" | "item";
+type SummaryMode = "rep" | "account" | "item" | "month";
 type DocumentTypeFilter = "all" | "invoice" | "credit_memo";
 
 const MAX_VISIBLE_TRANSACTIONS = 300;
@@ -61,7 +63,8 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
   const summaryRows = useMemo(() => {
     if (mode === "rep") return dashboardData.byRep;
     if (mode === "account") return dashboardData.byAccount;
-    return dashboardData.byItem;
+    if (mode === "item") return dashboardData.byItem;
+    return [];
   }, [dashboardData.byAccount, dashboardData.byItem, dashboardData.byRep, mode]);
   const metrics = useMemo(() => metricsFromDashboardData(dashboardData), [dashboardData]);
   const visibleTransactions = transactions.slice(0, MAX_VISIBLE_TRANSACTIONS);
@@ -223,16 +226,21 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
       <section className="sales-dashboard-panel sales-dashboard-panel-main">
         <div className="panel-heading-row">
           <div>
-            <h2>{mode === "rep" ? "By Rep" : mode === "account" ? "By Account" : "By Item"}</h2>
+            <h2>{mode === "rep" ? "By Rep" : mode === "account" ? "By Account" : mode === "item" ? "By Item" : "Monthly"}</h2>
             <p>{formatCount(matchingDocumentCount)} matching documents</p>
           </div>
           <div className="segmented-control sales-summary-mode" aria-label="Summary mode">
             <button className={mode === "rep" ? "active" : ""} onClick={() => setMode("rep")} type="button">Rep</button>
             <button className={mode === "account" ? "active" : ""} onClick={() => setMode("account")} type="button">Account</button>
             <button className={mode === "item" ? "active" : ""} onClick={() => setMode("item")} type="button">Item</button>
+            <button className={mode === "month" ? "active" : ""} onClick={() => setMode("month")} type="button">Monthly</button>
           </div>
         </div>
-        <SummaryTable rows={summaryRows} labelHeader={mode === "rep" ? "Rep" : mode === "account" ? "Account" : "Item"} />
+        {mode === "month" ? (
+          <MonthlyRepTable columns={dashboardData.monthColumns} rows={dashboardData.byRepMonthly} />
+        ) : (
+          <SummaryTable rows={summaryRows} labelHeader={mode === "rep" ? "Rep" : mode === "account" ? "Account" : "Item"} />
+        )}
       </section>
 
       <section className="sales-dashboard-panel">
@@ -297,7 +305,7 @@ function Metric({ label, value, detail, tone }: { label: string; value: string; 
 }
 
 function isSalesDashboardData(value: QuickBooksSalesDashboardData | { error?: string }): value is QuickBooksSalesDashboardData {
-  return "generatedAt" in value && "invoiceSales" in value && "transactions" in value;
+  return "generatedAt" in value && "invoiceSales" in value && "transactions" in value && "monthColumns" in value && "byRepMonthly" in value;
 }
 
 function SummaryTable({ rows, labelHeader }: { rows: QuickBooksSalesSummaryRow[]; labelHeader: string }) {
@@ -328,6 +336,45 @@ function SummaryTable({ rows, labelHeader }: { rows: QuickBooksSalesSummaryRow[]
           {rows.length === 0 ? (
             <tr>
               <td colSpan={6}>No sales match these filters.</td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MonthlyRepTable({ columns, rows }: { columns: QuickBooksSalesMonthColumn[]; rows: QuickBooksSalesMonthlyRepRow[] }) {
+  return (
+    <div className="table-scroll">
+      <table className="data-table sales-monthly-table">
+        <thead>
+          <tr>
+            <th>Rep</th>
+            {columns.map((column) => (
+              <th key={column.key} className="numeric">{column.label}</th>
+            ))}
+            <th className="numeric">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td>{row.label}</td>
+              {columns.map((column) => {
+                const amount = row.months[column.key] || 0;
+                return (
+                  <td key={column.key} className={amount < 0 ? "numeric negative" : "numeric"}>
+                    {preciseCurrency.format(amount)}
+                  </td>
+                );
+              })}
+              <td className={row.total < 0 ? "numeric negative" : "numeric"}>{preciseCurrency.format(row.total)}</td>
+            </tr>
+          ))}
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={columns.length + 2}>No sales match these filters.</td>
             </tr>
           ) : null}
         </tbody>

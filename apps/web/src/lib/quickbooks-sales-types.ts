@@ -9,6 +9,18 @@ export type QuickBooksSalesSummaryRow = {
   creditMemoRate: number;
 };
 
+export type QuickBooksSalesMonthColumn = {
+  key: string;
+  label: string;
+};
+
+export type QuickBooksSalesMonthlyRepRow = {
+  key: string;
+  label: string;
+  months: Record<string, number>;
+  total: number;
+};
+
 export type QuickBooksSalesTransactionRow = {
   id: string;
   type: "invoice" | "credit_memo";
@@ -56,6 +68,8 @@ export type QuickBooksSalesDashboardData = {
   byRep: QuickBooksSalesSummaryRow[];
   byAccount: QuickBooksSalesSummaryRow[];
   byItem: QuickBooksSalesSummaryRow[];
+  monthColumns: QuickBooksSalesMonthColumn[];
+  byRepMonthly: QuickBooksSalesMonthlyRepRow[];
   transactions: QuickBooksSalesTransactionRow[];
   recentTransactions: QuickBooksSalesTransactionRow[];
   unavailableReason?: string | null;
