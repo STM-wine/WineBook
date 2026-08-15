@@ -90,6 +90,29 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 - QuickBooks iterator IDs are session-scoped. After an attempted cross-session continuation returned status `3391`, changed Web Connector recovery sessions to append iterator continuation requests before closing the same session, fail QuickBooks `Error` statuses instead of completing them, and bumped weekly sales checkpoint keys to `weekv3:*` so the capped Aug. 6-12 invoice window is re-run with in-session continuation.
 - After several clean one-week YTD recovery runs, added an idempotent consolidation step that merges only still-pending `weekv3:*` sales-truth rows into two-week `span2v1:*` jobs. Already completed weekly windows stay intact, while the remaining YTD and 2025 sales pulls move faster without switching to risky month-sized requests.
 
+## Current Recovery Handoff
+
+- Nightly stopping point: the live status endpoint showed `pending: 5024`, `completed: 1715`, `failed: 0`, and `running: 0`.
+- Web Connector Auto-Run remains off. Recovery is still manual-run only.
+- Current YTD sales recovery has completed backward through the `2026-04-09` to `2026-04-22` invoice and credit memo window.
+- Next queued job is `quickbooks_invoices` for `span2v1:2026-03-26:2026-04-08`.
+- QuickBooks items have not been pulled yet. The queue is still set to finish YTD sales back to Jan. 1 first, then run `quickbooks_items`, then continue into 2025 sales.
+- Two-week windows are working cleanly. Completed `span2v1` invoice windows so far:
+  - `2026-06-18` to `2026-07-01`: 538 invoices; matching credit memos: 13.
+  - `2026-06-04` to `2026-06-17`: 602 invoices; matching credit memos: 17.
+  - `2026-05-21` to `2026-06-03`: 604 invoices; matching credit memos: 20.
+  - `2026-05-07` to `2026-05-20`: 630 invoices; matching credit memos: 18.
+  - `2026-04-23` to `2026-05-06`: 711 invoices; matching credit memos: 21.
+  - `2026-04-09` to `2026-04-22`: 710 invoices; matching credit memos: 23.
+- Completed one-week YTD windows before the two-week consolidation:
+  - `2026-08-13` to `2026-08-15`: 139 invoices; matching credit memos: 4.
+  - `2026-08-06` to `2026-08-12`: 252 invoices; matching credit memos: 9.
+  - `2026-07-30` to `2026-08-05`: 239 invoices; matching credit memos: 12.
+  - `2026-07-23` to `2026-07-29`: 245 invoices; matching credit memos: 13.
+  - `2026-07-16` to `2026-07-22`: 251 invoices; matching credit memos: 8.
+  - `2026-07-09` to `2026-07-15`: 220 invoices; matching credit memos: 9.
+  - `2026-07-02` to `2026-07-08`: 205 invoices; matching credit memos: 7.
+
 ## Historical Mirror Source Rules
 
 - Goal: read-only QuickBooks historical mirror as far back as the Stem Wine Company QuickBooks file will allow.
@@ -102,14 +125,11 @@ The current QBWC queue is now a focused daily delivery-date proof pull. Invoice 
 
 ## Next Steps
 
-1. Deploy this dashboard/parser commit to Render.
-2. Manually run `Stem Intelligence` in QuickBooks Web Connector once.
-3. Confirm `quickbooks_invoices` and `quickbooks_credit_memos` receive rows.
-4. Review the Sales Dashboard after sign-in.
-5. Add date-window filters and larger pull sizes.
-6. Add incremental sync/backfill logic.
-7. Add Vinosmith comparison columns to show where Vinosmith sales diverge from QuickBooks net sales.
-8. Decide an operating cadence before enabling Auto-Run.
+1. Resume manual Web Connector runs at `span2v1:2026-03-26:2026-04-08`.
+2. Continue paired invoice and credit memo checks until YTD reaches Jan. 1, 2026.
+3. Confirm the queued `quickbooks_items` pull runs immediately after YTD sales completes.
+4. Start Sales Truth Pack validation from the recovered 2026 YTD invoice and credit memo data.
+5. Keep Auto-Run off until the manual two-week queue cadence is fully reviewed.
 
 ## Guardrails
 
