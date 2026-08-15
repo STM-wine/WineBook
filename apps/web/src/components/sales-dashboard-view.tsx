@@ -110,6 +110,82 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     void loadSalesDashboard({ dateFrom: nextDateFrom, dateTo: nextDateTo });
   }
 
+  function selectMonthlyRepCell(row: QuickBooksSalesMonthlyRepRow, column: QuickBooksSalesMonthColumn) {
+    const range = dateRangeForMonth(column.key, {
+      from: dashboardData.salesDateFrom,
+      to: dashboardData.salesDateTo
+    });
+    if (!range) return;
+
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    setRepFilter(row.label);
+    setDocumentType("all");
+    setAccountFilter("");
+    setItemFilter("");
+    setDocumentFilter("");
+    setAppliedItemFilter("");
+    void loadSalesDashboard({
+      dateFrom: range.from,
+      dateTo: range.to,
+      rep: row.label,
+      documentType: "all",
+      account: "",
+      item: "",
+      document: ""
+    });
+  }
+
+  function selectMonthlyRep(row: QuickBooksSalesMonthlyRepRow) {
+    selectRep(row.label, dashboardData.salesDateFrom, dashboardData.salesDateTo);
+  }
+
+  function selectSummaryRow(row: QuickBooksSalesSummaryRow, nextDocumentType: DocumentTypeFilter = "all") {
+    if (mode === "rep") {
+      selectRep(row.label, dateFrom, dateTo, nextDocumentType);
+      return;
+    }
+
+    const nextRep = "All";
+    const nextAccount = mode === "account" ? row.label : "";
+    const nextItem = mode === "item" ? row.label : "";
+    setRepFilter(nextRep);
+    setDocumentType(nextDocumentType);
+    setAccountFilter(nextAccount);
+    setItemFilter(nextItem);
+    setDocumentFilter("");
+    setAppliedItemFilter(nextItem);
+    void loadSalesDashboard({
+      dateFrom,
+      dateTo,
+      rep: nextRep,
+      documentType: nextDocumentType,
+      account: nextAccount,
+      item: nextItem,
+      document: ""
+    });
+  }
+
+  function selectRep(rep: string, nextDateFrom: string, nextDateTo: string, nextDocumentType: DocumentTypeFilter = "all") {
+    setDateFrom(nextDateFrom);
+    setDateTo(nextDateTo);
+    setRepFilter(rep);
+    setDocumentType(nextDocumentType);
+    setAccountFilter("");
+    setItemFilter("");
+    setDocumentFilter("");
+    setAppliedItemFilter("");
+    void loadSalesDashboard({
+      dateFrom: nextDateFrom,
+      dateTo: nextDateTo,
+      rep,
+      documentType: nextDocumentType,
+      account: "",
+      item: "",
+      document: ""
+    });
+  }
+
   async function loadSalesDashboard(overrides: Partial<QuickBooksSalesDashboardFilters> = {}) {
     const filters = {
       dateFrom,
@@ -237,9 +313,9 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
           </div>
         </div>
         {mode === "month" ? (
-          <MonthlyRepTable columns={dashboardData.monthColumns} rows={dashboardData.byRepMonthly} />
+          <MonthlyRepTable columns={dashboardData.monthColumns} rows={dashboardData.byRepMonthly} onSelectMonth={selectMonthlyRepCell} onSelectRep={selectMonthlyRep} />
         ) : (
-          <SummaryTable rows={summaryRows} labelHeader={mode === "rep" ? "Rep" : mode === "account" ? "Account" : "Item"} />
+          <SummaryTable rows={summaryRows} labelHeader={mode === "rep" ? "Rep" : mode === "account" ? "Account" : "Item"} onSelect={selectSummaryRow} />
         )}
       </section>
 
@@ -308,7 +384,15 @@ function isSalesDashboardData(value: QuickBooksSalesDashboardData | { error?: st
   return "generatedAt" in value && "invoiceSales" in value && "transactions" in value && "monthColumns" in value && "byRepMonthly" in value;
 }
 
-function SummaryTable({ rows, labelHeader }: { rows: QuickBooksSalesSummaryRow[]; labelHeader: string }) {
+function SummaryTable({
+  rows,
+  labelHeader,
+  onSelect
+}: {
+  rows: QuickBooksSalesSummaryRow[];
+  labelHeader: string;
+  onSelect: (row: QuickBooksSalesSummaryRow, documentType?: DocumentTypeFilter) => void;
+}) {
   return (
     <div className="table-scroll">
       <table className="data-table sales-summary-table">
@@ -325,10 +409,26 @@ function SummaryTable({ rows, labelHeader }: { rows: QuickBooksSalesSummaryRow[]
         <tbody>
           {rows.map((row) => (
             <tr key={row.key}>
-              <td>{row.label}</td>
-              <td className="numeric">{preciseCurrency.format(row.invoiceSales)}</td>
-              <td className="numeric negative">{preciseCurrency.format(row.creditMemos)}</td>
-              <td className={row.netSales < 0 ? "numeric negative" : "numeric"}>{preciseCurrency.format(row.netSales)}</td>
+              <td>
+                <button type="button" className="sales-table-drilldown sales-row-label" onClick={() => onSelect(row)}>
+                  {row.label}
+                </button>
+              </td>
+              <td className="numeric">
+                <button type="button" className="sales-table-drilldown sales-amount-cell" onClick={() => onSelect(row, "invoice")}>
+                  {preciseCurrency.format(row.invoiceSales)}
+                </button>
+              </td>
+              <td className="numeric negative">
+                <button type="button" className="sales-table-drilldown sales-amount-cell negative" onClick={() => onSelect(row, "credit_memo")}>
+                  {preciseCurrency.format(row.creditMemos)}
+                </button>
+              </td>
+              <td className={row.netSales < 0 ? "numeric negative" : "numeric"}>
+                <button type="button" className={row.netSales < 0 ? "sales-table-drilldown sales-amount-cell negative" : "sales-table-drilldown sales-amount-cell"} onClick={() => onSelect(row)}>
+                  {preciseCurrency.format(row.netSales)}
+                </button>
+              </td>
               <td className="numeric">{percent.format(row.creditMemoRate)}</td>
               <td className="numeric">{formatCount(row.invoiceCount + row.creditMemoCount)}</td>
             </tr>
@@ -344,7 +444,17 @@ function SummaryTable({ rows, labelHeader }: { rows: QuickBooksSalesSummaryRow[]
   );
 }
 
-function MonthlyRepTable({ columns, rows }: { columns: QuickBooksSalesMonthColumn[]; rows: QuickBooksSalesMonthlyRepRow[] }) {
+function MonthlyRepTable({
+  columns,
+  rows,
+  onSelectMonth,
+  onSelectRep
+}: {
+  columns: QuickBooksSalesMonthColumn[];
+  rows: QuickBooksSalesMonthlyRepRow[];
+  onSelectMonth: (row: QuickBooksSalesMonthlyRepRow, column: QuickBooksSalesMonthColumn) => void;
+  onSelectRep: (row: QuickBooksSalesMonthlyRepRow) => void;
+}) {
   return (
     <div className="table-scroll">
       <table className="data-table sales-monthly-table">
@@ -360,16 +470,31 @@ function MonthlyRepTable({ columns, rows }: { columns: QuickBooksSalesMonthColum
         <tbody>
           {rows.map((row) => (
             <tr key={row.key}>
-              <td>{row.label}</td>
+              <td>
+                <button type="button" className="sales-table-drilldown sales-row-label" onClick={() => onSelectRep(row)}>
+                  {row.label}
+                </button>
+              </td>
               {columns.map((column) => {
                 const amount = row.months[column.key] || 0;
                 return (
-                  <td key={column.key} className={amount < 0 ? "numeric negative" : "numeric"}>
-                    {preciseCurrency.format(amount)}
+                  <td key={column.key} className="numeric">
+                    <button
+                      type="button"
+                      className={amount < 0 ? "sales-table-drilldown sales-monthly-cell negative" : "sales-table-drilldown sales-monthly-cell"}
+                      onClick={() => onSelectMonth(row, column)}
+                      aria-label={`${row.label} ${column.label} sales`}
+                    >
+                      {preciseCurrency.format(amount)}
+                    </button>
                   </td>
                 );
               })}
-              <td className={row.total < 0 ? "numeric negative" : "numeric"}>{preciseCurrency.format(row.total)}</td>
+              <td className={row.total < 0 ? "numeric negative" : "numeric"}>
+                <button type="button" className={row.total < 0 ? "sales-table-drilldown sales-amount-cell negative" : "sales-table-drilldown sales-amount-cell"} onClick={() => onSelectRep(row)}>
+                  {preciseCurrency.format(row.total)}
+                </button>
+              </td>
             </tr>
           ))}
           {rows.length === 0 ? (
@@ -392,6 +517,21 @@ function metricsFromDashboardData(data: QuickBooksSalesDashboardData) {
     creditMemoCount: data.creditMemoCount,
     documentCount: data.invoiceCount + data.creditMemoCount,
     averageInvoice: data.invoiceCount > 0 ? data.invoiceSales / data.invoiceCount : 0
+  };
+}
+
+function dateRangeForMonth(key: string, containingRange: { from: string; to: string }) {
+  const [yearText, monthText] = key.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+
+  const monthFrom = `${key}-01`;
+  const monthTo = `${key}-${String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(2, "0")}`;
+
+  return {
+    from: monthFrom > containingRange.from ? monthFrom : containingRange.from,
+    to: monthTo < containingRange.to ? monthTo : containingRange.to
   };
 }
 
