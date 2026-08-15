@@ -46,6 +46,11 @@ The current QBWC queue is still a small discovery sample, controlled by `QUICKBO
 
 ## Inspection Update
 
+- After Render deployed diagnostics, a follow-up QBWC run completed at `2026-08-15T00:49:07.370Z` with `lastError: null`.
+- Live status reported `persistenceConfigured: true`.
+- The follow-up run returned `recordCount: 10` for invoices, `recordCount: 10` for credit memos, and `recordCount: 10` for payments.
+- This means QuickBooks returned sales records and the server had the private Supabase persistence configuration available during the run.
+
 - The post-deploy QBWC run completed successfully with all five request types reporting `Status OK` and `lastError: null`.
 - The public Supabase API correctly denies anonymous reads of the QuickBooks tables, so table counts cannot be inspected from the local anon key.
 - Added safe diagnostics to the Web Connector status payload: `persistenceConfigured` and per-response `recordCount`.
