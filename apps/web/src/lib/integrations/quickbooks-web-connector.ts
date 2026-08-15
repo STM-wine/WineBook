@@ -44,6 +44,7 @@ type QuickBooksWebConnectorSession = {
     status: QuickBooksQbxmlResponseStatus[];
     responseChecksum: string;
     receivedAt: string;
+    recordCount: number | null;
   }>;
 };
 
@@ -60,6 +61,7 @@ type QuickBooksWebConnectorSessionSummary = {
     requestId?: string;
     receivedAt: string;
     responseChecksum: string;
+    recordCount: number | null;
     status: QuickBooksQbxmlResponseStatus[];
   }>;
 };
@@ -122,7 +124,8 @@ export function buildQuickBooksWebConnectorStatus() {
       appUrlConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_APP_URL),
       passwordConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_PASSWORD),
       username: process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_USERNAME || DEFAULT_USERNAME,
-      rawCaptureEnabled: process.env.QUICKBOOKS_DESKTOP_CAPTURE_RAW_RESPONSES !== "false" && DEFAULT_CAPTURE_RAW_RESPONSES
+      rawCaptureEnabled: process.env.QUICKBOOKS_DESKTOP_CAPTURE_RAW_RESPONSES !== "false" && DEFAULT_CAPTURE_RAW_RESPONSES,
+      persistenceConfigured: Boolean((process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) && process.env.SUPABASE_SERVICE_ROLE_KEY)
     },
     activeSessions: sessionStore.size,
     requestTypes: buildSalesDashboardRequests().map((request) => request.requestType),
@@ -188,12 +191,14 @@ async function receiveResponseXML(soapRequest: string) {
   const status = parseQbxmlResponseStatuses(response);
   const responseChecksum = createHash("sha256").update(response).digest("hex");
   const receivedAt = new Date().toISOString();
+  const recordCount = countReturnedRecords(request.requestType, response);
   session.responses.push({
     requestType: request.requestType,
     requestId: request.requestId,
     status,
     responseChecksum,
-    receivedAt
+    receivedAt,
+    recordCount
   });
 
   try {
@@ -245,6 +250,27 @@ function connectionError(soapRequest: string) {
   return "done";
 }
 
+function countReturnedRecords(requestType: string, response: string) {
+  if (requestType === "CustomerQueryRq") return countXmlBlocks(response, "CustomerRet");
+  if (requestType === "ItemQueryRq") return countItemRecords(response);
+  if (requestType === "InvoiceQueryRq") return countXmlBlocks(response, "InvoiceRet");
+  if (requestType === "CreditMemoQueryRq") return countXmlBlocks(response, "CreditMemoRet");
+  if (requestType === "ReceivePaymentQueryRq") return countXmlBlocks(response, "ReceivePaymentRet");
+  return null;
+}
+
+function countItemRecords(response: string) {
+  return ["ItemServiceRet", "ItemInventoryRet", "ItemNonInventoryRet", "ItemOtherChargeRet", "ItemSubtotalRet", "ItemDiscountRet", "ItemPaymentRet", "ItemSalesTaxRet", "ItemGroupRet", "ItemSalesTaxGroupRet", "ItemFixedAssetRet", "ItemInventoryAssemblyRet"].reduce(
+    (sum, tagName) => sum + countXmlBlocks(response, tagName),
+    0
+  );
+}
+
+function countXmlBlocks(xml: string, tagName: string) {
+  const pattern = new RegExp(`<${tagName}\\b[^>]*>`, "gi");
+  return xml.match(pattern)?.length || 0;
+}
+
 function buildSalesDashboardRequests() {
   const maxReturned = Number(process.env.QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED || 10);
   return buildQuickBooksSalesDashboardDiscoveryRequests({
@@ -277,6 +303,7 @@ function rememberSession(session: QuickBooksWebConnectorSession, closedAt?: stri
       requestId: response.requestId,
       receivedAt: response.receivedAt,
       responseChecksum: response.responseChecksum,
+      recordCount: response.recordCount,
       status: response.status
     }))
   };

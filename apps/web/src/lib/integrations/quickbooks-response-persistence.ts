@@ -35,12 +35,7 @@ type ParsedLine = {
 export async function persistQuickBooksResponse(input: PersistQuickBooksResponseInput) {
   if (!shouldPersistRequest(input.request.requestType)) return;
 
-  let supabase: SupabaseClient;
-  try {
-    supabase = createServiceRoleClient();
-  } catch {
-    return;
-  }
+  const supabase: SupabaseClient = createServiceRoleClient();
 
   const rawResponse = await recordRawResponse(supabase, input);
   if (input.request.requestType === "InvoiceQueryRq") {

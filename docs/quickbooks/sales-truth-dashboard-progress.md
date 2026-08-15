@@ -44,6 +44,13 @@ The successful QBWC run before this dashboard existed only proved connectivity a
 
 The current QBWC queue is still a small discovery sample, controlled by `QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED` and defaulting to 10 records per request. This first dashboard proves the data path and credit memo visibility; it is not yet a full historical sales replacement.
 
+## Inspection Update
+
+- The post-deploy QBWC run completed successfully with all five request types reporting `Status OK` and `lastError: null`.
+- The public Supabase API correctly denies anonymous reads of the QuickBooks tables, so table counts cannot be inspected from the local anon key.
+- Added safe diagnostics to the Web Connector status payload: `persistenceConfigured` and per-response `recordCount`.
+- Changed missing service-role persistence config from a silent skip into a visible Web Connector session error for future runs.
+
 ## Next Steps
 
 1. Deploy this dashboard/parser commit to Render.
