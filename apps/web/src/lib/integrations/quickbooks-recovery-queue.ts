@@ -33,7 +33,7 @@ type SourceSyncCheckpointRow = {
   id: string;
   resource_name: QuickBooksRecoveryResource;
   checkpoint_key: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled" | "needs_repair";
+  status: "pending" | "running" | "completed" | "failed" | "needs_repair";
   requested_start_date: string | null;
   requested_end_date: string | null;
   cursor_data: Record<string, unknown>;
@@ -220,22 +220,24 @@ async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
     });
     if (error) throw new Error(error.message);
   }
-  await cancelPendingDailySalesTruthRows(supabase);
+  await completeSupersededDailySalesTruthRows(supabase);
 }
 
-async function cancelPendingDailySalesTruthRows(supabase: SupabaseClient) {
+async function completeSupersededDailySalesTruthRows(supabase: SupabaseClient) {
   for (const window of salesTruthPriorityWindows()) {
     for (const resourceName of salesTruthRecoveryResources()) {
+      const supersededAt = new Date().toISOString();
       const { error } = await supabase
         .from("source_sync_checkpoints")
         .update({
-          status: "cancelled",
+          status: "completed",
           diagnostics: {
             recovery: true,
             supersededBy: "weekly_sales_truth_recovery",
-            supersededAt: new Date().toISOString()
+            supersededAt
           },
-          updated_at: new Date().toISOString()
+          last_synced_at: supersededAt,
+          updated_at: supersededAt
         })
         .eq("source_system", SOURCE_SYSTEM)
         .eq("resource_name", resourceName)
