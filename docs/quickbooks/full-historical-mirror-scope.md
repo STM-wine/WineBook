@@ -98,6 +98,25 @@ Primary dashboards:
 - Account transition impact.
 - Vinosmith vs QuickBooks sales discrepancy proof.
 
+Account cockpit requirements:
+
+- Wines purchased by account, with invoice dates, delivery dates, quantities, realized sale prices, credits, and net sales.
+- Gross profit and gross margin by account, item, producer, importer/supplier, and sales rep once cost data is trustworthy.
+- Rep responsible at time of sale and current rep owner.
+- This year vs last year sales, credits, margin, units, case volume, and order frequency.
+- Up/down account movement by dollars, units, gross margin, producer mix, and buying frequency.
+- New, retained, reactivated, declining, dormant, and lost-account classifications.
+- Last purchase date, days since last order, average days between orders, and order consistency.
+- Product mix quality: core SKUs, high-margin SKUs, discount-heavy SKUs, sample-heavy SKUs, and producer/supplier concentration.
+- Credit memo and return rate by account, including whether credits cluster by item, producer, rep, or delivery period.
+- Discount and deal dependency: how much of the account's sales require discounts, samples, or depletion support.
+- Account profitability view after credits, discounts, COGS, allowances, and known supplier billbacks where data supports it.
+- Account opportunity view: wines/producers/suppliers the account used to buy but stopped buying, similar accounts buying SKUs they do not buy, and accounts at risk of churn.
+
+Rollup principle:
+
+- Any account-level metric should be reusable at producer, supplier/importer, item, sales rep, territory/book, and company levels. The account cockpit should be the pattern for every other drilldown page.
+
 ### 2. Item And Product Information
 
 QuickBooks should be the first source for item identity and anything it accurately stores. Vinosmith should enrich item records into wine-native product records.
@@ -126,6 +145,8 @@ Primary dashboards:
 - Sales by item/product/producer/importer.
 - Active vs inactive item cleanup.
 - Price-level visibility from Vinosmith.
+- Product cockpit showing accounts buying the product, reps selling it, sales trend, margin trend, discount rate, credit rate, and supplier/importer concentration.
+- Producer and supplier cockpit pages built from the same metrics: accounts buying, account growth/decline, margin, velocity, discounts, credits, billbacks, and inventory exposure.
 
 ### 3. Product Costs, Margin, Discounts, And Supplier Billbacks
 
