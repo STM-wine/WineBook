@@ -275,9 +275,22 @@ async function claimNextRecoveryJob(supabase: SupabaseClient): Promise<QuickBook
     if (job) return job;
   }
 
-  const salesTruthRow = await readFirstPendingSalesTruthJob(supabase);
-  if (salesTruthRow) {
-    const job = await claimPendingRecoveryRow(supabase, salesTruthRow);
+  const ytdSalesTruthRow = await readFirstPendingYtdSalesTruthJob(supabase);
+  if (ytdSalesTruthRow) {
+    const job = await claimPendingRecoveryRow(supabase, ytdSalesTruthRow);
+    if (job) return job;
+  }
+
+  for (const resourceName of itemRecoveryResources()) {
+    const row = await readFirstPendingJobForResource(supabase, resourceName);
+    if (!row) continue;
+    const job = await claimPendingRecoveryRow(supabase, row);
+    if (job) return job;
+  }
+
+  const priorityYearSalesTruthRow = await readFirstPendingPriorityYearSalesTruthJob(supabase);
+  if (priorityYearSalesTruthRow) {
+    const job = await claimPendingRecoveryRow(supabase, priorityYearSalesTruthRow);
     if (job) return job;
   }
 
@@ -326,7 +339,15 @@ async function readNextPendingJobs(supabase: SupabaseClient, limit: number) {
     if (jobs.length >= limit) return jobs;
   }
 
-  jobs.push(...toNextJobs(await readPendingSalesTruthJobs(supabase, limit - jobs.length)));
+  jobs.push(...toNextJobs(await readPendingYtdSalesTruthJobs(supabase, limit - jobs.length)));
+  if (jobs.length >= limit) return jobs;
+
+  for (const resourceName of itemRecoveryResources()) {
+    jobs.push(...toNextJobs(await readPendingJobsForResource(supabase, resourceName, limit - jobs.length)));
+    if (jobs.length >= limit) return jobs;
+  }
+
+  jobs.push(...toNextJobs(await readPendingPriorityYearSalesTruthJobs(supabase, limit - jobs.length)));
   if (jobs.length >= limit) return jobs;
 
   for (const resourceName of followUpRecoveryResources()) {
@@ -350,15 +371,27 @@ async function readFirstPendingJobForResource(supabase: SupabaseClient, resource
   return (await readPendingJobsForResource(supabase, resourceName, 1))[0] || null;
 }
 
-async function readFirstPendingSalesTruthJob(supabase: SupabaseClient) {
-  return (await readPendingSalesTruthJobs(supabase, 1))[0] || null;
+async function readFirstPendingYtdSalesTruthJob(supabase: SupabaseClient) {
+  return (await readPendingYtdSalesTruthJobs(supabase, 1))[0] || null;
 }
 
-async function readPendingSalesTruthJobs(supabase: SupabaseClient, limit: number) {
+async function readFirstPendingPriorityYearSalesTruthJob(supabase: SupabaseClient) {
+  return (await readPendingPriorityYearSalesTruthJobs(supabase, 1))[0] || null;
+}
+
+async function readPendingYtdSalesTruthJobs(supabase: SupabaseClient, limit: number) {
+  return readPendingSalesTruthJobsForWindows(supabase, limit, ytdSalesTruthWindows());
+}
+
+async function readPendingPriorityYearSalesTruthJobs(supabase: SupabaseClient, limit: number) {
+  return readPendingSalesTruthJobsForWindows(supabase, limit, priorityYearSalesTruthWindows());
+}
+
+async function readPendingSalesTruthJobsForWindows(supabase: SupabaseClient, limit: number, windows: QuickBooksDateRange[]) {
   if (limit <= 0) return [];
 
   const requestedRows: SourceSyncCheckpointRow[] = [];
-  for (const window of recoveryPriorityWindows()) {
+  for (const window of windows) {
     if (requestedRows.length >= limit) break;
     const rows = await readPendingJobsForResourceWindow(supabase, salesTruthRecoveryResources(), limit - requestedRows.length, window);
     requestedRows.push(...rows);
@@ -521,6 +554,7 @@ function recoveryResources(): QuickBooksRecoveryResource[] {
   return [
     ...initialRecoveryResources(),
     ...salesTruthRecoveryResources(),
+    ...itemRecoveryResources(),
     ...followUpRecoveryResources()
   ];
 }
@@ -539,9 +573,14 @@ function salesTruthRecoveryResources(): QuickBooksRecoveryResource[] {
   ];
 }
 
+function itemRecoveryResources(): QuickBooksRecoveryResource[] {
+  return [
+    "quickbooks_items"
+  ];
+}
+
 function followUpRecoveryResources(): QuickBooksRecoveryResource[] {
   return [
-    "quickbooks_items",
     "quickbooks_receive_payments",
     "quickbooks_vendors",
     "quickbooks_purchase_orders",
@@ -562,15 +601,30 @@ function recoveryPriorityWindows(): QuickBooksDateRange[] {
 }
 
 function salesTruthPriorityWindows(): QuickBooksDateRange[] {
+  return [
+    ...ytdSalesTruthWindows(),
+    ...priorityYearSalesTruthWindows()
+  ];
+}
+
+function ytdSalesTruthWindows(): QuickBooksDateRange[] {
   const backfillStart = getBackfillStart();
   const backfillEnd = getBackfillEnd();
   const ytdYear = Number(backfillEnd.slice(0, 4));
   const ytdStart = `${ytdYear}-01-01`;
+
+  return [
+    clampDateRange({ from: ytdStart, to: backfillEnd }, backfillStart, backfillEnd)
+  ].filter((window): window is QuickBooksDateRange => Boolean(window));
+}
+
+function priorityYearSalesTruthWindows(): QuickBooksDateRange[] {
+  const backfillStart = getBackfillStart();
+  const backfillEnd = getBackfillEnd();
   const priorityYearStart = `${SALES_TRUTH_PRIORITY_YEAR}-01-01`;
   const priorityYearEnd = `${SALES_TRUTH_PRIORITY_YEAR}-12-31`;
 
   return [
-    clampDateRange({ from: ytdStart, to: backfillEnd }, backfillStart, backfillEnd),
     clampDateRange({ from: priorityYearStart, to: priorityYearEnd }, backfillStart, backfillEnd)
   ].filter((window): window is QuickBooksDateRange => Boolean(window));
 }
