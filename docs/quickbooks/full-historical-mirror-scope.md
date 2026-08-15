@@ -4,7 +4,7 @@
 
 Build a read-only Stem Intelligence financial and operating data mirror that can query as much QuickBooks Desktop data as QuickBooks will allow, going back to the beginning of the Stem Wine Company file. The goal is not to recreate QuickBooks screens. The goal is to make QuickBooks data easier to inspect, reconcile, combine with Vinosmith/catalog data, and visualize in ways QuickBooks does not make easy.
 
-QuickBooks is the first source of truth for financial transactions, balances, vendors, customers, items, sales prices, sales totals, net sales, payments, purchase orders, bills, and accounting reports. Vinosmith follows QuickBooks as the enrichment source for supplier/importer/producer/wine-name/pack-size/FOB/catalog detail, price levels, and additional sales-rep/catalog context.
+QuickBooks is the first source of truth for financial transactions, balances, vendors, customers, items, realized invoice prices, sales totals, net sales, payments, purchase orders, bills, and accounting reports. Vinosmith follows QuickBooks as the enrichment source for supplier/importer/producer/wine-name/pack-size/FOB/catalog detail, current selling prices, price levels, and additional sales-rep/catalog context.
 
 ## Operating Assumptions
 
@@ -42,7 +42,7 @@ QuickBooks should be treated as the source of truth for:
 - Vendors/suppliers and vendor balances.
 - Items and QuickBooks item identity.
 - Sales reps where attached to QuickBooks transactions.
-- Invoices, invoice lines, sales prices, and delivery/ship dates.
+- Invoices, invoice lines, realized transaction prices, and delivery/ship dates.
 - Credit memos and credit memo lines.
 - Receive payments.
 - Purchase orders and purchase order lines.
@@ -58,13 +58,153 @@ Vinosmith should enrich or reconcile:
 - Wine names and catalog metadata.
 - Pack size and bottle size.
 - FOBs.
-- Price levels.
+- Current item selling prices and price levels.
 - Product/catalog identity where QuickBooks item names are insufficient.
 - Sales-rep or account context when useful, but QuickBooks remains the financial truth.
 
 ### Canonical Sales Date
 
 Sales reporting should use invoice `ShipDate` / delivery date when present. If missing, fall back to invoice transaction date.
+
+## CFO Priority Stack
+
+This build should prioritize operating questions in the order a CFO would need them answered. The technical recovery order can still be adjusted for safety, but product decisions should follow this priority stack.
+
+### 1. Accurate Sales Data By Rep And Account
+
+This is the highest-priority business problem because sales comp, sales coaching, account ownership, customer health, and trust in the system all depend on it.
+
+Required data:
+
+- Invoices and invoice lines.
+- Credit memos and credit memo lines.
+- Customers/accounts.
+- Sales reps.
+- Account-to-rep assignment history with effective dates.
+- Delivery/ShipDate as the canonical sales date.
+- Transaction date as fallback when delivery date is missing.
+
+Important modeling requirement:
+
+- If a rep took over an account mid-year, reporting must be able to answer both questions: who owns the account now, and who owned the account at the time of sale.
+- This likely needs a `sales_rep_account_assignments` table or equivalent history table sourced from QuickBooks, Vinosmith, manual admin changes, or a controlled upload if neither system has reliable history.
+
+Primary dashboards:
+
+- Net sales by rep.
+- Net sales by account.
+- Credits by rep/account.
+- Rep account-book history.
+- Account transition impact.
+- Vinosmith vs QuickBooks sales discrepancy proof.
+
+### 2. Item And Product Information
+
+QuickBooks should be the first source for item identity and anything it accurately stores. Vinosmith should enrich item records into wine-native product records.
+
+Required data:
+
+- QuickBooks items.
+- Item active/inactive status.
+- Item descriptions and accounting references.
+- Vinosmith wine/catalog metadata.
+- Supplier/importer/producer.
+- Wine name, vintage, pack size, bottle size.
+- FOB and catalog availability.
+- Current item selling price and price levels from Vinosmith.
+
+Important modeling requirement:
+
+- Historical realized sale price comes from QuickBooks invoice lines.
+- Current/list selling price and price levels come from Vinosmith.
+- A crosswalk must connect QuickBooks items to Vinosmith wines/catalog records before product-level reporting is trusted.
+
+Primary dashboards:
+
+- Item master browser.
+- Product mapping gaps.
+- Sales by item/product/producer/importer.
+- Active vs inactive item cleanup.
+- Price-level visibility from Vinosmith.
+
+### 3. Product Costs, Margin, Discounts, And Supplier Billbacks
+
+Once sales and product identity are reliable, the next priority is profitability and leakage.
+
+Required data:
+
+- Item costs from QuickBooks where reliable.
+- FOB and supplier cost detail from Vinosmith/catalog where richer.
+- Purchase orders and purchase order lines.
+- Bills and bill lines.
+- Vendor credits.
+- Invoice line realized sales prices.
+- Credit memo line reductions.
+- Discounts, samples, depletion allowances, and supplier billbacks.
+
+Important modeling requirement:
+
+- Gross profit should be explainable at item, invoice, customer, rep, supplier/importer, and producer levels.
+- Supplier billbacks for samples, depletion allowances, or incentives need explicit tracking. If QuickBooks records them as vendor credits, bills, journal entries, or classes/accounts, those must be mapped into a normalized allowance/billback view.
+- Discounts must be separated from credit memos and from free/sample goods so margin reports do not blur different business events.
+
+Primary dashboards:
+
+- Gross margin by rep/account/item/producer/importer.
+- Discount leakage.
+- Sample/depletion allowance tracker.
+- Supplier billback receivable/collection status.
+- Net profit margin after credits, discounts, and allowances where data supports it.
+
+### 4. Expenses
+
+Expenses come before broad financial dashboards because leadership needs to see where money is going before cashflow or P&L visualizations can be trusted.
+
+Required data:
+
+- Chart of accounts.
+- Bills and bill lines.
+- Checks and check lines.
+- Credit card charges and credits.
+- Journal entries.
+- Classes.
+- General ledger detail.
+- Vendor/account mappings.
+
+Primary dashboards:
+
+- Expenses by account.
+- Expenses by vendor.
+- Expense trends by month/quarter/year.
+- Unusual expense detection.
+- COGS vs operating expense split.
+- Supplier-specific expense and allowance views.
+
+### 5. Finance Operating Stack
+
+After sales, item truth, margin, and expenses are grounded, build the larger finance command center.
+
+Required areas:
+
+- Bills and payables.
+- Receivables and customer balances.
+- Purchasing and receiving.
+- Inventory.
+- Cashflow.
+- P&L.
+- Balance sheet.
+- Debt/liabilities.
+- Audit/deleted/voided transaction tracking.
+
+Primary dashboards:
+
+- Vendor payables: owed, current, overdue, due soon.
+- Customer receivables: open, current, overdue.
+- Ordered vs received vs billed vs paid.
+- Inventory value and turns.
+- Cash expected vs cash required.
+- P&L by month/quarter/year.
+- Balance sheet and debt/liability snapshots.
 
 ## Target Data Domains
 
@@ -335,7 +475,7 @@ Vinosmith source areas:
 - Producers.
 - Pack size and bottle size.
 - FOB.
-- Price levels.
+- Current item selling prices and price levels.
 
 Dashboards enabled:
 
@@ -347,40 +487,48 @@ Dashboards enabled:
 
 ## Recommended Build Phases
 
-### Phase 1: Recovery Backbone
+### Phase 1: Sales Truth Pack
 
 - Keep QBWC read-only and queue-based.
-- Finish customer/vendor/item/sales/invoice/credit/payment/PO recovery.
+- Finish invoice, credit memo, customer/account, sales rep, and receive payment recovery.
+- Add or design account-to-rep assignment history with effective dates.
 - Keep manual Web Connector testing until queue stability is proven.
+- Build the primary sales dashboard around net sales by rep and account using delivery/ShipDate.
+- Compare against QuickBooks Sales by Rep, Sales by Customer, Sales by Item, and Open Invoices.
+
+### Phase 2: Item And Product Truth Pack
+
+- Finish QuickBooks item recovery and item-line persistence.
+- Connect QuickBooks items to Vinosmith wines/catalog records.
+- Treat QuickBooks invoice-line prices as realized historical sale prices.
+- Treat Vinosmith as the source for current/list selling prices and price levels.
+- Build item/product mapping dashboards before margin reporting depends on them.
+
+### Phase 3: Cost, Margin, Discounts, And Billback Pack
+
+- Add bills, bill lines, vendor credits, purchase orders, item receipts, and any reliable item-cost fields.
+- Model discounts, samples, depletion allowances, supplier billbacks, and vendor credits separately.
+- Build gross margin and leakage dashboards by rep, account, item, producer, importer, and supplier.
+- Compare against QuickBooks Purchase by Item, Purchase by Vendor, sales reports, and relevant account detail.
+
+### Phase 4: Expense Pack
+
+- Add accounts, classes, checks, credit card charges/credits, journal entries, and general ledger detail.
+- Build expense dashboards by account, vendor, class, and period.
+- Separate COGS, operating expenses, supplier allowances, and unusual/non-recurring expenses.
+
+### Phase 5: Finance Operating Stack
+
+- Add AP aging, AR aging, vendor balances, customer balances, deposits, inventory valuation, cash/bank snapshots, P&L, balance sheet, and cashflow report snapshots.
+- Build vendor payables, customer receivables, purchasing/receiving, inventory, cashflow, P&L, balance sheet, and debt/liability dashboards.
+- Compare every dashboard against the matching QuickBooks report before treating it as operational truth.
+
+### Phase 6: Automation And Executive Layer
+
 - Add queue status and record-count visibility in the app.
-
-### Phase 2: Payables Pack
-
-- Add bills, bill lines, vendor credits, bill payments/checks, AP aging snapshots, and vendor balance snapshots.
-- Build the first vendor payable dashboard: owed, current, overdue, due soon, credits available.
-- Compare against QuickBooks AP Aging Summary, AP Aging Detail, Unpaid Bills Detail, and Vendor Balance Detail.
-
-### Phase 3: Receivables And Cash Pack
-
-- Add AR aging snapshots, deposits, check/deposit detail, bank account balance snapshots.
-- Build cash expected vs cash required.
-- Compare against QuickBooks AR Aging, Open Invoices, Deposit Detail, and bank balances.
-
-### Phase 4: Inventory And Purchasing Pack
-
-- Add item receipts, inventory adjustments, inventory valuation snapshots.
-- Build ordered vs received vs billed vs paid views.
-- Tie into Order Review and PO Drafts.
-
-### Phase 5: P&L / Balance Sheet / GL Pack
-
-- Add report snapshot infrastructure for P&L, balance sheet, GL, transaction detail by account.
-- Build executive financial dashboards with account/month/vendor/product drilldowns.
-
-### Phase 6: Vinosmith Enrichment Pack
-
-- Connect QuickBooks items/vendors/customers to Vinosmith wines, suppliers/importers, producers, FOBs, and price levels.
-- Build wine-native sales, margin, and purchasing dashboards.
+- Add reconciliation health checks.
+- Add executive summaries and exception alerts.
+- Decide whether Web Connector Auto-Run can safely replace manual runs.
 
 ## Reconciliation Reports
 
