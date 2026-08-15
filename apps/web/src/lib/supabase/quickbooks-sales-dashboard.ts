@@ -85,6 +85,7 @@ export async function fetchQuickBooksSalesDashboardData(
         .gte("txn_date", salesDateRange.from)
         .lte("txn_date", salesDateRange.to)
         .order("txn_date", { ascending: false, nullsFirst: false })
+        .order("txn_id", { ascending: false })
         .range(from, to)
         .returns<QuickBooksInvoiceRow[]>()
     ),
@@ -95,6 +96,7 @@ export async function fetchQuickBooksSalesDashboardData(
         .gte("txn_date", salesDateRange.from)
         .lte("txn_date", salesDateRange.to)
         .order("txn_date", { ascending: false, nullsFirst: false })
+        .order("txn_id", { ascending: false })
         .range(from, to)
         .returns<QuickBooksCreditMemoRow[]>()
     )
