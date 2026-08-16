@@ -252,6 +252,8 @@ class SourceSyncRepositoryTests(unittest.TestCase):
             "wine": wine,
             "quantity": "2",
             "price_cents": "12000",
+            "price_id": 2650249,
+            "price_label": "3 case",
             "total_cents": "24000",
         }
 
@@ -266,6 +268,8 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         line_payload = vinosmith_order_line_payload(line, "supplier-order-1")
         self.assertEqual(line_payload["quantity_bottles"], 2)
         self.assertAlmostEqual(line_payload["quantity_cases"], 2 / 6)
+        self.assertEqual(line_payload["price_id"], "2650249")
+        self.assertEqual(line_payload["price_label"], "3 case")
         prearrival_payload = vinosmith_prearrival_payload(
             {
                 "wine": wine,

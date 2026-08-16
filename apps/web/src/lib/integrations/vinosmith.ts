@@ -101,6 +101,8 @@ export type VinosmithSupplierOrderLineItem = {
   wine: VinosmithWineSnapshot;
   quantity?: number | string | null;
   price_cents?: number | null;
+  price_id?: VinosmithId | number | null;
+  price_label?: string | null;
   total_cents?: number | null;
   discount?: number | string | null;
   manual_price?: boolean | null;

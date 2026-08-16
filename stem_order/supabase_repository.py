@@ -1349,6 +1349,7 @@ def vinosmith_order_line_payload(line_item: dict[str, Any], supplier_order_id: s
     quantity_bottles = clean_numeric(line_item.get("quantity"), 0) or 0
     unit_set = clean_numeric(wine.get("unit_set"), 1) or 1
     quantity_cases = quantity_bottles / unit_set if unit_set else None
+    price_id = clean_value(line_item.get("price_id"))
     return {
         "line_item_id": str(line_item_id),
         "supplier_order_id": supplier_order_id,
@@ -1362,6 +1363,8 @@ def vinosmith_order_line_payload(line_item: dict[str, Any], supplier_order_id: s
         "unit_set": unit_set,
         "quantity_bottles": quantity_bottles,
         "price_cents": int_value(line_item.get("price_cents")),
+        "price_id": str(price_id) if price_id is not None else None,
+        "price_label": clean_value(line_item.get("price_label")),
         "total_cents": int_value(line_item.get("total_cents")),
         "discount": clean_numeric(line_item.get("discount")),
         "manual_price": nullable_bool_value(line_item.get("manual_price")),
