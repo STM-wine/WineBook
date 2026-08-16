@@ -48,6 +48,99 @@ Current `quickbooks_items.purchase_cost` and `quickbooks_items.average_cost` are
 
 For true gross profit, QuickBooks report outputs or accounting transaction detail must provide the COGS/gross-margin basis.
 
+## Hybrid Margin Bridge While Vinosmith Remains In Use
+
+There may be a faster operational path before full QuickBooks report/ledger margin truth is complete.
+
+Proposed source of truth:
+
+- FOB per item: QuickBooks, if the field is confirmed and persisted.
+- Laid-in cost per item, including trucking and tax: QuickBooks, if the field is confirmed and persisted.
+- Price sold: QuickBooks invoice and credit memo lines.
+- Bill-back/depletion amount on the price or transaction: Vinosmith report/API, not currently imported in the daily report pipeline.
+
+Proposed line formula:
+
+```text
+gross_sales = QuickBooks invoice line amount
+gross_cost_before_billback = quantity * (qb_fob_per_bottle + qb_laid_in_per_bottle)
+billback_recovery = matched_vinosmith_billback_amount
+effective_cost = gross_cost_before_billback - billback_recovery
+gross_profit = gross_sales - effective_cost
+gross_margin_pct = gross_profit / gross_sales
+```
+
+For credit memo lines, invert the signs consistently so returns reduce net sales, cost, billback, and gross profit.
+
+This path is likely easier than reconstructing COGS from ledger detail, but only if the join quality is strong enough.
+
+### Required Bridge Checks
+
+1. Confirm where QuickBooks stores FOB.
+   - If it is `quickbooks_items.purchase_cost`, document that business meaning.
+   - If it is a custom item field, update item parsing because current persistence stores `custom_fields: {}`.
+   - If FOB is transaction-specific, item master alone is not enough.
+
+2. Confirm where QuickBooks stores laid-in cost.
+   - Current QuickBooks item schema does not have a dedicated `laid_in_cost`, trucking, freight, or tax field.
+   - If this exists in QuickBooks custom fields, parse and persist it explicitly.
+   - If it is embedded in item name, description, class, or account mapping, do not rely on it without validation.
+
+3. Import the Vinosmith bill-back report/source.
+   - Current Vinosmith API discovery found `prices[].price.bill_back_price_cents`, but live order lines did not expose `price_id`, preventing an exact line-to-price join.
+   - The current daily RB6/RADs ingest does not import billback/depletion amounts into `reorder_recommendations`.
+   - If an emailed Vinosmith report includes billback by transaction/line/price, ingest that report as a first-class source.
+
+4. Preserve confidence on every calculated margin line.
+   - `qb_price_qb_cost_vinosmith_exact_billback`: exact transaction/line/price match.
+   - `qb_price_qb_cost_vinosmith_effective_price_billback`: matched by item/date/price/effective period.
+   - `qb_price_qb_cost_vinosmith_item_billback`: matched by item only.
+   - `qb_price_qb_cost_no_billback`: billback unavailable.
+   - `qb_price_current_item_cost_estimate`: fallback estimate only.
+
+5. Reconcile against QuickBooks reports anyway.
+   - The hybrid bridge can be the useful operating model, but it still needs comparison against Sales by Item Summary, P&L COGS, and any available QuickBooks margin reports.
+
+### Hybrid Bridge Data Model
+
+Add or extend a margin mart with explicit cost components:
+
+- `sales_date`
+- `txn_id`
+- `txn_line_id`
+- `transaction_type`
+- `customer_list_id`
+- `customer_full_name`
+- `sales_rep`
+- `item_list_id`
+- `item_full_name`
+- `quantity`
+- `qb_unit_price`
+- `qb_gross_sales`
+- `qb_fob_per_bottle`
+- `qb_laid_in_per_bottle`
+- `qb_trucking_per_bottle`
+- `qb_tax_per_bottle`
+- `gross_cost_before_billback`
+- `vinosmith_billback_source_id`
+- `vinosmith_billback_per_bottle`
+- `vinosmith_billback_amount`
+- `effective_cost`
+- `gross_profit`
+- `gross_margin_pct`
+- `margin_source`
+- `margin_confidence`
+- `diagnostics`
+
+This model separates the economics:
+
+- sales price from QuickBooks
+- base cost from QuickBooks
+- freight/tax/laid-in from QuickBooks
+- supplier recovery/billback from Vinosmith
+
+That separation is important because it lets leadership see normal GP, billback-assisted GP, and leakage when billbacks are missing or unmatched.
+
 ## Official QuickBooks SDK Signals
 
 QuickBooks Desktop SDK report queries are the likely correct source for margin truth:
@@ -336,4 +429,3 @@ For sales trend: yes, once 2025 and 2024 sales history are complete.
 For ordering item identity: mostly yes, with known mapping risks.
 
 For true gross profit per sale: no. Item data alone is not enough. We need QuickBooks-reported COGS/gross-margin data from report queries or ledger/COGS detail before treating GP as real.
-
