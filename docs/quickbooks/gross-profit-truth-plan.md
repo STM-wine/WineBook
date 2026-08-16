@@ -59,6 +59,20 @@ Proposed source of truth:
 - Price sold: QuickBooks invoice and credit memo lines.
 - Bill-back/depletion amount on the price or transaction: Vinosmith report/API, not currently imported in the daily report pipeline.
 
+Known Vinosmith price endpoint shape:
+
+- `price.id`
+- `price.label`, for example `Frontline`
+- `price.default`
+- `price.price_cents`
+- `price.bill_back_price_cents`
+- `price.bill_back_date`
+- `wine.id`
+- `wine.name`
+- `wine.code`
+
+This means the bridge can match Vinosmith price levels to an item by Vinosmith wine ID/code and/or QuickBooks item code mapping, then use only the Vinosmith billback/depletion amount from that price level. FOB and laid-in cost should still come from QuickBooks once confirmed.
+
 Proposed line formula:
 
 ```text
@@ -89,6 +103,7 @@ This path is likely easier than reconstructing COGS from ledger detail, but only
 3. Import the Vinosmith bill-back report/source.
    - Current Vinosmith API discovery found `prices[].price.bill_back_price_cents`, but live order lines did not expose `price_id`, preventing an exact line-to-price join.
    - The current daily RB6/RADs ingest does not import billback/depletion amounts into `reorder_recommendations`.
+   - The parser now accepts `bill_back_date` from the Vinosmith price endpoint and normalizes it into `vinosmith_prices.bill_back_at`.
    - If an emailed Vinosmith report includes billback by transaction/line/price, ingest that report as a first-class source.
 
 4. Preserve confidence on every calculated margin line.

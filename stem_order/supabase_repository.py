@@ -1254,7 +1254,7 @@ def vinosmith_price_payload(record: dict[str, Any], raw_response_id: str | None 
         "price_type": clean_value(price.get("type")),
         "price_cents": int_value(price.get("price_cents")),
         "bill_back_price_cents": int_value(price.get("bill_back_price_cents")),
-        "bill_back_at": datetime_value(price.get("bill_back_at")),
+        "bill_back_at": datetime_value(price.get("bill_back_at") or price.get("bill_back_date")),
         "effective_start_at": datetime_value(price.get("effective_start_at")),
         "effective_end_at": datetime_value(price.get("effective_end_at")),
         "active": nullable_bool_value(price.get("active")),

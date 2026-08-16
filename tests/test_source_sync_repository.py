@@ -220,7 +220,16 @@ class SourceSyncRepositoryTests(unittest.TestCase):
 
     def test_vinosmith_payload_helpers_map_orders_inventory_prices_and_prearrivals(self):
         wine = {"id": "wine-1", "code": "ABC", "name": "Wine", "unit_set": "6"}
-        price_record = {"price": {"id": "price-1", "price_cents": "1999", "default": "true"}, "wine": wine}
+        price_record = {
+            "price": {
+                "id": "price-1",
+                "price_cents": "1999",
+                "bill_back_price_cents": "250",
+                "bill_back_date": "2026-06-01T00:00:00-07:00",
+                "default": "true",
+            },
+            "wine": wine,
+        }
         inventory_record = {
             "wine": wine,
             "warehouse": {"id": "wh-1", "name": "Stem"},
@@ -247,7 +256,10 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         }
 
         self.assertEqual(vinosmith_wine_payload(wine)["wine_id"], "wine-1")
-        self.assertEqual(vinosmith_price_payload(price_record)["is_default"], True)
+        price_payload = vinosmith_price_payload(price_record)
+        self.assertEqual(price_payload["is_default"], True)
+        self.assertEqual(price_payload["bill_back_price_cents"], 250)
+        self.assertIsNotNone(price_payload["bill_back_at"])
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["available"], 10.5)
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["end_of_stock"], False)
         self.assertEqual(vinosmith_order_header_payload(order)["supplier_order_id"], "supplier-order-1")
