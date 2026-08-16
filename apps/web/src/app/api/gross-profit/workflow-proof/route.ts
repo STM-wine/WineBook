@@ -135,7 +135,7 @@ async function buildWorkflowProof(supabase: ProofClient, dateFrom: string, dateT
   const invoicesByTxnId = new Map(quickBooksInvoices.map((row) => [row.txn_id, row]));
   const headersById = new Map(vinosmithHeaders.map((row) => [row.supplier_order_id, row]));
   const priceById = new Map(prices.map((row) => [row.price_id, row]));
-  const priceByLineIdentity = buildVinosmithPriceLookup(prices);
+  const priceLookup = buildVinosmithPriceLookup(prices);
   const vinoInvoiceNumbers = new Set(vinosmithHeaders.map((row) => normalizeKey(row.invoice_number)).filter(Boolean));
   const invoiceLineLookup = buildVinosmithLineLookup(vinosmithLines, headersById);
   const examples: MatchExample[] = [];
@@ -157,6 +157,8 @@ async function buildWorkflowProof(supabase: ProofClient, dateFrom: string, dateT
     matchedWithVinosmithPriceId: 0,
     matchedPriceByPriceId: 0,
     matchedPriceByWineLabelPrice: 0,
+    matchedPriceByWineLabel: 0,
+    currentPriceMismatchRows: 0,
     matchedPriceRows: 0,
     matchedBillbackRows: 0,
     ambiguousPriceRows: 0,
@@ -189,10 +191,14 @@ async function buildWorkflowProof(supabase: ProofClient, dateFrom: string, dateT
     }
     if (vinoLine.price_id) stats.matchedWithVinosmithPriceId += 1;
 
-    const priceMatch = matchVinosmithPrice(vinoLine, priceById, priceByLineIdentity);
+    const priceMatch = matchVinosmithPrice(vinoLine, priceById, priceLookup);
     if (priceMatch.status === "matched") {
       if (priceMatch.method === "price_id") stats.matchedPriceByPriceId += 1;
-      else stats.matchedPriceByWineLabelPrice += 1;
+      else if (priceMatch.method === "wine_label_price") stats.matchedPriceByWineLabelPrice += 1;
+      else {
+        stats.matchedPriceByWineLabel += 1;
+        stats.currentPriceMismatchRows += 1;
+      }
       stats.matchedPriceRows += 1;
       if (numberOrNull(priceMatch.price.bill_back_price_cents) !== null) stats.matchedBillbackRows += 1;
     } else if (priceMatch.status === "ambiguous") {
@@ -242,25 +248,33 @@ function buildVinosmithLineLookup(lines: VinosmithOrderLineRow[], headersById: M
 }
 
 function buildVinosmithPriceLookup(prices: VinosmithPriceRow[]) {
-  const lookup = new Map<string, VinosmithPriceRow[]>();
+  const byExact = new Map<string, VinosmithPriceRow[]>();
+  const byWineLabel = new Map<string, VinosmithPriceRow[]>();
 
   prices.forEach((price) => {
-    const key = priceIdentityKey(price.wine_id, price.label, integerOrNull(price.price_cents));
-    if (!key) return;
-    const existing = lookup.get(key) || [];
-    existing.push(price);
-    lookup.set(key, existing);
+    const exactKey = priceIdentityKey(price.wine_id, price.label, integerOrNull(price.price_cents));
+    const labelKey = wineLabelKey(price.wine_id, price.label);
+    if (exactKey) {
+      const existing = byExact.get(exactKey) || [];
+      existing.push(price);
+      byExact.set(exactKey, existing);
+    }
+    if (labelKey) {
+      const existing = byWineLabel.get(labelKey) || [];
+      existing.push(price);
+      byWineLabel.set(labelKey, existing);
+    }
   });
 
-  return lookup;
+  return { byExact, byWineLabel };
 }
 
 function matchVinosmithPrice(
   line: VinosmithOrderLineRow,
   priceById: Map<string, VinosmithPriceRow>,
-  priceByLineIdentity: Map<string, VinosmithPriceRow[]>
+  priceLookup: ReturnType<typeof buildVinosmithPriceLookup>
 ):
-  | { status: "matched"; method: "price_id" | "wine_label_price"; price: VinosmithPriceRow }
+  | { status: "matched"; method: "price_id" | "wine_label_price" | "wine_label_current_price"; price: VinosmithPriceRow }
   | { status: "ambiguous" | "missing" } {
   if (line.price_id) {
     const price = priceById.get(line.price_id);
@@ -268,12 +282,22 @@ function matchVinosmithPrice(
   }
 
   const key = priceIdentityKey(line.wine_id, line.price_label, integerOrNull(line.price_cents));
-  const candidates = key ? priceByLineIdentity.get(key) || [] : [];
+  const candidates = key ? priceLookup.byExact.get(key) || [] : [];
   if (candidates.length === 1) return { status: "matched", method: "wine_label_price", price: candidates[0] };
 
   const activeCandidates = candidates.filter((price) => price.active !== false && price.disabled !== true);
   if (activeCandidates.length === 1) return { status: "matched", method: "wine_label_price", price: activeCandidates[0] };
   if (candidates.length > 1) return { status: "ambiguous" };
+
+  const labelKey = wineLabelKey(line.wine_id, line.price_label);
+  const labelCandidates = labelKey ? priceLookup.byWineLabel.get(labelKey) || [] : [];
+  if (labelCandidates.length === 1) return { status: "matched", method: "wine_label_current_price", price: labelCandidates[0] };
+
+  const activeLabelCandidates = labelCandidates.filter((price) => price.active !== false && price.disabled !== true);
+  if (activeLabelCandidates.length === 1) {
+    return { status: "matched", method: "wine_label_current_price", price: activeLabelCandidates[0] };
+  }
+  if (labelCandidates.length > 1) return { status: "ambiguous" };
   return { status: "missing" };
 }
 
@@ -427,6 +451,13 @@ function priceIdentityKey(wineId: string | null | undefined, label: string | nul
   const normalizedLabel = normalizeKey(label);
   if (!normalizedWineId || !normalizedLabel || priceCents === null) return "";
   return [normalizedWineId, normalizedLabel, String(priceCents)].join("|");
+}
+
+function wineLabelKey(wineId: string | null | undefined, label: string | null | undefined) {
+  const normalizedWineId = normalizeKey(wineId);
+  const normalizedLabel = normalizeKey(label);
+  if (!normalizedWineId || !normalizedLabel) return "";
+  return [normalizedWineId, normalizedLabel].join("|");
 }
 
 function itemKeys(value: string | null | undefined) {
