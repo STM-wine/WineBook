@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / ".env.local")
+    load_dotenv(ROOT / ".env.local", override=True)
     repo = SupabaseRepository.from_env()
 
     report_run = fetch_report_run(repo, args.report_run_id)

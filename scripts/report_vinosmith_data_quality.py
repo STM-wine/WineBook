@@ -84,7 +84,7 @@ def main() -> int:
         raise SystemExit("--end-date must be on or after --start-date.")
 
     load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / ".env.local")
+    load_dotenv(ROOT / ".env.local", override=True)
     repo = SupabaseRepository.from_env()
 
     print("Fetching Vinosmith sync metadata...", file=sys.stderr, flush=True)

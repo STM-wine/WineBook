@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import os
+from pathlib import Path
+import tempfile
 import unittest
 
 from stem_order.supabase_repository import (
@@ -8,6 +11,7 @@ from stem_order.supabase_repository import (
     dedupe_payloads_for_conflict,
     execute_with_transient_retries,
     is_transient_http_error,
+    load_dotenv,
     normalized_vinosmith_vintage,
     vinosmith_account_contact_payload,
     vinosmith_account_payload,
@@ -87,6 +91,25 @@ class FakeClient:
 
 
 class SourceSyncRepositoryTests(unittest.TestCase):
+    def test_load_dotenv_can_override_existing_values(self):
+        previous = os.environ.get("STEM_TEST_DOTENV_VALUE")
+        try:
+            os.environ["STEM_TEST_DOTENV_VALUE"] = "base"
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = Path(tmpdir) / ".env.local"
+                path.write_text("STEM_TEST_DOTENV_VALUE=local\n", encoding="utf-8")
+
+                load_dotenv(path)
+                self.assertEqual(os.environ["STEM_TEST_DOTENV_VALUE"], "base")
+
+                load_dotenv(path, override=True)
+                self.assertEqual(os.environ["STEM_TEST_DOTENV_VALUE"], "local")
+        finally:
+            if previous is None:
+                os.environ.pop("STEM_TEST_DOTENV_VALUE", None)
+            else:
+                os.environ["STEM_TEST_DOTENV_VALUE"] = previous
+
     def test_create_source_sync_run_payload(self):
         client = FakeClient()
         repo = SupabaseRepository(client)

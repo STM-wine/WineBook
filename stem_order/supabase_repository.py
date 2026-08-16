@@ -50,7 +50,7 @@ SOURCE_CHECKPOINT_STATUSES = {"pending", "running", "completed", "failed", "need
 PRODUCT_SOURCE_MATCH_STATUSES = {"unmapped", "candidate", "matched", "ignored", "conflict"}
 
 
-def load_dotenv(path: str | Path = ".env") -> None:
+def load_dotenv(path: str | Path = ".env", *, override: bool = False) -> None:
     path = Path(path)
     if not path.exists():
         return
@@ -59,7 +59,9 @@ def load_dotenv(path: str | Path = ".env") -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        key = key.strip()
+        if override or key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
 
 
 @dataclass(frozen=True)
