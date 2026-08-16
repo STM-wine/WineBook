@@ -298,6 +298,36 @@ Recommendation:
 
 Use Vinosmith billback pulls to backfill historical terms and validate sales history, but build the forward-looking billback source of truth in Stem Intelligence. This is the best operating model if Stem is going to be the approval and intelligence layer.
 
+### Vinosmith Price Write Capability
+
+Vinosmith documents a distributor price batch write endpoint:
+
+- `POST https://vinosmith.com/api/distributor/prices`
+- Creates, updates, or deletes prices in batch.
+- Identifies wine by `wine_id` or `wine_code`.
+- Identifies an existing price by `price_id` or `label`.
+- Requires `label`, `price_cents`, and `wine_id` or `wine_code`.
+- Supports delete via `operation: "delete"`.
+- Documented optional fields include `internal_label`, `default`, `active`, `admin`, `disabled_at`, `public`, `sort_order`, `premise`, `external_identifier1`, `source`, `marketplace`, `start_date`, and `end_date`.
+
+Important limitation:
+
+- The documented accepted-field list does not include `bill_back_price_cents` or `bill_back_date`, even though read endpoints return those fields.
+- Therefore Stem can likely push price levels to Vinosmith, but pushing billback through the documented API is not confirmed.
+
+Safe implementation approach:
+
+1. Build a dry-run sync preview from Stem commercial terms to Vinosmith payloads.
+2. Start with create/update of price label, price cents, wine code/ID, active/default/public/admin/effective dates.
+3. Test a single non-critical price with Vinosmith approval.
+4. Attempt `bill_back_price_cents` and `bill_back_date` only in a controlled test and immediately re-fetch that price.
+5. If Vinosmith accepts and persists billback fields, enable billback write behind an admin-only feature flag.
+6. If Vinosmith does not accept billback fields, keep Stem as billback truth and require manual Vinosmith billback entry plus reconciliation alerts.
+
+Reference:
+
+- https://vinosmith.readme.io/reference/create-update-delete-prices-in-batch
+
 ## Official QuickBooks SDK Signals
 
 QuickBooks Desktop SDK report queries are the likely correct source for margin truth:
