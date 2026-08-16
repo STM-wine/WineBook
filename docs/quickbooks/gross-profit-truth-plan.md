@@ -42,11 +42,50 @@ QuickBooks items currently store:
 
 This supports sales, net sales, quantity, item/account/rep drilldowns, and trend. It does not yet support audited historical gross profit per sale line.
 
+## Confirmed Source Boundaries
+
+QuickBooks Desktop is the financial transaction truth:
+
+- invoices and invoice lines
+- credit memos and credit memo lines
+- payments and applied credits
+- bills and vendor credits
+- purchase orders
+- realized invoice-line sale prices
+- net sales, accounting reports, and period financials
+
+Vinosmith remains useful, but it is not complete enough to be the final financial truth:
+
+- Vinosmith says QuickBooks credit memos are not fully materialized in Vinosmith.
+- Vinosmith's QuickBooks Desktop setting may track applied credit memos as invoice payments.
+- Applied-credit-as-payment data may help paid/open invoice status.
+- It does not create first-class credit memo records for sales reporting, item reporting, rep reporting, commission analysis, margin, or billback analysis.
+- Vinosmith price levels/current selling prices are likely the current source of truth for price-level data while Stem commercial terms are not yet live.
+- Vinosmith is likely the better current source for wine/catalog enrichment: supplier/importer, producer, wine name, pack size, bottle size, FOB, and catalog metadata.
+
+Stem Intelligence should use those source boundaries explicitly:
+
+- QuickBooks owns actual financial transactions and accounting outcomes.
+- Vinosmith enriches wine/catalog/price-level context and operational status.
+- Stem owns the crosswalk, approval logic, margin policy, confidence labels, and eventually commercial-term history.
+
 ## Key Finding
 
 Current `quickbooks_items.purchase_cost` and `quickbooks_items.average_cost` are current item-master values. They can help estimate margin and flag anomalies, but they are not reliable historical cost-of-goods-sold for a 2024 or 2025 invoice line.
 
 For true gross profit, QuickBooks report outputs or accounting transaction detail must provide the COGS/gross-margin basis.
+
+## Challenged Assumptions
+
+Do not build GP or ordering logic on these assumptions:
+
+- "QuickBooks blocks credit memo access." This is false for this integration; QBWC can read `CreditMemoQueryRq`.
+- "Applied credits as payments are enough." They are not enough for sales, item, rep, commission, margin, or billback analysis.
+- "Invoice paid status equals accurate net sales." It does not.
+- "Vinosmith sales reports are reliable if credit memos are missing or payment-only." They may overstate sales by rep, account, and item.
+- "Credit memo date and original invoice date can be treated the same." Credits often cross months, which matters for accrual sales, commissions, YOY trend, and rep performance.
+- "Current account rep should automatically absorb old credits." Rep ownership needs effective dates and a commission policy.
+- "Product cost/margin can come from one field." We need to compare QuickBooks item cost, PO/bill cost, Vinosmith FOB, landed cost, discounts, samples, depletion allowances, and supplier billbacks.
 
 ## Hybrid Margin Bridge While Vinosmith Remains In Use
 
@@ -360,6 +399,21 @@ Minimum transaction sources:
 - Sales reps.
 - Items.
 
+Credit memo requirements:
+
+- Pull credit memos as first-class QuickBooks transactions, not only as applied payment status.
+- Preserve credit memo transaction date separately from the original invoice date.
+- Preserve linked transactions where QuickBooks returns them so credits can be analyzed by credit period and original sale period.
+- Net sales dashboards should support both accounting-period views and original-sale attribution views.
+- Credits must reverse item, account, rep, commission, billback, and margin metrics according to an explicit business policy.
+
+Rep and commission requirements:
+
+- Do not assign old credits only by the account's current rep.
+- Preserve QuickBooks transaction sales rep where present.
+- Maintain or infer effective-date rep ownership for account-level attribution.
+- Flag credits where original invoice rep, current account rep, and credit memo rep do not agree.
+
 Additional margin-truth sources to add:
 
 - Sales by Item Summary report by month/year.
@@ -369,6 +423,8 @@ Additional margin-truth sources to add:
 - Profit and Loss Standard / Detail by month.
 - Transaction Detail by Account or General Ledger filtered to income and COGS accounts.
 - Inventory Valuation Detail/Summary for cost sanity checks.
+
+Vinosmith sales/report data should be used to enrich and validate those facts, not to replace QuickBooks net sales when credits are missing or represented only as payments.
 
 ## Source Hierarchy For Gross Profit
 
