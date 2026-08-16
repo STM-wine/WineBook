@@ -111,6 +111,13 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     );
   }
 
+  function setMonthToDate() {
+    const range = monthToDateRange();
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    void loadSalesDashboard({ dateFrom: range.from, dateTo: range.to });
+  }
+
   function setYtd() {
     const year = new Date().getFullYear();
     const nextDateFrom = `${year}-01-01`;
@@ -286,6 +293,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
 
       <section className="sales-filter-panel" aria-label="Sales filters">
         <div className="sales-filter-presets">
+          <button type="button" onClick={setMonthToDate}>MTD</button>
           <button type="button" onClick={setYtd}>YTD</button>
           <button type="button" onClick={setFullYear2025}>2025</button>
           <button type="button" onClick={() => void loadSalesDashboard({}, { includeTransactions: false })} disabled={isLoading}>{isLoading ? "Loading" : "Apply"}</button>
@@ -580,6 +588,14 @@ function dateRangeForMonth(key: string, containingRange: { from: string; to: str
   return {
     from: monthFrom > containingRange.from ? monthFrom : containingRange.from,
     to: monthTo < containingRange.to ? monthTo : containingRange.to
+  };
+}
+
+function monthToDateRange() {
+  const now = new Date();
+  return {
+    from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`,
+    to: now.toISOString().slice(0, 10)
   };
 }
 

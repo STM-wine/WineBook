@@ -42,17 +42,24 @@ type MutableSummary = QuickBooksSalesSummaryRow;
 type MutableMonthlyRepRow = QuickBooksSalesMonthlyRepRow;
 
 const DEFAULT_HISTORY_FROM = "2025-01-01";
-const DEFAULT_SALES_DELIVERY_FROM = `${new Date().getFullYear()}-01-01`;
-const DEFAULT_SALES_DELIVERY_TO = new Date().toISOString().slice(0, 10);
 const SALES_DATE_BASIS = "Transaction date; sales subtotal";
 const PAGE_SIZE = 1000;
 const TXN_ID_CHUNK_SIZE = 400;
 const DEFAULT_TRANSACTION_LIMIT = 300;
 
 function getSalesDashboardDeliveryDateRange() {
+  const monthToDate = monthToDateRange();
   return {
-    from: process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_DEFAULT_FROM || DEFAULT_SALES_DELIVERY_FROM,
-    to: process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_DEFAULT_TO || DEFAULT_SALES_DELIVERY_TO
+    from: monthToDate.from,
+    to: monthToDate.to
+  };
+}
+
+function monthToDateRange() {
+  const now = new Date();
+  return {
+    from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`,
+    to: now.toISOString().slice(0, 10)
   };
 }
 

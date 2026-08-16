@@ -152,7 +152,7 @@ def main() -> int:
     extra_query_params = parse_query_params(args.query_param)
 
     load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / ".env.local")
+    load_dotenv(ROOT / ".env.local", override=True)
 
     token = os.getenv("VINOSMITH_API_TOKEN", "").strip()
     if not token:

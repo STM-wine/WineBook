@@ -3275,6 +3275,28 @@ tr.has-recommendation .sticky-name {
   color: #7a5a1a;
 }
 
+.gross-profit-center-metrics {
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+}
+
+.gross-profit-center-grid {
+  align-items: stretch;
+}
+
+.gross-profit-center-table {
+  min-width: 980px;
+}
+
+.data-pill.is-positive {
+  background: #e8f1e7;
+  color: var(--green);
+}
+
+.data-pill.is-warning {
+  background: #fff2d8;
+  color: #7a5a1a;
+}
+
 .settings-publish-form {
   align-items: end;
   display: grid;

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import os
+from pathlib import Path
+import tempfile
 import unittest
 
 from stem_order.supabase_repository import (
@@ -8,6 +11,7 @@ from stem_order.supabase_repository import (
     dedupe_payloads_for_conflict,
     execute_with_transient_retries,
     is_transient_http_error,
+    load_dotenv,
     normalized_vinosmith_vintage,
     vinosmith_account_contact_payload,
     vinosmith_account_payload,
@@ -87,6 +91,25 @@ class FakeClient:
 
 
 class SourceSyncRepositoryTests(unittest.TestCase):
+    def test_load_dotenv_can_override_existing_values(self):
+        previous = os.environ.get("STEM_TEST_DOTENV_VALUE")
+        try:
+            os.environ["STEM_TEST_DOTENV_VALUE"] = "base"
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = Path(tmpdir) / ".env.local"
+                path.write_text("STEM_TEST_DOTENV_VALUE=local\n", encoding="utf-8")
+
+                load_dotenv(path)
+                self.assertEqual(os.environ["STEM_TEST_DOTENV_VALUE"], "base")
+
+                load_dotenv(path, override=True)
+                self.assertEqual(os.environ["STEM_TEST_DOTENV_VALUE"], "local")
+        finally:
+            if previous is None:
+                os.environ.pop("STEM_TEST_DOTENV_VALUE", None)
+            else:
+                os.environ["STEM_TEST_DOTENV_VALUE"] = previous
+
     def test_create_source_sync_run_payload(self):
         client = FakeClient()
         repo = SupabaseRepository(client)
@@ -220,7 +243,16 @@ class SourceSyncRepositoryTests(unittest.TestCase):
 
     def test_vinosmith_payload_helpers_map_orders_inventory_prices_and_prearrivals(self):
         wine = {"id": "wine-1", "code": "ABC", "name": "Wine", "unit_set": "6"}
-        price_record = {"price": {"id": "price-1", "price_cents": "1999", "default": "true"}, "wine": wine}
+        price_record = {
+            "price": {
+                "id": "price-1",
+                "price_cents": "1999",
+                "bill_back_price_cents": "250",
+                "bill_back_date": "2026-06-01T00:00:00-07:00",
+                "default": "true",
+            },
+            "wine": wine,
+        }
         inventory_record = {
             "wine": wine,
             "warehouse": {"id": "wh-1", "name": "Stem"},
@@ -243,17 +275,24 @@ class SourceSyncRepositoryTests(unittest.TestCase):
             "wine": wine,
             "quantity": "2",
             "price_cents": "12000",
+            "price_id": 2650249,
+            "price_label": "3 case",
             "total_cents": "24000",
         }
 
         self.assertEqual(vinosmith_wine_payload(wine)["wine_id"], "wine-1")
-        self.assertEqual(vinosmith_price_payload(price_record)["is_default"], True)
+        price_payload = vinosmith_price_payload(price_record)
+        self.assertEqual(price_payload["is_default"], True)
+        self.assertEqual(price_payload["bill_back_price_cents"], 250)
+        self.assertIsNotNone(price_payload["bill_back_at"])
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["available"], 10.5)
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["end_of_stock"], False)
         self.assertEqual(vinosmith_order_header_payload(order)["supplier_order_id"], "supplier-order-1")
         line_payload = vinosmith_order_line_payload(line, "supplier-order-1")
         self.assertEqual(line_payload["quantity_bottles"], 2)
         self.assertAlmostEqual(line_payload["quantity_cases"], 2 / 6)
+        self.assertEqual(line_payload["price_id"], "2650249")
+        self.assertEqual(line_payload["price_label"], "3 case")
         prearrival_payload = vinosmith_prearrival_payload(
             {
                 "wine": wine,

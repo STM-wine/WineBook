@@ -28,6 +28,7 @@ export type ProductIdentityCandidate = {
   displayName: string;
   planningSku: string;
   planningSkuWithoutVintage: string;
+  quickbooksItemId: string | null;
   quickbooksItemNumber: string | null;
   quickbooksItemName: string | null;
   systemTags: string[];
@@ -148,7 +149,8 @@ export function quickbooksItemRowToCandidate(row: Record<string, unknown>): Prod
     displayName: name || displayName,
     planningSku: buildPlanningSku(displayName),
     planningSkuWithoutVintage: buildPlanningSku(displayName, true),
-    quickbooksItemNumber: stringOrNull(row.list_id),
+    quickbooksItemId: stringOrNull(row.list_id),
+    quickbooksItemNumber: quickbooksItemNumberFromRow(row),
     quickbooksItemName: name || null,
     systemTags: [],
     active: row.is_active !== false,
@@ -189,6 +191,7 @@ export function supplierCatalogRowToCandidate(row: Record<string, unknown>): Pro
     displayName,
     planningSku,
     planningSkuWithoutVintage: normalizeSpaces(row.planning_sku_without_vintage) || buildPlanningSku(displayName, true),
+    quickbooksItemId: stringOrNull(row.quickbooks_item_id),
     quickbooksItemNumber: stringOrNull(row.quickbooks_item_number),
     quickbooksItemName: stringOrNull(row.quickbooks_item_name),
     systemTags: stringArray(row.system_tags),
@@ -239,6 +242,7 @@ export function productRowToCandidate(
     displayName,
     planningSku,
     planningSkuWithoutVintage: buildPlanningSku(displayName, true),
+    quickbooksItemId: null,
     quickbooksItemNumber: stringOrNull(row.product_code),
     quickbooksItemName: stringOrNull(row.name),
     systemTags: [row.is_core ? "Core" : "", row.is_btg ? "BTG" : ""].filter(Boolean),
@@ -285,6 +289,7 @@ export function recommendationRowToCandidate(row: Record<string, unknown>): Prod
     displayName,
     planningSku,
     planningSkuWithoutVintage: buildPlanningSku(displayName, true),
+    quickbooksItemId: null,
     quickbooksItemNumber: stringOrNull(row.product_code),
     quickbooksItemName: stringOrNull(row.product_name),
     systemTags: [row.is_core ? "Core" : "", row.is_btg ? "BTG" : ""].filter(Boolean),
@@ -327,6 +332,7 @@ export function vinosmithWineRowToCandidate(row: Record<string, unknown>): Produ
     displayName,
     planningSku: buildPlanningSku(displayName),
     planningSkuWithoutVintage: buildPlanningSku(displayName, true),
+    quickbooksItemId: null,
     quickbooksItemNumber: stringOrNull(row.code),
     quickbooksItemName: stringOrNull(row.name),
     systemTags: [row.core ? "Core" : ""].filter(Boolean),
@@ -458,6 +464,21 @@ function textFromCustomFields(value: unknown, keys: string[]) {
 function numberFromCustomFields(value: unknown, keys: string[]) {
   const text = textFromCustomFields(value, keys);
   return text ? numberValue(text) : 0;
+}
+
+function quickbooksItemNumberFromRow(row: Record<string, unknown>) {
+  return stringOrNull(
+    textFromCustomFields(row.custom_fields, [
+      "item_number",
+      "itemNumber",
+      "ItemNumber",
+      "sku",
+      "SKU",
+      "product_code",
+      "productCode",
+      "ProductCode"
+    ])
+  );
 }
 
 function normalizePackFormatBottle(value: unknown) {

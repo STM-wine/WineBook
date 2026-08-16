@@ -101,6 +101,8 @@ export type VinosmithSupplierOrderLineItem = {
   wine: VinosmithWineSnapshot;
   quantity?: number | string | null;
   price_cents?: number | null;
+  price_id?: VinosmithId | number | null;
+  price_label?: string | null;
   total_cents?: number | null;
   discount?: number | string | null;
   manual_price?: boolean | null;
@@ -133,6 +135,7 @@ export type VinosmithPriceSnapshot = {
   price_cents?: number | null;
   bill_back_price_cents?: number | null;
   bill_back_at?: string | null;
+  bill_back_date?: string | null;
   effective_start_at?: string | null;
   effective_end_at?: string | null;
   active?: boolean | null;

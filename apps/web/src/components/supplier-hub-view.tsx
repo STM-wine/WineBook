@@ -1104,7 +1104,7 @@ function productIdentityMatchToTemplateWine(match: ProductIdentityMatch, query: 
     planning_sku: identity.planningSku,
     planning_sku_without_vintage: identity.planningSkuWithoutVintage,
     diagnostics: { source: match.source, source_id: match.sourceId },
-    quickbooks_item_id: match.source === "quickbooks_item" ? match.sourceId : match.quickbooksItemNumber,
+    quickbooks_item_id: match.quickbooksItemId || (match.source === "quickbooks_item" ? match.sourceId : null),
     quickbooks_item_name: match.quickbooksItemName,
     quickbooks_item_number: match.quickbooksItemNumber,
     quickbooks_sync_status: match.quickbooksItemNumber || match.source === "quickbooks_item" ? "linked" : "not_created",

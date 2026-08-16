@@ -6,6 +6,7 @@ import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 const SETTINGS_NAV = [
   { href: "/settings", label: "Overview" },
   { href: "/settings/logic", label: "Logic Settings" },
+  { href: "/settings/gross-profit-center", label: "Gross Profit Center" },
   { href: "/settings/requests", label: "Change Requests" },
   { href: "/settings/access", label: "User Access" },
   { href: "/settings/suppliers", label: "Supplier Settings" },

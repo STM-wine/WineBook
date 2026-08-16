@@ -1,0 +1,252 @@
+{
+  "id": "gross_profit_center_knowledge_graph",
+  "version": 1,
+  "updated_at": "2026-08-16",
+  "audience": "Stem managers using Gross Profit Center",
+  "purpose": "Explain how Gross Profit Center revenue, cost, billback, confidence, and exceptions relate so managers can trust drilldowns without confusing enrichment gaps for financial mismatches.",
+  "nodes": [
+    {
+      "id": "gross_profit_center",
+      "type": "product_concept",
+      "label": "Gross Profit Center",
+      "manager_summary": "A read-only operating proof that combines QuickBooks financial truth with Vinosmith enrichment to explain sales, credits, cost, billback, gross profit, and confidence."
+    },
+    {
+      "id": "quickbooks_financial_truth",
+      "type": "source_boundary",
+      "label": "QuickBooks Financial Truth",
+      "manager_summary": "QuickBooks owns financial revenue, credit memos, transaction dates, customers, reps, quantities, and accounting tie-outs."
+    },
+    {
+      "id": "vinosmith_enrichment",
+      "type": "source_boundary",
+      "label": "Vinosmith Enrichment",
+      "manager_summary": "Vinosmith enriches QuickBooks lines with wine metadata, sold price label, price identity, and billback when the sold line is still present."
+    },
+    {
+      "id": "header_net_sales",
+      "type": "metric",
+      "label": "QuickBooks Header Net Sales",
+      "manager_summary": "Invoice header subtotal less credit memo header subtotal for the selected date range."
+    },
+    {
+      "id": "line_net_sales",
+      "type": "metric",
+      "label": "QuickBooks Line Net Sales",
+      "manager_summary": "Signed sum of invoice line amounts and credit memo line amounts for the selected date range."
+    },
+    {
+      "id": "revenue_tie_out",
+      "type": "control",
+      "label": "Revenue Tie-Out",
+      "manager_summary": "The app should show that header net sales and line net sales match before managers trust GP drilldowns."
+    },
+    {
+      "id": "stable_pagination",
+      "type": "data_quality_rule",
+      "label": "Stable Extract Ordering",
+      "manager_summary": "Large extracts must use stable unique ordering. Otherwise a page can duplicate some invoices and skip others while row counts still look plausible."
+    },
+    {
+      "id": "gross_sales",
+      "type": "metric",
+      "label": "Gross Sales",
+      "manager_summary": "Gross Profit Center revenue: signed QuickBooks line net sales, including credit memo reversals."
+    },
+    {
+      "id": "credit_memo_reversal",
+      "type": "business_rule",
+      "label": "Credit Memo Reversal",
+      "manager_summary": "Credit memo lines reverse revenue, quantity, billback, effective cost, and gross profit consistently."
+    },
+    {
+      "id": "current_qb_cost_estimate",
+      "type": "metric",
+      "label": "Current QuickBooks Cost Estimate",
+      "manager_summary": "Initial GP uses current QuickBooks item purchase cost as the cost basis and labels it explicitly as current item cost, not audited historical COGS."
+    },
+    {
+      "id": "billback_earned",
+      "type": "metric",
+      "label": "Billback Earned",
+      "manager_summary": "Billback is treated as earned economic recovery per bottle when matched from Vinosmith price data."
+    },
+    {
+      "id": "effective_cost",
+      "type": "metric",
+      "label": "Effective Cost",
+      "manager_summary": "Cost before billback minus earned billback recovery."
+    },
+    {
+      "id": "gross_profit",
+      "type": "metric",
+      "label": "Gross Profit",
+      "manager_summary": "Gross sales minus effective cost."
+    },
+    {
+      "id": "confidence_bucket",
+      "type": "control",
+      "label": "Confidence Bucket",
+      "manager_summary": "Every line receives a bucket so managers can separate exact matches, lower-confidence enrichment, manual prices, samples, missing price enrichment, and credit-workflow artifacts."
+    },
+    {
+      "id": "missing_vinosmith_price",
+      "type": "confidence_bucket",
+      "label": "Missing Vinosmith Price Enrichment",
+      "manager_summary": "The QuickBooks line matched a Vinosmith sold line, but price/billback enrichment was unavailable. This is an enrichment issue, not a revenue mismatch."
+    },
+    {
+      "id": "credit_workflow_missing_vinosmith_line",
+      "type": "confidence_bucket",
+      "label": "Credit-Workflow Missing Vinosmith Line",
+      "manager_summary": "Returns or credits may cause Vinosmith sold lines to be deleted or altered. QuickBooks remains the financial truth; this bucket explains the enrichment gap."
+    },
+    {
+      "id": "sample_bucket",
+      "type": "confidence_bucket",
+      "label": "Samples / Zero-Dollar / 100% Discount",
+      "manager_summary": "Free goods and samples are separated from normal GP so managers do not read them as bad commercial margin."
+    },
+    {
+      "id": "manual_price_no_billback",
+      "type": "confidence_bucket",
+      "label": "Manual Price, No Billback",
+      "manager_summary": "Manual Vinosmith prices are admin-entered; the app should not apply Vinosmith billback and should flag the line."
+    },
+    {
+      "id": "manager_revenue_question",
+      "type": "manager_question",
+      "label": "Why Does Revenue Not Match?",
+      "manager_summary": "First check the revenue tie-out and extract stability before assuming the business numbers are wrong."
+    }
+  ],
+  "edges": [
+    {
+      "from": "gross_profit_center",
+      "to": "quickbooks_financial_truth",
+      "relationship": "uses_as_source_of_truth_for"
+    },
+    {
+      "from": "gross_profit_center",
+      "to": "vinosmith_enrichment",
+      "relationship": "uses_for_enrichment_only"
+    },
+    {
+      "from": "quickbooks_financial_truth",
+      "to": "header_net_sales",
+      "relationship": "provides"
+    },
+    {
+      "from": "quickbooks_financial_truth",
+      "to": "line_net_sales",
+      "relationship": "provides"
+    },
+    {
+      "from": "header_net_sales",
+      "to": "revenue_tie_out",
+      "relationship": "is_reconciled_by"
+    },
+    {
+      "from": "line_net_sales",
+      "to": "revenue_tie_out",
+      "relationship": "is_reconciled_by"
+    },
+    {
+      "from": "stable_pagination",
+      "to": "revenue_tie_out",
+      "relationship": "protects"
+    },
+    {
+      "from": "line_net_sales",
+      "to": "gross_sales",
+      "relationship": "defines"
+    },
+    {
+      "from": "credit_memo_reversal",
+      "to": "gross_sales",
+      "relationship": "reduces"
+    },
+    {
+      "from": "credit_memo_reversal",
+      "to": "billback_earned",
+      "relationship": "reverses"
+    },
+    {
+      "from": "credit_memo_reversal",
+      "to": "effective_cost",
+      "relationship": "reverses"
+    },
+    {
+      "from": "current_qb_cost_estimate",
+      "to": "effective_cost",
+      "relationship": "contributes_to"
+    },
+    {
+      "from": "billback_earned",
+      "to": "effective_cost",
+      "relationship": "reduces"
+    },
+    {
+      "from": "gross_sales",
+      "to": "gross_profit",
+      "relationship": "contributes_to"
+    },
+    {
+      "from": "effective_cost",
+      "to": "gross_profit",
+      "relationship": "reduces"
+    },
+    {
+      "from": "confidence_bucket",
+      "to": "missing_vinosmith_price",
+      "relationship": "classifies"
+    },
+    {
+      "from": "confidence_bucket",
+      "to": "credit_workflow_missing_vinosmith_line",
+      "relationship": "classifies"
+    },
+    {
+      "from": "confidence_bucket",
+      "to": "sample_bucket",
+      "relationship": "classifies"
+    },
+    {
+      "from": "confidence_bucket",
+      "to": "manual_price_no_billback",
+      "relationship": "classifies"
+    },
+    {
+      "from": "vinosmith_enrichment",
+      "to": "missing_vinosmith_price",
+      "relationship": "can_be_missing_as"
+    },
+    {
+      "from": "vinosmith_enrichment",
+      "to": "credit_workflow_missing_vinosmith_line",
+      "relationship": "can_be_missing_as"
+    },
+    {
+      "from": "manager_revenue_question",
+      "to": "revenue_tie_out",
+      "relationship": "answered_by"
+    },
+    {
+      "from": "manager_revenue_question",
+      "to": "stable_pagination",
+      "relationship": "requires_understanding"
+    },
+    {
+      "from": "manager_revenue_question",
+      "to": "confidence_bucket",
+      "relationship": "then_interprets"
+    }
+  ],
+  "manager_guidance": [
+    "Start with the revenue tie-out: QuickBooks header net sales should equal Gross Profit Center line net sales for the same date range.",
+    "If a revenue extract does not match, verify stable unique pagination before concluding the business numbers are wrong.",
+    "Treat Vinosmith gaps as enrichment confidence issues unless QuickBooks revenue itself fails the tie-out.",
+    "Do not mix samples/free goods into normal commercial-margin interpretation.",
+    "Initial GP is operating/economic GP using current QuickBooks item cost and earned billback, not audited historical COGS."
+  ]
+}

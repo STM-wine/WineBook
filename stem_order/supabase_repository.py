@@ -50,7 +50,7 @@ SOURCE_CHECKPOINT_STATUSES = {"pending", "running", "completed", "failed", "need
 PRODUCT_SOURCE_MATCH_STATUSES = {"unmapped", "candidate", "matched", "ignored", "conflict"}
 
 
-def load_dotenv(path: str | Path = ".env") -> None:
+def load_dotenv(path: str | Path = ".env", *, override: bool = False) -> None:
     path = Path(path)
     if not path.exists():
         return
@@ -59,7 +59,9 @@ def load_dotenv(path: str | Path = ".env") -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        key = key.strip()
+        if override or key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
 
 
 @dataclass(frozen=True)
@@ -1254,7 +1256,7 @@ def vinosmith_price_payload(record: dict[str, Any], raw_response_id: str | None 
         "price_type": clean_value(price.get("type")),
         "price_cents": int_value(price.get("price_cents")),
         "bill_back_price_cents": int_value(price.get("bill_back_price_cents")),
-        "bill_back_at": datetime_value(price.get("bill_back_at")),
+        "bill_back_at": datetime_value(price.get("bill_back_at") or price.get("bill_back_date")),
         "effective_start_at": datetime_value(price.get("effective_start_at")),
         "effective_end_at": datetime_value(price.get("effective_end_at")),
         "active": nullable_bool_value(price.get("active")),
@@ -1349,6 +1351,7 @@ def vinosmith_order_line_payload(line_item: dict[str, Any], supplier_order_id: s
     quantity_bottles = clean_numeric(line_item.get("quantity"), 0) or 0
     unit_set = clean_numeric(wine.get("unit_set"), 1) or 1
     quantity_cases = quantity_bottles / unit_set if unit_set else None
+    price_id = clean_value(line_item.get("price_id"))
     return {
         "line_item_id": str(line_item_id),
         "supplier_order_id": supplier_order_id,
@@ -1362,6 +1365,8 @@ def vinosmith_order_line_payload(line_item: dict[str, Any], supplier_order_id: s
         "unit_set": unit_set,
         "quantity_bottles": quantity_bottles,
         "price_cents": int_value(line_item.get("price_cents")),
+        "price_id": str(price_id) if price_id is not None else None,
+        "price_label": clean_value(line_item.get("price_label")),
         "total_cents": int_value(line_item.get("total_cents")),
         "discount": clean_numeric(line_item.get("discount")),
         "manual_price": nullable_bool_value(line_item.get("manual_price")),
