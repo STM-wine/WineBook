@@ -73,6 +73,65 @@ Known Vinosmith price endpoint shape:
 
 This means the bridge can match Vinosmith price levels to an item by Vinosmith wine ID/code and/or QuickBooks item code mapping, then use only the Vinosmith billback/depletion amount from that price level. FOB and laid-in cost should still come from QuickBooks once confirmed.
 
+### Confirmed Business Rules For The Bridge
+
+Manual price overrides:
+
+- If `manual_price = true`, do not apply Vinosmith billback.
+- Manual prices were admin-entered and approved.
+- Margin lines should be flagged as manual price and excluded from billback-assisted GP.
+
+Price level changes:
+
+- Vinosmith can keep a price level and adjust billback on that same level over time.
+- The key risk is historical drift: if a sale from 2024 joins to a price level whose billback was edited later, today's price record may not equal the billback in effect when the sale happened.
+- Sold lines include `price_cents`, which protects sold revenue because the sale line stores the actual price used.
+- Sold lines do not appear to include billback amount directly, so billback history depends on whether Vinosmith preserves price-change timestamps/history.
+- If the price level still exists and its billback-adjusted margin drops below threshold, Stem should surface a live margin alert.
+
+Billback units:
+
+- `bill_back_price_cents` is per bottle.
+- Billback amount for a normal sale line should be `quantity_bottles * bill_back_price_cents`.
+
+Account-specific prices:
+
+- Accounts have price levels attached.
+- Billback lives on the price level, not directly on the account.
+- Matching should still preserve account context for audit and drilldown, but billback comes from the matched price level.
+
+Credits and returns:
+
+- Credits/returns must reverse revenue and billback.
+- A returned line should reduce net sales, effective cost, billback recovery, and gross profit consistently.
+
+QuickBooks cost basis:
+
+- FOB comes from QuickBooks.
+- Laid-in cost, including trucking and tax, comes from QuickBooks.
+- FOB and laid-in are per bottle and are set together.
+
+QuickBooks/Vinosmith matching:
+
+- QuickBooks invoice lines should match Vinosmith supplier order lines by invoice number, item number/code, quantity, price, delivery date, and account.
+- Item numbers are expected to be the same between QuickBooks and Vinosmith.
+- Exact joins should receive high confidence; mismatches should be flagged, not silently accepted.
+
+Samples/free goods:
+
+- Lines with a 100% discount should go into a Samples bucket.
+- Samples should not be treated as poor-margin normal sales.
+
+Billback GP basis:
+
+- Initial GP should be live economic GP assuming billbacks are earned.
+- Collected/booked billback GP can become a later finance view, but it is not the first operating dashboard target.
+
+Confidence:
+
+- Every margin line should carry a confidence/source label.
+- The UI can ship useful margin analytics early as long as estimated, manual, sample, and exact-match lines are labeled clearly.
+
 Proposed line formula:
 
 ```text
@@ -110,6 +169,8 @@ This path is likely easier than reconstructing COGS from ledger detail, but only
    - `qb_price_qb_cost_vinosmith_exact_billback`: exact transaction/line/price match.
    - `qb_price_qb_cost_vinosmith_effective_price_billback`: matched by item/date/price/effective period.
    - `qb_price_qb_cost_vinosmith_item_billback`: matched by item only.
+   - `qb_price_qb_cost_manual_no_billback`: manual price override; no billback expected.
+   - `sample_100_percent_discount`: sample/free-goods bucket; not normal GP.
    - `qb_price_qb_cost_no_billback`: billback unavailable.
    - `qb_price_current_item_cost_estimate`: fallback estimate only.
 
