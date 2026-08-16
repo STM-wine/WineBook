@@ -47,9 +47,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const dateFrom = validDate(request.nextUrl.searchParams.get("from")) || "2025-01-01";
-  const dateTo = validDate(request.nextUrl.searchParams.get("to")) || today;
+  const defaultRange = monthToDateRange();
+  const dateFrom = validDate(request.nextUrl.searchParams.get("from")) || defaultRange.from;
+  const dateTo = validDate(request.nextUrl.searchParams.get("to")) || defaultRange.to;
   const includeLines = request.nextUrl.searchParams.get("includeLines") === "true";
   const lineLimit = positiveInteger(request.nextUrl.searchParams.get("lineLimit")) || 250;
 
@@ -68,6 +68,14 @@ function canViewSettings(role: string, permissionRows: Array<{ permission: strin
 
 function validDate(value: string | null) {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+function monthToDateRange() {
+  const now = new Date();
+  return {
+    from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`,
+    to: now.toISOString().slice(0, 10)
+  };
 }
 
 function positiveInteger(value: string | null) {

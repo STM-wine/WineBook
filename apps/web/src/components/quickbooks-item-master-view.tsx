@@ -29,13 +29,7 @@ type QuickBooksItemMasterSummary = {
     updated_at: string | null;
   } | null;
   salesCoverage: {
-    currentYear: QuickBooksSalesCoverageRange;
-    priorYear: QuickBooksSalesCoverageRange;
-    checkpointCoverage: Array<{
-      resourceName: string;
-      status: string;
-      count: number;
-    }>;
+    currentMonth: QuickBooksSalesCoverageRange;
   };
   orderingShadow: {
     latestReport: {
@@ -187,7 +181,7 @@ function QuickBooksItemMasterSummaryView({ summary }: { summary: QuickBooksItemM
         <MetricCard label="Snapshots" value={formatInteger(summary.inventorySnapshots)} detail="Inventory history rows" tone={summary.inventorySnapshots > 0 ? "blue" : "red"} />
         <MetricCard label="Missing Fields" value={formatInteger(activeMissingAny)} detail="Max active-item gap" tone={activeMissingAny > 0 ? "gold" : "green"} />
         <MetricCard label="Pull Status" value={itemPullStatus} detail={itemPullFreshness || "No checkpoint time"} tone={itemPullStatus === "completed" ? "blue" : "red"} />
-        <MetricCard label="2025 QB Sales" value={formatInteger(summary.salesCoverage.priorYear.invoices.count)} detail={`${formatInteger(summary.salesCoverage.priorYear.creditMemos.count)} credit memos`} tone={summary.salesCoverage.priorYear.invoices.count > 0 ? "green" : "red"} />
+        <MetricCard label="MTD QB Sales" value={formatInteger(summary.salesCoverage.currentMonth.invoices.count)} detail={`${formatInteger(summary.salesCoverage.currentMonth.creditMemos.count)} credit memos`} tone={summary.salesCoverage.currentMonth.invoices.count > 0 ? "green" : "red"} />
       </section>
 
       <section className="panel">
@@ -239,11 +233,11 @@ function QuickBooksItemMasterSummaryView({ summary }: { summary: QuickBooksItemM
         <div className="section-heading">
           <div>
             <h1>QuickBooks Sales Coverage</h1>
-            <p>Backfill coverage needed before YOY ordering recommendations can be compared against QuickBooks sales truth.</p>
+            <p>Month-to-date QuickBooks sales coverage loaded for item-master health without pulling historical sales by default.</p>
           </div>
         </div>
         <div className="inline-warning">
-          Ordering should continue to use the current report workflow until 2025 QuickBooks invoices and credit memos are complete enough for year-over-year comparisons.
+          Historical QuickBooks sales checks should be requested intentionally. Order Review can still use its current velocity planning inputs.
         </div>
         <div className="table-shell">
           <table>
@@ -257,37 +251,13 @@ function QuickBooksItemMasterSummaryView({ summary }: { summary: QuickBooksItemM
               </tr>
             </thead>
             <tbody>
-              {[summary.salesCoverage.currentYear, summary.salesCoverage.priorYear].map((range) => (
+              {[summary.salesCoverage.currentMonth].map((range) => (
                 <tr key={range.label}>
                   <td>{range.label}</td>
                   <td>{formatInteger(range.invoices.count)}</td>
                   <td>{dateSpan(range.invoices.earliestTxnDate, range.invoices.latestTxnDate)}</td>
                   <td>{formatInteger(range.creditMemos.count)}</td>
                   <td>{dateSpan(range.creditMemos.earliestTxnDate, range.creditMemos.latestTxnDate)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="table-shell quickbooks-health-table">
-          <table>
-            <thead>
-              <tr>
-                <th>2025 Backfill Queue</th>
-                <th>Pending</th>
-                <th>Running</th>
-                <th>Completed</th>
-                <th>Failed / Repair</th>
-              </tr>
-            </thead>
-            <tbody>
-              {["quickbooks_invoices", "quickbooks_credit_memos"].map((resourceName) => (
-                <tr key={resourceName}>
-                  <td>{resourceName.replace("quickbooks_", "").replace("_", " ")}</td>
-                  <td>{formatInteger(checkpointCount(summary, resourceName, "pending"))}</td>
-                  <td>{formatInteger(checkpointCount(summary, resourceName, "running"))}</td>
-                  <td>{formatInteger(checkpointCount(summary, resourceName, "completed"))}</td>
-                  <td>{formatInteger(checkpointCount(summary, resourceName, "failed") + checkpointCount(summary, resourceName, "needs_repair"))}</td>
                 </tr>
               ))}
             </tbody>
@@ -464,10 +434,6 @@ function dateSpan(earliest: string | null, latest: string | null) {
   if (!earliest && !latest) return "No rows";
   if (earliest === latest) return earliest || latest || "";
   return `${earliest || "?"} to ${latest || "?"}`;
-}
-
-function checkpointCount(summary: QuickBooksItemMasterSummary, resourceName: string, status: string) {
-  return summary.salesCoverage.checkpointCoverage.find((row) => row.resourceName === resourceName && row.status === status)?.count || 0;
 }
 
 function displayValue(value: string | number | null) {

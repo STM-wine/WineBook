@@ -291,29 +291,19 @@ async function orderingShadowComparison(supabase: QuickBooksSummaryClient) {
 }
 
 async function quickBooksSalesCoverage(supabase: QuickBooksSummaryClient) {
-  const currentYear = new Date().getUTCFullYear();
-  const today = new Date().toISOString().slice(0, 10);
-  const currentYearRange = {
-    label: `${currentYear} YTD`,
-    from: `${currentYear}-01-01`,
-    to: today
-  };
-  const priorYearRange = {
-    label: "2025 full year",
-    from: "2025-01-01",
-    to: "2025-12-31"
-  };
-
-  const [currentYearCoverage, priorYearCoverage, checkpointCoverage] = await Promise.all([
-    salesTransactionCoverageForRange(supabase, currentYearRange),
-    salesTransactionCoverageForRange(supabase, priorYearRange),
-    salesCheckpointCoverageForRange(supabase, priorYearRange)
-  ]);
+  const currentMonthCoverage = await salesTransactionCoverageForRange(supabase, monthToDateRange());
 
   return {
-    currentYear: currentYearCoverage,
-    priorYear: priorYearCoverage,
-    checkpointCoverage
+    currentMonth: currentMonthCoverage
+  };
+}
+
+function monthToDateRange() {
+  const now = new Date();
+  return {
+    label: "Current MTD",
+    from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`,
+    to: now.toISOString().slice(0, 10)
   };
 }
 
@@ -355,32 +345,6 @@ async function firstDateForTable(supabase: QuickBooksSummaryClient, table: strin
 
   if (error) throw new Error(error.message);
   return data?.txn_date || null;
-}
-
-async function salesCheckpointCoverageForRange(
-  supabase: QuickBooksSummaryClient,
-  range: { from: string; to: string }
-) {
-  const resources = ["quickbooks_invoices", "quickbooks_credit_memos"] as const;
-  const statuses = ["pending", "running", "completed", "failed", "needs_repair"] as const;
-  const rows = await Promise.all(
-    resources.flatMap((resourceName) =>
-      statuses.map(async (status) => ({
-        resourceName,
-        status,
-        count: await countRows(supabase, "source_sync_checkpoints", (query) =>
-          query
-            .eq("source_system", "quickbooks_desktop")
-            .eq("resource_name", resourceName)
-            .eq("status", status)
-            .gte("requested_start_date", range.from)
-            .lte("requested_start_date", range.to)
-        )
-      }))
-    )
-  );
-
-  return rows;
 }
 
 async function fetchAllQuickBooksItemsForShadow(supabase: QuickBooksSummaryClient) {
