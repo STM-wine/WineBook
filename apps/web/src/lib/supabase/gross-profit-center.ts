@@ -82,6 +82,18 @@ type VinosmithPriceRow = {
   disabled: boolean | null;
 };
 
+type VinosmithWineCostRow = {
+  wine_id: string;
+  fob_price: number | string | null;
+  stem_laid_in_per_bottle: number | string | null;
+  stem_laid_in_source: string | null;
+};
+
+type GrossProfitCostSource =
+  | "quickbooks_items.purchase_cost_current_plus_stem_laid_in"
+  | "quickbooks_items.average_cost_current_plus_stem_laid_in"
+  | "missing_current_item_cost";
+
 export type GrossProfitConfidenceBucket =
   | "qb_price_qb_cost_vinosmith_price_id_billback"
   | "qb_price_qb_cost_vinosmith_exact_price_billback"
@@ -116,7 +128,7 @@ export type GrossProfitCenterLine = {
   qbGrossSales: number | null;
   qbFobPerBottle: number | null;
   qbLaidInPerBottle: number | null;
-  qbCostSource: "quickbooks_items.purchase_cost_current" | "quickbooks_items.average_cost_current" | "missing_current_item_cost";
+  qbCostSource: GrossProfitCostSource;
   grossCostBeforeBillback: number | null;
   vinosmithSupplierOrderId: string | null;
   vinosmithLineItemId: string | null;
@@ -244,12 +256,16 @@ export async function buildGrossProfitCenter(
     new Map([...vinosmithHeadersInRange, ...vinosmithHeadersByInvoice].map((row) => [row.supplier_order_id, row])).values()
   );
   const vinosmithLines = await fetchVinosmithLines(supabase, vinosmithHeaders.map((row) => row.supplier_order_id));
-  const prices = await fetchVinosmithPricesForLines(supabase, vinosmithLines);
+  const [prices, vinosmithWines] = await Promise.all([
+    fetchVinosmithPricesForLines(supabase, vinosmithLines),
+    fetchVinosmithWinesForLines(supabase, vinosmithLines)
+  ]);
 
   const headersById = new Map(vinosmithHeaders.map((row) => [row.supplier_order_id, row]));
   const priceById = new Map(prices.map((row) => [row.price_id, row]));
   const priceLookup = buildVinosmithPriceLookup(prices);
   const itemByListId = new Map(quickBooksItems.map((row) => [row.list_id, row]));
+  const wineById = new Map(vinosmithWines.map((row) => [row.wine_id, row]));
   const vinoInvoiceNumbers = new Set(vinosmithHeaders.map((row) => normalizeKey(row.invoice_number)).filter(Boolean));
   const invoiceLineLookup = buildVinosmithLineLookup(vinosmithLines, headersById);
 
@@ -268,6 +284,7 @@ export async function buildGrossProfitCenter(
       lookup: invoiceLineLookup,
       priceById,
       priceLookup,
+      wineById,
       item: line.item_list_id ? itemByListId.get(line.item_list_id) || null : null
     });
   });
@@ -282,6 +299,7 @@ export async function buildGrossProfitCenter(
       lookup: invoiceLineLookup,
       priceById,
       priceLookup,
+      wineById,
       item: line.item_list_id ? itemByListId.get(line.item_list_id) || null : null
     });
   });
@@ -312,6 +330,7 @@ function buildGrossProfitCenterLine({
   lookup,
   priceById,
   priceLookup,
+  wineById,
   item
 }: {
   transactionType: "invoice" | "credit_memo";
@@ -321,6 +340,7 @@ function buildGrossProfitCenterLine({
   lookup: Map<string, VinosmithOrderLineRow[]>;
   priceById: Map<string, VinosmithPriceRow>;
   priceLookup: ReturnType<typeof buildVinosmithPriceLookup>;
+  wineById: Map<string, VinosmithWineCostRow>;
   item: QuickBooksItemRow | null;
 }): GrossProfitCenterLine {
   const sign = transactionType === "credit_memo" ? -1 : 1;
@@ -328,10 +348,11 @@ function buildGrossProfitCenterLine({
   const quantity = unsignedQuantity === null ? null : sign * unsignedQuantity;
   const qbGrossSales = signedMoney(line.amount, sign);
   const qbUnitPrice = absoluteNumberOrNull(line.rate);
-  const cost = itemCost(item);
-  const grossCostBeforeBillback = quantity !== null && cost.costPerBottle !== null ? quantity * cost.costPerBottle : null;
   const match = findVinosmithMatch(line, transaction, linkedInvoice, transactionType, lookup);
   const matchedLine = match.status === "matched" ? match.line : match.status === "ambiguous" ? match.line : null;
+  const vinosmithWine = matchedLine?.wine_id ? wineById.get(matchedLine.wine_id) || null : null;
+  const cost = itemCost(item, vinosmithWine);
+  const grossCostBeforeBillback = quantity !== null && cost.costPerBottle !== null ? quantity * cost.costPerBottle : null;
   const sample = isQuickBooksSampleLine(line) || (matchedLine ? isVinosmithSampleLine(matchedLine) : false);
   const manualPrice = Boolean(matchedLine?.manual_price);
   const priceMatch = matchedLine && !sample && !manualPrice ? matchVinosmithPrice(matchedLine, priceById, priceLookup) : { status: "missing" as const };
@@ -368,8 +389,8 @@ function buildGrossProfitCenterLine({
     quantity,
     qbUnitPrice,
     qbGrossSales,
-    qbFobPerBottle: cost.costPerBottle,
-    qbLaidInPerBottle: null,
+    qbFobPerBottle: cost.baseCostPerBottle,
+    qbLaidInPerBottle: cost.laidInPerBottle,
     qbCostSource: cost.qbCostSource,
     grossCostBeforeBillback,
     vinosmithSupplierOrderId: matchedLine?.supplier_order_id || null,
@@ -392,6 +413,9 @@ function buildGrossProfitCenterLine({
     confidenceScore: confidenceScore(bucket),
     diagnostics: {
       cost_basis: cost.qbCostSource,
+      vinosmith_fob_price: numberOrNull(vinosmithWine?.fob_price),
+      stem_laid_in_per_bottle: cost.laidInPerBottle,
+      stem_laid_in_source: vinosmithWine?.stem_laid_in_source || null,
       qb_item_sales_price: numberOrNull(item?.sales_price),
       vinosmith_line_match_ambiguous: match.status === "matched" ? match.ambiguous : match.status === "ambiguous",
       vinosmith_price_current_price_cents: integerOrNull(price?.price_cents),
@@ -694,6 +718,50 @@ async function fetchVinosmithPricesForLines(supabase: GrossProfitClient, lines: 
   return Array.from(new Map(rows.map((row) => [row.price_id, row])).values());
 }
 
+async function fetchVinosmithWinesForLines(supabase: GrossProfitClient, lines: VinosmithOrderLineRow[]) {
+  const rows: VinosmithWineCostRow[] = [];
+  const wineIds = unique(lines.map((row) => row.wine_id || ""));
+  let stemLaidInColumnsAvailable = true;
+  for (const chunk of chunks(wineIds, CHUNK_SIZE)) {
+    rows.push(...(await fetchVinosmithWineCostChunk(supabase, chunk, stemLaidInColumnsAvailable)));
+    if (rows.some((row) => row.stem_laid_in_source === "schema_missing")) stemLaidInColumnsAvailable = false;
+  }
+  return rows.map((row) => ({
+    ...row,
+    stem_laid_in_source: row.stem_laid_in_source === "schema_missing" ? null : row.stem_laid_in_source
+  }));
+}
+
+async function fetchVinosmithWineCostChunk(
+  supabase: GrossProfitClient,
+  wineIds: string[],
+  includeStemLaidIn: boolean
+): Promise<VinosmithWineCostRow[]> {
+  const selectColumns = includeStemLaidIn ? "wine_id,fob_price,stem_laid_in_per_bottle,stem_laid_in_source" : "wine_id,fob_price";
+  const { data, error } = await supabase
+    .from("vinosmith_wines")
+    .select(selectColumns)
+    .in("wine_id", wineIds)
+    .order("wine_id", { ascending: true })
+    .returns<VinosmithWineCostRow[]>();
+
+  if (!error) {
+    return (data || []).map((row) => ({
+      wine_id: row.wine_id,
+      fob_price: row.fob_price,
+      stem_laid_in_per_bottle: includeStemLaidIn ? row.stem_laid_in_per_bottle : 0,
+      stem_laid_in_source: includeStemLaidIn ? row.stem_laid_in_source : null
+    }));
+  }
+
+  if (includeStemLaidIn && /stem_laid_in|column/i.test(error.message)) {
+    const fallback: VinosmithWineCostRow[] = await fetchVinosmithWineCostChunk(supabase, wineIds, false);
+    return fallback.map((row) => ({ ...row, stem_laid_in_source: "schema_missing" }));
+  }
+
+  throw new Error(error.message);
+}
+
 async function fetchAll<Row>(
   fetchPage: (from: number, to: number) => PromiseLike<{ data: Row[] | null; error: { message: string } | null }>
 ) {
@@ -790,12 +858,30 @@ function billbackPerBottleDollars({
   return centsToDollars(numberOrNull(priceMatch.price.bill_back_price_cents) || 0);
 }
 
-function itemCost(item: QuickBooksItemRow | null): Pick<GrossProfitCenterLine, "qbCostSource"> & { costPerBottle: number | null } {
+function itemCost(
+  item: QuickBooksItemRow | null,
+  vinosmithWine: VinosmithWineCostRow | null
+): Pick<GrossProfitCenterLine, "qbCostSource"> & { costPerBottle: number | null; baseCostPerBottle: number | null; laidInPerBottle: number } {
+  const laidInPerBottle = Math.max(0, numberOrNull(vinosmithWine?.stem_laid_in_per_bottle) || 0);
   const purchaseCost = numberOrNull(item?.purchase_cost);
-  if (purchaseCost !== null) return { costPerBottle: purchaseCost, qbCostSource: "quickbooks_items.purchase_cost_current" };
+  if (purchaseCost !== null) {
+    return {
+      baseCostPerBottle: purchaseCost,
+      laidInPerBottle,
+      costPerBottle: purchaseCost + laidInPerBottle,
+      qbCostSource: "quickbooks_items.purchase_cost_current_plus_stem_laid_in"
+    };
+  }
   const averageCost = numberOrNull(item?.average_cost);
-  if (averageCost !== null) return { costPerBottle: averageCost, qbCostSource: "quickbooks_items.average_cost_current" };
-  return { costPerBottle: null, qbCostSource: "missing_current_item_cost" };
+  if (averageCost !== null) {
+    return {
+      baseCostPerBottle: averageCost,
+      laidInPerBottle,
+      costPerBottle: averageCost + laidInPerBottle,
+      qbCostSource: "quickbooks_items.average_cost_current_plus_stem_laid_in"
+    };
+  }
+  return { baseCostPerBottle: null, laidInPerBottle, costPerBottle: null, qbCostSource: "missing_current_item_cost" };
 }
 
 function headerAmount(row: QuickBooksInvoiceRow | QuickBooksCreditMemoRow) {
@@ -931,7 +1017,14 @@ function isVinosmithSampleLine(line: VinosmithOrderLineRow) {
 }
 
 function refName(value: Record<string, unknown> | null | undefined) {
-  return typeof value?.FullName === "string" ? value.FullName : typeof value?.Name === "string" ? value.Name : null;
+  if (typeof value?.ResolvedFullName === "string") return value.ResolvedFullName;
+  if (typeof value?.SalesRepEntityFullName === "string") return value.SalesRepEntityFullName;
+  if (typeof value?.resolvedFullName === "string") return value.resolvedFullName;
+  if (typeof value?.FullName === "string") return value.FullName;
+  if (typeof value?.fullName === "string") return value.fullName;
+  if (typeof value?.Name === "string") return value.Name;
+  if (typeof value?.name === "string") return value.name;
+  return null;
 }
 
 function creditMemoRepName(rawData: Record<string, unknown> | null | undefined) {

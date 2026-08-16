@@ -382,6 +382,183 @@ textarea {
   color: var(--blue);
 }
 
+.wine-loading-progress {
+  align-items: center;
+  background: rgba(255, 252, 247, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(35, 31, 28, 0.16);
+  color: var(--ink);
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: 72px minmax(170px, 1fr);
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 10px 12px 12px;
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  z-index: 70;
+}
+
+.wine-loader-art {
+  height: 62px;
+  position: relative;
+  width: 72px;
+}
+
+.wine-loader-bottle {
+  height: 50px;
+  left: 3px;
+  position: absolute;
+  top: 2px;
+  transform: rotate(-28deg);
+  transform-origin: 44px 15px;
+  width: 48px;
+}
+
+.wine-loader-bottle-neck,
+.wine-loader-bottle-body {
+  background: #4f6d58;
+  border: 2px solid #2f4637;
+  display: block;
+  position: absolute;
+}
+
+.wine-loader-bottle-neck {
+  border-radius: 7px 7px 4px 4px;
+  height: 18px;
+  right: 0;
+  top: 10px;
+  width: 16px;
+}
+
+.wine-loader-bottle-body {
+  border-radius: 15px 8px 8px 15px;
+  box-shadow: inset -7px 0 0 rgba(255, 255, 255, 0.12);
+  height: 30px;
+  left: 0;
+  top: 4px;
+  width: 34px;
+}
+
+.wine-loader-pour {
+  animation: winePour 1.35s ease-in-out infinite;
+  background: #8d2532;
+  border-radius: 999px;
+  height: 35px;
+  left: 47px;
+  position: absolute;
+  top: 18px;
+  transform: rotate(7deg);
+  width: 4px;
+}
+
+.wine-loader-glass {
+  border: 2px solid #282623;
+  border-radius: 3px 3px 13px 13px;
+  bottom: 12px;
+  height: 34px;
+  overflow: visible;
+  position: absolute;
+  right: 4px;
+  width: 24px;
+}
+
+.wine-loader-glass::before {
+  background: rgba(255, 255, 255, 0.5);
+  content: "";
+  height: 22px;
+  left: 5px;
+  position: absolute;
+  top: 4px;
+  width: 2px;
+  z-index: 2;
+}
+
+.wine-loader-glass-stem,
+.wine-loader-glass-base {
+  background: #282623;
+  content: "";
+  display: block;
+  position: absolute;
+  z-index: 3;
+}
+
+.wine-loader-glass-stem {
+  bottom: -12px;
+  height: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+}
+
+.wine-loader-glass-base {
+  border-radius: 999px;
+  bottom: -15px;
+  height: 3px;
+  left: 4px;
+  width: 16px;
+}
+
+.wine-loader-fill {
+  animation: wineFill 1.65s ease-in-out infinite;
+  background: linear-gradient(180deg, #b8444f 0%, #7c1f2d 100%);
+  bottom: 0;
+  display: block;
+  height: 44%;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.wine-loader-fill span {
+  animation: wineWave 1.2s ease-in-out infinite;
+  background: rgba(255, 255, 255, 0.24);
+  border-radius: 50%;
+  display: block;
+  height: 10px;
+  left: -4px;
+  position: absolute;
+  right: -4px;
+  top: -5px;
+}
+
+.wine-loader-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wine-loader-copy strong {
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.wine-loader-copy span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.wine-loader-bar {
+  background: #eee7dc;
+  border-radius: 999px;
+  display: block;
+  grid-column: 1 / -1;
+  height: 4px;
+  overflow: hidden;
+}
+
+.wine-loader-bar span {
+  animation: wineProgress 1.35s ease-in-out infinite;
+  background: linear-gradient(90deg, #4f6d58, #8d2532);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  width: 42%;
+}
+
 .order-path-chip {
   background: #f7f3ec;
   border: 1px solid var(--line);
@@ -3859,7 +4036,7 @@ tr.has-recommendation .sticky-name {
 
 .company-rep-table,
 .company-account-table {
-  min-width: 780px;
+  min-width: 860px;
 }
 
 .company-rep-table th:first-child,
@@ -3917,6 +4094,60 @@ th.numeric .company-sort-button {
 .company-rep-table tr.is-selected td {
   background: #f7f3ec;
   font-weight: 850;
+}
+
+@keyframes winePour {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(-3px) rotate(7deg) scaleY(0.72);
+  }
+  45%,
+  70% {
+    opacity: 1;
+    transform: translateY(0) rotate(7deg) scaleY(1);
+  }
+}
+
+@keyframes wineFill {
+  0%,
+  100% {
+    height: 34%;
+  }
+  50% {
+    height: 76%;
+  }
+}
+
+@keyframes wineWave {
+  0%,
+  100% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes wineProgress {
+  0% {
+    transform: translateX(-115%);
+  }
+  55% {
+    transform: translateX(70%);
+  }
+  100% {
+    transform: translateX(245%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wine-loader-pour,
+  .wine-loader-fill,
+  .wine-loader-fill span,
+  .wine-loader-bar span {
+    animation-duration: 4s;
+  }
 }
 
 .sales-report-heading {

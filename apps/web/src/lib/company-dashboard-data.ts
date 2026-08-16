@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildGrossProfitWorkflowProof } from "@/lib/supabase/gross-profit-center";
+import { buildGrossProfitCenter, type GrossProfitCenterLine } from "@/lib/supabase/gross-profit-center";
 import { fetchQuickBooksSalesDashboardData } from "@/lib/supabase/quickbooks-sales-dashboard";
 import type { QuickBooksSalesSummaryRow } from "@/lib/quickbooks-sales-types";
 
@@ -52,7 +52,7 @@ export async function fetchCompanyDashboardData(
       ? { from: filters.dateFrom, to: filters.dateTo }
       : rangeForPeriod(period);
   const comparisonRange = !filters.rep ? lastYearSameRange(range) : null;
-  const includeGrossProfit = filters.includeGrossProfit !== false && !cleanFilter(filters.rep);
+  const includeGrossProfit = filters.includeGrossProfit !== false;
 
   const [current, comparison] = await Promise.all([
     fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit }),
@@ -139,12 +139,12 @@ async function fetchPeriodDashboardData(
     includeItems: false
   });
   const grossProfit = options.includeGrossProfit === false
-    ? { grossProfit: null, grossProfitPercent: null, unavailableReason: null }
-    : await fetchGrossProfitSummary(supabase, range);
+    ? emptyGrossProfitRollups()
+    : await fetchGrossProfitRollups(supabase, range, rep);
 
   return {
-    byRep: sales.byRep,
-    byAccount: sales.byAccount,
+    byRep: mergeGrossProfitRows(sales.byRep, grossProfit.byRep),
+    byAccount: mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount),
     unavailableReason: sales.unavailableReason || null,
     summary: {
       grossSales: sales.invoiceSales,
@@ -153,42 +153,120 @@ async function fetchPeriodDashboardData(
       invoiceCount: sales.invoiceCount,
       creditMemoCount: sales.creditMemoCount,
       averageInvoice: sales.invoiceCount > 0 ? sales.invoiceSales / sales.invoiceCount : 0,
-      grossProfit: grossProfit.grossProfit,
-      grossProfitPercent: grossProfit.grossProfitPercent,
+      grossProfit: grossProfit.summary.grossProfit,
+      grossProfitPercent: grossProfit.summary.grossProfitPercent,
       grossProfitUnavailableReason: grossProfit.unavailableReason
     }
   };
 }
 
-async function fetchGrossProfitSummary(supabase: SupabaseClient, range: { from: string; to: string }) {
+type GrossProfitRollup = {
+  grossSales: number;
+  grossProfit: number | null;
+  grossProfitPercent: number | null;
+};
+
+type GrossProfitRollups = {
+  summary: GrossProfitRollup;
+  byRep: Map<string, GrossProfitRollup>;
+  byAccount: Map<string, GrossProfitRollup>;
+  unavailableReason: string | null;
+};
+
+async function fetchGrossProfitRollups(supabase: SupabaseClient, range: { from: string; to: string }, rep?: string): Promise<GrossProfitRollups> {
   try {
-    const proof = await buildGrossProfitProofWithRetry(supabase, range);
+    const grossProfitCenter = await buildGrossProfitCenterWithRetry(supabase, range);
+    const filteredLines = filterGrossProfitLines(grossProfitCenter.lines, rep);
     return {
-      grossProfit: numberOrNull(proof.grossProfit),
-      grossProfitPercent: numberOrNull(proof.grossMarginPct),
+      summary: summarizeGrossProfitLines(filteredLines),
+      byRep: rollupGrossProfitLines(filteredLines, (line) => cleanLabel(line.salesRep, "Unassigned Rep")),
+      byAccount: rollupGrossProfitLines(filteredLines, (line) => cleanLabel(line.customerFullName, "Unknown Account")),
       unavailableReason: null
     };
   } catch (error) {
     return {
-      grossProfit: null,
-      grossProfitPercent: null,
+      ...emptyGrossProfitRollups(),
       unavailableReason: error instanceof Error ? error.message : "Gross profit is not available."
     };
   }
 }
 
-async function buildGrossProfitProofWithRetry(supabase: SupabaseClient, range: { from: string; to: string }) {
-  const options = {
-    includeLines: false,
-    lineLimit: 0
+function emptyGrossProfitRollups(): GrossProfitRollups {
+  return {
+    summary: { grossSales: 0, grossProfit: null, grossProfitPercent: null },
+    byRep: new Map(),
+    byAccount: new Map(),
+    unavailableReason: null
   };
+}
+
+async function buildGrossProfitCenterWithRetry(supabase: SupabaseClient, range: { from: string; to: string }) {
   try {
-    return await buildGrossProfitWorkflowProof(supabase, range.from, range.to, options);
+    return await buildGrossProfitCenter(supabase, range.from, range.to);
   } catch (error) {
     if (!isStatementTimeout(error)) throw error;
     await sleep(500);
-    return buildGrossProfitWorkflowProof(supabase, range.from, range.to, options);
+    return buildGrossProfitCenter(supabase, range.from, range.to);
   }
+}
+
+function filterGrossProfitLines(lines: GrossProfitCenterLine[], rep?: string) {
+  const repFilter = cleanFilter(rep);
+  if (!repFilter) return lines;
+  return lines.filter((line) => cleanLabel(line.salesRep, "Unassigned Rep") === repFilter);
+}
+
+function rollupGrossProfitLines(lines: GrossProfitCenterLine[], labelForLine: (line: GrossProfitCenterLine) => string) {
+  const rollups = new Map<string, GrossProfitRollup>();
+  for (const line of lines) {
+    const label = labelForLine(line);
+    const key = rowKey(label);
+    const current = rollups.get(key) || { grossSales: 0, grossProfit: 0, grossProfitPercent: null };
+    current.grossSales += money(line.qbGrossSales);
+    current.grossProfit = money(current.grossProfit) + money(line.grossProfit);
+    current.grossProfitPercent = marginPct(current.grossProfit, current.grossSales);
+    rollups.set(key, current);
+  }
+  return rollups;
+}
+
+function summarizeGrossProfitLines(lines: GrossProfitCenterLine[]) {
+  const grossSales = lines.reduce((sum, line) => sum + money(line.qbGrossSales), 0);
+  const grossProfit = lines.reduce((sum, line) => sum + money(line.grossProfit), 0);
+  return {
+    grossSales,
+    grossProfit,
+    grossProfitPercent: marginPct(grossProfit, grossSales)
+  };
+}
+
+function mergeGrossProfitRows(rows: QuickBooksSalesSummaryRow[], rollups: Map<string, GrossProfitRollup>) {
+  return rows.map((row) => {
+    const rollup = rollups.get(row.key) || rollups.get(rowKey(row.label));
+    return {
+      ...row,
+      grossProfit: rollup?.grossProfit ?? null,
+      grossProfitPercent: rollup?.grossProfitPercent ?? null
+    };
+  });
+}
+
+function rowKey(label: string) {
+  return label.trim().toLowerCase();
+}
+
+function cleanLabel(value: string | null | undefined, fallback: string) {
+  const text = value?.trim();
+  return text || fallback;
+}
+
+function money(value: number | null | undefined) {
+  return value || 0;
+}
+
+function marginPct(grossProfit: number | null, grossSales: number | null) {
+  if (grossProfit === null || grossSales === null || grossSales === 0) return null;
+  return grossProfit / grossSales;
 }
 
 function isStatementTimeout(error: unknown) {
@@ -286,11 +364,6 @@ function comparisonLabel(period: CompanyDashboardPeriod) {
   if (period === "ytd") return "Last Year YTD";
   if (period === "previous-day") return "Same Day Last Year";
   return "Same Range Last Year";
-}
-
-function numberOrNull(value: unknown) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
 }
 
 function cleanFilter(value: string | undefined) {

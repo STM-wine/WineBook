@@ -7,6 +7,7 @@ const SETTINGS_NAV = [
   { href: "/settings", label: "Overview" },
   { href: "/settings/logic", label: "Logic Settings" },
   { href: "/settings/gross-profit-center", label: "Gross Profit Center" },
+  { href: "/settings/laid-in-coverage", label: "Laid-In Coverage" },
   { href: "/settings/requests", label: "Change Requests" },
   { href: "/settings/access", label: "User Access" },
   { href: "/settings/suppliers", label: "Supplier Settings" },

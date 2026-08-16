@@ -7,6 +7,9 @@ export type QuickBooksSalesSummaryRow = {
   invoiceCount: number;
   creditMemoCount: number;
   creditMemoRate: number;
+  grossProfit?: number | null;
+  grossProfitPercent?: number | null;
+  grossProfitUnavailableReason?: string | null;
 };
 
 export type QuickBooksSalesMonthColumn = {

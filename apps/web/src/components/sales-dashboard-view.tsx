@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { WineLoadingProgress } from "@/components/wine-loading-progress";
 import type {
   QuickBooksSalesDashboardData,
   QuickBooksSalesDashboardFilters,
@@ -278,6 +279,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
 
   return (
     <section className="sales-dashboard-view">
+      {isLoading ? <WineLoadingProgress message="Loading sales" detail="Refreshing QuickBooks summaries and transactions." /> : null}
       <div className="sales-report-heading">
         <div>
           <p className="eyebrow">Stem Intelligence</p>

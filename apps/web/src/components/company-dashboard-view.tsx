@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { WineLoadingProgress } from "@/components/wine-loading-progress";
 import type { CompanyDashboardData, CompanyDashboardPeriod } from "@/lib/company-dashboard-data";
 import type { QuickBooksSalesSummaryRow } from "@/lib/quickbooks-sales-types";
 
@@ -71,7 +72,7 @@ const DATE_RANGE_LABELS = [
 
 type DateRangeLabel = (typeof DATE_RANGE_LABELS)[number];
 
-type SortKey = "label" | "gross" | "credits" | "net" | "invoices";
+type SortKey = "label" | "gross" | "credits" | "net" | "gp" | "invoices";
 type SortState = {
   key: SortKey;
   direction: "asc" | "desc";
@@ -105,6 +106,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const gpDelta = comparison && data.summary.grossProfitPercent !== null && comparison.summary.grossProfitPercent !== null
     ? data.summary.grossProfitPercent - comparison.summary.grossProfitPercent
     : null;
+  const loadingStatus = dashboardLoadingStatus({ isDrilldownLoading, isLoading, isProfitLoading });
   const topReps = useMemo(() => sortSummaryRows(data.byRep, repSort).slice(0, 20), [data.byRep, repSort]);
   const accountRows = useMemo(() => sortSummaryRows(accountData.byAccount, accountSort), [accountData.byAccount, accountSort]);
 
@@ -234,6 +236,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
   return (
     <section className="company-dashboard-view">
+      {loadingStatus ? <WineLoadingProgress message={loadingStatus.message} detail={loadingStatus.detail} /> : null}
       {topbarControlTarget
         ? createPortal(
             <DashboardDateControls
@@ -332,16 +335,30 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                 <SortableHeader label="Gross" sortKey="gross" sort={repSort} onSort={setRepSort} numeric />
                 <SortableHeader label="Credits" sortKey="credits" sort={repSort} onSort={setRepSort} numeric />
                 <SortableHeader label="Net" sortKey="net" sort={repSort} onSort={setRepSort} numeric />
+                <SortableHeader
+                  label="GP %"
+                  sortKey="gp"
+                  sort={repSort}
+                  onSort={setRepSort}
+                  numeric
+                  helpText="Calculated from QuickBooks sales lines using current QuickBooks item cost. Matched Vinosmith billbacks reduce effective cost where available."
+                />
                 <SortableHeader label="Invoices" sortKey="invoices" sort={repSort} onSort={setRepSort} numeric />
               </tr>
             </thead>
             <tbody>
               {topReps.map((row) => (
-                <SummaryRow key={row.key} row={row} selected={selectedRep === row.label} onSelect={() => void selectRep(row)} />
+                <SummaryRow
+                  key={row.key}
+                  row={row}
+                  selected={selectedRep === row.label}
+                  showProfitLoading={isProfitLoading && row.grossProfitPercent == null}
+                  onSelect={() => void selectRep(row)}
+                />
               ))}
               {topReps.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No sales found for this period.</td>
+                  <td colSpan={6}>No sales found for this period.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -372,16 +389,28 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                 <SortableHeader label="Gross" sortKey="gross" sort={accountSort} onSort={setAccountSort} numeric />
                 <SortableHeader label="Credits" sortKey="credits" sort={accountSort} onSort={setAccountSort} numeric />
                 <SortableHeader label="Net" sortKey="net" sort={accountSort} onSort={setAccountSort} numeric />
+                <SortableHeader
+                  label="GP %"
+                  sortKey="gp"
+                  sort={accountSort}
+                  onSort={setAccountSort}
+                  numeric
+                  helpText="Calculated from QuickBooks sales lines using current QuickBooks item cost. Matched Vinosmith billbacks reduce effective cost where available."
+                />
                 <SortableHeader label="Invoices" sortKey="invoices" sort={accountSort} onSort={setAccountSort} numeric />
               </tr>
             </thead>
             <tbody>
               {accountRows.map((row) => (
-                <SummaryRow key={row.key} row={row} />
+                <SummaryRow
+                  key={row.key}
+                  row={row}
+                  showProfitLoading={!selectedRep && isProfitLoading && row.grossProfitPercent == null}
+                />
               ))}
               {accountRows.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No accounts found for this period.</td>
+                  <td colSpan={6}>No accounts found for this period.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -482,12 +511,14 @@ function DashboardMetric({
 }
 
 function SortableHeader({
+  helpText,
   label,
   numeric,
   onSort,
   sort,
   sortKey
 }: {
+  helpText?: string;
   label: string;
   numeric?: boolean;
   onSort: (sort: SortState) => void;
@@ -500,6 +531,7 @@ function SortableHeader({
     <th className={numeric ? "numeric" : ""}>
       <button
         className={active ? "company-sort-button active" : "company-sort-button"}
+        title={helpText}
         onClick={() => onSort({ key: sortKey, direction: nextDirection })}
         type="button"
       >
@@ -513,11 +545,13 @@ function SortableHeader({
 function SummaryRow({
   onSelect,
   row,
-  selected
+  selected,
+  showProfitLoading
 }: {
   onSelect?: () => void;
   row: QuickBooksSalesSummaryRow;
   selected?: boolean;
+  showProfitLoading?: boolean;
 }) {
   return (
     <tr className={selected ? "is-selected" : ""}>
@@ -533,6 +567,7 @@ function SummaryRow({
       <td className="numeric">{currency.format(row.invoiceSales)}</td>
       <td className="numeric negative">{currency.format(row.creditMemos)}</td>
       <td className={row.netSales < 0 ? "numeric negative" : "numeric"}>{currency.format(row.netSales)}</td>
+      <td className="numeric">{formatRowProfitPercent(row, showProfitLoading)}</td>
       <td className="numeric">{number.format(row.invoiceCount)}</td>
     </tr>
   );
@@ -574,6 +609,36 @@ function cacheKey(data: CompanyDashboardData) {
 
 function customKey(dateFrom: string, dateTo: string) {
   return `custom:${dateFrom}:${dateTo}`;
+}
+
+function dashboardLoadingStatus({
+  isDrilldownLoading,
+  isLoading,
+  isProfitLoading
+}: {
+  isDrilldownLoading: boolean;
+  isLoading: boolean;
+  isProfitLoading: boolean;
+}) {
+  if (isLoading) {
+    return {
+      message: "Refreshing dashboard",
+      detail: "Loading sales first, then GP follows."
+    };
+  }
+  if (isDrilldownLoading) {
+    return {
+      message: "Loading rep accounts",
+      detail: "Filtering accounts for the selected rep."
+    };
+  }
+  if (isProfitLoading) {
+    return {
+      message: "Calculating GP",
+      detail: "Blending QuickBooks costs with Vinosmith billbacks."
+    };
+  }
+  return null;
 }
 
 function labelForInitialPeriod(period: CompanyDashboardPeriod): DateRangeLabel {
@@ -741,6 +806,7 @@ function sortSummaryRows(rows: QuickBooksSalesSummaryRow[], sort: SortState) {
 function valueForSort(row: QuickBooksSalesSummaryRow, key: SortKey) {
   if (key === "gross") return row.invoiceSales;
   if (key === "credits") return row.creditMemos;
+  if (key === "gp") return row.grossProfitPercent ?? Number.NEGATIVE_INFINITY;
   if (key === "invoices") return row.invoiceCount;
   return row.netSales;
 }
@@ -794,6 +860,11 @@ function formatSignedPoints(value: number | null) {
 
 function formatPercent(value: number | null) {
   return value === null ? "-" : percent.format(value);
+}
+
+function formatRowProfitPercent(row: QuickBooksSalesSummaryRow, showProfitLoading?: boolean) {
+  if (showProfitLoading) return "Calculating...";
+  return row.grossProfitPercent === null || row.grossProfitPercent === undefined ? "-" : percent.format(row.grossProfitPercent);
 }
 
 function formatDate(value: string | null) {
