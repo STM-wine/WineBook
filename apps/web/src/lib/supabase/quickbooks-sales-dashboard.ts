@@ -11,38 +11,30 @@ import type {
   QuickBooksSalesTransactionRow
 } from "@/lib/quickbooks-sales-types";
 
-type QuickBooksInvoiceRow = {
-  txn_id: string;
-  ref_number: string | null;
-  txn_date: string | null;
-  ship_date: string | null;
-  customer_full_name: string | null;
-  sales_rep_ref: Record<string, unknown> | null;
-  subtotal: number | string | null;
-  total_amount: number | string | null;
-  balance_remaining: number | string | null;
-  is_paid: boolean | null;
-  time_modified: string | null;
-  last_seen_at: string | null;
-};
-
-type QuickBooksCreditMemoRow = {
-  txn_id: string;
-  ref_number: string | null;
-  txn_date: string | null;
-  customer_full_name: string | null;
-  subtotal: number | string | null;
-  total_amount: number | string | null;
-  raw_data: Record<string, unknown> | null;
-  time_modified: string | null;
-  last_seen_at: string | null;
-};
-
 type QuickBooksSalesLineTableRow = {
   txn_id: string;
   item_full_name: string | null;
   description: string | null;
   quantity: number | string | null;
+  amount: number | string | null;
+};
+
+type QuickBooksSalesSummaryRpcRow = {
+  group_type: "overall" | "rep" | "account" | "monthly_rep" | "item";
+  label: string | null;
+  month_key: string | null;
+  document_type: "invoice" | "credit_memo" | "all";
+  sales_amount: number | string | null;
+  document_count: number | string | null;
+};
+
+type QuickBooksSalesTransactionRpcRow = {
+  txn_id: string;
+  document_type: "invoice" | "credit_memo";
+  ref_number: string | null;
+  txn_date: string | null;
+  account: string | null;
+  rep: string | null;
   amount: number | string | null;
 };
 
@@ -74,123 +66,39 @@ export async function fetchQuickBooksSalesDashboardData(
     to: filters.dateTo || defaultSalesDateRange.to
   };
   const historyFrom = process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_HISTORY_FROM || DEFAULT_HISTORY_FROM;
-  const historyTo = salesDateRange.to;
   const includeTransactions = filters.includeTransactions ?? false;
-  const shouldLoadLines = includeTransactions || Boolean(filters.item?.trim());
-  const [invoiceRows, creditMemoRows] = await Promise.all([
-    fetchAll<QuickBooksInvoiceRow>((from, to) =>
-      supabase
-        .from("quickbooks_invoices")
-        .select("txn_id,ref_number,txn_date,ship_date,customer_full_name,sales_rep_ref,subtotal,total_amount,balance_remaining,is_paid,time_modified,last_seen_at")
-        .gte("txn_date", salesDateRange.from)
-        .lte("txn_date", salesDateRange.to)
-        .order("txn_date", { ascending: false, nullsFirst: false })
-        .order("txn_id", { ascending: false })
-        .range(from, to)
-        .returns<QuickBooksInvoiceRow[]>()
-    ),
-    fetchAll<QuickBooksCreditMemoRow>((from, to) =>
-      supabase
-        .from("quickbooks_credit_memos")
-        .select("txn_id,ref_number,txn_date,customer_full_name,subtotal,total_amount,raw_data,time_modified,last_seen_at")
-        .gte("txn_date", salesDateRange.from)
-        .lte("txn_date", salesDateRange.to)
-        .order("txn_date", { ascending: false, nullsFirst: false })
-        .order("txn_id", { ascending: false })
-        .range(from, to)
-        .returns<QuickBooksCreditMemoRow[]>()
-    )
-  ]);
-
-  const invoices = invoiceRows.filter((row) => dateInRange(row.txn_date, salesDateRange));
-  const creditMemos = creditMemoRows.filter((row) => dateInRange(row.txn_date, salesDateRange));
-  const [invoiceLinesByTxnId, creditMemoLinesByTxnId] = await Promise.all([
-    shouldLoadLines ? fetchLinesByTxnId(supabase, "quickbooks_invoice_lines", invoices.map((row) => row.txn_id)) : Promise.resolve(new Map<string, QuickBooksSalesLineRow[]>()),
-    shouldLoadLines ? fetchLinesByTxnId(supabase, "quickbooks_credit_memo_lines", creditMemos.map((row) => row.txn_id)) : Promise.resolve(new Map<string, QuickBooksSalesLineRow[]>())
-  ]);
-  const byItem = new Map<string, MutableSummary>();
+  const includeItems = filters.includeItems ?? Boolean(filters.item?.trim());
   const monthColumns = buildMonthColumns(salesDateRange);
-  const transactions: QuickBooksSalesTransactionRow[] = [];
 
-  for (const invoice of invoices) {
-    const amount = money(invoice.subtotal ?? invoice.total_amount);
-    const rep = refName(invoice.sales_rep_ref) || "Unassigned Rep";
-    const account = cleanLabel(invoice.customer_full_name, "Unknown Account");
-    const salesDate = invoice.txn_date;
-    const items = invoiceLinesByTxnId.get(invoice.txn_id) || [];
-    if (!matchesHeaderFilters({ type: "invoice", refNumber: invoice.ref_number, account, rep }, filters)) continue;
-    transactions.push({
-      id: invoice.txn_id,
-      type: "invoice",
-      refNumber: invoice.ref_number,
-      txnDate: invoice.txn_date,
-      salesDate,
-      account,
-      rep,
-      amount,
-      items
-    });
-    if (matchesItemFilter(items, filters.item)) {
-      addItemSummary(byItem, items, amount, "invoice", filters.item);
-    }
-  }
-
-  for (const creditMemo of creditMemos) {
-    const amount = Math.abs(money(creditMemo.subtotal ?? creditMemo.total_amount));
-    const rep = creditMemoRepName(creditMemo.raw_data) || "Unassigned Rep";
-    const account = cleanLabel(creditMemo.customer_full_name, "Unknown Account");
-    const items = creditMemoLinesByTxnId.get(creditMemo.txn_id) || [];
-    if (!matchesHeaderFilters({ type: "credit_memo", refNumber: creditMemo.ref_number, account, rep }, filters)) continue;
-    transactions.push({
-      id: creditMemo.txn_id,
-      type: "credit_memo",
-      refNumber: creditMemo.ref_number,
-      txnDate: creditMemo.txn_date,
-      salesDate: creditMemo.txn_date,
-      account,
-      rep,
-      amount: -amount,
-      items
-    });
-    if (matchesItemFilter(items, filters.item)) {
-      addItemSummary(byItem, items, amount, "credit_memo", filters.item);
-    }
-  }
-
-  const matchingTransactions = transactions.filter((row) => matchesItemFilter(row.items, filters.item));
-  const byRep = buildTransactionSummaries(matchingTransactions, (transaction) => transaction.rep);
-  const byAccount = buildTransactionSummaries(matchingTransactions, (transaction) => transaction.account);
-  const byRepMonthly = buildMonthlyRepRows(matchingTransactions, monthColumns);
-  const invoiceSales = matchingTransactions
-    .filter((row) => row.type === "invoice")
-    .reduce((sum, row) => sum + Math.max(0, row.amount), 0);
-  const creditMemoTotal = matchingTransactions
-    .filter((row) => row.type === "credit_memo")
-    .reduce((sum, row) => sum + Math.abs(row.amount), 0);
-  const sortedTransactions = matchingTransactions.sort((a, b) => (b.salesDate || "").localeCompare(a.salesDate || ""));
-  const visibleTransactions = includeTransactions ? sortedTransactions.slice(0, DEFAULT_TRANSACTION_LIMIT) : [];
+  const [summaryRows, transactions] = await Promise.all([
+    fetchSummaryRows(supabase, salesDateRange, filters, includeItems),
+    includeTransactions ? fetchVisibleTransactions(supabase, salesDateRange, filters) : Promise.resolve([])
+  ]);
+  const summaryData = buildSummaryData(summaryRows, monthColumns);
 
   return {
     generatedAt: new Date().toISOString(),
     salesDateFrom: salesDateRange.from,
     salesDateTo: salesDateRange.to,
     availableDateFrom: historyFrom,
-    availableDateTo: historyTo,
+    availableDateTo: defaultSalesDateRange.to,
     dateBasis: SALES_DATE_BASIS,
-    invoiceCount: matchingTransactions.filter((row) => row.type === "invoice").length,
-    creditMemoCount: matchingTransactions.filter((row) => row.type === "credit_memo").length,
-    invoiceSales,
-    creditMemos: creditMemoTotal,
-    netSales: invoiceSales - creditMemoTotal,
-    lastInvoiceDate: latestDate(invoices.map((row) => row.txn_date)),
-    lastCreditMemoDate: latestDate(creditMemos.map((row) => row.txn_date)),
-    byRep: sortedSummaries(byRep),
-    byAccount: sortedSummaries(byAccount),
-    byItem: sortedSummaries(byItem),
+    invoiceCount: summaryData.invoiceCount,
+    creditMemoCount: summaryData.creditMemoCount,
+    invoiceSales: summaryData.invoiceSales,
+    creditMemos: summaryData.creditMemos,
+    netSales: summaryData.invoiceSales - summaryData.creditMemos,
+    lastInvoiceDate: summaryData.lastInvoiceDate,
+    lastCreditMemoDate: summaryData.lastCreditMemoDate,
+    byRep: sortedSummaries(summaryData.byRep),
+    byAccount: sortedSummaries(summaryData.byAccount),
+    byItem: includeItems ? sortedSummaries(summaryData.byItem) : [],
     monthColumns,
-    byRepMonthly,
-    transactions: visibleTransactions,
-    recentTransactions: visibleTransactions.slice(0, 50),
+    byRepMonthly: sortedMonthlyRows(summaryData.byRepMonthly),
+    transactions,
+    recentTransactions: transactions.slice(0, 50),
+    byItemLoaded: includeItems,
+    transactionLimit: DEFAULT_TRANSACTION_LIMIT,
     unavailableReason: null
   };
 }
@@ -218,8 +126,87 @@ export function unavailableQuickBooksSalesDashboardData(reason: string): QuickBo
     byRepMonthly: [],
     transactions: [],
     recentTransactions: [],
+    byItemLoaded: false,
+    transactionLimit: DEFAULT_TRANSACTION_LIMIT,
     unavailableReason: reason
   };
+}
+
+async function fetchSummaryRows(
+  supabase: SupabaseClient,
+  range: { from: string; to: string },
+  filters: QuickBooksSalesDashboardFilters,
+  includeItems: boolean
+) {
+  const { data, error } = await supabase
+    .rpc("quickbooks_sales_dashboard_summary", {
+      p_date_from: range.from,
+      p_date_to: range.to,
+      p_rep: cleanRpcParam(filters.rep === "All" ? undefined : filters.rep),
+      p_document_type: filters.documentType || "all",
+      p_account: cleanRpcParam(filters.account),
+      p_document: cleanRpcParam(filters.document),
+      p_item: cleanRpcParam(filters.item),
+      p_include_items: includeItems
+    })
+    .returns<QuickBooksSalesSummaryRpcRow[]>();
+
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) ? data : [];
+}
+
+async function fetchVisibleTransactions(
+  supabase: SupabaseClient,
+  range: { from: string; to: string },
+  filters: QuickBooksSalesDashboardFilters
+) {
+  const { data, error } = await supabase
+    .rpc("quickbooks_sales_dashboard_transactions", {
+      p_date_from: range.from,
+      p_date_to: range.to,
+      p_rep: cleanRpcParam(filters.rep === "All" ? undefined : filters.rep),
+      p_document_type: filters.documentType || "all",
+      p_account: cleanRpcParam(filters.account),
+      p_document: cleanRpcParam(filters.document),
+      p_item: cleanRpcParam(filters.item),
+      p_limit: DEFAULT_TRANSACTION_LIMIT
+    })
+    .returns<QuickBooksSalesTransactionRpcRow[]>();
+
+  if (error) throw new Error(error.message);
+
+  const rows = Array.isArray(data) ? data : [];
+  const [invoiceLinesByTxnId, creditMemoLinesByTxnId] = await Promise.all([
+    fetchLinesByTxnId(
+      supabase,
+      "quickbooks_invoice_lines",
+      rows.filter((row) => row.document_type === "invoice").map((row) => row.txn_id)
+    ),
+    fetchLinesByTxnId(
+      supabase,
+      "quickbooks_credit_memo_lines",
+      rows.filter((row) => row.document_type === "credit_memo").map((row) => row.txn_id)
+    )
+  ]);
+
+  return rows.map<QuickBooksSalesTransactionRow>((row) => {
+    const items =
+      row.document_type === "invoice"
+        ? invoiceLinesByTxnId.get(row.txn_id) || []
+        : creditMemoLinesByTxnId.get(row.txn_id) || [];
+
+    return {
+      id: row.txn_id,
+      type: row.document_type,
+      refNumber: row.ref_number,
+      txnDate: row.txn_date,
+      salesDate: row.txn_date,
+      account: cleanLabel(row.account, "Unknown Account"),
+      rep: cleanLabel(row.rep, "Unassigned Rep"),
+      amount: money(row.amount),
+      items
+    };
+  });
 }
 
 async function fetchAll<Row>(fetchPage: (from: number, to: number) => PromiseLike<{ data: Row[] | null; error: { message: string } | null }>) {
@@ -265,28 +252,54 @@ async function fetchLinesByTxnId(supabase: SupabaseClient, table: string, txnIds
   return linesByTxnId;
 }
 
-function matchesHeaderFilters(
-  transaction: { type: "invoice" | "credit_memo"; refNumber: string | null; account: string; rep: string },
-  filters: QuickBooksSalesDashboardFilters
-) {
-  if (filters.documentType && filters.documentType !== "all" && transaction.type !== filters.documentType) return false;
-  if (filters.rep && filters.rep !== "All" && transaction.rep !== filters.rep) return false;
-  if (filters.account?.trim() && !includesText(transaction.account, filters.account)) return false;
-  if (filters.document?.trim() && !includesText(transaction.refNumber || "", filters.document)) return false;
-  return true;
-}
+function buildSummaryData(rows: QuickBooksSalesSummaryRpcRow[], monthColumns: QuickBooksSalesMonthColumn[]) {
+  const data = {
+    invoiceSales: 0,
+    creditMemos: 0,
+    invoiceCount: 0,
+    creditMemoCount: 0,
+    lastInvoiceDate: null as string | null,
+    lastCreditMemoDate: null as string | null,
+    byRep: new Map<string, MutableSummary>(),
+    byAccount: new Map<string, MutableSummary>(),
+    byItem: new Map<string, MutableSummary>(),
+    byRepMonthly: new Map<string, MutableMonthlyRepRow>()
+  };
 
-function matchesItemFilter(items: QuickBooksSalesLineRow[], itemFilter: string | undefined) {
-  if (!itemFilter?.trim()) return true;
-  return items.some((line) => includesText(line.item, itemFilter) || includesText(line.description || "", itemFilter));
-}
+  for (const row of rows) {
+    const label = cleanLabel(row.label, "Unknown");
+    const amount = money(row.sales_amount);
+    const count = integer(row.document_count);
 
-function includesText(value: string, search: string) {
-  return value.trim().toLowerCase().includes(search.trim().toLowerCase());
-}
+    if (row.group_type === "overall") {
+      if (row.document_type === "invoice") {
+        data.invoiceSales = amount;
+        data.invoiceCount = count;
+        data.lastInvoiceDate = row.month_key;
+      } else if (row.document_type === "credit_memo") {
+        data.creditMemos = amount;
+        data.creditMemoCount = count;
+        data.lastCreditMemoDate = row.month_key;
+      }
+      continue;
+    }
 
-function dateInRange(value: string | null | undefined, range: { from: string; to: string }) {
-  return Boolean(value && value >= range.from && value <= range.to);
+    if (row.group_type === "monthly_rep") {
+      if (!row.month_key) continue;
+      addMonthlyRepAmount(data.byRepMonthly, monthColumns, label, row.month_key, amount);
+      continue;
+    }
+
+    const summaries =
+      row.group_type === "rep"
+        ? data.byRep
+        : row.group_type === "account"
+          ? data.byAccount
+          : data.byItem;
+    addSummaryValues(summaryFor(summaries, label), row.document_type, amount, count);
+  }
+
+  return data;
 }
 
 function summaryFor(map: Map<string, MutableSummary>, label: string) {
@@ -307,65 +320,21 @@ function summaryFor(map: Map<string, MutableSummary>, label: string) {
   return created;
 }
 
-function addInvoice(summary: MutableSummary, amount: number) {
-  summary.invoiceSales += amount;
-  summary.netSales += amount;
-  summary.invoiceCount += 1;
-  updateCreditRate(summary);
-}
-
-function addCredit(summary: MutableSummary, amount: number) {
-  summary.creditMemos += amount;
-  summary.netSales -= amount;
-  summary.creditMemoCount += 1;
-  updateCreditRate(summary);
-}
-
-function addItemSummary(
-  map: Map<string, MutableSummary>,
-  items: QuickBooksSalesLineRow[],
-  transactionAmount: number,
-  type: "invoice" | "credit_memo",
-  itemFilter: string | undefined
-) {
-  const matchingItems = itemFilter?.trim()
-    ? items.filter((line) => includesText(line.item, itemFilter) || includesText(line.description || "", itemFilter))
-    : items;
-
-  if (matchingItems.length === 0) {
-    const summary = summaryFor(map, "Unspecified Item");
-    if (type === "credit_memo") addCredit(summary, Math.abs(transactionAmount));
-    else addInvoice(summary, Math.abs(transactionAmount));
-    return;
+function addSummaryValues(summary: MutableSummary, documentType: "invoice" | "credit_memo" | "all", amount: number, count: number) {
+  if (documentType === "invoice") {
+    summary.invoiceSales += amount;
+    summary.netSales += amount;
+    summary.invoiceCount += count;
+  } else if (documentType === "credit_memo") {
+    summary.creditMemos += amount;
+    summary.netSales -= amount;
+    summary.creditMemoCount += count;
   }
-
-  for (const item of matchingItems) {
-    const amount = Math.abs(item.amount);
-    const summary = summaryFor(map, item.item);
-    if (type === "credit_memo") addCredit(summary, amount);
-    else addInvoice(summary, amount);
-  }
-}
-
-function updateCreditRate(summary: MutableSummary) {
   summary.creditMemoRate = summary.invoiceSales > 0 ? summary.creditMemos / summary.invoiceSales : 0;
 }
 
 function sortedSummaries(map: Map<string, MutableSummary>) {
   return Array.from(map.values()).sort((a, b) => Math.abs(b.netSales) - Math.abs(a.netSales));
-}
-
-function buildTransactionSummaries(
-  transactions: QuickBooksSalesTransactionRow[],
-  labelForTransaction: (transaction: QuickBooksSalesTransactionRow) => string
-) {
-  const summaries = new Map<string, MutableSummary>();
-  for (const transaction of transactions) {
-    const summary = summaryFor(summaries, labelForTransaction(transaction));
-    if (transaction.type === "credit_memo") addCredit(summary, Math.abs(transaction.amount));
-    else addInvoice(summary, Math.max(0, transaction.amount));
-  }
-  return summaries;
 }
 
 function buildMonthColumns(range: { from: string; to: string }): QuickBooksSalesMonthColumn[] {
@@ -418,10 +387,6 @@ function parseDateParts(value: string) {
   };
 }
 
-function monthKey(value: string | null | undefined) {
-  return value ? value.slice(0, 7) : null;
-}
-
 function monthlyRowFor(map: Map<string, MutableMonthlyRepRow>, columns: QuickBooksSalesMonthColumn[], rep: string) {
   const key = rep.toLowerCase();
   const existing = map.get(key);
@@ -441,22 +406,13 @@ function addMonthlyRepAmount(
   map: Map<string, MutableMonthlyRepRow>,
   columns: QuickBooksSalesMonthColumn[],
   rep: string,
-  date: string | null | undefined,
+  monthKey: string,
   amount: number
 ) {
-  const key = monthKey(date);
-  if (!key || !columns.some((column) => column.key === key)) return;
+  if (!columns.some((column) => column.key === monthKey)) return;
   const row = monthlyRowFor(map, columns, rep);
-  row.months[key] = (row.months[key] || 0) + amount;
+  row.months[monthKey] = (row.months[monthKey] || 0) + amount;
   row.total += amount;
-}
-
-function buildMonthlyRepRows(transactions: QuickBooksSalesTransactionRow[], columns: QuickBooksSalesMonthColumn[]) {
-  const rows = new Map<string, MutableMonthlyRepRow>();
-  for (const transaction of transactions) {
-    addMonthlyRepAmount(rows, columns, transaction.rep, transaction.salesDate || transaction.txnDate, transaction.amount);
-  }
-  return sortedMonthlyRows(rows);
 }
 
 function sortedMonthlyRows(map: Map<string, MutableMonthlyRepRow>) {
@@ -466,6 +422,11 @@ function sortedMonthlyRows(map: Map<string, MutableMonthlyRepRow>) {
 function money(value: number | string | null | undefined) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function integer(value: number | string | null | undefined) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
 function nullableNumber(value: number | string | null | undefined) {
@@ -478,30 +439,9 @@ function cleanLabel(value: string | null | undefined, fallback: string) {
   return text || fallback;
 }
 
-function refName(value: Record<string, unknown> | null | undefined) {
-  if (!value) return null;
-  return (
-    stringValue(value.ResolvedFullName) ||
-    stringValue(value.SalesRepEntityFullName) ||
-    stringValue(value.resolvedFullName) ||
-    stringValue(value.FullName) ||
-    stringValue(value.fullName) ||
-    stringValue(value.Name) ||
-    stringValue(value.name)
-  );
-}
-
-function creditMemoRepName(rawData: Record<string, unknown> | null | undefined) {
-  const salesRepRef = rawData?.sales_rep_ref;
-  return typeof salesRepRef === "object" && salesRepRef ? refName(salesRepRef as Record<string, unknown>) : null;
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function latestDate(values: Array<string | null>) {
-  return values.filter(Boolean).sort().at(-1) || null;
+function cleanRpcParam(value: string | null | undefined) {
+  const text = value?.trim();
+  return text || null;
 }
 
 function unique(values: string[]) {

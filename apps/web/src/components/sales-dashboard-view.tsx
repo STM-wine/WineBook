@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type {
   QuickBooksSalesDashboardData,
   QuickBooksSalesDashboardFilters,
@@ -17,6 +17,7 @@ type SalesDashboardViewProps = {
 type SummaryMode = "rep" | "account" | "item" | "month";
 type DocumentTypeFilter = "all" | "invoice" | "credit_memo";
 type LoadSalesDashboardOptions = {
+  includeItems?: boolean;
   includeTransactions?: boolean;
   showLoading?: boolean;
 };
@@ -63,6 +64,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     [dashboardData.byRep, transactions]
   );
   const selectedItem = appliedItemFilter.trim();
+  const byItemLoaded = Boolean(dashboardData.byItemLoaded);
 
   const summaryRows = useMemo(() => {
     if (mode === "rep") return dashboardData.byRep;
@@ -81,12 +83,6 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     accountFilter.trim() ||
     itemFilter.trim() ||
     documentFilter.trim();
-
-  useEffect(() => {
-    void loadSalesDashboard({}, { includeTransactions: false, showLoading: false });
-    // The first screen should refresh from the same API used by drilldowns without loading transaction detail.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function resetFilters() {
     setDateFrom(data.salesDateFrom);
@@ -121,7 +117,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     const nextDateTo = data.availableDateTo;
     setDateFrom(nextDateFrom);
     setDateTo(nextDateTo);
-    void loadSalesDashboard({ dateFrom: nextDateFrom, dateTo: nextDateTo });
+    void loadSalesDashboard({ dateFrom: nextDateFrom, dateTo: nextDateTo }, { includeTransactions: false });
   }
 
   function setFullYear2025() {
@@ -129,7 +125,14 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     const nextDateTo = "2025-12-31";
     setDateFrom(nextDateFrom);
     setDateTo(nextDateTo);
-    void loadSalesDashboard({ dateFrom: nextDateFrom, dateTo: nextDateTo });
+    void loadSalesDashboard({ dateFrom: nextDateFrom, dateTo: nextDateTo }, { includeTransactions: false });
+  }
+
+  function selectMode(nextMode: SummaryMode) {
+    setMode(nextMode);
+    if (nextMode === "item" && !byItemLoaded) {
+      void loadSalesDashboard({}, { includeItems: true, includeTransactions: false });
+    }
   }
 
   function selectMonthlyRepCell(row: QuickBooksSalesMonthlyRepRow, column: QuickBooksSalesMonthColumn) {
@@ -147,15 +150,18 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     setItemFilter("");
     setDocumentFilter("");
     setAppliedItemFilter("");
-    void loadSalesDashboard({
-      dateFrom: range.from,
-      dateTo: range.to,
-      rep: row.label,
-      documentType: "all",
-      account: "",
-      item: "",
-      document: ""
-    });
+    void loadSalesDashboard(
+      {
+        dateFrom: range.from,
+        dateTo: range.to,
+        rep: row.label,
+        documentType: "all",
+        account: "",
+        item: "",
+        document: ""
+      },
+      { includeTransactions: true }
+    );
   }
 
   function selectMonthlyRep(row: QuickBooksSalesMonthlyRepRow) {
@@ -177,15 +183,18 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     setItemFilter(nextItem);
     setDocumentFilter("");
     setAppliedItemFilter(nextItem);
-    void loadSalesDashboard({
-      dateFrom,
-      dateTo,
-      rep: nextRep,
-      documentType: nextDocumentType,
-      account: nextAccount,
-      item: nextItem,
-      document: ""
-    });
+    void loadSalesDashboard(
+      {
+        dateFrom,
+        dateTo,
+        rep: nextRep,
+        documentType: nextDocumentType,
+        account: nextAccount,
+        item: nextItem,
+        document: ""
+      },
+      { includeItems: mode === "item", includeTransactions: true }
+    );
   }
 
   function selectRep(rep: string, nextDateFrom: string, nextDateTo: string, nextDocumentType: DocumentTypeFilter = "all") {
@@ -197,23 +206,24 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
     setItemFilter("");
     setDocumentFilter("");
     setAppliedItemFilter("");
-    void loadSalesDashboard({
-      dateFrom: nextDateFrom,
-      dateTo: nextDateTo,
-      rep,
-      documentType: nextDocumentType,
-      account: "",
-      item: "",
-      document: ""
-    });
+    void loadSalesDashboard(
+      {
+        dateFrom: nextDateFrom,
+        dateTo: nextDateTo,
+        rep,
+        documentType: nextDocumentType,
+        account: "",
+        item: "",
+        document: ""
+      },
+      { includeTransactions: true }
+    );
   }
 
   async function loadSalesDashboard(
     overrides: Partial<QuickBooksSalesDashboardFilters> = {},
     options: LoadSalesDashboardOptions = {}
   ) {
-    const includeTransactions = options.includeTransactions ?? true;
-    const showLoading = options.showLoading ?? true;
     const filters = {
       dateFrom,
       dateTo,
@@ -224,10 +234,14 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
       document: documentFilter,
       ...overrides
     };
+    const includeTransactions = options.includeTransactions ?? false;
+    const includeItems = options.includeItems ?? (mode === "item" || Boolean(filters.item?.trim()));
+    const showLoading = options.showLoading ?? true;
     const params = new URLSearchParams();
     params.set("from", filters.dateFrom || data.salesDateFrom);
     params.set("to", filters.dateTo || data.salesDateTo);
     params.set("type", filters.documentType || "all");
+    params.set("includeItems", includeItems ? "true" : "false");
     params.set("includeTransactions", includeTransactions ? "true" : "false");
     if (filters.rep && filters.rep !== "All") params.set("rep", filters.rep);
     if (filters.account?.trim()) params.set("account", filters.account.trim());
@@ -274,7 +288,7 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
         <div className="sales-filter-presets">
           <button type="button" onClick={setYtd}>YTD</button>
           <button type="button" onClick={setFullYear2025}>2025</button>
-          <button type="button" onClick={() => void loadSalesDashboard()} disabled={isLoading}>{isLoading ? "Loading" : "Apply"}</button>
+          <button type="button" onClick={() => void loadSalesDashboard({}, { includeTransactions: false })} disabled={isLoading}>{isLoading ? "Loading" : "Apply"}</button>
           <button type="button" onClick={resetFilters} disabled={!hasFilters}>Reset</button>
         </div>
         <div className="sales-filter-grid">
@@ -333,13 +347,15 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
             <p>{formatCount(matchingDocumentCount)} matching documents</p>
           </div>
           <div className="segmented-control sales-summary-mode" aria-label="Summary mode">
-            <button className={mode === "rep" ? "active" : ""} onClick={() => setMode("rep")} type="button">Rep</button>
-            <button className={mode === "account" ? "active" : ""} onClick={() => setMode("account")} type="button">Account</button>
-            <button className={mode === "item" ? "active" : ""} onClick={() => setMode("item")} type="button">Item</button>
-            <button className={mode === "month" ? "active" : ""} onClick={() => setMode("month")} type="button">Monthly</button>
+            <button className={mode === "rep" ? "active" : ""} onClick={() => selectMode("rep")} type="button">Rep</button>
+            <button className={mode === "account" ? "active" : ""} onClick={() => selectMode("account")} type="button">Account</button>
+            <button className={mode === "item" ? "active" : ""} onClick={() => selectMode("item")} type="button">Item</button>
+            <button className={mode === "month" ? "active" : ""} onClick={() => selectMode("month")} type="button">Monthly</button>
           </div>
         </div>
-        {mode === "month" ? (
+        {mode === "item" && !byItemLoaded && isLoading ? (
+          <div className="status-card">Loading item summaries...</div>
+        ) : mode === "month" ? (
           <MonthlyRepTable columns={dashboardData.monthColumns} rows={dashboardData.byRepMonthly} onSelectMonth={selectMonthlyRepCell} onSelectRep={selectMonthlyRep} />
         ) : (
           <SummaryTable rows={summaryRows} labelHeader={mode === "rep" ? "Rep" : mode === "account" ? "Account" : "Item"} onSelect={selectSummaryRow} />
@@ -355,6 +371,11 @@ export function SalesDashboardView({ data }: SalesDashboardViewProps) {
               {matchingDocumentCount > visibleTransactions.length ? ` of ${formatCount(matchingDocumentCount)}` : ""}
             </p>
           </div>
+          {!hasRequestedTransactions ? (
+            <button type="button" onClick={() => void loadSalesDashboard({}, { includeItems: byItemLoaded, includeTransactions: true })} disabled={isLoading}>
+              {isLoading ? "Loading" : `Load first ${formatCount(dashboardData.transactionLimit || MAX_VISIBLE_TRANSACTIONS)}`}
+            </button>
+          ) : null}
         </div>
         <div className="table-scroll">
           <table className="data-table sales-transaction-table">

@@ -48,6 +48,7 @@ export type QuickBooksSalesDashboardFilters = {
   account?: string;
   item?: string;
   document?: string;
+  includeItems?: boolean;
   includeTransactions?: boolean;
 };
 
@@ -72,5 +73,7 @@ export type QuickBooksSalesDashboardData = {
   byRepMonthly: QuickBooksSalesMonthlyRepRow[];
   transactions: QuickBooksSalesTransactionRow[];
   recentTransactions: QuickBooksSalesTransactionRow[];
+  byItemLoaded?: boolean;
+  transactionLimit?: number;
   unavailableReason?: string | null;
 };

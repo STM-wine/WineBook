@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
       account: cleanParam(params.get("account")),
       item: cleanParam(params.get("item")),
       document: cleanParam(params.get("document")),
+      includeItems: params.get("includeItems") === "true",
       includeTransactions: params.get("includeTransactions") === "true"
     };
 
