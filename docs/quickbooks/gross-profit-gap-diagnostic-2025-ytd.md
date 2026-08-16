@@ -69,3 +69,48 @@ The unique wine + label fallback can recover another 5,529 rows, including 873 r
 4. Allow unique wine + label fallback as lower confidence when price cents changed.
 5. Keep manual prices and samples in separate buckets.
 6. Investigate the small quantity mismatch and item-code mismatch buckets after source coverage is repaired.
+
+## Post-Backfill Result
+
+After REST backfilling Vinosmith supplier orders for 2025-04, 2026-06, 2026-07, and 2026-08 through 2026-08-16:
+
+- Backfill worker: `scripts/backfill_vinosmith_supplier_orders_rest.py`.
+- Reason for REST worker: current Supabase `sb_secret` keys work through PostgREST, while the older Python Supabase client rejects that key format.
+- QuickBooks invoice lines: 70,147.
+- Vinosmith order headers: 23,879.
+- Vinosmith order lines: 64,468.
+- All-line match rate: 86.47%.
+- Positive-revenue QuickBooks invoice lines: 57,057.
+- Positive-revenue matched lines: 55,451.
+- Positive-revenue line match rate: 97.19%.
+- Positive-revenue amount match rate: 96.99%.
+
+Remaining unmatched buckets:
+
+| Gap | Lines | Line amount |
+| --- | ---: | ---: |
+| Zero/negative invoice not in Vinosmith | 7,885 | $0.00 |
+| Positive invoice not in Vinosmith | 1,321 | $328,022.04 |
+| Quantity mismatch | 279 | $75,695.92 |
+| Item not on Vinosmith invoice | 6 | $19,357.77 |
+| Zero/negative quantity mismatch | 2 | $0.00 |
+
+The biggest remaining zero-dollar bucket is sample-account activity. Top accounts include `SAMPLES - RB`, `SAMPLES - SCOTT`, `SAMPLES - SAMANTHA`, `SAMPLES - KRISTIN`, `SAMPLES - SARIYA`, and other sample accounts.
+
+The biggest remaining positive missing-in-Vinosmith bucket includes internal or special accounts such as `Stem Owner Wine - Ryan`, `Stem Owner Wine - Mark`, and normal accounts that need exception review.
+
+## Credit Workflow Caveat
+
+Vinosmith is not a stable historical sales-line ledger when returns/credits happen. In the current operational workflow, an item may be deleted from the Vinosmith invoice so that Vinosmith matches QuickBooks after a credit. That means missing or mismatched Vinosmith lines can be legitimate artifacts of the credit workflow, not necessarily bad imports.
+
+Workflow implication:
+
+- QuickBooks remains the source of truth for original invoice lines, credit memo lines, net sales, returned quantity, period attribution, rep/account/item financial truth, and margin reversal.
+- Vinosmith is used for operational enrichment and price-level/billback inference when the sold line is still present.
+- Missing Vinosmith lines on credited/returned items should be bucketed as expected credit-workflow exceptions when confirmed.
+- Do not chase 100% Vinosmith line match as the success criterion.
+- The practical target is high coverage for normal positive-revenue wine sales plus clear confidence and exception buckets.
+
+Current conclusion:
+
+The workflow is strong enough to move from source-coverage repair into a GP proof/mart design. Positive-revenue line coverage is already about 97%, and the remaining gaps are small enough to handle with explicit exception buckets.
