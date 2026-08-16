@@ -1,0 +1,339 @@
+# QuickBooks Gross Profit Truth Plan
+
+Date: 2026-08-16
+
+## Goal
+
+Build trustworthy gross profit and gross margin analytics from QuickBooks Desktop, with drilldown from company totals to reps, accounts, invoices, items, producers, suppliers/importers, and individual sale lines.
+
+This is separate from the item-master project. Item data is required for identity and enrichment, but current item cost alone is not enough to prove historical gross profit.
+
+## Current State
+
+The app currently pulls and persists the sales spine:
+
+- `quickbooks_invoices`
+- `quickbooks_invoice_lines`
+- `quickbooks_credit_memos`
+- `quickbooks_credit_memo_lines`
+- `quickbooks_customers`
+- `quickbooks_sales_reps`
+- `quickbooks_items`
+
+Invoice and credit memo lines currently store:
+
+- `item_list_id`
+- `item_full_name`
+- `description`
+- `quantity`
+- `unit_of_measure`
+- `rate`
+- `amount`
+- `class_ref`
+- `raw_data`
+
+QuickBooks items currently store:
+
+- `purchase_cost`
+- `average_cost`
+- `sales_price`
+- inventory quantities
+- accounting refs, including COGS account ref
+
+This supports sales, net sales, quantity, item/account/rep drilldowns, and trend. It does not yet support audited historical gross profit per sale line.
+
+## Key Finding
+
+Current `quickbooks_items.purchase_cost` and `quickbooks_items.average_cost` are current item-master values. They can help estimate margin and flag anomalies, but they are not reliable historical cost-of-goods-sold for a 2024 or 2025 invoice line.
+
+For true gross profit, QuickBooks report outputs or accounting transaction detail must provide the COGS/gross-margin basis.
+
+## Official QuickBooks SDK Signals
+
+QuickBooks Desktop SDK report queries are the likely correct source for margin truth:
+
+- Intuit's report list says `GeneralDetailReportQueryRq` supports reports including `SalesByItemDetail`, `SalesByRepDetail`, `SalesByCustomerDetail`, `ProfitAndLossDetail`, `InventoryValuationDetail`, and `TransactionDetailByAccount`.
+- Intuit's report list says `GeneralSummaryReportQueryRq` supports `SalesByItemSummary`, `SalesByCustomerSummary`, `SalesByRepSummary`, and P&L reports.
+- Intuit's report request reference says Sales by Item Summary has default subcolumns including quantity, amount, average price, average cost, COGS, gross margin, and gross margin percent.
+- Intuit's General Detail report reference says detail reports can include columns such as `TxnID`, `Item`, `Quantity`, `Amount`, `AverageCost`, `CostPrice`, `SalesRep`, and related transaction/report columns, depending on report support.
+
+References:
+
+- https://developer.intuit.com/app/developer/qbdesktop/docs/additional-reference/reports-that-can-be-requested-with-the-sdk
+- https://developer.intuit.com/app/developer/qbdesktop/docs/additional-reference/report-request-reference
+- https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/generaldetailreportquery
+- https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/generalsummaryreportquery
+
+## Required Historical Pull
+
+The sales history pull should include both 2025 and 2024:
+
+- 2025 full calendar year for current YOY ordering and sales trend comparisons.
+- 2024 full calendar year to establish a deeper trend baseline and validate seasonality.
+- Current year to date for active dashboards.
+
+Minimum transaction sources:
+
+- Invoices with line items.
+- Credit memos with line items.
+- Customers.
+- Sales reps.
+- Items.
+
+Additional margin-truth sources to add:
+
+- Sales by Item Summary report by month/year.
+- Sales by Item Detail report with transaction IDs if usable.
+- Sales by Customer Summary or Detail.
+- Sales by Rep Summary or Detail.
+- Profit and Loss Standard / Detail by month.
+- Transaction Detail by Account or General Ledger filtered to income and COGS accounts.
+- Inventory Valuation Detail/Summary for cost sanity checks.
+
+## Source Hierarchy For Gross Profit
+
+Use a tiered truth model instead of one blended number.
+
+### Tier 1: QuickBooks Reported Gross Profit
+
+Preferred when available from QuickBooks reports.
+
+Fields:
+
+- sales amount
+- quantity
+- average cost
+- COGS
+- gross margin dollars
+- gross margin percent
+
+Use cases:
+
+- official item margin
+- company/item/account/rep margin dashboards
+- reconciliation to QuickBooks UI reports
+
+Risk:
+
+- report rows may aggregate differently than transaction queries.
+- detail report columns may vary by report type and QuickBooks edition.
+- parsing report XML is more complex than transaction XML.
+
+### Tier 2: Ledger/COGS Detail
+
+Use when report summaries are insufficient for drilldown.
+
+Fields:
+
+- transaction ID
+- date
+- account
+- split account
+- item/customer/name
+- debit/credit/amount
+- transaction type
+
+Use cases:
+
+- reconcile sales revenue to COGS accounts.
+- validate P&L.
+- drill into unusual margin.
+
+Risk:
+
+- joining ledger COGS back to invoice lines may be imperfect.
+- some COGS may be posted through adjustments, journals, or inventory transactions rather than direct invoice-line records.
+
+### Tier 3: Reconstructed Cost Estimate
+
+Use only as fallback or diagnostic.
+
+Formula examples:
+
+- invoice line revenue = line amount
+- estimated cost = quantity * item average cost as of latest item pull
+- estimated gross profit = revenue - estimated cost
+
+Risk:
+
+- current item cost may differ from cost at sale date.
+- inventory costing method and timing can make historical estimates wrong.
+
+This tier must be labeled clearly as estimated, not official GP.
+
+## Data Model Needs
+
+Add generic report persistence before building the GP dashboard:
+
+- `quickbooks_report_snapshots`
+- `quickbooks_report_rows`
+- optionally normalized report-specific mart tables after the report XML shape is understood
+
+Suggested report snapshot fields:
+
+- `id`
+- `source_system`
+- `report_request_type`
+- `report_type`
+- `report_basis`
+- `date_from`
+- `date_to`
+- `summarize_rows_by`
+- `summarize_columns_by`
+- `include_columns`
+- `raw_response_id`
+- `report_title`
+- `report_subtitle`
+- `num_rows`
+- `num_columns`
+- `raw_data`
+- `created_at`
+
+Suggested report row fields:
+
+- `id`
+- `report_snapshot_id`
+- `row_sequence`
+- `row_kind`
+- `row_type`
+- `row_value`
+- `parent_row_sequence`
+- `columns`
+- `raw_data`
+
+Then build a curated mart/view:
+
+- `quickbooks_sales_margin_lines`
+
+Candidate fields:
+
+- `sales_date`
+- `txn_date`
+- `txn_id`
+- `txn_line_id`
+- `ref_number`
+- `transaction_type`
+- `customer_list_id`
+- `customer_full_name`
+- `sales_rep`
+- `item_list_id`
+- `item_full_name`
+- `quantity`
+- `gross_sales`
+- `credit_amount`
+- `net_sales`
+- `reported_cogs`
+- `reported_gross_profit`
+- `reported_gross_margin_pct`
+- `estimated_cogs`
+- `estimated_gross_profit`
+- `estimated_gross_margin_pct`
+- `margin_source`
+- `margin_confidence`
+- `diagnostics`
+
+## Dashboard Requirements
+
+The gross profit dashboard must drill down in both directions:
+
+- company -> rep -> account -> invoice -> line
+- company -> supplier/importer -> producer -> item -> account/rep/invoice
+- company -> item -> accounts buying -> reps selling -> transaction lines
+
+Required metrics:
+
+- gross sales
+- credit memos
+- net sales
+- units/bottles/cases
+- COGS
+- gross profit dollars
+- gross margin percent
+- average selling price
+- average cost
+- credit rate
+- margin trend by month
+- YOY net sales and GP
+- account/product/reps moving up or down
+
+Required filters:
+
+- date range
+- year preset: current YTD, 2025, 2024
+- rep
+- account
+- item
+- producer
+- supplier/importer
+- transaction type
+- margin confidence/source
+
+## Validation And Reconciliation
+
+Do not trust GP dashboards until they reconcile against QuickBooks UI reports.
+
+Initial reconciliation reports:
+
+- Sales by Item Summary for 2025 and 2024.
+- Sales by Rep Summary for 2025 and 2024.
+- Sales by Customer Summary for 2025 and 2024.
+- Profit and Loss Standard by month for 2025 and 2024.
+- Inventory Valuation Summary/Detail around selected periods.
+
+Acceptance checks:
+
+- Net sales from transaction tables matches QuickBooks sales reports within a documented tolerance.
+- Credit memo totals match QuickBooks credit reporting.
+- COGS from report mart matches P&L COGS totals.
+- Gross profit by item sums to company gross profit for the same date/basis, or differences are explained.
+- At least 10 high-value invoices can drill from dashboard line -> QuickBooks invoice/report evidence.
+- Every margin number has a `margin_source`: `qb_reported`, `ledger_reconciled`, or `estimated_current_item_cost`.
+
+## Implementation Phases
+
+### Phase 1: Finish Sales History
+
+- Pull 2025 invoices and credit memos.
+- Pull 2024 invoices and credit memos.
+- Keep line items enabled.
+- Verify row counts and latest/earliest transaction dates.
+
+### Phase 2: Report Query Discovery
+
+- Add read-only allowlist support for `GeneralSummaryReportQueryRq` and `GeneralDetailReportQueryRq`.
+- Build minimal qbXML builders for:
+  - `SalesByItemSummary`
+  - `SalesByCustomerSummary`
+  - `SalesByRepSummary`
+  - `ProfitAndLossStandard`
+  - `SalesByItemDetail`
+  - `TransactionDetailByAccount`
+- Capture raw report responses first.
+- Parse report column descriptors and rows generically.
+
+### Phase 3: Persist Report Snapshots
+
+- Add report snapshot/row tables.
+- Persist raw report metadata and normalized rows.
+- Keep report pulls in separate recovery queue resources so they cannot interrupt invoice/credit memo history pulls.
+
+### Phase 4: Build Margin Mart
+
+- Join invoices/credit memos to report-derived COGS/margin where possible.
+- Preserve estimate-only fallback separately.
+- Add confidence and diagnostics.
+
+### Phase 5: Dashboard
+
+- Extend Sales Dashboard into Sales + Margin.
+- Add drilldowns to account, rep, item, producer, supplier/importer, invoice, and line level.
+- Clearly label unavailable or estimated GP.
+
+## Current Answer To "Are We Pulling Enough Item Data?"
+
+For sales trend: yes, once 2025 and 2024 sales history are complete.
+
+For ordering item identity: mostly yes, with known mapping risks.
+
+For true gross profit per sale: no. Item data alone is not enough. We need QuickBooks-reported COGS/gross-margin data from report queries or ledger/COGS detail before treating GP as real.
+

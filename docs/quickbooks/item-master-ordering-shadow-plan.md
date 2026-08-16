@@ -58,9 +58,11 @@ QuickBooks sales-history requirement:
 
 - Item master coverage is necessary but not sufficient for QuickBooks-backed ordering.
 - Year-over-year ordering recommendations need QuickBooks invoice and credit memo history, especially the full 2025 calendar year.
+- Deeper trend work should also pull full-year 2024 invoices and credit memos.
 - The recovery queue already treats 2025 as the sales-truth priority year for `InvoiceQueryRq` and `CreditMemoQueryRq` windows.
 - Before replacing RADs/Vinosmith report sales inputs, verify 2025 QuickBooks invoices and credit memos are complete and reconcile to the sales dashboard.
 - Until that coverage is confirmed, QuickBooks should be used for item identity/cost/inventory shadow checks, not YOY recommendation generation.
+- Gross profit and gross margin require a separate margin-truth plan; item current cost is not enough for historical GP. See `docs/quickbooks/gross-profit-truth-plan.md`.
 
 ## Current Ordering Path
 
