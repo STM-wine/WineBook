@@ -1,6 +1,8 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -28,8 +30,9 @@ export async function createClient() {
 }
 
 export function createServiceRoleClient() {
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const localServerEnv = loadLocalServerEnv();
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || localServerEnv.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || localServerEnv.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !serviceRoleKey) {
     throw new Error("Missing Supabase service-role configuration.");
@@ -41,4 +44,30 @@ export function createServiceRoleClient() {
       persistSession: false
     }
   });
+}
+
+function loadLocalServerEnv() {
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return {};
+  }
+
+  const rootEnvPath = path.resolve(process.cwd(), "../../.env.local");
+  if (!existsSync(rootEnvPath)) {
+    return {};
+  }
+
+  try {
+    return Object.fromEntries(
+      readFileSync(rootEnvPath, "utf8")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#") && line.includes("="))
+        .map((line) => {
+          const separator = line.indexOf("=");
+          return [line.slice(0, separator), line.slice(separator + 1).replace(/^['"]|['"]$/g, "")];
+        })
+    );
+  } catch {
+    return {};
+  }
 }

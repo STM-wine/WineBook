@@ -15,6 +15,7 @@ import {
   updateRecommendationOrderPath,
   updateRecommendationApprovals
 } from "@/app/actions";
+import type { CompanyDashboardData } from "@/lib/company-dashboard-data";
 import type { QuickBooksSalesDashboardData } from "@/lib/quickbooks-sales-types";
 import type {
   PriceChangeEvent,
@@ -43,6 +44,7 @@ import {
 } from "@/lib/order-data";
 import { AppTopbar } from "./app-topbar";
 import { ActiveView, DEFAULT_VIEW, isActiveView } from "./dashboard-types";
+import { CompanyDashboardView } from "./company-dashboard-view";
 import { FreightView } from "./freight-view";
 import { OrderReviewView } from "./order-review-view";
 import { PoDraftsView } from "./po-drafts-view";
@@ -63,20 +65,24 @@ type Props = {
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
   quickBooksSales: QuickBooksSalesDashboardData;
+  companyDashboard: CompanyDashboardData;
+  quickBooksLastSyncAt: string | null;
   canViewSettings?: boolean;
 };
 
-function formatReportUpdatedAt(value: string | null) {
+function formatSourceUpdatedAt(value: string | null) {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Denver",
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Phoenix",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit"
-  }).format(date);
+  }).formatToParts(date);
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value || "";
+  return `${part("month")} ${part("day")}, ${part("hour")}:${part("minute")} ${part("dayPeriod")}`;
 }
 
 export function OrderDashboard({
@@ -89,6 +95,8 @@ export function OrderDashboard({
   wineRequests,
   priceChangeEvents,
   quickBooksSales,
+  companyDashboard,
+  quickBooksLastSyncAt,
   canViewSettings
 }: Props) {
   const router = useRouter();
@@ -176,11 +184,16 @@ export function OrderDashboard({
     [supplierSort, visibleRecommendations]
   );
   const allSupplierGroups = useMemo(() => buildSupplierGroups(displayRows), [displayRows]);
-  const dataUpdatedAt = formatReportUpdatedAt(reportRun.completed_at);
-  const dataLabel = dataUpdatedAt ? `Data Updated ${dataUpdatedAt}` : `Data Date ${reportRun.report_date || "Latest run"}`;
+  const dataUpdatedAt = formatSourceUpdatedAt(reportRun.completed_at);
+  const dataLabel = dataUpdatedAt ? `VS Updated ${dataUpdatedAt}` : `VS Date ${reportRun.report_date || "Latest run"}`;
   const dataTitle = reportRun.report_date
     ? `Report date ${reportRun.report_date}${dataUpdatedAt ? `, completed ${dataUpdatedAt}` : ""}`
     : undefined;
+  const qbUpdatedAt = formatSourceUpdatedAt(quickBooksLastSyncAt);
+  const qbDataLabel = qbUpdatedAt ? `QB Updated ${qbUpdatedAt}` : null;
+  const qbDataTitle = qbUpdatedAt
+    ? `Last QuickBooks Web Connector response received ${qbUpdatedAt}. ${quickBooksSales.dateBasis}`
+    : quickBooksSales.dateBasis;
 
   function selectView(view: ActiveView) {
     if (view === "quickbooks-items" && !canViewSettings) return;
@@ -650,9 +663,11 @@ export function OrderDashboard({
         canViewSettings={canViewSettings}
         dataLabel={dataLabel}
         dataTitle={dataTitle}
+        qbDataLabel={qbDataLabel}
+        qbDataTitle={qbDataTitle}
         isPending={isPending}
-        onCreateDrafts={createDrafts}
-        onRefreshReports={refreshReports}
+        onCreateDrafts={activeView === "order-review" ? createDrafts : undefined}
+        onRefreshReports={activeView === "order-review" ? refreshReports : undefined}
         onSelectView={selectView}
       />
 
@@ -668,6 +683,8 @@ export function OrderDashboard({
           </div>
         </div>
       ) : null}
+
+      {activeView === "company-dashboard" ? <CompanyDashboardView initialData={companyDashboard} /> : null}
 
       {activeView === "sales-dashboard" ? <SalesDashboardView data={quickBooksSales} /> : null}
 

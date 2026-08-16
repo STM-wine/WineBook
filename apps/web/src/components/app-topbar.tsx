@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { AccountMenu } from "./account-menu";
-import { ActiveView, DEFAULT_VIEW, NAV_VIEW_LABELS } from "./dashboard-types";
-import { SignOutButton } from "./sign-out-button";
+import { AppUserMenu } from "./app-user-menu";
+import { ActiveView, DEFAULT_VIEW, VIEW_LABELS } from "./dashboard-types";
 
 type AppTopbarProps = {
   activeModule?: "grw-converter" | "supplier-offer-compiler" | "settings";
@@ -11,6 +10,8 @@ type AppTopbarProps = {
   canViewSettings?: boolean;
   dataLabel?: string;
   dataTitle?: string;
+  qbDataLabel?: string | null;
+  qbDataTitle?: string;
   isPending?: boolean;
   onCreateDrafts?: () => void;
   onRefreshReports?: () => void;
@@ -21,18 +22,27 @@ function viewHref(view: ActiveView) {
   return view === DEFAULT_VIEW ? "/" : "/?view=" + view;
 }
 
+const HOME_VIEW: ActiveView = "company-dashboard";
+const SALES_VIEW: ActiveView = "sales-dashboard";
+const ORDERING_VIEWS: ActiveView[] = ["order-review", "po-drafts", "supplier-hub", "freight", "quickbooks-items"];
+
 export function AppTopbar({
   activeModule,
   activeView,
   canViewSettings,
   dataLabel,
   dataTitle,
+  qbDataLabel,
+  qbDataTitle,
   isPending,
   onCreateDrafts,
   onRefreshReports,
   onSelectView
 }: AppTopbarProps) {
-  const navViews = NAV_VIEW_LABELS.filter((view) => !view.requiresSettings || canViewSettings);
+  const orderingViews = VIEW_LABELS.filter(
+    (view) => ORDERING_VIEWS.includes(view.id) && !view.hidden && (!view.requiresSettings || canViewSettings)
+  );
+  const isOrderingActive = Boolean(activeView && ORDERING_VIEWS.includes(activeView));
   const brandContent = (
     <div className="brand-mark">
       <img alt="Stem home" src="/brand/stem-intelligence-logo-cropped.png" />
@@ -51,22 +61,43 @@ export function AppTopbar({
         </Link>
       )}
       <nav className="nav-tabs" aria-label="Primary">
-        {navViews.map((view) =>
-          onSelectView ? (
+        <TopbarViewLink activeView={activeView} label="Home" onSelectView={onSelectView} view={HOME_VIEW} />
+        <TopbarViewLink activeView={activeView} label="Sales" onSelectView={onSelectView} view={SALES_VIEW} />
+        <div className="nav-dropdown">
+          {onSelectView ? (
             <button
-              key={view.id}
-              className={activeView === view.id ? "active" : ""}
-              onClick={() => onSelectView(view.id)}
+              className={isOrderingActive ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"}
+              onClick={() => onSelectView("order-review")}
               type="button"
+              aria-haspopup="menu"
             >
-              {view.label}
+              Products
             </button>
           ) : (
-            <Link key={view.id} className={activeView === view.id ? "active" : ""} href={viewHref(view.id)}>
-              {view.label}
+            <Link className={isOrderingActive ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"} href="/products" aria-haspopup="menu">
+              Products
             </Link>
-          )
-        )}
+          )}
+          <div className="nav-dropdown-menu" role="menu">
+            {orderingViews.map((view) =>
+              onSelectView ? (
+                <button
+                  key={view.id}
+                  className={activeView === view.id ? "active" : ""}
+                  onClick={() => onSelectView(view.id)}
+                  type="button"
+                  role="menuitem"
+                >
+                  {view.label}
+                </button>
+              ) : (
+                <Link key={view.id} className={activeView === view.id ? "active" : ""} href={viewHref(view.id)} role="menuitem">
+                  {view.label}
+                </Link>
+              )
+            )}
+          </div>
+        </div>
         <div className="nav-dropdown">
           <button
             className={activeModule === "grw-converter" ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"}
@@ -81,16 +112,17 @@ export function AppTopbar({
             </Link>
           </div>
         </div>
-        {canViewSettings ? (
-          <Link className={activeModule === "settings" ? "active" : ""} href="/settings">
-            Settings
-          </Link>
-        ) : null}
       </nav>
       <div className="topbar-actions">
+        <div className="topbar-context-controls" id="topbar-context-controls" />
         {dataLabel ? (
-          <span className="data-pill" title={dataTitle}>
+          <span className="data-pill source-data-pill" title={dataTitle}>
             {dataLabel}
+          </span>
+        ) : null}
+        {qbDataLabel ? (
+          <span className="data-pill source-data-pill source-data-pill-qb" title={qbDataTitle}>
+            {qbDataLabel}
           </span>
         ) : null}
         {onRefreshReports ? (
@@ -103,9 +135,34 @@ export function AppTopbar({
             Create PO Drafts
           </button>
         ) : null}
-        <AccountMenu />
-        <SignOutButton />
+        <AppUserMenu canViewSettings={canViewSettings} isSettingsActive={activeModule === "settings"} />
       </div>
     </header>
+  );
+}
+
+function TopbarViewLink({
+  activeView,
+  label,
+  onSelectView,
+  view
+}: {
+  activeView?: ActiveView;
+  label: string;
+  onSelectView?: (view: ActiveView) => void;
+  view: ActiveView;
+}) {
+  if (onSelectView) {
+    return (
+      <button className={activeView === view ? "active" : ""} onClick={() => onSelectView(view)} type="button">
+        {label}
+      </button>
+    );
+  }
+
+  return (
+    <Link className={activeView === view ? "active" : ""} href={viewHref(view)}>
+      {label}
+    </Link>
   );
 }

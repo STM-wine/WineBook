@@ -1,5 +1,6 @@
 import { OrderDashboard } from "@/components/order-dashboard";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
+import { fetchCompanyDashboardData, unavailableCompanyDashboardData } from "@/lib/company-dashboard-data";
 import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { fetchVinosmithExplorerData, unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
@@ -67,6 +68,32 @@ export default async function HomePage() {
     }
   })();
 
+  const quickBooksLastSyncPromise = (async () => {
+    try {
+      const { data, error } = await createServiceRoleClient()
+        .from("source_api_responses")
+        .select("fetched_at")
+        .eq("source_system", "quickbooks_desktop")
+        .order("fetched_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{ fetched_at: string | null }>();
+      if (error) return null;
+      return data?.fetched_at || null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const companyDashboardPromise = (() => {
+    try {
+      return fetchCompanyDashboardData(createServiceRoleClient(), "mtd");
+    } catch (error) {
+      return Promise.resolve(
+        unavailableCompanyDashboardData(error instanceof Error ? error.message : "Company Dashboard is not configured.", "mtd")
+      );
+    }
+  })();
+
   const vinosmithExplorerPromise = (() => {
     try {
       return fetchVinosmithExplorerData(createServiceRoleClient());
@@ -83,14 +110,18 @@ export default async function HomePage() {
     { data: wineRequests },
     { data: priceChangeEvents },
     vinosmithExplorer,
-    quickBooksSales
+    quickBooksSales,
+    companyDashboard,
+    quickBooksLastSyncAt
   ] = await Promise.all([
     reportRunsPromise,
     supplierCatalogPromise,
     wineRequestsPromise,
     priceChangeEventsPromise,
     vinosmithExplorerPromise,
-    quickBooksSalesPromise
+    quickBooksSalesPromise,
+    companyDashboardPromise,
+    quickBooksLastSyncPromise
   ]);
 
   const latestRun = reportRuns?.[0] || null;
@@ -178,6 +209,8 @@ export default async function HomePage() {
       wineRequests={wineRequests || []}
       priceChangeEvents={priceChangeEvents || []}
       quickBooksSales={quickBooksSales}
+      companyDashboard={companyDashboard}
+      quickBooksLastSyncAt={quickBooksLastSyncAt}
       canViewSettings={hasPermission(permissions, "view_settings")}
     />
   );
