@@ -217,6 +217,87 @@ This model separates the economics:
 
 That separation is important because it lets leadership see normal GP, billback-assisted GP, and leakage when billbacks are missing or unmatched.
 
+## Stem-Owned Commercial Terms Source Of Truth
+
+The stronger long-term design is for Stem Intelligence to become the source of truth for commercial terms: item setup, price levels, billback/depletion allowances, effective dates, and approvals.
+
+In this model:
+
+- QuickBooks remains the accounting and item master source of truth.
+- Stem Intelligence owns commercial terms and approval workflow.
+- Vinosmith remains the sales execution and operational system.
+- Vinosmith billback/price data can be imported historically to seed Stem's terms table, but once Stem is live, Stem should be the terms brain.
+
+Recommended workflow:
+
+1. Item is set up in Stem Intelligence.
+2. Stem captures item identity, price levels, billback/depletion amount, effective timestamp/date, editor, approver, and margin diagnostics.
+3. Approved item is pushed to QuickBooks for item setup.
+4. Price levels are pushed to Vinosmith if write access is allowed.
+5. If Vinosmith write access is not allowed, price levels are manually entered in Vinosmith and reconciled back to Stem.
+6. Sales and COGS continue to come from QuickBooks.
+7. Sold price level is matched from QuickBooks/Vinosmith sales data by exact price, item, account, invoice, and date.
+8. Billback comes from Stem's approved price-level history for that item/price level/effective period.
+9. GP is calculated from QuickBooks sales/COGS plus Stem billback.
+10. If someone changes billback in Stem and GP drops below threshold, Stem alerts immediately or requires admin approval.
+
+Existing schema fit:
+
+- `supplier_catalog_price_levels` already stores price level name, bottle price, depletion allowance, calculated GP margin, source system/source ID, and timestamps.
+- This table can evolve into, or feed, a proper Stem commercial terms ledger.
+
+Additional model needs:
+
+- Effective start/end timestamps for every Stem-owned price level.
+- Created/edited/approved by user IDs.
+- Approval status, approval timestamp, and optional admin override reason.
+- Immutable change/audit history; do not only update the current row.
+- External mappings:
+  - QuickBooks item `ListID` and item number/code.
+  - Vinosmith wine ID/code.
+  - Vinosmith price ID when synced or manually reconciled.
+- Margin guardrails:
+  - minimum GP threshold.
+  - warning threshold.
+  - override permission and reason.
+  - current QB FOB/laid-in used for validation.
+
+Suggested tables:
+
+- `stem_commercial_terms`
+- `stem_commercial_term_price_levels`
+- `stem_commercial_term_price_level_versions`
+- `stem_commercial_term_sync_events`
+
+At minimum, add versioning/audit around `supplier_catalog_price_levels` before it is used as the official billback source.
+
+Price-level matching rules:
+
+- Exact: QB invoice line + Vinosmith order line matched by invoice number, item code, quantity, sold price, delivery date, and account; Vinosmith line has `price_id`; Stem has matching Vinosmith price ID or matched price level version.
+- Strong: item code + sold price + account/date matches one active Stem price-level version.
+- Review: item code + sold price matches multiple Stem price-level versions or no exact effective date.
+- Manual: `manual_price = true`; no billback expected.
+- Sample: 100% discount; route to Samples bucket.
+
+Advantages:
+
+- Historical billback is stable because Stem owns effective-dated versions.
+- GP can be calculated live without waiting for Vinosmith to expose price history perfectly.
+- Margin guardrails can run at the moment commercial terms change.
+- Admin approvals become part of the economics, not tribal knowledge.
+- Vinosmith can be reconciled as an execution system rather than trusted as the terms source.
+
+Risks:
+
+- Requires disciplined workflow adoption: all price/billback changes must happen in Stem first.
+- If Vinosmith is manually updated and Stem is not, dashboards can drift.
+- Requires a reconciliation dashboard comparing Stem price levels to Vinosmith price levels.
+- Requires item identity to be clean between Stem, QuickBooks, and Vinosmith.
+
+Recommendation:
+
+Use Vinosmith billback pulls to backfill historical terms and validate sales history, but build the forward-looking billback source of truth in Stem Intelligence. This is the best operating model if Stem is going to be the approval and intelligence layer.
+
 ## Official QuickBooks SDK Signals
 
 QuickBooks Desktop SDK report queries are the likely correct source for margin truth:
