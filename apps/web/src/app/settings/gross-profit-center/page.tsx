@@ -34,10 +34,25 @@ export default async function GrossProfitCenterPage({ searchParams }: PageProps)
   const params = await searchParams;
   const dateFrom = validDate(singleParam(params?.from)) || defaultRange.from;
   const dateTo = validDate(singleParam(params?.to)) || defaultRange.to;
-  const proof = await buildGrossProfitWorkflowProof(createServiceRoleClient(), dateFrom, dateTo, {
-    includeLines: false,
-    lineLimit: 0
-  });
+  const proofResult = await loadGrossProfitProof(dateFrom, dateTo);
+  if ("error" in proofResult) {
+    return (
+      <>
+        <header className="settings-header">
+          <p className="eyebrow">Settings</p>
+          <h1>Gross Profit Center</h1>
+          <p className="muted">
+            QuickBooks financial truth with Vinosmith enrichment, signed credit memo reversals, and confidence buckets for exception review.
+          </p>
+        </header>
+        <section className="settings-panel">
+          <h2>Proof unavailable</h2>
+          <p className="muted">{proofResult.error}</p>
+        </section>
+      </>
+    );
+  }
+  const proof = proofResult.proof;
   const revenueDelta = Number(proof.quickBooksRevenueDelta || 0);
   const revenueTies = Math.abs(revenueDelta) < 0.01;
   const confidenceBuckets = (proof.confidenceBuckets as BucketSummary[]).slice(0, 8);
@@ -220,6 +235,21 @@ function singleParam(value: string | string[] | undefined) {
 
 function validDate(value: string | undefined) {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+async function loadGrossProfitProof(dateFrom: string, dateTo: string) {
+  try {
+    return {
+      proof: await buildGrossProfitWorkflowProof(createServiceRoleClient(), dateFrom, dateTo, {
+        includeLines: false,
+        lineLimit: 0
+      })
+    };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Could not load Gross Profit Center proof."
+    };
+  }
 }
 
 function defaultDateRange() {
