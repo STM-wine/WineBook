@@ -113,4 +113,46 @@ Workflow implication:
 
 Current conclusion:
 
-The workflow is strong enough to move from source-coverage repair into a GP proof/mart design. Positive-revenue line coverage is already about 97%, and the remaining gaps are small enough to handle with explicit exception buckets.
+The workflow is strong enough to move from source-coverage repair into a Gross Profit Center proof design. Positive-revenue line coverage is already about 97%, and the remaining gaps are small enough to handle with explicit exception buckets.
+
+## Gross Profit Center Proof Result
+
+After implementing the read-only Gross Profit Center proof builder on 2026-08-16 and running it for `2025-01-01` through `2026-08-16`:
+
+- QuickBooks financial lines: 88,395.
+- QuickBooks invoice lines: 87,352.
+- QuickBooks credit memo lines: 1,043.
+- QuickBooks credit memos: 818.
+- Positive-revenue invoice line match rate: 98.92%.
+- Positive-revenue invoice amount match rate: 98.68%.
+- Gross sales, net of signed credit memo lines: $17,346,555.60.
+- QuickBooks header net sales tie-out: $17,346,555.60, with line-vs-header delta below $0.01.
+- Current QuickBooks item-cost basis before billback: $12,737,218.20.
+- Vinosmith billback earned: $304,391.66.
+- Effective cost after earned billback: $12,432,826.54.
+- Gross profit: $4,929,321.21.
+- Gross margin: 28.42%.
+
+Top confidence buckets by gross sales:
+
+| Bucket | Lines | Gross sales | Billback earned | Gross profit | Margin |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| QB price + current QB cost + Vinosmith price, no billback | 52,114 | $12,378,856.42 | $0.00 | $3,814,601.36 | 30.82% |
+| QB price + current QB cost + exact Vinosmith price billback | 9,998 | $2,577,986.88 | $282,228.43 | $834,417.11 | 32.37% |
+| Missing Vinosmith price enrichment | 6,691 | $1,644,379.41 | $0.00 | $429,320.08 | 26.11% |
+| QB price + current QB cost + unique label/current-price billback | 1,547 | $333,223.24 | $21,977.47 | $101,194.26 | 30.37% |
+| Manual Vinosmith price, no billback | 468 | $325,018.01 | $0.00 | $55,495.93 | 17.07% |
+| Missing Vinosmith line | 735 | $224,387.50 | $0.00 | $50,964.30 | 22.71% |
+| Credit-workflow missing Vinosmith line | 920 | -$171,355.20 | $0.00 | -$41,679.92 | 24.32% |
+| Sample / zero-dollar / 100% discount | 15,870 | $22,404.86 | $0.00 | -$319,116.02 | n/a |
+
+Cost-source result:
+
+- 88,155 lines use `quickbooks_items.purchase_cost_current`.
+- 240 lines have missing current item cost, with net sales of -$15,592.15.
+
+Recommended next cleanup:
+
+1. Investigate the `missing_vinosmith_price` bucket first. These lines already match Vinosmith sold lines, so the issue is price enrichment coverage rather than invoice/order coverage.
+2. Keep `credit_workflow_missing_vinosmith_line` as an exception bucket unless business review shows a true source gap.
+3. Do not mix sample/free-goods economics into normal GP rollups without a separate sample-cost view.
