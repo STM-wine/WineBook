@@ -32,6 +32,7 @@ type VinosmithOrderHeaderRow = {
 type VinosmithOrderLineRow = {
   line_item_id: string;
   supplier_order_id: string;
+  wine_id: string | null;
   wine_code: string | null;
   wine_name: string | null;
   quantity_bottles: number | string | null;
@@ -49,6 +50,8 @@ type VinosmithPriceRow = {
   bill_back_price_cents: number | string | null;
   label: string | null;
   wine_id: string | null;
+  active: boolean | null;
+  disabled: boolean | null;
 };
 
 type MatchExample = {
@@ -127,14 +130,12 @@ async function buildWorkflowProof(supabase: ProofClient, dateFrom: string, dateT
     fetchQuickBooksLines(supabase, quickBooksInvoices.map((row) => row.txn_id)),
     fetchVinosmithLines(supabase, vinosmithHeaders.map((row) => row.supplier_order_id))
   ]);
-  const prices = await fetchVinosmithPrices(
-    supabase,
-    vinosmithLines.map((row) => row.price_id || "").filter(Boolean)
-  );
+  const prices = await fetchVinosmithPricesForLines(supabase, vinosmithLines);
 
   const invoicesByTxnId = new Map(quickBooksInvoices.map((row) => [row.txn_id, row]));
   const headersById = new Map(vinosmithHeaders.map((row) => [row.supplier_order_id, row]));
   const priceById = new Map(prices.map((row) => [row.price_id, row]));
+  const priceByLineIdentity = buildVinosmithPriceLookup(prices);
   const vinoInvoiceNumbers = new Set(vinosmithHeaders.map((row) => normalizeKey(row.invoice_number)).filter(Boolean));
   const invoiceLineLookup = buildVinosmithLineLookup(vinosmithLines, headersById);
   const examples: MatchExample[] = [];
@@ -154,8 +155,12 @@ async function buildWorkflowProof(supabase: ProofClient, dateFrom: string, dateT
     partialLineMatches: 0,
     unmatchedQuickBooksLines: 0,
     matchedWithVinosmithPriceId: 0,
+    matchedPriceByPriceId: 0,
+    matchedPriceByWineLabelPrice: 0,
     matchedPriceRows: 0,
     matchedBillbackRows: 0,
+    ambiguousPriceRows: 0,
+    unmatchedVinosmithPriceRows: 0,
     manualNoBillbackRows: 0,
     sampleRows: 0
   };
@@ -184,12 +189,18 @@ async function buildWorkflowProof(supabase: ProofClient, dateFrom: string, dateT
     }
     if (vinoLine.price_id) stats.matchedWithVinosmithPriceId += 1;
 
-    const price = vinoLine.price_id ? priceById.get(vinoLine.price_id) : null;
-    if (price) {
+    const priceMatch = matchVinosmithPrice(vinoLine, priceById, priceByLineIdentity);
+    if (priceMatch.status === "matched") {
+      if (priceMatch.method === "price_id") stats.matchedPriceByPriceId += 1;
+      else stats.matchedPriceByWineLabelPrice += 1;
       stats.matchedPriceRows += 1;
-      if (numberOrNull(price.bill_back_price_cents) !== null) stats.matchedBillbackRows += 1;
-    } else if (vinoLine.price_id) {
-      pushExample(examples, line, invoice, "Vinosmith line has price_id but no price row");
+      if (numberOrNull(priceMatch.price.bill_back_price_cents) !== null) stats.matchedBillbackRows += 1;
+    } else if (priceMatch.status === "ambiguous") {
+      stats.ambiguousPriceRows += 1;
+      pushExample(examples, line, invoice, "Multiple Vinosmith prices match wine, label, and price");
+    } else {
+      stats.unmatchedVinosmithPriceRows += 1;
+      pushExample(examples, line, invoice, vinoLine.price_id ? "Vinosmith line has price_id but no price row" : "No Vinosmith price match by wine, label, and price");
     }
   });
 
@@ -228,6 +239,42 @@ function buildVinosmithLineLookup(lines: VinosmithOrderLineRow[], headersById: M
   });
 
   return lookup;
+}
+
+function buildVinosmithPriceLookup(prices: VinosmithPriceRow[]) {
+  const lookup = new Map<string, VinosmithPriceRow[]>();
+
+  prices.forEach((price) => {
+    const key = priceIdentityKey(price.wine_id, price.label, integerOrNull(price.price_cents));
+    if (!key) return;
+    const existing = lookup.get(key) || [];
+    existing.push(price);
+    lookup.set(key, existing);
+  });
+
+  return lookup;
+}
+
+function matchVinosmithPrice(
+  line: VinosmithOrderLineRow,
+  priceById: Map<string, VinosmithPriceRow>,
+  priceByLineIdentity: Map<string, VinosmithPriceRow[]>
+):
+  | { status: "matched"; method: "price_id" | "wine_label_price"; price: VinosmithPriceRow }
+  | { status: "ambiguous" | "missing" } {
+  if (line.price_id) {
+    const price = priceById.get(line.price_id);
+    if (price) return { status: "matched", method: "price_id", price };
+  }
+
+  const key = priceIdentityKey(line.wine_id, line.price_label, integerOrNull(line.price_cents));
+  const candidates = key ? priceByLineIdentity.get(key) || [] : [];
+  if (candidates.length === 1) return { status: "matched", method: "wine_label_price", price: candidates[0] };
+
+  const activeCandidates = candidates.filter((price) => price.active !== false && price.disabled !== true);
+  if (activeCandidates.length === 1) return { status: "matched", method: "wine_label_price", price: activeCandidates[0] };
+  if (candidates.length > 1) return { status: "ambiguous" };
+  return { status: "missing" };
 }
 
 function findVinosmithMatch(
@@ -311,7 +358,7 @@ async function fetchVinosmithLines(supabase: ProofClient, supplierOrderIds: stri
       ...(await fetchAll<VinosmithOrderLineRow>((from, to) =>
         supabase
           .from("vinosmith_order_lines")
-          .select("line_item_id,supplier_order_id,wine_code,wine_name,quantity_bottles,price_cents,price_id,price_label,total_cents,discount,manual_price")
+          .select("line_item_id,supplier_order_id,wine_id,wine_code,wine_name,quantity_bottles,price_cents,price_id,price_label,total_cents,discount,manual_price")
           .in("supplier_order_id", chunk)
           .order("supplier_order_id", { ascending: true })
           .range(from, to)
@@ -322,14 +369,16 @@ async function fetchVinosmithLines(supabase: ProofClient, supplierOrderIds: stri
   return rows;
 }
 
-async function fetchVinosmithPrices(supabase: ProofClient, priceIds: string[]) {
+async function fetchVinosmithPricesForLines(supabase: ProofClient, lines: VinosmithOrderLineRow[]) {
+  const priceIds = unique(lines.map((row) => row.price_id || ""));
+  const wineIds = unique(lines.map((row) => row.wine_id || ""));
   const rows: VinosmithPriceRow[] = [];
-  for (const chunk of chunks(unique(priceIds), CHUNK_SIZE)) {
+  for (const chunk of chunks(priceIds, CHUNK_SIZE)) {
     rows.push(
       ...(await fetchAll<VinosmithPriceRow>((from, to) =>
         supabase
           .from("vinosmith_prices")
-          .select("price_id,price_cents,bill_back_price_cents,label,wine_id")
+          .select("price_id,price_cents,bill_back_price_cents,label,wine_id,active,disabled")
           .in("price_id", chunk)
           .order("price_id", { ascending: true })
           .range(from, to)
@@ -337,7 +386,20 @@ async function fetchVinosmithPrices(supabase: ProofClient, priceIds: string[]) {
       ))
     );
   }
-  return rows;
+  for (const chunk of chunks(wineIds, CHUNK_SIZE)) {
+    rows.push(
+      ...(await fetchAll<VinosmithPriceRow>((from, to) =>
+        supabase
+          .from("vinosmith_prices")
+          .select("price_id,price_cents,bill_back_price_cents,label,wine_id,active,disabled")
+          .in("wine_id", chunk)
+          .order("price_id", { ascending: true })
+          .range(from, to)
+          .returns<VinosmithPriceRow[]>()
+      ))
+    );
+  }
+  return Array.from(new Map(rows.map((row) => [row.price_id, row])).values());
 }
 
 async function fetchAll<Row>(
@@ -358,6 +420,13 @@ async function fetchAll<Row>(
 function keyFor(invoiceNumber: string, itemKey: string, quantity: number | null, cents: number | null, mode: string) {
   if (!invoiceNumber || !itemKey || quantity === null) return "";
   return [invoiceNumber, itemKey, quantity.toFixed(4), mode, cents === null ? "" : String(cents)].join("|");
+}
+
+function priceIdentityKey(wineId: string | null | undefined, label: string | null | undefined, priceCents: number | null) {
+  const normalizedWineId = normalizeKey(wineId);
+  const normalizedLabel = normalizeKey(label);
+  if (!normalizedWineId || !normalizedLabel || priceCents === null) return "";
+  return [normalizedWineId, normalizedLabel, String(priceCents)].join("|");
 }
 
 function itemKeys(value: string | null | undefined) {
