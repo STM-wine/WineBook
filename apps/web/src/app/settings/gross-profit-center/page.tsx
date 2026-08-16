@@ -1,6 +1,7 @@
 import { AccountPending, getAppContext } from "@/lib/auth";
 import { buildGrossProfitWorkflowProof } from "@/lib/supabase/gross-profit-center";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { unstable_cache } from "next/cache";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -240,16 +241,47 @@ function validDate(value: string | undefined) {
 async function loadGrossProfitProof(dateFrom: string, dateTo: string) {
   try {
     return {
-      proof: await buildGrossProfitWorkflowProof(createServiceRoleClient(), dateFrom, dateTo, {
-        includeLines: false,
-        lineLimit: 0
-      })
+      proof: await cachedGrossProfitProof(dateFrom, dateTo)
     };
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : "Could not load Gross Profit Center proof."
     };
   }
+}
+
+async function cachedGrossProfitProof(dateFrom: string, dateTo: string) {
+  return unstable_cache(
+    () =>
+      buildGrossProfitProofWithRetry(dateFrom, dateTo, {
+        includeLines: false,
+        lineLimit: 0
+      }),
+    ["gross-profit-center-proof", dateFrom, dateTo],
+    { revalidate: 300 }
+  )();
+}
+
+async function buildGrossProfitProofWithRetry(
+  dateFrom: string,
+  dateTo: string,
+  options: Parameters<typeof buildGrossProfitWorkflowProof>[3]
+) {
+  try {
+    return await buildGrossProfitWorkflowProof(createServiceRoleClient(), dateFrom, dateTo, options);
+  } catch (error) {
+    if (!isStatementTimeout(error)) throw error;
+    await sleep(500);
+    return buildGrossProfitWorkflowProof(createServiceRoleClient(), dateFrom, dateTo, options);
+  }
+}
+
+function isStatementTimeout(error: unknown) {
+  return error instanceof Error && error.message.toLowerCase().includes("statement timeout");
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function defaultDateRange() {

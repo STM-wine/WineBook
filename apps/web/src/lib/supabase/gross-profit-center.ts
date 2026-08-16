@@ -162,6 +162,7 @@ type PriceMatch =
 type BuildOptions = {
   includeLines?: boolean;
   lineLimit?: number;
+  includeVinosmithDeliveryRange?: boolean;
 };
 
 const PAGE_SIZE = 1000;
@@ -173,7 +174,7 @@ export async function buildGrossProfitWorkflowProof(
   dateTo: string,
   options: BuildOptions = {}
 ) {
-  const grossProfitCenter = await buildGrossProfitCenter(supabase, dateFrom, dateTo);
+  const grossProfitCenter = await buildGrossProfitCenter(supabase, dateFrom, dateTo, options);
   const positiveInvoiceLines = grossProfitCenter.lines.filter((line) => line.transactionType === "invoice" && money(line.qbGrossSales) > 0);
   const positiveInvoiceMatchedLines = positiveInvoiceLines.filter((line) => line.vinosmithLineMatchMethod !== "missing" && line.vinosmithLineMatchMethod !== "ambiguous");
   const positiveInvoiceSales = positiveInvoiceLines.reduce((sum, line) => sum + Math.max(0, money(line.qbGrossSales)), 0);
@@ -215,7 +216,12 @@ export async function buildGrossProfitWorkflowProof(
   };
 }
 
-export async function buildGrossProfitCenter(supabase: GrossProfitClient, dateFrom: string, dateTo: string) {
+export async function buildGrossProfitCenter(
+  supabase: GrossProfitClient,
+  dateFrom: string,
+  dateTo: string,
+  options: Pick<BuildOptions, "includeVinosmithDeliveryRange"> = {}
+) {
   const [quickBooksInvoices, quickBooksCreditMemos] = await Promise.all([
     fetchQuickBooksInvoices(supabase, dateFrom, dateTo),
     fetchQuickBooksCreditMemos(supabase, dateFrom, dateTo)
@@ -230,7 +236,7 @@ export async function buildGrossProfitCenter(supabase: GrossProfitClient, dateFr
   const invoiceRowsByTxnId = new Map([...quickBooksInvoices, ...linkedInvoices].map((row) => [row.txn_id, row]));
   const invoiceRefNumbers = unique([...quickBooksInvoices, ...linkedInvoices].map((row) => row.ref_number || ""));
   const [vinosmithHeadersInRange, vinosmithHeadersByInvoice, quickBooksItems] = await Promise.all([
-    fetchVinosmithOrderHeaders(supabase, dateFrom, dateTo),
+    options.includeVinosmithDeliveryRange ? fetchVinosmithOrderHeaders(supabase, dateFrom, dateTo) : Promise.resolve([]),
     fetchVinosmithOrderHeadersByInvoiceNumbers(supabase, invoiceRefNumbers),
     fetchQuickBooksItems(supabase, [...quickBooksInvoiceLines, ...quickBooksCreditMemoLines].map((row) => row.item_list_id || ""))
   ]);
@@ -626,7 +632,7 @@ async function fetchVinosmithOrderHeadersByInvoiceNumbers(supabase: GrossProfitC
           .from("vinosmith_order_headers")
           .select("supplier_order_id,invoice_number,account_name,delivery_at")
           .in("invoice_number", chunk)
-          .order("delivery_at", { ascending: true })
+          .order("invoice_number", { ascending: true })
           .order("supplier_order_id", { ascending: true })
           .range(from, to)
           .returns<VinosmithOrderHeaderRow[]>()
