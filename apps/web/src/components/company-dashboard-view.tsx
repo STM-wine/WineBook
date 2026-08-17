@@ -22,6 +22,12 @@ const percent = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1
 });
 
+const percentOneDecimal = new Intl.NumberFormat("en-US", {
+  style: "percent",
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
+});
+
 const number = new Intl.NumberFormat("en-US");
 
 const RANGE_PLACEHOLDER = "- Choose -";
@@ -366,7 +372,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         <DashboardMetric
           label={`${compactScopedPeriodLabel} Samples`}
           value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : currency.format(data.summary.sampleCost)}
-          detail={`${formatPercent(sampleCostRate)} of net sales`}
+          detail={`${formatPercentOneDecimal(sampleCostRate)} of net sales`}
           meta="Landed sample cost"
           helpText="Samples as a percent of net sales is landed sample cost divided by QuickBooks net sales for the selected date range. Landed sample cost is quantity pulled multiplied by QuickBooks FOB plus Supplier Logistics laid-in cost."
         />
@@ -1020,6 +1026,10 @@ function formatSignedPoints(value: number | null) {
 
 function formatPercent(value: number | null) {
   return value === null ? "-" : percent.format(value);
+}
+
+function formatPercentOneDecimal(value: number | null) {
+  return value === null ? "-" : percentOneDecimal.format(value);
 }
 
 function formatRowProfitPercent(row: QuickBooksSalesSummaryRow, showProfitLoading?: boolean) {
