@@ -4655,6 +4655,13 @@ tr.has-recommendation .sticky-name {
   overflow: auto;
 }
 
+.company-account-table thead th {
+  background: var(--surface-soft);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
 .company-sort-button,
 .company-drilldown-button {
   background: transparent;
