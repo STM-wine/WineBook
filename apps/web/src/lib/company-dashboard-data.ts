@@ -6,6 +6,7 @@ import { fetchQuickBooksSalesDashboardData } from "@/lib/supabase/quickbooks-sal
 import type { QuickBooksSalesSummaryRow } from "@/lib/quickbooks-sales-types";
 
 export type CompanyDashboardPeriod = "previous-day" | "mtd" | "ytd" | "custom";
+export type CompanyDashboardBusinessLine = "all" | "stem" | "grw";
 
 export type CompanyDashboardSummary = {
   grossSales: number;
@@ -26,14 +27,22 @@ export type CompanyDashboardComparison = {
   summary: CompanyDashboardSummary;
 };
 
+export type CompanyDashboardBusinessLineSummary = CompanyDashboardSummary & {
+  key: Exclude<CompanyDashboardBusinessLine, "all">;
+  label: string;
+  salesShare: number;
+};
+
 export type CompanyDashboardData = {
   generatedAt: string;
   period: CompanyDashboardPeriod;
   periodLabel: string;
+  businessLine: CompanyDashboardBusinessLine;
   dateFrom: string;
   dateTo: string;
   summary: CompanyDashboardSummary;
   comparison: CompanyDashboardComparison | null;
+  businessLineSummaries: CompanyDashboardBusinessLineSummary[];
   byRep: QuickBooksSalesSummaryRow[];
   byAccount: QuickBooksSalesSummaryRow[];
   selectedRep: string | null;
@@ -45,7 +54,7 @@ const DASHBOARD_TIME_ZONE = "America/Phoenix";
 export async function fetchCompanyDashboardData(
   supabase: SupabaseClient,
   period: CompanyDashboardPeriod = "mtd",
-  filters: { dateFrom?: string; dateTo?: string; rep?: string; includeGrossProfit?: boolean } = {}
+  filters: { dateFrom?: string; dateTo?: string; rep?: string; includeGrossProfit?: boolean; businessLine?: string } = {}
 ): Promise<CompanyDashboardData> {
   const range =
     filters.dateFrom && filters.dateTo
@@ -53,16 +62,18 @@ export async function fetchCompanyDashboardData(
       : rangeForPeriod(period);
   const comparisonRange = !filters.rep ? lastYearSameRange(range) : null;
   const includeGrossProfit = filters.includeGrossProfit !== false;
+  const businessLine = parseCompanyDashboardBusinessLine(filters.businessLine);
 
   const [current, comparison] = await Promise.all([
-    fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit }),
-    comparisonRange ? fetchPeriodDashboardData(supabase, comparisonRange, undefined, { includeGrossProfit }) : Promise.resolve(null)
+    fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit, businessLine }),
+    comparisonRange ? fetchPeriodDashboardData(supabase, comparisonRange, undefined, { includeGrossProfit, businessLine }) : Promise.resolve(null)
   ]);
 
   return {
     generatedAt: new Date().toISOString(),
     period,
     periodLabel: periodLabel(period),
+    businessLine,
     dateFrom: range.from,
     dateTo: range.to,
     summary: current.summary,
@@ -74,6 +85,7 @@ export async function fetchCompanyDashboardData(
           summary: comparison.summary
         }
       : null,
+    businessLineSummaries: current.businessLineSummaries,
     byRep: current.byRep,
     byAccount: current.byAccount,
     selectedRep: cleanFilter(filters.rep) || null,
@@ -84,7 +96,7 @@ export async function fetchCompanyDashboardData(
 export function unavailableCompanyDashboardData(
   reason: string,
   period: CompanyDashboardPeriod = "mtd",
-  filters: { dateFrom?: string; dateTo?: string; rep?: string } = {}
+  filters: { dateFrom?: string; dateTo?: string; rep?: string; businessLine?: string } = {}
 ): CompanyDashboardData {
   const range =
     filters.dateFrom && filters.dateTo
@@ -107,6 +119,7 @@ export function unavailableCompanyDashboardData(
     generatedAt: new Date().toISOString(),
     period,
     periodLabel: periodLabel(period),
+    businessLine: parseCompanyDashboardBusinessLine(filters.businessLine),
     dateFrom: range.from,
     dateTo: range.to,
     summary: emptySummary,
@@ -116,8 +129,9 @@ export function unavailableCompanyDashboardData(
           dateFrom: comparisonRange.from,
           dateTo: comparisonRange.to,
           summary: emptySummary
-        }
+      }
       : null,
+    businessLineSummaries: emptyBusinessLineSummaries(),
     byRep: [],
     byAccount: [],
     selectedRep: cleanFilter(filters.rep) || null,
@@ -129,8 +143,9 @@ async function fetchPeriodDashboardData(
   supabase: SupabaseClient,
   range: { from: string; to: string },
   rep?: string,
-  options: { includeGrossProfit?: boolean } = {}
+  options: { includeGrossProfit?: boolean; businessLine?: CompanyDashboardBusinessLine } = {}
 ) {
+  const businessLine = options.businessLine || "all";
   const sales = await fetchQuickBooksSalesDashboardData(supabase, {
     dateFrom: range.from,
     dateTo: range.to,
@@ -140,11 +155,22 @@ async function fetchPeriodDashboardData(
   });
   const grossProfit = options.includeGrossProfit === false
     ? emptyGrossProfitRollups()
-    : await fetchGrossProfitRollups(supabase, range, rep);
+    : await fetchGrossProfitRollups(supabase, range, rep, businessLine);
+
+  if (options.includeGrossProfit !== false && !grossProfit.unavailableReason) {
+    return {
+      byRep: grossProfit.byRepRows,
+      byAccount: grossProfit.byAccountRows,
+      businessLineSummaries: grossProfit.businessLineSummaries,
+      unavailableReason: sales.unavailableReason || null,
+      summary: grossProfit.summary
+    };
+  }
 
   return {
     byRep: mergeGrossProfitRows(sales.byRep, grossProfit.byRep),
     byAccount: mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount),
+    businessLineSummaries: grossProfit.businessLineSummaries,
     unavailableReason: sales.unavailableReason || null,
     summary: {
       grossSales: sales.invoiceSales,
@@ -161,26 +187,47 @@ async function fetchPeriodDashboardData(
 }
 
 type GrossProfitRollup = {
-  grossSales: number;
+  invoiceSales: number;
+  creditMemos: number;
+  netSales: number;
+  invoiceCount: number;
+  creditMemoCount: number;
   grossProfit: number | null;
   grossProfitPercent: number | null;
 };
 
+type MutableGrossProfitRollup = GrossProfitRollup & {
+  invoiceTxnIds: Set<string>;
+  creditMemoTxnIds: Set<string>;
+};
+
 type GrossProfitRollups = {
-  summary: GrossProfitRollup;
+  summary: CompanyDashboardSummary;
   byRep: Map<string, GrossProfitRollup>;
   byAccount: Map<string, GrossProfitRollup>;
+  byRepRows: QuickBooksSalesSummaryRow[];
+  byAccountRows: QuickBooksSalesSummaryRow[];
+  businessLineSummaries: CompanyDashboardBusinessLineSummary[];
   unavailableReason: string | null;
 };
 
-async function fetchGrossProfitRollups(supabase: SupabaseClient, range: { from: string; to: string }, rep?: string): Promise<GrossProfitRollups> {
+async function fetchGrossProfitRollups(
+  supabase: SupabaseClient,
+  range: { from: string; to: string },
+  rep?: string,
+  businessLine: CompanyDashboardBusinessLine = "all"
+): Promise<GrossProfitRollups> {
   try {
     const grossProfitCenter = await buildGrossProfitCenterWithRetry(supabase, range);
-    const filteredLines = filterGrossProfitLines(grossProfitCenter.lines, rep);
+    const repFilteredLines = filterGrossProfitLines(grossProfitCenter.lines, rep);
+    const filteredLines = filterGrossProfitLinesByBusinessLine(repFilteredLines, businessLine);
     return {
       summary: summarizeGrossProfitLines(filteredLines),
       byRep: rollupGrossProfitLines(filteredLines, (line) => cleanLabel(line.salesRep, "Unassigned Rep")),
       byAccount: rollupGrossProfitLines(filteredLines, (line) => cleanLabel(line.customerFullName, "Unknown Account")),
+      byRepRows: rollupSalesRows(filteredLines, (line) => cleanLabel(line.salesRep, "Unassigned Rep")),
+      byAccountRows: rollupSalesRows(filteredLines, (line) => cleanLabel(line.customerFullName, "Unknown Account")),
+      businessLineSummaries: summarizeBusinessLineSplits(repFilteredLines),
       unavailableReason: null
     };
   } catch (error) {
@@ -193,9 +240,12 @@ async function fetchGrossProfitRollups(supabase: SupabaseClient, range: { from: 
 
 function emptyGrossProfitRollups(): GrossProfitRollups {
   return {
-    summary: { grossSales: 0, grossProfit: null, grossProfitPercent: null },
+    summary: emptySummary(null),
     byRep: new Map(),
     byAccount: new Map(),
+    byRepRows: [],
+    byAccountRows: [],
+    businessLineSummaries: emptyBusinessLineSummaries(),
     unavailableReason: null
   };
 }
@@ -216,27 +266,134 @@ function filterGrossProfitLines(lines: GrossProfitCenterLine[], rep?: string) {
   return lines.filter((line) => cleanLabel(line.salesRep, "Unassigned Rep") === repFilter);
 }
 
+function filterGrossProfitLinesByBusinessLine(lines: GrossProfitCenterLine[], businessLine: CompanyDashboardBusinessLine) {
+  if (businessLine === "all") return lines;
+  return lines.filter((line) => classifyBusinessLine(line) === businessLine);
+}
+
 function rollupGrossProfitLines(lines: GrossProfitCenterLine[], labelForLine: (line: GrossProfitCenterLine) => string) {
-  const rollups = new Map<string, GrossProfitRollup>();
+  const rollups = new Map<string, MutableGrossProfitRollup>();
   for (const line of lines) {
     const label = labelForLine(line);
     const key = rowKey(label);
-    const current = rollups.get(key) || { grossSales: 0, grossProfit: 0, grossProfitPercent: null };
-    current.grossSales += money(line.qbGrossSales);
-    current.grossProfit = money(current.grossProfit) + money(line.grossProfit);
-    current.grossProfitPercent = marginPct(current.grossProfit, current.grossSales);
+    const current = rollups.get(key) || emptyLineRollup();
+    addLineToRollup(current, line);
     rollups.set(key, current);
   }
   return rollups;
 }
 
 function summarizeGrossProfitLines(lines: GrossProfitCenterLine[]) {
-  const grossSales = lines.reduce((sum, line) => sum + money(line.qbGrossSales), 0);
-  const grossProfit = lines.reduce((sum, line) => sum + money(line.grossProfit), 0);
+  const rollup = rollupLines(lines);
+  const grossProfit = rollup.grossProfit ?? 0;
   return {
-    grossSales,
+    grossSales: rollup.invoiceSales,
+    credits: rollup.creditMemos,
+    netSales: rollup.netSales,
+    invoiceCount: rollup.invoiceCount,
+    creditMemoCount: rollup.creditMemoCount,
+    averageInvoice: rollup.invoiceCount > 0 ? rollup.invoiceSales / rollup.invoiceCount : 0,
     grossProfit,
-    grossProfitPercent: marginPct(grossProfit, grossSales)
+    grossProfitPercent: marginPct(grossProfit, rollup.netSales),
+    grossProfitUnavailableReason: null
+  };
+}
+
+function rollupSalesRows(lines: GrossProfitCenterLine[], labelForLine: (line: GrossProfitCenterLine) => string) {
+  const rollups = new Map<string, { label: string; rollup: MutableGrossProfitRollup }>();
+  for (const line of lines) {
+    const label = labelForLine(line);
+    const key = rowKey(label);
+    const current = rollups.get(key) || { label, rollup: emptyLineRollup() };
+    addLineToRollup(current.rollup, line);
+    rollups.set(key, current);
+  }
+  return Array.from(rollups.entries())
+    .map(([key, { label, rollup }]) => salesRowFromRollup(key, label, rollup))
+    .sort((a, b) => Math.abs(b.netSales) - Math.abs(a.netSales));
+}
+
+function summarizeBusinessLineSplits(lines: GrossProfitCenterLine[]): CompanyDashboardBusinessLineSummary[] {
+  const allRollup = rollupLines(lines);
+  const stemRollup = rollupLines(lines.filter((line) => classifyBusinessLine(line) === "stem"));
+  const grwRollup = rollupLines(lines.filter((line) => classifyBusinessLine(line) === "grw"));
+  return [
+    businessLineSummary("stem", "Stem Core", stemRollup, allRollup.netSales),
+    businessLineSummary("grw", "GRW Broker", grwRollup, allRollup.netSales)
+  ];
+}
+
+function businessLineSummary(
+  key: Exclude<CompanyDashboardBusinessLine, "all">,
+  label: string,
+  rollup: MutableGrossProfitRollup,
+  totalNetSales: number
+): CompanyDashboardBusinessLineSummary {
+  const grossProfit = rollup.grossProfit ?? 0;
+  return {
+    key,
+    label,
+    grossSales: rollup.invoiceSales,
+    credits: rollup.creditMemos,
+    netSales: rollup.netSales,
+    invoiceCount: rollup.invoiceCount,
+    creditMemoCount: rollup.creditMemoCount,
+    averageInvoice: rollup.invoiceCount > 0 ? rollup.invoiceSales / rollup.invoiceCount : 0,
+    grossProfit,
+    grossProfitPercent: marginPct(grossProfit, rollup.netSales),
+    grossProfitUnavailableReason: null,
+    salesShare: totalNetSales === 0 ? 0 : rollup.netSales / totalNetSales
+  };
+}
+
+function rollupLines(lines: GrossProfitCenterLine[]) {
+  const rollup = emptyLineRollup();
+  lines.forEach((line) => addLineToRollup(rollup, line));
+  return rollup;
+}
+
+function emptyLineRollup(): MutableGrossProfitRollup {
+  return {
+    invoiceSales: 0,
+    creditMemos: 0,
+    netSales: 0,
+    invoiceCount: 0,
+    creditMemoCount: 0,
+    grossProfit: 0,
+    grossProfitPercent: null,
+    invoiceTxnIds: new Set(),
+    creditMemoTxnIds: new Set()
+  };
+}
+
+function addLineToRollup(rollup: MutableGrossProfitRollup, line: GrossProfitCenterLine) {
+  const amount = money(line.qbGrossSales);
+  if (line.transactionType === "invoice") {
+    rollup.invoiceSales += amount;
+    if (line.transactionId) rollup.invoiceTxnIds.add(line.transactionId);
+  } else {
+    rollup.creditMemos += Math.abs(amount);
+    if (line.transactionId) rollup.creditMemoTxnIds.add(line.transactionId);
+  }
+  rollup.netSales += amount;
+  rollup.invoiceCount = rollup.invoiceTxnIds.size;
+  rollup.creditMemoCount = rollup.creditMemoTxnIds.size;
+  rollup.grossProfit = money(rollup.grossProfit) + money(line.grossProfit);
+  rollup.grossProfitPercent = marginPct(rollup.grossProfit, rollup.netSales);
+}
+
+function salesRowFromRollup(key: string, label: string, rollup: GrossProfitRollup): QuickBooksSalesSummaryRow {
+  return {
+    key,
+    label,
+    invoiceSales: rollup.invoiceSales,
+    creditMemos: rollup.creditMemos,
+    netSales: rollup.netSales,
+    invoiceCount: rollup.invoiceCount,
+    creditMemoCount: rollup.creditMemoCount,
+    creditMemoRate: rollup.invoiceSales > 0 ? rollup.creditMemos / rollup.invoiceSales : 0,
+    grossProfit: rollup.grossProfit,
+    grossProfitPercent: rollup.grossProfitPercent
   };
 }
 
@@ -251,6 +408,27 @@ function mergeGrossProfitRows(rows: QuickBooksSalesSummaryRow[], rollups: Map<st
   });
 }
 
+function emptyBusinessLineSummaries(): CompanyDashboardBusinessLineSummary[] {
+  return [
+    { key: "stem", label: "Stem Core", salesShare: 0, ...emptySummary(null) },
+    { key: "grw", label: "GRW Broker", salesShare: 0, ...emptySummary(null) }
+  ];
+}
+
+function emptySummary(reason: string | null): CompanyDashboardSummary {
+  return {
+    grossSales: 0,
+    credits: 0,
+    netSales: 0,
+    invoiceCount: 0,
+    creditMemoCount: 0,
+    averageInvoice: 0,
+    grossProfit: null,
+    grossProfitPercent: null,
+    grossProfitUnavailableReason: reason
+  };
+}
+
 function rowKey(label: string) {
   return label.trim().toLowerCase();
 }
@@ -258,6 +436,28 @@ function rowKey(label: string) {
 function cleanLabel(value: string | null | undefined, fallback: string) {
   const text = value?.trim();
   return text || fallback;
+}
+
+function classifyBusinessLine(line: GrossProfitCenterLine): Exclude<CompanyDashboardBusinessLine, "all"> {
+  if (isGrwCode(line.vinosmithWineCode)) return "grw";
+  if (isGrwCode(line.itemFullName)) return "grw";
+  if (isGrwCode(line.description)) return "grw";
+  if (normalizeBusinessLineCue(line.vinosmithImporterName) === "grw") return "grw";
+  return "stem";
+}
+
+function isGrwCode(value: string | null | undefined) {
+  const cue = normalizeBusinessLineCue(value);
+  if (!cue) return false;
+  return cue
+    .split(/[:/\\|\-_\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .some((part) => part.startsWith("grw"));
+}
+
+function normalizeBusinessLineCue(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
 }
 
 function money(value: number | null | undefined) {
@@ -281,6 +481,11 @@ export function parseCompanyDashboardPeriod(value: string | null): CompanyDashbo
   if (value === "yesterday") return "previous-day";
   if (value === "previous-day" || value === "ytd" || value === "custom") return value;
   return "mtd";
+}
+
+export function parseCompanyDashboardBusinessLine(value: string | null | undefined): CompanyDashboardBusinessLine {
+  if (value === "stem" || value === "grw") return value;
+  return "all";
 }
 
 function rangeForPeriod(period: CompanyDashboardPeriod) {

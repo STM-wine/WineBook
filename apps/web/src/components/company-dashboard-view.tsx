@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { WineLoadingProgress } from "@/components/wine-loading-progress";
-import type { CompanyDashboardData, CompanyDashboardPeriod } from "@/lib/company-dashboard-data";
+import type { CompanyDashboardBusinessLine, CompanyDashboardData, CompanyDashboardPeriod } from "@/lib/company-dashboard-data";
 import type { QuickBooksSalesSummaryRow } from "@/lib/quickbooks-sales-types";
 
 type CompanyDashboardViewProps = {
@@ -87,6 +87,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const [selectedRangeLabel, setSelectedRangeLabel] = useState<DateRangeLabel>(labelForInitialPeriod(initialData.period));
   const [dateFrom, setDateFrom] = useState(initialData.dateFrom);
   const [dateTo, setDateTo] = useState(initialData.dateTo);
+  const [selectedBusinessLine, setSelectedBusinessLine] = useState<CompanyDashboardBusinessLine>(initialData.businessLine);
   const [selectedRep, setSelectedRep] = useState<string | null>(null);
   const [accountData, setAccountData] = useState<CompanyDashboardData>(initialData);
   const [repSort, setRepSort] = useState<SortState>({ key: "net", direction: "desc" });
@@ -95,11 +96,12 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const [isProfitLoading, setIsProfitLoading] = useState(false);
   const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const activeKey = activePeriod === "custom" ? customKey(dateFrom, dateTo) : activePeriod;
+  const activeKey = cacheKeyFor(activePeriod, dateFrom, dateTo, selectedBusinessLine);
   const data = dataByPeriod[activeKey] || initialData;
   const displayPeriodLabel = selectedRangeLabel === RANGE_PLACEHOLDER || selectedRangeLabel === CUSTOM_RANGE_LABEL
     ? data.periodLabel
     : selectedRangeLabel;
+  const scopedPeriodLabel = data.businessLine === "all" ? displayPeriodLabel : `${displayPeriodLabel} ${businessLineLabel(data.businessLine)}`;
   const comparison = data.comparison;
   const netSalesDelta = comparison ? data.summary.netSales - comparison.summary.netSales : null;
   const netSalesDeltaRate = comparison ? changeRate(data.summary.netSales, comparison.summary.netSales) : null;
@@ -125,7 +127,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
     const preset = dateRangeForLabel(rangeLabel);
     const nextPeriod = preset.period || "custom";
-    const nextKey = preset.period || customKey(preset.dateFrom, preset.dateTo);
+    const nextKey = cacheKeyFor(nextPeriod, preset.dateFrom, preset.dateTo, selectedBusinessLine);
     setActivePeriod(nextPeriod);
     setDateFrom(preset.dateFrom);
     setDateTo(preset.dateTo);
@@ -144,17 +146,19 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
     setIsLoading(true);
     try {
+      const requiresProfit = selectedBusinessLine !== "all";
       const dashboardData = await loadCompanyDashboard({
         dateFrom: preset.period ? undefined : preset.dateFrom,
         dateTo: preset.period ? undefined : preset.dateTo,
         period: preset.period,
-        includeProfit: false
+        includeProfit: requiresProfit,
+        businessLine: selectedBusinessLine
       });
       setDateFrom(dashboardData.dateFrom);
       setDateTo(dashboardData.dateTo);
       setAccountData(dashboardData);
-      setDataByPeriod((current) => ({ ...current, [nextKey]: dashboardData }));
-      void hydrateProfit(dashboardData);
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+      if (!requiresProfit) void hydrateProfit(dashboardData);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not load company dashboard.");
     } finally {
@@ -167,7 +171,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setSelectedRangeLabel(CUSTOM_RANGE_LABEL);
     setSelectedRep(null);
     setErrorMessage("");
-    const key = customKey(dateFrom, dateTo);
+    const key = cacheKeyFor("custom", dateFrom, dateTo, selectedBusinessLine);
     if (dataByPeriod[key]) {
       setAccountData(dataByPeriod[key]);
       if (dataByPeriod[key].summary.grossProfitPercent === null) {
@@ -178,10 +182,16 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
     setIsLoading(true);
     try {
-      const dashboardData = await loadCompanyDashboard({ dateFrom, dateTo, includeProfit: false });
+      const requiresProfit = selectedBusinessLine !== "all";
+      const dashboardData = await loadCompanyDashboard({
+        dateFrom,
+        dateTo,
+        includeProfit: requiresProfit,
+        businessLine: selectedBusinessLine
+      });
       setAccountData(dashboardData);
-      setDataByPeriod((current) => ({ ...current, [key]: dashboardData }));
-      void hydrateProfit(dashboardData);
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+      if (!requiresProfit) void hydrateProfit(dashboardData);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not load company dashboard.");
     } finally {
@@ -198,7 +208,8 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         period: activePeriod === "custom" ? undefined : activePeriod,
         dateFrom: data.dateFrom,
         dateTo: data.dateTo,
-        rep: row.label
+        rep: row.label,
+        businessLine: selectedBusinessLine
       });
       setAccountData(drilldownData);
     } catch (error) {
@@ -213,6 +224,42 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setAccountData(data);
   }
 
+  async function selectBusinessLine(nextBusinessLine: CompanyDashboardBusinessLine) {
+    if (nextBusinessLine === selectedBusinessLine) return;
+    setSelectedBusinessLine(nextBusinessLine);
+    setSelectedRep(null);
+    setErrorMessage("");
+
+    const key = cacheKeyFor(activePeriod, dateFrom, dateTo, nextBusinessLine);
+    const cachedData = dataByPeriod[key];
+    if (cachedData) {
+      setAccountData(cachedData);
+      if (cachedData.summary.grossProfitPercent === null) {
+        void hydrateProfit(cachedData);
+      }
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const dashboardData = await loadCompanyDashboard({
+        dateFrom: activePeriod === "custom" ? dateFrom : undefined,
+        dateTo: activePeriod === "custom" ? dateTo : undefined,
+        period: activePeriod === "custom" ? undefined : activePeriod,
+        includeProfit: true,
+        businessLine: nextBusinessLine
+      });
+      setDateFrom(dashboardData.dateFrom);
+      setDateTo(dashboardData.dateTo);
+      setAccountData(dashboardData);
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load business line.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   async function hydrateProfit(baseData: CompanyDashboardData) {
     if (baseData.selectedRep) return;
     setIsProfitLoading(true);
@@ -221,7 +268,8 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         dateFrom: baseData.period === "custom" ? baseData.dateFrom : undefined,
         dateTo: baseData.period === "custom" ? baseData.dateTo : undefined,
         period: baseData.period === "custom" ? undefined : baseData.period,
-        includeProfit: true
+        includeProfit: true,
+        businessLine: baseData.businessLine
       });
       setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
       setAccountData((current) =>
@@ -244,6 +292,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
               dateTo={dateTo}
               isLoading={isLoading}
               onApplyCustomRange={applyCustomRange}
+              onSelectBusinessLine={selectBusinessLine}
               onDateFromChange={(value) => {
                 setSelectedRangeLabel(CUSTOM_RANGE_LABEL);
                 setDateFrom(value);
@@ -253,6 +302,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                 setDateTo(value);
               }}
               onSelectDateRange={selectDateRange}
+              selectedBusinessLine={selectedBusinessLine}
               selectedRangeLabel={selectedRangeLabel}
             />,
             topbarControlTarget
@@ -272,7 +322,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
       <div className="company-kpi-grid">
         <DashboardMetric
-          label={`${displayPeriodLabel} Sales`}
+          label={`${scopedPeriodLabel} Sales`}
           value={currency.format(data.summary.netSales)}
           detail={`Gross ${currency.format(data.summary.grossSales)} / Net ${currency.format(data.summary.netSales)}`}
           meta={`${number.format(data.summary.invoiceCount)} invoices, ${number.format(data.summary.creditMemoCount)} credits`}
@@ -286,7 +336,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
           helpText="Compares current QuickBooks net sales against the same date range last year."
         />
         <DashboardMetric
-          label={`${displayPeriodLabel} GP %`}
+          label={`${scopedPeriodLabel} GP %`}
           value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : formatPercent(data.summary.grossProfitPercent)}
           detail={
             isProfitLoading && data.summary.grossProfit === null
@@ -296,7 +346,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                 : `${currency.format(data.summary.grossProfit)} gross profit`
           }
           meta={isProfitLoading && data.summary.grossProfitPercent === null ? "Background calculation running" : data.summary.grossProfitUnavailableReason || "QuickBooks + Vinosmith cost basis"}
-          helpText="Gross profit uses QuickBooks sales lines and current QuickBooks item cost. When Vinosmith order and price data can be matched, Vinosmith billbacks reduce effective cost. Sample and zero-dollar lines are currently included in this economic GP view."
+          helpText="Gross profit uses QuickBooks sales lines, current QuickBooks item FOB cost, and the Stem laid-in per bottle from Supplier Logistics. When Vinosmith order and price data can be matched, Vinosmith billbacks reduce effective cost."
         />
         <DashboardMetric
           label={comparison ? gpComparisonLabel(data.period) : "GP Trend"}
@@ -309,20 +359,27 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                 : "Comparison unavailable"
           }
           tone={toneFor(gpDelta)}
-          helpText="Compares this period's GP percentage against the same date range last year using the same QuickBooks plus Vinosmith gross-profit method."
+          helpText="Compares this period's GP percentage against the same date range last year using the same QuickBooks cost, Supplier Logistics laid-in, and Vinosmith billback method."
         />
         <DashboardMetric
-          label={`${displayPeriodLabel} Avg Invoice`}
+          label={`${scopedPeriodLabel} Avg Invoice`}
           value={currency.format(data.summary.averageInvoice)}
           detail={`${number.format(data.summary.invoiceCount)} invoice basis`}
           helpText="Average invoice is QuickBooks gross invoice sales divided by the number of QuickBooks invoices in the selected range. Credit memos are not included in this average."
         />
       </div>
 
+      <BusinessLineSplit
+        activeBusinessLine={selectedBusinessLine}
+        isLoading={isProfitLoading || isLoading}
+        rows={data.businessLineSummaries}
+        onSelectBusinessLine={selectBusinessLine}
+      />
+
       <section className="company-dashboard-panel">
         <div className="panel-heading-row">
           <div>
-            <h2>{displayPeriodLabel} Sales by Rep</h2>
+            <h2>{scopedPeriodLabel} Sales by Rep</h2>
             <p>Click a rep to drill into account sales.</p>
           </div>
           {isLoading ? <span className="data-pill">Loading</span> : null}
@@ -369,7 +426,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       <section className="company-dashboard-panel">
         <div className="panel-heading-row">
           <div>
-            <h2>{selectedRep ? `${selectedRep} Account Summary` : `${displayPeriodLabel} Account Summary`}</h2>
+            <h2>{selectedRep ? `${selectedRep} Account Summary` : `${scopedPeriodLabel} Account Summary`}</h2>
             <p>{selectedRep ? "Filtered from the selected rep." : "Company account sales, descending by net sales."}</p>
           </div>
           <div className="company-panel-actions">
@@ -426,22 +483,39 @@ function DashboardDateControls({
   dateTo,
   isLoading,
   onApplyCustomRange,
+  onSelectBusinessLine,
   onDateFromChange,
   onDateToChange,
   onSelectDateRange,
+  selectedBusinessLine,
   selectedRangeLabel
 }: {
   dateFrom: string;
   dateTo: string;
   isLoading: boolean;
   onApplyCustomRange: () => void;
+  onSelectBusinessLine: (businessLine: CompanyDashboardBusinessLine) => void;
   onDateFromChange: (value: string) => void;
   onDateToChange: (value: string) => void;
   onSelectDateRange: (rangeLabel: DateRangeLabel) => void;
+  selectedBusinessLine: CompanyDashboardBusinessLine;
   selectedRangeLabel: DateRangeLabel;
 }) {
   return (
     <div className="company-dashboard-controls">
+      <select
+        aria-label="Revenue center"
+        className="company-revenue-select"
+        disabled={isLoading}
+        onChange={(event) => void onSelectBusinessLine(event.target.value as CompanyDashboardBusinessLine)}
+        value={selectedBusinessLine}
+      >
+        {(["all", "stem", "grw"] as const).map((businessLine) => (
+          <option key={businessLine} value={businessLine}>
+            {revenueCenterOptionLabel(businessLine)}
+          </option>
+        ))}
+      </select>
       <div className="company-date-controls" aria-label="Custom date range">
         <select
           aria-label="Date range preset"
@@ -473,6 +547,47 @@ function DashboardDateControls({
         </button>
       </div>
     </div>
+  );
+}
+
+function BusinessLineSplit({
+  activeBusinessLine,
+  isLoading,
+  onSelectBusinessLine,
+  rows
+}: {
+  activeBusinessLine: CompanyDashboardBusinessLine;
+  isLoading: boolean;
+  onSelectBusinessLine: (businessLine: CompanyDashboardBusinessLine) => void;
+  rows: CompanyDashboardData["businessLineSummaries"];
+}) {
+  const totalNetSales = rows.reduce((sum, row) => sum + row.netSales, 0);
+  return (
+    <section className="business-line-split" aria-label="Business line split">
+      <div className="business-line-split-header">
+        <div>
+          <h2>Business Line Split</h2>
+          <p>Stem Core vs GRW Broker</p>
+        </div>
+      </div>
+      <div className="business-line-split-rows">
+        {rows.map((row) => (
+          <button
+            key={row.key}
+            className={activeBusinessLine === row.key ? "business-line-row active" : "business-line-row"}
+            disabled={isLoading}
+            onClick={() => void onSelectBusinessLine(row.key)}
+            type="button"
+          >
+            <span>{row.label}</span>
+            <strong>{isLoading && totalNetSales === 0 ? "Calculating..." : currency.format(row.netSales)}</strong>
+            <small>
+              GP {formatPercent(row.grossProfitPercent)} · Share {percent.format(row.salesShare)}
+            </small>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -574,12 +689,14 @@ function SummaryRow({
 }
 
 async function loadCompanyDashboard({
+  businessLine,
   dateFrom,
   dateTo,
   includeProfit,
   period,
   rep
 }: {
+  businessLine?: CompanyDashboardBusinessLine;
   dateFrom?: string;
   dateTo?: string;
   includeProfit?: boolean;
@@ -594,6 +711,7 @@ async function loadCompanyDashboard({
     params.set("period", period);
   }
   if (includeProfit === false) params.set("includeProfit", "false");
+  if (businessLine && businessLine !== "all") params.set("businessLine", businessLine);
   if (rep) params.set("rep", rep);
   const response = await fetch(`/api/company-dashboard?${params.toString()}`);
   const result = (await response.json()) as CompanyDashboardData | { error?: string };
@@ -604,7 +722,17 @@ async function loadCompanyDashboard({
 }
 
 function cacheKey(data: CompanyDashboardData) {
-  return data.period === "custom" ? customKey(data.dateFrom, data.dateTo) : data.period;
+  return cacheKeyFor(data.period, data.dateFrom, data.dateTo, data.businessLine);
+}
+
+function cacheKeyFor(
+  period: CompanyDashboardPeriod,
+  dateFrom: string,
+  dateTo: string,
+  businessLine: CompanyDashboardBusinessLine
+) {
+  const rangeKey = period === "custom" ? customKey(dateFrom, dateTo) : period;
+  return `${businessLine}:${rangeKey}`;
 }
 
 function customKey(dateFrom: string, dateTo: string) {
@@ -893,4 +1021,16 @@ function formatDateTime(value: string) {
   }).formatToParts(date);
   const part = (type: string) => parts.find((entry) => entry.type === type)?.value || "";
   return `${part("month")} ${part("day")}, ${part("hour")}:${part("minute")} ${part("dayPeriod")}`;
+}
+
+function businessLineLabel(businessLine: CompanyDashboardBusinessLine) {
+  if (businessLine === "grw") return "GRW";
+  if (businessLine === "stem") return "Stem";
+  return "All";
+}
+
+function revenueCenterOptionLabel(businessLine: CompanyDashboardBusinessLine) {
+  if (businessLine === "grw") return "GRW Broker";
+  if (businessLine === "stem") return "Stem Core";
+  return "All Revenue";
 }

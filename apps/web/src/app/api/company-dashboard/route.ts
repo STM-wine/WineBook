@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
       dateFrom,
       dateTo,
       rep: cleanParam(params.get("rep")),
+      businessLine: cleanParam(params.get("businessLine")),
       includeGrossProfit: params.get("includeProfit") !== "false"
     });
     return noStoreJson(data);

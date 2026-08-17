@@ -84,6 +84,7 @@ type VinosmithPriceRow = {
 
 type VinosmithWineCostRow = {
   wine_id: string;
+  importer_name: string | null;
   fob_price: number | string | null;
   stem_laid_in_per_bottle: number | string | null;
   stem_laid_in_source: string | null;
@@ -135,6 +136,7 @@ export type GrossProfitCenterLine = {
   vinosmithWineId: string | null;
   vinosmithWineCode: string | null;
   vinosmithWineName: string | null;
+  vinosmithImporterName: string | null;
   vinosmithPriceId: string | null;
   vinosmithPriceLabel: string | null;
   vinosmithSoldPriceCents: number | null;
@@ -398,6 +400,7 @@ function buildGrossProfitCenterLine({
     vinosmithWineId: matchedLine?.wine_id || null,
     vinosmithWineCode: matchedLine?.wine_code || null,
     vinosmithWineName: matchedLine?.wine_name || null,
+    vinosmithImporterName: vinosmithWine?.importer_name || null,
     vinosmithPriceId: matchedLine?.price_id || price?.price_id || null,
     vinosmithPriceLabel: matchedLine?.price_label || price?.label || null,
     vinosmithSoldPriceCents: integerOrNull(matchedLine?.price_cents),
@@ -737,7 +740,7 @@ async function fetchVinosmithWineCostChunk(
   wineIds: string[],
   includeStemLaidIn: boolean
 ): Promise<VinosmithWineCostRow[]> {
-  const selectColumns = includeStemLaidIn ? "wine_id,fob_price,stem_laid_in_per_bottle,stem_laid_in_source" : "wine_id,fob_price";
+  const selectColumns = includeStemLaidIn ? "wine_id,importer_name,fob_price,stem_laid_in_per_bottle,stem_laid_in_source" : "wine_id,importer_name,fob_price";
   const { data, error } = await supabase
     .from("vinosmith_wines")
     .select(selectColumns)
@@ -748,6 +751,7 @@ async function fetchVinosmithWineCostChunk(
   if (!error) {
     return (data || []).map((row) => ({
       wine_id: row.wine_id,
+      importer_name: row.importer_name,
       fob_price: row.fob_price,
       stem_laid_in_per_bottle: includeStemLaidIn ? row.stem_laid_in_per_bottle : 0,
       stem_laid_in_source: includeStemLaidIn ? row.stem_laid_in_source : null
