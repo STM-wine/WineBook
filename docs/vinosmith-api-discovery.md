@@ -12,7 +12,8 @@ apply to Stem, and the Vinosmith RADs endpoint represents a Supplier entity that
 not exposed to Distributor accounts. This spike therefore does not call winery or
 RADs endpoints.
 
-The relevant read-only Distributor endpoints are:
+The relevant read-only Distributor endpoints used by the current WineBook rescue
+worker are:
 
 | Purpose | Endpoint |
 | --- | --- |
@@ -24,13 +25,33 @@ The relevant read-only Distributor endpoints are:
 Authentication is `Authorization: Bearer <token>`. The token must be loaded only
 from the ignored repository-root `.env.local`.
 
+The Vinosmith API documentation now also exposes Distributor write endpoints for
+some objects. Those writes are not implemented in WineBook yet and should be
+added behind explicit review, dry-run, and audit logging:
+
+| Purpose | Endpoint | WineBook posture |
+| --- | --- | --- |
+| Product field updates | `PUT /api/distributor/wines/{wine_id}` | Candidate for safe metadata sync. |
+| Price create/update/delete batch | `POST /api/distributor/prices` | Best first write-back candidate for reviewed price levels. |
+| Inventory quantity update | `POST /api/distributor/wines/{wine_id}/inventory/{warehouse_id}` | Avoid while QuickBooks is source of truth. |
+| Account updates | `PUT /api/distributor/accounts/{account_id}` | Possible, but out of current ordering scope. |
+| Account contact updates | `PUT /api/distributor/account_contacts/{contact_id}` | Possible, but out of current ordering scope. |
+| Producer updates | `PUT /api/distributor/producers/{representation_producer_id}` | Possible, but out of current ordering scope. |
+| Vendor updates | `PUT /api/distributor/vendors/{vendor_id}` | Possible, but out of current ordering scope. |
+
+No allocation create/update API endpoint was visible in the Vinosmith API index as
+of August 17, 2026. Allocation write-back should therefore be treated as an
+Excel-import workflow unless Vinosmith confirms a hidden or future API endpoint.
+
 ## Safety
 
-- GET requests only.
+- Existing rescue/discovery scripts send GET requests only.
 - No production behavior changes.
 - No token output, logging, hardcoding, or committed secrets.
 - Raw successful responses are stored only in ignored `tmp/vinosmith/`.
 - The existing emailed RB6/RADs workflow remains the production source and fallback.
+- Any future Vinosmith write-back must be implemented separately from the rescue
+  worker, with explicit user approval before sending writes to Vinosmith.
 
 ## Discovery command
 
@@ -259,6 +280,115 @@ supplier, vintage, pack/bottle size, available/on-hand/on-order inventory, FOB,
 Core, active/orderable, external ID, and category. BTG, laid-in cost, and exact
 unconfirmed-quantity semantics are missing or uncertain.
 
+## Allocation import workflow
+
+Vinosmith does not currently expose a documented Distributor API endpoint for
+creating or updating allocations, but the Vinosmith UI supports importing
+allocations from Excel at `Products / Allocations / Import`. This is a strong
+candidate for a WineBook **Allocation Manager**: WineBook can plan allocations,
+validate the required Vinosmith identifiers, and export the exact `.xlsx` upload
+file for a user to import into Vinosmith.
+
+The Vinosmith import screen states that the header row is required and allocation
+data starts on row 2. Required or contextual columns must be present; additional
+columns are ignored by the importer and may exist only for reference.
+
+### Upload semantics from Vinosmith
+
+- `Allocation ID` is optional/contextual. It must be blank when creating a new
+  allocation. When editing an existing allocation, it must contain the existing
+  allocation's unique numeric ID.
+- `Type` is required and must be `live` or `presale`. If omitted, Vinosmith
+  defaults to `live`.
+- `Sales Rep Email` is required and must be the sales rep email for the
+  allocation.
+- `Account Name or Code` is contextual:
+  - For account allocations, provide either the name or code of an existing
+    Vinosmith account.
+  - For corporate group allocations, use the exact value `corporate-group`, then
+    provide `Corporate Account Group Name`.
+  - For sales-rep-level allocations without an account, use the exact value
+    `sales-rep`.
+- `Corporate Account Group Name` is contextual and must match an existing
+  corporate group by name when the allocation is corporate-group based.
+- `Warehouse Code` is required and must match an existing Vinosmith warehouse
+  code.
+- `Wine Code` is required and must match the Vinosmith product/wine code.
+- `Starting Quantity` is required and is the final desired allocation quantity,
+  not a differential adjustment.
+- `Notes` is optional.
+- `Notify Sales Rep?` is optional. During creation, the value `yes` sends a
+  notification email to `Sales Rep Email`.
+- `Delete Me` is optional on the Vinosmith import screen. If the value is exactly
+  `delete me` and an existing allocation is found by `Allocation ID`, Vinosmith
+  permanently deletes that allocation. The downloaded template inspected on
+  August 17, 2026 did not include this column, so WineBook should add it only if
+  a delete workflow is intentionally supported and tested.
+
+### Excel template observed
+
+The downloaded template `/Users/markyaeger/Downloads/allocations-template-3.xlsx`
+and sample export `/Users/markyaeger/Downloads/allocations-19.xlsx` both contain a
+single sheet named `Allocations` with these 24 columns:
+
+| Column | Header | Allocation Manager treatment |
+| ---: | --- | --- |
+| 1 | `Allocation ID` | Blank for create; required for update/delete. |
+| 2 | `Type` | Required; `live` or `presale`. |
+| 3 | `Start Date` | Include when known; sample uses `MM/DD/YYYY`. |
+| 4 | `Sales Rep Email` | Required. |
+| 5 | `Account Name or Code` | Contextual account/corporate-group/sales-rep target. |
+| 6 | `Account Owner Emails` | Reference/export context; populate when available. |
+| 7 | `Corporate Account Group Name` | Contextual for corporate-group allocations. |
+| 8 | `Wine` | Reference product display name; populate from Vinosmith catalog. |
+| 9 | `Wine Code` | Required product key. |
+| 10 | `Wine Vintage` | Reference/export context; populate when available. |
+| 11 | `Producer` | Reference/export context; populate when available. |
+| 12 | `Wine: Vendor` | Reference/export context; populate when available. |
+| 13 | `Warehouse Name` | Reference/export context; sample uses `STEM`. |
+| 14 | `Warehouse Code` | Required warehouse key; sample uses `STM`. |
+| 15 | `Starting Quantity` | Required final allocation amount. |
+| 16 | `Current Quantity` | Existing/export context; for new allocations usually match starting quantity or leave blank after testing. |
+| 17 | `Expiration Date` | Include when the allocation should expire; sample uses `MM/DD/YYYY`. |
+| 18 | `Last Used At` | Existing/export context; leave blank for new allocations. |
+| 19 | `Completed` | Existing/export context; leave blank for new allocations. |
+| 20 | `Completion Style` | Existing/export context; leave blank unless editing a known allocation. |
+| 21 | `Approved?` | Existing/export context; sample stores a date. Confirm before writing. |
+| 22 | `Notes` | Optional free text. |
+| 23 | `Default Price` | Reference/export context; useful for review, not required by screenshot. |
+| 24 | `Notify Sales Rep?` | Optional; use `yes` only when notification is intended. |
+
+Sample exported allocation rows contained Vinosmith allocation IDs, `live` type,
+sales rep email, account name, wine code, warehouse code `STM`, starting/current
+quantity, expiration date, and default price. Product names in the sample used
+non-breaking spaces, so exports should preserve Vinosmith names from the API/cache
+instead of reconstructing names from normalized text when possible.
+
+### Allocation Manager design implication
+
+WineBook can save significant manual effort without direct API allocation writes:
+
+1. Pull Vinosmith products, accounts, users/sales reps, warehouses, existing
+   allocation exports, and prices into local cache where available.
+2. Let the buyer build allocation drafts by wine, account/corporate group/sales
+   rep, warehouse, quantity, start/expiration dates, notes, and notification
+   preference.
+3. Validate every draft before export:
+   - wine code exists and is orderable/active as appropriate;
+   - warehouse code exists;
+   - sales rep email exists;
+   - account name/code or corporate group name resolves;
+   - allocation ID is blank for create and present for update/delete;
+   - starting quantity is numeric and represents the final allocation target.
+4. Export a Vinosmith-compatible `.xlsx` with sheet `Allocations`, the exact
+   header row above, and data beginning on row 2.
+5. Keep an audit record of the generated file, source draft rows, user, timestamp,
+   and intended action so imported allocation changes can be traced later.
+
+The first implementation should support create/update exports only. Delete exports
+should remain disabled until the `Delete Me` column behavior is tested against a
+known non-production allocation or confirmed by Vinosmith.
+
 ## Recommended sync architecture
 
 Vinosmith should feed a local database/cache. The application and ordering
@@ -406,6 +536,9 @@ the preferred join to catalog, prices, and inventory; wine code is the fallback.
 7. Is laid-in cost available through another Distributor endpoint?
 8. Is historical-at-sale FOB available, or is `wines[].fob_price` only the current
    value?
+9. Is there a Distributor API endpoint for creating, updating, deleting, or
+   listing allocations, or should allocations remain an Excel import/export
+   workflow?
 
 ### Final readiness note
 

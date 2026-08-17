@@ -268,22 +268,275 @@ validation against Stem's product version and company-file population.
    metadata?
 12. Do Desktop quantities and financial totals match Vinosmith and emailed reports
     for the same windows?
+13. Can a controlled Stem write queue create one disposable QuickBooks item, read it
+    back by `ListID`, and then stop without changing any ordering behavior?
+14. Which exact chart-of-account, vendor, tax-code, and unit-of-measure references
+    are required for Stem wine items in the live company file?
 
 ## Official references
 
 - [Get started with QuickBooks Web Connector](https://developer.intuit.com/app/developer/qbdesktop/docs/get-started/get-started-with-quickbooks-web-connector)
 - [QuickBooks Desktop SDK](https://developer.intuit.com/app/developer/qbdesktop/docs/get-started)
 - [Connections, sessions, and authorizations](https://developer.intuit.com/app/developer/qbdesktop/docs/develop/connections-sessions-and-authorizations)
+- [AccountQuery](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/accountquery)
 - [CustomerQuery](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/customerquery)
 - [InvoiceQuery](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/invoicequery)
 - [ItemQuery](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/itemquery)
+- [ItemInventoryAdd](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/iteminventoryadd)
 - [ItemInventoryQuery](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/iteminventoryquery)
+- [ItemNonInventoryAdd](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/itemnoninventoryadd)
+- [UnitOfMeasureSetQuery](https://developer.intuit.com/app/developer/qbdesktop/docs/api-reference/qbdesktop/unitofmeasuresetquery)
 - [QuickBooks Web Connector Programmer's Guide](https://static.developer.intuit.com/qbSDK-current/doc/pdf/QBWC_proguide.pdf)
 
 ## Recommended implementation phases
 
 This is the recommended delivery plan for Junaid. Each phase should be reviewed and
 accepted before work begins on the next phase.
+
+## QuickBooks item creation write discovery
+
+Stem's current QuickBooks Web Connector service is intentionally read-only. The
+server-side client rejects any qbXML request whose type ends in `AddRq`, `ModRq`,
+or `DelRq`, and the Web Connector handler calls that guard before sending a request
+to QuickBooks. The placeholder `createWineInQuickBooks()` also intentionally
+throws. New item creation therefore requires a separate, explicit write path rather
+than loosening the current read-only recovery queue.
+
+The business loop worth proving is:
+
+1. WineBook creates a reviewed new-item candidate.
+2. A controlled QuickBooks write queue sends one `ItemInventoryAddRq` for a
+   disposable/test item.
+3. QuickBooks returns `ItemInventoryRet` with `ListID`, `EditSequence`, `Name`,
+   and `FullName`.
+4. WineBook records the write request, response, actor, approval, and resulting
+   QuickBooks identity.
+5. A subsequent `ItemQueryRq` reads the item back and confirms that the local
+   `quickbooks_items` mirror sees the same official item.
+6. Only after that proof should WineBook test the Vinosmith side: product mapping,
+   price write-back, and allocation Excel export.
+
+This proof can be done before ordering logic changes. It should not change Order
+Review, PO Drafts, recommendation quantities, or exports.
+
+### Likely qbXML request
+
+Most Stem products appear to behave like inventory items in the current QuickBooks
+mirror: the `quickbooks_items` table stores quantity, average cost, purchase cost,
+sales price, income account, COGS account, and asset account fields. The first
+write proof should therefore target `ItemInventoryAddRq`, not a purchase order and
+not a Vinosmith write.
+
+Representative qbXML shape:
+
+```xml
+<?xml version="1.0"?>
+<?qbxml version="16.0"?>
+<QBXML>
+  <QBXMLMsgsRq onError="stopOnError">
+    <ItemInventoryAddRq requestID="stem-item-create-test-001">
+      <ItemInventoryAdd>
+        <Name>STEM API TEST 2026-08-17</Name>
+        <IsActive>true</IsActive>
+        <SalesDesc>STEM API TEST - DO NOT SELL</SalesDesc>
+        <SalesPrice>1.00</SalesPrice>
+        <IncomeAccountRef>
+          <ListID>CONFIRMED_INCOME_ACCOUNT_LIST_ID</ListID>
+        </IncomeAccountRef>
+        <PurchaseDesc>STEM API TEST - DO NOT BUY</PurchaseDesc>
+        <PurchaseCost>1.00</PurchaseCost>
+        <COGSAccountRef>
+          <ListID>CONFIRMED_COGS_ACCOUNT_LIST_ID</ListID>
+        </COGSAccountRef>
+        <PrefVendorRef>
+          <ListID>CONFIRMED_TEST_VENDOR_LIST_ID</ListID>
+        </PrefVendorRef>
+        <AssetAccountRef>
+          <ListID>CONFIRMED_INVENTORY_ASSET_ACCOUNT_LIST_ID</ListID>
+        </AssetAccountRef>
+        <QuantityOnHand>0</QuantityOnHand>
+        <TotalValue>0</TotalValue>
+        <InventoryDate>2026-08-17</InventoryDate>
+        <ExternalGUID>{PUT-A-STEM-GENERATED-GUID-HERE}</ExternalGUID>
+      </ItemInventoryAdd>
+      <IncludeRetElement>ListID</IncludeRetElement>
+      <IncludeRetElement>EditSequence</IncludeRetElement>
+      <IncludeRetElement>Name</IncludeRetElement>
+      <IncludeRetElement>FullName</IncludeRetElement>
+      <IncludeRetElement>IsActive</IncludeRetElement>
+      <IncludeRetElement>SalesPrice</IncludeRetElement>
+      <IncludeRetElement>PurchaseCost</IncludeRetElement>
+    </ItemInventoryAddRq>
+  </QBXMLMsgsRq>
+</QBXML>
+```
+
+Important notes:
+
+- `Name` is the core required identifier in the Intuit `ItemInventoryAdd`
+  reference. For Stem, the app should also require accounting refs even when qbXML
+  marks some of them optional, because missing or defaulted accounts are an
+  accounting risk.
+- Use `ListID` for account/vendor refs after querying the live company file.
+  `FullName` can work, but `ListID` avoids name ambiguity and rename drift.
+- Do not create opening inventory by accident. Test items should use
+  `QuantityOnHand = 0`, `TotalValue = 0`, and a known `InventoryDate`.
+- If Stem later creates a real item that already has inventory on hand outside
+  QuickBooks, accounting must decide whether opening quantity/value belongs in the
+  item add request or in a separate inventory adjustment. Intuit's inventory docs
+  distinguish creating an item with starting quantity/value from creating a zero
+  item and later increasing inventory through purchasing activity.
+- `ExternalGUID` is available on item add requests in modern qbXML. Use a
+  Stem-generated GUID for idempotency/traceability, but do not rely on it as the
+  only duplicate guard until tested in the live Desktop file.
+- Avoid colons in the item `Name` during tests because colons represent hierarchy
+  in QuickBooks full names.
+
+### Required preflight discovery
+
+Before any `ItemInventoryAddRq`, run/read the following from QuickBooks and store
+the selected refs in a locked configuration table or env-backed setting:
+
+| Needed ref | Discovery request | Required decision |
+| --- | --- | --- |
+| Income account | `AccountQueryRq` filtered to `Income` | Which sales/income account should new wine items use? |
+| COGS account | `AccountQueryRq` filtered to `CostOfGoodsSold` | Which COGS account should inventory items use? |
+| Inventory asset account | `AccountQueryRq` filtered to `OtherCurrentAsset`, `OtherAsset`, or `FixedAsset`, or by known full name/special account | Which inventory asset account should hold item value? |
+| Preferred vendor | `VendorQueryRq` with active vendors | Should the preferred vendor be the supplier/importer, a test vendor, or blank? |
+| Sales tax code | Existing item samples plus sales-tax-code query if needed | Which code should taxable/non-taxable wine items use? |
+| Unit of measure | `UnitOfMeasureSetQueryRq` if UOM is enabled | Whether Stem needs a UOM set for bottle/case behavior or should omit UOM in the first proof. |
+| Parent item/class | Existing item samples plus `ItemQueryRq`/class query if needed | Whether wine items sit under a parent/category in QuickBooks. |
+
+The current WineBook recovery queue already persists vendors and items, but it
+does not yet persist chart-of-account rows, tax codes, classes, or UOM sets as
+first-class tables. The write proof should add read-only discovery for the missing
+refs before enabling the item add request.
+
+### Read-only ref discovery from current mirror
+
+Read-only Supabase mirror inspection on August 17, 2026 found 8,756 mirrored
+QuickBooks items, including 2,156 active items. The latest persisted item pull was
+an `ItemQueryRq` page at `2026-08-15T15:27:19.916Z`, with QuickBooks status OK.
+
+Active item type counts:
+
+| Item type | Active rows |
+| --- | ---: |
+| `Inventory` | 2,127 |
+| `OtherCharge` | 15 |
+| `Service` | 7 |
+| `NonInventory` | 4 |
+| `FixedAsset` | 2 |
+| `SalesTax` | 1 |
+
+Most active inventory items use one of two account-ref groups:
+
+| Group | Active inventory rows | Income account | COGS account | Inventory asset account |
+| --- | ---: | --- | --- | --- |
+| Main Stem wine items | 1,720 | `Sales` / `80000008-1481823979` | `Cost of Goods Sold:Wine` / `8000004E-1482949059` | `Inventory Asset` / `80000042-1481827012` |
+| GRW brokerage items | 407 | `Brokerage Income - GRW` / `8000010C-1755131943` | `COGS - GRW` / `8000010D-1755131991` | `Inventory Asset - GRW` / `8000010E-1755132023` |
+
+The first QuickBooks item-create proof should use the **main Stem wine item**
+account group unless accounting specifically wants to test GRW brokerage items.
+Representative main Stem active inventory item names are SKU-like codes such as
+`ADR000001`, `AE000001`, and `ALH000002`; their stored parent refs are blank in
+the current mirror, so the first proof should not assume a parent item hierarchy.
+
+Current gaps:
+
+- `quickbooks_vendors` currently has 0 rows, and no recent `VendorQueryRq`
+  response was found in `source_api_responses`; preferred vendor cannot be chosen
+  from the mirror yet.
+- No `AccountQueryRq` response was found. The account refs above were inferred
+  from existing item rows and should be confirmed by an explicit account query
+  before writing.
+- No `UnitOfMeasureSetQueryRq` response was found. UOM should be omitted from the
+  first test item unless accounting confirms a required UOM set.
+- Sales tax code/class refs are not persisted as first-class discovery tables yet.
+
+Next read-only QBWC request set before any write proof:
+
+1. `AccountQueryRq` for `Income`, `CostOfGoodsSold`, `OtherCurrentAsset`,
+   `OtherAsset`, and `FixedAsset` accounts, to confirm the exact active account
+   refs above.
+2. `VendorQueryRq` for active vendors, to choose a test preferred vendor or decide
+   to omit `PrefVendorRef`.
+3. `UnitOfMeasureSetQueryRq`, to detect whether the company file has UOM enabled
+   and whether bottle/case UOM should ever be assigned by Stem.
+4. Sales-tax-code/class discovery if the first real item-create flow needs those
+   refs. They are not needed for the zero-quantity disposable item proof unless
+   accounting requires them.
+
+### Write-queue design
+
+Do not reuse the read-only recovery queue for writes. Add a separate queue/table
+with a narrow state machine:
+
+- `draft`: generated by WineBook but not approved.
+- `approved_for_test`: approved by an authorized user for one manual QBWC run.
+- `queued`: ready for the next manual Web Connector update.
+- `sent`: qbXML was returned from `sendRequestXML`.
+- `succeeded`: `ItemInventoryAddRs` returned OK and a `ListID` was parsed.
+- `failed`: QuickBooks returned an error or Web Connector failed.
+- `confirmed`: subsequent `ItemQueryRq` found the created item by `ListID`.
+- `cancelled`: intentionally abandoned before send.
+
+Each row should store actor, approval timestamp, source candidate ID, idempotency
+key/ExternalGUID, request XML checksum, response checksum, parsed status code,
+status message, returned `ListID`, returned `EditSequence`, returned `FullName`,
+and raw-response link. The queue should allow exactly one active write job during
+the first proof.
+
+The Web Connector handler should keep the existing read-only assertion for normal
+sessions. A write session should require all of the following:
+
+- explicit feature flag, disabled by default;
+- specific write-mode job ID;
+- manual QBWC run only, not auto-run;
+- authorized actor/approval attached to that job;
+- request type allowlist containing only `ItemInventoryAddRq` for the first proof;
+- one request per session;
+- no `ModRq` or `DelRq`;
+- no purchase orders, bills, item receipts, inventory adjustments, or invoice
+  writes in the item-create proof.
+
+### Test sequence
+
+1. Create or identify a safe QuickBooks test vendor and test account refs with
+   accounting's approval.
+2. Add read-only `AccountQueryRq` and optional `UnitOfMeasureSetQueryRq`
+   discovery, then select the exact refs for the test item.
+3. Build a local qbXML preview for one item named clearly as a test.
+4. Validate the XML shape locally with unit tests and, if available on the Windows
+   machine, Intuit's qbXML Validator/SDK tools.
+5. Queue one approved write job.
+6. Run Web Connector manually with Auto-Run disabled.
+7. Parse `ItemInventoryAddRs`; fail closed on any non-OK status.
+8. Immediately queue/read `ItemQueryRq` by returned `ListID`.
+9. Persist the confirmed item in `quickbooks_items` and link it to the original
+   WineBook candidate.
+10. Stop. Do not create additional items until the first proof is reviewed.
+
+### Decisions before real item creation
+
+- Should real wine items be `ItemInventoryAddRq`, `ItemNonInventoryAddRq`, or a
+  mix? Production data strongly suggests inventory items, but accounting should
+  confirm.
+- Which QuickBooks `Name` convention is authoritative: Stem SKU, Vinosmith wine
+  code, human wine name, or a parented full-name structure?
+- Should item `Name` ever change after creation, or should renames be blocked and
+  handled manually?
+- Which account refs should be defaulted, and are any supplier/category-specific?
+- Should preferred vendor be required?
+- Should sales price be written to QuickBooks, or should Vinosmith own active
+  selling prices while QuickBooks stores a placeholder/current item price?
+- Should purchase cost be FOB, current expected purchase cost, or left blank/zero
+  until first bill/PO?
+- Should initial quantity/value always be zero?
+- Should a Vinosmith product be created manually after QuickBooks item creation,
+  or can Vinosmith product update/linking consume the new QuickBooks item code?
+- What is the rollback policy for a bad test item: mark inactive manually, rename,
+  or leave as an audited test artifact?
 
 ## Initial Stem QBWC service skeleton
 
