@@ -193,6 +193,14 @@ function ProductWorkspaceTable({
       })
       .sort((a, b) => compareRows(a, b, sort.key, sort.direction));
   }, [data.rows, health, search, sort, statusFilter, supplier]);
+  const statusGapCount = useMemo(
+    () => data.rows.filter((row) => isLifecycleMismatch(row.statusKey)).length,
+    [data.rows]
+  );
+  const needsReviewCount = useMemo(
+    () => data.rows.filter((row) => row.sourceHealth === "needs_review").length,
+    [data.rows]
+  );
   const selectedRow = visibleRows.find((row) => row.id === selectedId) || visibleRows[0] || null;
 
   useEffect(() => {
@@ -211,8 +219,8 @@ function ProductWorkspaceTable({
   return (
     <>
       <section className="metric-grid product-workspace-metrics">
-        <MetricCard label="Status Gaps" value={formatSummaryCount(data.summary.lifecycleMismatches)} detail="QB and VS do not match" tone={data.summary.lifecycleMismatches ? "red" : "green"} />
-        <MetricCard label="Needs Review" value={formatSummaryCount(data.summary.needsReview)} detail="Missing core source data" tone={data.summary.needsReview ? "red" : "green"} />
+        <MetricCard label="Status Gaps" value={formatInteger(statusGapCount)} detail="QB and VS do not match" tone={statusGapCount ? "red" : "green"} />
+        <MetricCard label="Needs Review" value={formatInteger(needsReviewCount)} detail="Missing core source data" tone={needsReviewCount ? "red" : "green"} />
       </section>
 
       <section className="panel product-workspace-header">
@@ -454,10 +462,6 @@ function moneyOrDash(value: number | null) {
 
 function percentOrDash(value: number | null) {
   return value === null ? "-" : `${value.toFixed(1)}%`;
-}
-
-function formatSummaryCount(value: number | null | undefined) {
-  return formatInteger(asNumber(value));
 }
 
 function isLifecycleMismatch(statusKey: ProductWorkspaceStatusKey) {
