@@ -4397,8 +4397,8 @@ tr.has-recommendation .sticky-name {
 
 .company-kpi-grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(5, minmax(170px, 1fr));
+  gap: 10px;
+  grid-template-columns: repeat(6, minmax(145px, 1fr));
 }
 
 .company-kpi,
@@ -4410,10 +4410,10 @@ tr.has-recommendation .sticky-name {
 
 .company-kpi {
   display: grid;
-  gap: 9px;
-  grid-template-rows: 24px 36px 18px minmax(15px, auto);
-  min-height: 138px;
-  padding: 16px;
+  gap: 6px;
+  grid-template-rows: 22px 30px 17px minmax(14px, auto);
+  min-height: 112px;
+  padding: 12px 14px;
 }
 
 .company-kpi span {
@@ -4492,7 +4492,7 @@ tr.has-recommendation .sticky-name {
 .company-kpi strong {
   align-self: end;
   color: var(--ink);
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1.05;
   overflow-wrap: anywhere;
 }
@@ -4504,12 +4504,12 @@ tr.has-recommendation .sticky-name {
 }
 
 .company-kpi small {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 .company-kpi em {
-  font-size: 12px;
+  font-size: 11px;
   font-style: normal;
   line-height: 1.25;
 }

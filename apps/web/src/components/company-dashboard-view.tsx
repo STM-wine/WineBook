@@ -362,6 +362,13 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
           helpText="Compares this period's GP percentage against the same date range last year using the same QuickBooks cost, Supplier Logistics laid-in, and Vinosmith billback method."
         />
         <DashboardMetric
+          label={`${scopedPeriodLabel} Samples`}
+          value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : currency.format(data.summary.sampleCost)}
+          detail="Landed sample cost"
+          meta="Excluded from GP %"
+          helpText="Sample cost is quantity pulled multiplied by landed bottle cost: QuickBooks FOB plus Supplier Logistics laid-in cost. It includes sample, zero-dollar, and fully discounted lines for the selected date range, and is excluded from GP %."
+        />
+        <DashboardMetric
           label={`${scopedPeriodLabel} Avg Invoice`}
           value={currency.format(data.summary.averageInvoice)}
           detail={`${number.format(data.summary.invoiceCount)} invoice basis`}

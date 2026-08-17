@@ -15,6 +15,7 @@ export type CompanyDashboardSummary = {
   invoiceCount: number;
   creditMemoCount: number;
   averageInvoice: number;
+  sampleCost: number;
   grossProfit: number | null;
   grossProfitPercent: number | null;
   grossProfitUnavailableReason: string | null;
@@ -110,6 +111,7 @@ export function unavailableCompanyDashboardData(
     invoiceCount: 0,
     creditMemoCount: 0,
     averageInvoice: 0,
+    sampleCost: 0,
     grossProfit: null,
     grossProfitPercent: null,
     grossProfitUnavailableReason: reason
@@ -179,6 +181,7 @@ async function fetchPeriodDashboardData(
       invoiceCount: sales.invoiceCount,
       creditMemoCount: sales.creditMemoCount,
       averageInvoice: sales.invoiceCount > 0 ? sales.invoiceSales / sales.invoiceCount : 0,
+      sampleCost: grossProfit.summary.sampleCost,
       grossProfit: grossProfit.summary.grossProfit,
       grossProfitPercent: grossProfit.summary.grossProfitPercent,
       grossProfitUnavailableReason: grossProfit.unavailableReason
@@ -294,6 +297,7 @@ function summarizeGrossProfitLines(lines: GrossProfitCenterLine[]) {
     invoiceCount: rollup.invoiceCount,
     creditMemoCount: rollup.creditMemoCount,
     averageInvoice: rollup.invoiceCount > 0 ? rollup.invoiceSales / rollup.invoiceCount : 0,
+    sampleCost: rollup.sampleCost,
     grossProfit,
     grossProfitPercent: marginPct(grossProfit, rollup.netSales),
     grossProfitUnavailableReason: null
@@ -340,6 +344,7 @@ function businessLineSummary(
     invoiceCount: rollup.invoiceCount,
     creditMemoCount: rollup.creditMemoCount,
     averageInvoice: rollup.invoiceCount > 0 ? rollup.invoiceSales / rollup.invoiceCount : 0,
+    sampleCost: rollup.sampleCost,
     grossProfit,
     grossProfitPercent: marginPct(grossProfit, rollup.netSales),
     grossProfitUnavailableReason: null,
@@ -432,6 +437,7 @@ function emptySummary(reason: string | null): CompanyDashboardSummary {
     invoiceCount: 0,
     creditMemoCount: 0,
     averageInvoice: 0,
+    sampleCost: 0,
     grossProfit: null,
     grossProfitPercent: null,
     grossProfitUnavailableReason: reason
