@@ -328,7 +328,7 @@ function ProductWorkspaceTable({
                     <td title={row.laidInSource || "Missing Supplier Logistics laid-in"}>{moneyOrDash(row.laidIn)}</td>
                     <td>{moneyOrDash(row.frontline)}</td>
                     <td>{moneyOrDash(row.bestPrice)}</td>
-                    <td className={`gp-cell ${gpToneClass(row.lowestGpPercent)}`}>{percentOrDash(row.lowestGpPercent)}</td>
+                    <td className={`gp-cell ${gpToneClass(row)}`}>{percentOrDash(row.lowestGpPercent)}</td>
                     <td title={row.statusDetail}>{row.statusLabel}</td>
                     <td>
                       <span className={`source-health source-health-${row.sourceHealth}`}>{row.sourceHealthLabel}</span>
@@ -464,8 +464,10 @@ function percentOrDash(value: number | null) {
   return value === null ? "-" : `${value.toFixed(1)}%`;
 }
 
-function gpToneClass(value: number | null) {
+function gpToneClass(row: ProductWorkspaceRow) {
+  const value = row.lowestGpPercent;
   if (value === null) return "";
+  if (row.revenueCenter === "GRW Broker") return value < 8 ? "gp-cell-critical" : "";
   if (value < 26.5) return "gp-cell-critical";
   if (value < 28) return "gp-cell-warning";
   return "";
