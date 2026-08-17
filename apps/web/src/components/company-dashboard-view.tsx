@@ -512,6 +512,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                   key={row.key}
                   row={row}
                   selected={selectedRep === row.label}
+                  showSamples
                   showProfitLoading={isProfitLoading && row.grossProfitPercent == null}
                   onSelect={() => void selectRep(row)}
                 />
@@ -557,14 +558,6 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                   numeric
                   helpText="Calculated from QuickBooks sales lines using current QuickBooks item cost. Matched Vinosmith billbacks reduce effective cost where available."
                 />
-                <SortableHeader
-                  label="Samples"
-                  sortKey="samples"
-                  sort={accountSort}
-                  onSort={setAccountSort}
-                  numeric
-                  helpText="Landed cost of sample, zero-dollar, or fully discounted lines. Shown for manager visibility; excluded from GP %."
-                />
                 <SortableHeader label="Invoices" sortKey="invoices" sort={accountSort} onSort={setAccountSort} numeric />
               </tr>
             </thead>
@@ -591,7 +584,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
               ))}
               {accountRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>No accounts found for this period.</td>
+                  <td colSpan={6}>No accounts found for this period.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -785,11 +778,13 @@ function SummaryRow({
   onSelect,
   row,
   selected,
+  showSamples,
   showProfitLoading
 }: {
   onSelect?: () => void;
   row: QuickBooksSalesSummaryRow;
   selected?: boolean;
+  showSamples?: boolean;
   showProfitLoading?: boolean;
 }) {
   return (
@@ -807,7 +802,7 @@ function SummaryRow({
       <td className="numeric negative">{currency.format(row.creditMemos)}</td>
       <td className={row.netSales < 0 ? "numeric negative" : "numeric"}>{currency.format(row.netSales)}</td>
       <td className="numeric">{formatRowProfitPercent(row, showProfitLoading)}</td>
-      <td className="numeric">{formatSampleCost(row.sampleCost)}</td>
+      {showSamples ? <td className="numeric">{formatSampleCost(row.sampleCost)}</td> : null}
       <td className="numeric">{number.format(row.invoiceCount)}</td>
     </tr>
   );
@@ -833,7 +828,7 @@ function AccountInvoiceExpansion({
   const hasHitLimit = panel.transactions.length >= visibleLimit;
   return (
     <tr className="company-account-expanded-row">
-      <td colSpan={7}>
+      <td colSpan={6}>
         <div className="company-account-expansion">
           <div className="company-account-expansion-heading">
             <div>
