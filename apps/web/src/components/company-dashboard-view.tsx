@@ -36,7 +36,7 @@ const number = new Intl.NumberFormat("en-US");
 
 const RANGE_PLACEHOLDER = "- Choose -";
 const CUSTOM_RANGE_LABEL = "Custom";
-const MAX_AUTO_GROSS_PROFIT_DAYS = 45;
+const MAX_AUTO_GROSS_PROFIT_DAYS = 124;
 
 const DATE_RANGE_LABELS = [
   RANGE_PLACEHOLDER,
@@ -304,7 +304,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   async function selectBusinessLine(nextBusinessLine: CompanyDashboardBusinessLine) {
     if (nextBusinessLine === selectedBusinessLine) return;
     if (nextBusinessLine !== "all" && !canAutoLoadGrossProfit(dateFrom, dateTo)) {
-      setErrorMessage("Stem/GRW filtering needs a 45-day-or-less range for now.");
+      setErrorMessage("Stem/GRW filtering needs a trimester-or-less range for now.");
       return;
     }
     setSelectedBusinessLine(nextBusinessLine);
@@ -496,7 +496,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
             isProfitLoading && data.summary.grossProfit === null
               ? "Calculating GP from QB + VS"
               : !canAutoLoadGrossProfitForVisibleRange && data.summary.grossProfit === null
-                ? "Use 45 days or less for GP"
+                ? "Use a trimester or less for GP"
               : data.summary.grossProfit === null
                 ? "Gross profit unavailable"
                 : `${currency.format(data.summary.grossProfit)} gross profit`

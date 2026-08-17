@@ -4308,9 +4308,9 @@ tr.has-recommendation .sticky-name {
 .company-kpi {
   display: grid;
   gap: 5px;
-  grid-template-rows: minmax(24px, auto) 28px 17px minmax(14px, auto);
-  min-height: 106px;
-  padding: 11px 12px;
+  grid-template-rows: minmax(24px, auto) 30px minmax(18px, auto) minmax(16px, auto);
+  min-height: 122px;
+  padding: 12px;
 }
 
 .company-kpi span {
@@ -4408,7 +4408,7 @@ tr.has-recommendation .sticky-name {
 .company-kpi em {
   font-size: 11px;
   font-style: normal;
-  line-height: 1.25;
+  line-height: 1.3;
 }
 
 .company-kpi-up {
