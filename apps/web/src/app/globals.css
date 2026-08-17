@@ -1505,7 +1505,8 @@ td {
 }
 
 .product-workspace-metrics {
-  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  grid-template-columns: repeat(2, minmax(180px, 260px));
+  justify-content: start;
 }
 
 .product-workspace-header {

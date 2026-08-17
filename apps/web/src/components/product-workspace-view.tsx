@@ -211,11 +211,7 @@ function ProductWorkspaceTable({
   return (
     <>
       <section className="metric-grid product-workspace-metrics">
-        <MetricCard label="Visible Items" value={formatInteger(data.summary.visible)} detail={includeInactive ? "Active and inactive" : "Active plus status gaps"} tone="ink" />
-        <MetricCard label="Active" value={formatInteger(data.summary.active)} detail="QuickBooks active items" tone="green" />
-        <MetricCard label="Inactive" value={formatInteger(data.summary.inactive)} detail="Available when included" tone="gold" />
         <MetricCard label="Status Gaps" value={formatInteger(data.summary.lifecycleMismatches)} detail="QB and VS do not match" tone={data.summary.lifecycleMismatches ? "red" : "green"} />
-        <MetricCard label="Ready" value={formatInteger(data.summary.ready)} detail="Cost and price sources present" tone="blue" />
         <MetricCard label="Needs Review" value={formatInteger(data.summary.needsReview)} detail="Missing core source data" tone={data.summary.needsReview ? "red" : "green"} />
       </section>
 
