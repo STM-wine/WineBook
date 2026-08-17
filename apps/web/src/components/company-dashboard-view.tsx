@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { WineLoadingProgress } from "@/components/wine-loading-progress";
 import type { CompanyDashboardBusinessLine, CompanyDashboardData, CompanyDashboardPeriod } from "@/lib/company-dashboard-data";
-import type { QuickBooksSalesSummaryRow } from "@/lib/quickbooks-sales-types";
+import type {
+  QuickBooksSalesDashboardData,
+  QuickBooksSalesSummaryRow,
+  QuickBooksSalesTransactionRow
+} from "@/lib/quickbooks-sales-types";
 
 type CompanyDashboardViewProps = {
   initialData: CompanyDashboardData;
@@ -84,6 +88,21 @@ type SortState = {
   direction: "asc" | "desc";
 };
 
+type AccountInvoiceRangeMode = "month" | "full";
+
+type AccountInvoicePanelState = {
+  accountKey: string;
+  accountName: string;
+  row: QuickBooksSalesSummaryRow;
+  dateFrom: string;
+  dateTo: string;
+  mode: AccountInvoiceRangeMode;
+  transactions: QuickBooksSalesTransactionRow[];
+  transactionLimit: number;
+  isLoading: boolean;
+  error: string;
+};
+
 export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps) {
   const [topbarControlTarget, setTopbarControlTarget] = useState<HTMLElement | null>(null);
   const [dataByPeriod, setDataByPeriod] = useState<Record<string, CompanyDashboardData>>({
@@ -98,6 +117,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const [accountData, setAccountData] = useState<CompanyDashboardData>(initialData);
   const [repSort, setRepSort] = useState<SortState>({ key: "net", direction: "desc" });
   const [accountSort, setAccountSort] = useState<SortState>({ key: "net", direction: "desc" });
+  const [accountInvoicePanel, setAccountInvoicePanel] = useState<AccountInvoicePanelState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isProfitLoading, setIsProfitLoading] = useState(false);
   const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
@@ -140,6 +160,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setDateFrom(preset.dateFrom);
     setDateTo(preset.dateTo);
     setSelectedRep(null);
+    setAccountInvoicePanel(null);
     setErrorMessage("");
     const cachedData = dataByPeriod[nextKey];
     if (cachedData) {
@@ -178,6 +199,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setActivePeriod("custom");
     setSelectedRangeLabel(CUSTOM_RANGE_LABEL);
     setSelectedRep(null);
+    setAccountInvoicePanel(null);
     setErrorMessage("");
     const key = cacheKeyFor("custom", dateFrom, dateTo, selectedBusinessLine);
     if (dataByPeriod[key]) {
@@ -209,6 +231,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
   async function selectRep(row: QuickBooksSalesSummaryRow) {
     setSelectedRep(row.label);
+    setAccountInvoicePanel(null);
     setErrorMessage("");
     setIsDrilldownLoading(true);
     try {
@@ -230,12 +253,14 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   function clearRep() {
     setSelectedRep(null);
     setAccountData(data);
+    setAccountInvoicePanel(null);
   }
 
   async function selectBusinessLine(nextBusinessLine: CompanyDashboardBusinessLine) {
     if (nextBusinessLine === selectedBusinessLine) return;
     setSelectedBusinessLine(nextBusinessLine);
     setSelectedRep(null);
+    setAccountInvoicePanel(null);
     setErrorMessage("");
 
     const key = cacheKeyFor(activePeriod, dateFrom, dateTo, nextBusinessLine);
@@ -287,6 +312,61 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       setErrorMessage(error instanceof Error ? error.message : "Could not calculate gross profit.");
     } finally {
       setIsProfitLoading(false);
+    }
+  }
+
+  async function selectAccount(row: QuickBooksSalesSummaryRow) {
+    if (accountInvoicePanel?.accountKey === row.key && !accountInvoicePanel.isLoading) {
+      setAccountInvoicePanel(null);
+      return;
+    }
+
+    const range = latestMonthRangeWithin(data.dateFrom, data.dateTo);
+    await loadAccountInvoices(row, range, "month");
+  }
+
+  async function loadFullAccountRange() {
+    if (!accountInvoicePanel) return;
+    await loadAccountInvoices(accountInvoicePanel.row, { from: data.dateFrom, to: data.dateTo }, "full");
+  }
+
+  async function loadAccountInvoices(
+    row: QuickBooksSalesSummaryRow,
+    range: { from: string; to: string },
+    mode: AccountInvoiceRangeMode
+  ) {
+    const loadingState: AccountInvoicePanelState = {
+      accountKey: row.key,
+      accountName: row.label,
+      row,
+      dateFrom: range.from,
+      dateTo: range.to,
+      mode,
+      transactions: [],
+      transactionLimit: 300,
+      isLoading: true,
+      error: ""
+    };
+    setAccountInvoicePanel(loadingState);
+    try {
+      const transactionData = await loadAccountTransactions({
+        account: row.label,
+        dateFrom: range.from,
+        dateTo: range.to,
+        rep: selectedRep || undefined
+      });
+      setAccountInvoicePanel({
+        ...loadingState,
+        transactions: transactionData.transactions,
+        transactionLimit: transactionData.transactionLimit || transactionData.transactions.length,
+        isLoading: false
+      });
+    } catch (error) {
+      setAccountInvoicePanel({
+        ...loadingState,
+        isLoading: false,
+        error: error instanceof Error ? error.message : "Could not load account invoices."
+      });
     }
   }
 
@@ -490,11 +570,24 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
             </thead>
             <tbody>
               {accountRows.map((row) => (
-                <SummaryRow
-                  key={row.key}
-                  row={row}
-                  showProfitLoading={!selectedRep && isProfitLoading && row.grossProfitPercent == null}
-                />
+                <Fragment key={row.key}>
+                  <SummaryRow
+                    row={row}
+                    selected={accountInvoicePanel?.accountKey === row.key}
+                    showProfitLoading={!selectedRep && isProfitLoading && row.grossProfitPercent == null}
+                    onSelect={() => void selectAccount(row)}
+                  />
+                  {accountInvoicePanel?.accountKey === row.key ? (
+                    <AccountInvoiceExpansion
+                      businessLine={selectedBusinessLine}
+                      panel={accountInvoicePanel}
+                      selectedRange={{ from: data.dateFrom, to: data.dateTo }}
+                      selectedRep={selectedRep}
+                      onClose={() => setAccountInvoicePanel(null)}
+                      onLoadFullRange={() => void loadFullAccountRange()}
+                    />
+                  ) : null}
+                </Fragment>
               ))}
               {accountRows.length === 0 ? (
                 <tr>
@@ -720,6 +813,103 @@ function SummaryRow({
   );
 }
 
+function AccountInvoiceExpansion({
+  businessLine,
+  onClose,
+  onLoadFullRange,
+  panel,
+  selectedRange,
+  selectedRep
+}: {
+  businessLine: CompanyDashboardBusinessLine;
+  onClose: () => void;
+  onLoadFullRange: () => void;
+  panel: AccountInvoicePanelState;
+  selectedRange: { from: string; to: string };
+  selectedRep: string | null;
+}) {
+  const isFullSelectedRange = panel.dateFrom === selectedRange.from && panel.dateTo === selectedRange.to;
+  const visibleLimit = panel.transactionLimit || 300;
+  const hasHitLimit = panel.transactions.length >= visibleLimit;
+  return (
+    <tr className="company-account-expanded-row">
+      <td colSpan={7}>
+        <div className="company-account-expansion">
+          <div className="company-account-expansion-heading">
+            <div>
+              <h3>{panel.accountName}</h3>
+              <p>
+                {panel.mode === "month" && !isFullSelectedRange ? "Latest month loaded" : "Selected range loaded"} ·{" "}
+                {formatDateRange(panel.dateFrom, panel.dateTo)}
+                {selectedRep ? ` · ${selectedRep}` : ""}
+              </p>
+            </div>
+            <div className="company-panel-actions">
+              {!isFullSelectedRange ? (
+                <button className="button button-tiny button-outline" disabled={panel.isLoading} onClick={onLoadFullRange} type="button">
+                  Load full selected range
+                </button>
+              ) : null}
+              <button className="button button-tiny button-outline" onClick={onClose} type="button">
+                Minimize
+              </button>
+            </div>
+          </div>
+
+          {businessLine !== "all" ? (
+            <p className="company-account-expansion-note">
+              Invoice list is QuickBooks account activity for this account and date range. Business-line line filtering can be added in the account dashboard slice.
+            </p>
+          ) : null}
+          {hasHitLimit ? (
+            <p className="company-account-expansion-note">
+              Showing first {number.format(visibleLimit)} documents. Use the date controls above to narrow the range.
+            </p>
+          ) : null}
+          {panel.error ? <div className="status-card error">{panel.error}</div> : null}
+
+          <div className="table-scroll">
+            <table className="data-table company-account-invoice-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Number</th>
+                  <th>Rep</th>
+                  <th>Items</th>
+                  <th className="numeric">Sales</th>
+                </tr>
+              </thead>
+              <tbody>
+                {panel.isLoading ? (
+                  <tr>
+                    <td colSpan={6}>Loading invoices...</td>
+                  </tr>
+                ) : null}
+                {!panel.isLoading && panel.transactions.map((transaction) => (
+                  <tr key={`${transaction.type}-${transaction.id}`}>
+                    <td>{formatDate(transaction.salesDate || transaction.txnDate)}</td>
+                    <td>{documentTypeLabel(transaction.type)}</td>
+                    <td>{transaction.refNumber || "-"}</td>
+                    <td>{transaction.rep}</td>
+                    <td>{formatTransactionItems(transaction.items)}</td>
+                    <td className={transaction.amount < 0 ? "numeric negative" : "numeric"}>{currency.format(transaction.amount)}</td>
+                  </tr>
+                ))}
+                {!panel.isLoading && panel.transactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>No invoices found for this account and date range.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 async function loadCompanyDashboard({
   businessLine,
   dateFrom,
@@ -751,6 +941,33 @@ async function loadCompanyDashboard({
     throw new Error("error" in result && result.error ? result.error : "Could not load company dashboard.");
   }
   return result as CompanyDashboardData;
+}
+
+async function loadAccountTransactions({
+  account,
+  dateFrom,
+  dateTo,
+  rep
+}: {
+  account: string;
+  dateFrom: string;
+  dateTo: string;
+  rep?: string;
+}) {
+  const params = new URLSearchParams({
+    from: dateFrom,
+    to: dateTo,
+    type: "all",
+    account,
+    includeTransactions: "true"
+  });
+  if (rep) params.set("rep", rep);
+  const response = await fetch(`/api/sales-dashboard?${params.toString()}`);
+  const result = (await response.json()) as QuickBooksSalesDashboardData | { error?: string };
+  if (!response.ok || "error" in result) {
+    throw new Error("error" in result && result.error ? result.error : "Could not load account invoices.");
+  }
+  return result as QuickBooksSalesDashboardData;
 }
 
 function cacheKey(data: CompanyDashboardData) {
@@ -877,6 +1094,25 @@ function dateRangeForLabel(label: DateRangeLabel): { dateFrom: string; dateTo: s
 
 function isoRange(from: Date, to: Date) {
   return { dateFrom: toIsoDate(from), dateTo: toIsoDate(to) };
+}
+
+function latestMonthRangeWithin(dateFrom: string, dateTo: string) {
+  const toDate = parseIsoDate(dateTo);
+  if (!toDate) return { from: dateFrom, to: dateTo };
+  const monthStart = startOfMonth(toDate);
+  const monthEnd = endOfMonth(toDate);
+  const monthFrom = toIsoDate(monthStart);
+  const monthTo = toIsoDate(monthEnd);
+  return {
+    from: monthFrom > dateFrom ? monthFrom : dateFrom,
+    to: monthTo < dateTo ? monthTo : dateTo
+  };
+}
+
+function parseIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function startOfDay(date: Date) {
@@ -1035,6 +1271,17 @@ function formatPercentOneDecimal(value: number | null) {
 function formatRowProfitPercent(row: QuickBooksSalesSummaryRow, showProfitLoading?: boolean) {
   if (showProfitLoading) return "Calculating...";
   return row.grossProfitPercent === null || row.grossProfitPercent === undefined ? "-" : percent.format(row.grossProfitPercent);
+}
+
+function formatTransactionItems(items: QuickBooksSalesTransactionRow["items"]) {
+  const names = Array.from(new Set(items.map((item) => item.item).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  if (names.length === 0) return "-";
+  if (names.length <= 2) return names.join(", ");
+  return `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
+}
+
+function documentTypeLabel(value: QuickBooksSalesTransactionRow["type"]) {
+  return value === "credit_memo" ? "Credit Memo" : "Invoice";
 }
 
 function formatDate(value: string | null) {

@@ -4700,6 +4700,59 @@ th.numeric .company-sort-button {
   font-weight: 850;
 }
 
+.company-account-table tr.is-selected td {
+  background: #f7f3ec;
+  font-weight: 850;
+}
+
+.company-account-expanded-row > td {
+  background: #fbfaf7;
+  padding: 0;
+}
+
+.company-account-expansion {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.company-account-expansion-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.company-account-expansion-heading h3 {
+  font-size: 18px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.company-account-expansion-heading p,
+.company-account-expansion-note {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.35;
+  margin: 4px 0 0;
+}
+
+.company-account-expansion-note {
+  margin: 0;
+}
+
+.company-account-invoice-table {
+  min-width: 820px;
+}
+
+.company-account-invoice-table th:nth-child(5),
+.company-account-invoice-table td:nth-child(5) {
+  min-width: 260px;
+  white-space: normal;
+}
+
 @keyframes winePour {
   0%,
   100% {
