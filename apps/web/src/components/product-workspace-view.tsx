@@ -211,8 +211,8 @@ function ProductWorkspaceTable({
   return (
     <>
       <section className="metric-grid product-workspace-metrics">
-        <MetricCard label="Status Gaps" value={formatInteger(data.summary.lifecycleMismatches)} detail="QB and VS do not match" tone={data.summary.lifecycleMismatches ? "red" : "green"} />
-        <MetricCard label="Needs Review" value={formatInteger(data.summary.needsReview)} detail="Missing core source data" tone={data.summary.needsReview ? "red" : "green"} />
+        <MetricCard label="Status Gaps" value={formatSummaryCount(data.summary.lifecycleMismatches)} detail="QB and VS do not match" tone={data.summary.lifecycleMismatches ? "red" : "green"} />
+        <MetricCard label="Needs Review" value={formatSummaryCount(data.summary.needsReview)} detail="Missing core source data" tone={data.summary.needsReview ? "red" : "green"} />
       </section>
 
       <section className="panel product-workspace-header">
@@ -454,6 +454,10 @@ function moneyOrDash(value: number | null) {
 
 function percentOrDash(value: number | null) {
   return value === null ? "-" : `${value.toFixed(1)}%`;
+}
+
+function formatSummaryCount(value: number | null | undefined) {
+  return formatInteger(asNumber(value));
 }
 
 function isLifecycleMismatch(statusKey: ProductWorkspaceStatusKey) {
