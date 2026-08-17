@@ -3,7 +3,6 @@ import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { fetchCompanyDashboardData, unavailableCompanyDashboardData } from "@/lib/company-dashboard-data";
 import { fetchVinosmithExplorerData, unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
-import { fetchQuickBooksSalesDashboardData, unavailableQuickBooksSalesDashboardData } from "@/lib/supabase/quickbooks-sales-dashboard";
 import type {
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
@@ -57,16 +56,6 @@ export default async function HomePage() {
     .limit(100)
     .returns<PriceChangeEvent[]>();
 
-  const quickBooksSalesPromise = (() => {
-    try {
-      return fetchQuickBooksSalesDashboardData(createServiceRoleClient());
-    } catch (error) {
-      return Promise.resolve(
-        unavailableQuickBooksSalesDashboardData(error instanceof Error ? error.message : "QuickBooks Sales Dashboard is not configured.")
-      );
-    }
-  })();
-
   const quickBooksLastSyncPromise = (async () => {
     try {
       const { data, error } = await createServiceRoleClient()
@@ -109,7 +98,6 @@ export default async function HomePage() {
     { data: wineRequests },
     { data: priceChangeEvents },
     vinosmithExplorer,
-    quickBooksSales,
     companyDashboard,
     quickBooksLastSyncAt
   ] = await Promise.all([
@@ -118,7 +106,6 @@ export default async function HomePage() {
     wineRequestsPromise,
     priceChangeEventsPromise,
     vinosmithExplorerPromise,
-    quickBooksSalesPromise,
     companyDashboardPromise,
     quickBooksLastSyncPromise
   ]);
@@ -204,7 +191,6 @@ export default async function HomePage() {
       vinosmithExplorer={vinosmithExplorer}
       wineRequests={wineRequests || []}
       priceChangeEvents={priceChangeEvents || []}
-      quickBooksSales={quickBooksSales}
       companyDashboard={companyDashboard}
       quickBooksLastSyncAt={quickBooksLastSyncAt}
       canViewSettings={hasPermission(permissions, "view_settings")}

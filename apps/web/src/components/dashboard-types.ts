@@ -1,6 +1,5 @@
 export type ActiveView =
   | "company-dashboard"
-  | "sales-dashboard"
   | "product-workspace"
   | "order-review"
   | "supplier-hub"
@@ -14,7 +13,6 @@ export const DEFAULT_VIEW: ActiveView = "company-dashboard";
 
 export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolean; requiresSettings?: boolean }> = [
   { id: "company-dashboard", label: "Home" },
-  { id: "sales-dashboard", label: "Sales Dashboard" },
   { id: "product-workspace", label: "Items" },
   { id: "order-review", label: "Order Review" },
   { id: "supplier-hub", label: "Supplier Hub" },

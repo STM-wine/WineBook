@@ -24,7 +24,6 @@ function viewHref(view: ActiveView) {
 }
 
 const HOME_VIEW: ActiveView = "company-dashboard";
-const SALES_VIEW: ActiveView = "sales-dashboard";
 const ORDERING_VIEWS: ActiveView[] = ["product-workspace", "order-review", "po-drafts", "supplier-hub", "freight", "quickbooks-items"];
 
 export function AppTopbar({
@@ -64,7 +63,6 @@ export function AppTopbar({
       )}
       <nav className="nav-tabs" aria-label="Primary">
         <TopbarViewLink activeView={activeView} label="Home" onSelectView={onSelectView} view={HOME_VIEW} />
-        <TopbarViewLink activeView={activeView} label="Sales" onSelectView={onSelectView} view={SALES_VIEW} />
         <div className="nav-dropdown">
           {onSelectView ? (
             <button

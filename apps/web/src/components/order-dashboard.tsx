@@ -16,7 +16,6 @@ import {
   updateRecommendationApprovals
 } from "@/app/actions";
 import type { CompanyDashboardData } from "@/lib/company-dashboard-data";
-import type { QuickBooksSalesDashboardData } from "@/lib/quickbooks-sales-types";
 import type {
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
@@ -51,7 +50,6 @@ import { PoDraftsView } from "./po-drafts-view";
 import { ProductWorkspaceView } from "./product-workspace-view";
 import { QuickBooksItemMasterView } from "./quickbooks-item-master-view";
 import { StatusMessages } from "./status-messages";
-import { SalesDashboardView } from "./sales-dashboard-view";
 import { SupplierBoardView } from "./supplier-board-view";
 import { SupplierHubView } from "./supplier-hub-view";
 import { VinosmithRescueExplorerView } from "./vinosmith-rescue-explorer-view";
@@ -65,7 +63,6 @@ type Props = {
   vinosmithExplorer: VinosmithExplorerData;
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
-  quickBooksSales: QuickBooksSalesDashboardData;
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   canViewSettings?: boolean;
@@ -95,7 +92,6 @@ export function OrderDashboard({
   vinosmithExplorer,
   wineRequests,
   priceChangeEvents,
-  quickBooksSales,
   companyDashboard,
   quickBooksLastSyncAt,
   canViewSettings
@@ -193,8 +189,8 @@ export function OrderDashboard({
   const qbUpdatedAt = formatSourceUpdatedAt(quickBooksLastSyncAt);
   const qbDataLabel = qbUpdatedAt ? `QB Updated ${qbUpdatedAt}` : null;
   const qbDataTitle = qbUpdatedAt
-    ? `Last QuickBooks Web Connector response received ${qbUpdatedAt}. ${quickBooksSales.dateBasis}`
-    : quickBooksSales.dateBasis;
+    ? `Last QuickBooks Web Connector response received ${qbUpdatedAt}.`
+    : undefined;
 
   function selectView(view: ActiveView) {
     if (view === "quickbooks-items" && !canViewSettings) return;
@@ -687,8 +683,6 @@ export function OrderDashboard({
       ) : null}
 
       {activeView === "company-dashboard" ? <CompanyDashboardView initialData={companyDashboard} /> : null}
-
-      {activeView === "sales-dashboard" ? <SalesDashboardView data={quickBooksSales} /> : null}
 
       {activeView === "product-workspace" ? <ProductWorkspaceView canViewDiagnostics={canViewSettings} /> : null}
 
