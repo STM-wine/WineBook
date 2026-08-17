@@ -209,12 +209,7 @@ export async function GET(request: Request) {
       ];
       const frontline = pickPrice(priceLevels, "frontline");
       const bestPrice = pickPrice(priceLevels, "best");
-      const gpValues = priceLevels
-        .map((level) => level.calculatedGpPercent)
-        .filter((value): value is number => value !== null);
-      const averageGpPercent = gpValues.length
-        ? roundPercent(gpValues.reduce((sum, value) => sum + value, 0) / gpValues.length)
-        : null;
+      const lowestGpPercent = lowestGpForPriceLevels(priceLevels);
       const sourceHealth = sourceHealthForRow(row.fob, row.laidIn, priceLevels);
       const productName = row.vinosmith?.name || row.supplierCatalog?.display_name || row.item.full_name || row.item.name || "Unnamed item";
       const status = statusForRow(row.item, row.vinosmith);
@@ -240,7 +235,7 @@ export async function GET(request: Request) {
         landedCost: row.landedCost,
         frontline,
         bestPrice,
-        averageGpPercent,
+        lowestGpPercent,
         lastSold: null,
         ytdSales: null,
         sourceHealth,
@@ -717,12 +712,7 @@ function buildVinosmithOnlyRow(
   const priceLevels = priceLevelsFromVinosmith(vinosmithPrices, null);
   const frontline = pickPrice(priceLevels, "frontline");
   const bestPrice = pickPrice(priceLevels, "best");
-  const gpValues = priceLevels
-    .map((level) => level.calculatedGpPercent)
-    .filter((value): value is number => value !== null);
-  const averageGpPercent = gpValues.length
-    ? roundPercent(gpValues.reduce((sum, value) => sum + value, 0) / gpValues.length)
-    : null;
+  const lowestGpPercent = lowestGpForPriceLevels(priceLevels);
   const sourceHealth = sourceHealthForRow(null, laidIn, priceLevels);
 
   return {
@@ -746,7 +736,7 @@ function buildVinosmithOnlyRow(
     landedCost: null,
     frontline,
     bestPrice,
-    averageGpPercent,
+    lowestGpPercent,
     lastSold: null,
     ytdSales: null,
     sourceHealth,
@@ -832,6 +822,14 @@ function priceLevelsFromSupplierCatalog(rows: SupplierCatalogPriceLevelRow[]): P
 function pickPrice(priceLevels: ProductWorkspacePriceLevel[], kind: "frontline" | "best") {
   const match = priceLevels.find((level) => (kind === "frontline" ? level.isFrontline : level.isBest));
   return match?.bottlePrice ?? null;
+}
+
+function lowestGpForPriceLevels(priceLevels: ProductWorkspacePriceLevel[]) {
+  const gpValues = priceLevels
+    .map((level) => level.calculatedGpPercent)
+    .filter((value): value is number => value !== null);
+  if (gpValues.length === 0) return null;
+  return roundPercent(Math.min(...gpValues));
 }
 
 function calculateGpPercent(bottlePrice: number | null, landedCost: number | null, depletionAllowance: number) {

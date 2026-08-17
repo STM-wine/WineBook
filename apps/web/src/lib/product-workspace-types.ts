@@ -40,7 +40,7 @@ export type ProductWorkspaceRow = {
   landedCost: number | null;
   frontline: number | null;
   bestPrice: number | null;
-  averageGpPercent: number | null;
+  lowestGpPercent: number | null;
   lastSold: string | null;
   ytdSales: number | null;
   sourceHealth: "ready" | "partial" | "needs_review";

@@ -23,7 +23,7 @@ type SortKey =
   | "landedCost"
   | "frontline"
   | "bestPrice"
-  | "averageGpPercent"
+  | "lowestGpPercent"
   | "active"
   | "sourceHealth";
 
@@ -305,7 +305,7 @@ function ProductWorkspaceTable({
                   <SortableHeader label="Laid-in" sortKey="laidIn" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Frontline" sortKey="frontline" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Best" sortKey="bestPrice" sort={sort} onSort={changeSort} />
-                  <SortableHeader label="Avg GP" sortKey="averageGpPercent" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="Lowest GP" sortKey="lowestGpPercent" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Status" sortKey="active" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Source" sortKey="sourceHealth" sort={sort} onSort={changeSort} />
                 </tr>
@@ -328,7 +328,7 @@ function ProductWorkspaceTable({
                     <td title={row.laidInSource || "Missing Supplier Logistics laid-in"}>{moneyOrDash(row.laidIn)}</td>
                     <td>{moneyOrDash(row.frontline)}</td>
                     <td>{moneyOrDash(row.bestPrice)}</td>
-                    <td>{percentOrDash(row.averageGpPercent)}</td>
+                    <td className={`gp-cell ${gpToneClass(row.lowestGpPercent)}`}>{percentOrDash(row.lowestGpPercent)}</td>
                     <td title={row.statusDetail}>{row.statusLabel}</td>
                     <td>
                       <span className={`source-health source-health-${row.sourceHealth}`}>{row.sourceHealthLabel}</span>
@@ -462,6 +462,13 @@ function moneyOrDash(value: number | null) {
 
 function percentOrDash(value: number | null) {
   return value === null ? "-" : `${value.toFixed(1)}%`;
+}
+
+function gpToneClass(value: number | null) {
+  if (value === null) return "";
+  if (value < 26.5) return "gp-cell-critical";
+  if (value < 28) return "gp-cell-warning";
+  return "";
 }
 
 function isLifecycleMismatch(statusKey: ProductWorkspaceStatusKey) {

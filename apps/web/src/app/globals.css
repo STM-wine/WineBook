@@ -1731,6 +1731,21 @@ td {
   width: 88px;
 }
 
+.gp-cell {
+  border-radius: 0;
+  font-weight: 800;
+}
+
+.gp-cell-warning {
+  background: #fff0d3;
+  color: #7f520f;
+}
+
+.gp-cell-critical {
+  background: #fde8e5;
+  color: #8f2c26;
+}
+
 .table-sort-button {
   align-items: center;
   background: transparent;
