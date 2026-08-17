@@ -123,27 +123,27 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const includeInactive = url.searchParams.get("includeInactive") === "true";
-    const [quickBooksItems, vinosmithWines, suppliers, supplierCatalogWines, supplierCatalogPriceLevels] = await Promise.all([
+    const [quickBooksItems, suppliers, supplierCatalogWines, supplierCatalogPriceLevels] = await Promise.all([
       fetchQuickBooksItems(supabase, includeInactive),
-      fetchVinosmithWines(supabase),
       fetchSuppliers(supabase),
       fetchSupplierCatalogWines(supabase),
       fetchSupplierCatalogPriceLevels(supabase)
     ]);
 
     const matchedWineIds = new Set<string>();
+    const baseRows = quickBooksItems.slice(0, MAX_WORKSPACE_ROWS);
+    const vinosmithWines = await fetchVinosmithWines(supabase, baseRows);
     const supplierByName = mapSuppliersByName(suppliers);
     const vinosmithLookup = buildVinosmithLookup(vinosmithWines);
     const catalogLookup = buildSupplierCatalogLookup(supplierCatalogWines);
     const catalogPriceLevelsByWine = groupSupplierCatalogPriceLevels(supplierCatalogPriceLevels);
-    const baseRows = quickBooksItems.slice(0, MAX_WORKSPACE_ROWS);
 
     const provisionalRows = baseRows.map((item) => {
       const itemCode = itemCodeFromQuickBooks(item);
       const vinosmith = resolveVinosmithWine(item, itemCode, vinosmithLookup);
       if (vinosmith) matchedWineIds.add(vinosmith.wine_id);
       const supplierCatalog = resolveSupplierCatalogWine(item, itemCode, catalogLookup);
-      const supplierName = vinosmith?.importer_name || supplierCatalog?.supplier_name || null;
+      const supplierName = resolveSupplierName(itemCode, vinosmith, supplierCatalog);
       const supplier = supplierName ? supplierByName.get(normalizeKey(supplierName)) || null : null;
       const fob = numberOrNull(item.purchase_cost) ?? numberOrNull(item.average_cost);
       const purchaseCost = numberOrNull(item.purchase_cost);
@@ -196,7 +196,7 @@ export async function GET(request: Request) {
         vintage: row.vinosmith?.vintage || row.supplierCatalog?.vintage || null,
         pack: packLabel(row.vinosmith, row.supplierCatalog),
         supplierName: row.supplierName,
-        revenueCenter: revenueCenterFromItem(row.item),
+        revenueCenter: revenueCenterFromItem(row.item, row.itemCode),
         active: row.item.is_active,
         fob: row.fob,
         fobSource: row.fobSource,
@@ -302,11 +302,28 @@ async function fetchQuickBooksItems(supabase: ProductWorkspaceClient, includeIna
   return rows;
 }
 
-async function fetchVinosmithWines(supabase: ProductWorkspaceClient) {
-  const rows: VinosmithWineRow[] = [];
-  let from = 0;
+async function fetchVinosmithWines(supabase: ProductWorkspaceClient, quickBooksItems: QuickBooksItemRow[]) {
+  const byWineId = new Map<string, VinosmithWineRow>();
+  const itemCodes = uniqueTextValues(quickBooksItems.map((item) => itemCodeFromQuickBooks(item)));
+  const itemNames = uniqueTextValues(
+    quickBooksItems.flatMap((item) => [item.full_name, item.name])
+  );
 
-  while (true) {
+  await fetchVinosmithWineBatch(supabase, "code", itemCodes, byWineId);
+  await fetchVinosmithWineBatch(supabase, "name", itemNames, byWineId);
+
+  return Array.from(byWineId.values());
+}
+
+async function fetchVinosmithWineBatch(
+  supabase: ProductWorkspaceClient,
+  column: "code" | "name",
+  values: string[],
+  byWineId: Map<string, VinosmithWineRow>
+) {
+  for (let index = 0; index < values.length; index += 200) {
+    const batch = values.slice(index, index + 200);
+    if (batch.length === 0) continue;
     const { data, error } = await supabase
       .from("vinosmith_wines")
       .select(`
@@ -323,19 +340,15 @@ async function fetchVinosmithWines(supabase: ProductWorkspaceClient) {
         active,
         orderable
       `)
-      .order("name", { ascending: true })
-      .range(from, from + PAGE_SIZE - 1)
+      .in(column, batch)
       .returns<VinosmithWineRow[]>();
 
     if (error) throw new Error(error.message);
 
-    const page = data || [];
-    rows.push(...page);
-    if (page.length < PAGE_SIZE || rows.length >= 5000) break;
-    from += PAGE_SIZE;
+    for (const row of data || []) {
+      byWineId.set(row.wine_id, row);
+    }
   }
-
-  return rows;
 }
 
 async function fetchSuppliers(supabase: ProductWorkspaceClient) {
@@ -506,6 +519,15 @@ function resolveSupplierCatalogWine(
     null;
 }
 
+function resolveSupplierName(
+  itemCode: string,
+  vinosmith: VinosmithWineRow | null,
+  supplierCatalog: SupplierCatalogWineRow | null
+) {
+  if (isGrwItemCode(itemCode)) return "GRW";
+  return vinosmith?.importer_name || supplierCatalog?.supplier_name || null;
+}
+
 function itemCodeFromQuickBooks(item: QuickBooksItemRow) {
   return textFromCustomFields(item.custom_fields, [
     "item_number",
@@ -602,10 +624,14 @@ function packLabel(vinosmith: VinosmithWineRow | null, supplierCatalog: Supplier
   return null;
 }
 
-function revenueCenterFromItem(item: QuickBooksItemRow) {
+function revenueCenterFromItem(item: QuickBooksItemRow, itemCode: string) {
   const fullName = normalizeKey(item.full_name);
-  if (fullName.includes("grw")) return "GRW Broker";
+  if (isGrwItemCode(itemCode) || fullName.includes("grw")) return "GRW Broker";
   return "Stem Core";
+}
+
+function isGrwItemCode(value: string) {
+  return normalizeKey(value).startsWith("grw");
 }
 
 function numberOrNull(value: unknown) {
@@ -624,6 +650,10 @@ function roundPercent(value: number | null) {
 
 function normalizeKey(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function uniqueTextValues(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
 }
 
 function moneyLabel(value: number) {

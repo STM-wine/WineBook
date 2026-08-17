@@ -377,6 +377,11 @@ textarea {
   padding: 7px 10px;
 }
 
+.source-data-link:hover {
+  border-color: var(--green);
+  box-shadow: inset 0 0 0 1px rgba(89, 113, 90, 0.16);
+}
+
 .source-data-pill-qb {
   background: #eef3f4;
   color: var(--blue);
@@ -1571,22 +1576,40 @@ td {
 .product-workspace-layout {
   align-items: start;
   display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  gap: 14px;
+  grid-template-columns: minmax(760px, 1fr) minmax(280px, 320px);
 }
 
 .product-workspace-table {
   max-height: 68vh;
+  position: relative;
 }
 
 .product-workspace-table table {
-  min-width: 1680px;
+  min-width: 1260px;
+  table-layout: fixed;
 }
 
 .product-workspace-table th,
 .product-workspace-table td {
-  padding: 10px 11px;
+  padding: 9px 10px;
   vertical-align: top;
+}
+
+.product-workspace-table th {
+  background: #f4f2ee;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.product-workspace-table td {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .product-workspace-table tbody tr {
@@ -1599,10 +1622,18 @@ td {
 }
 
 .product-workspace-table td:nth-child(2) {
-  min-width: 260px;
-  max-width: 360px;
   text-align: left;
   white-space: normal;
+}
+
+.product-workspace-table th:nth-child(5),
+.product-workspace-table td:nth-child(5),
+.product-workspace-table th:nth-child(6),
+.product-workspace-table td:nth-child(6) {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .product-workspace-table td:nth-child(2) strong,
@@ -1613,22 +1644,69 @@ td {
 .product-workspace-table td:nth-child(2) strong {
   color: var(--ink);
   font-size: 13px;
+  font-weight: 700;
   line-height: 1.25;
 }
 
 .product-workspace-table td:nth-child(2) small {
   color: var(--muted);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 650;
   line-height: 1.25;
   margin-top: 3px;
 }
 
 .mono-cell {
   color: var(--ink);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: Quicksand, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 12px;
-  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.product-col-code {
+  width: 84px;
+}
+
+.product-col-name {
+  width: 230px;
+}
+
+.product-col-vintage {
+  width: 54px;
+}
+
+.product-col-pack {
+  width: 62px;
+}
+
+.product-col-supplier {
+  width: 140px;
+}
+
+.product-col-revenue {
+  width: 92px;
+}
+
+.product-col-money {
+  width: 66px;
+}
+
+.product-col-money-wide {
+  width: 72px;
+}
+
+.product-col-gp {
+  width: 60px;
+}
+
+.product-col-status {
+  width: 60px;
+}
+
+.product-col-health {
+  width: 88px;
 }
 
 .table-sort-button {
@@ -1642,6 +1720,8 @@ td {
   gap: 5px;
   justify-content: flex-end;
   padding: 0;
+  text-align: inherit;
+  white-space: normal;
   width: 100%;
 }
 
@@ -1656,10 +1736,9 @@ th:nth-child(5) .table-sort-button {
   border-radius: 999px;
   display: inline-flex;
   font-size: 11px;
-  font-weight: 850;
-  letter-spacing: 0.06em;
+  font-weight: 750;
+  letter-spacing: 0;
   padding: 6px 9px;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -1686,7 +1765,7 @@ th:nth-child(5) .table-sort-button {
   gap: 16px;
   max-height: 68vh;
   overflow: auto;
-  padding: 18px;
+  padding: 16px;
   position: sticky;
   top: 96px;
 }
@@ -3921,6 +4000,49 @@ tr.has-recommendation .sticky-name {
 .data-pill.is-warning {
   background: #fff2d8;
   color: #7a5a1a;
+}
+
+.data-pill.is-danger {
+  background: #fde8e5;
+  color: #8f2c26;
+}
+
+.data-sync-metrics {
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+}
+
+.sync-action-block {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  max-width: 360px;
+}
+
+.sync-action-message {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
+  margin: 0;
+  text-align: right;
+}
+
+.sync-action-message a {
+  color: var(--blue);
+  font-weight: 850;
+}
+
+.sync-action-success {
+  color: var(--green);
+}
+
+.sync-action-error {
+  color: #8f2c26;
+}
+
+.data-sync-table {
+  min-width: 960px;
 }
 
 .settings-publish-form {

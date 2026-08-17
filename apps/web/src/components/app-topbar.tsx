@@ -10,6 +10,7 @@ type AppTopbarProps = {
   canViewSettings?: boolean;
   dataLabel?: string;
   dataTitle?: string;
+  dataHref?: string;
   qbDataLabel?: string | null;
   qbDataTitle?: string;
   isPending?: boolean;
@@ -32,6 +33,7 @@ export function AppTopbar({
   canViewSettings,
   dataLabel,
   dataTitle,
+  dataHref,
   qbDataLabel,
   qbDataTitle,
   isPending,
@@ -116,9 +118,15 @@ export function AppTopbar({
       <div className="topbar-actions">
         <div className="topbar-context-controls" id="topbar-context-controls" />
         {dataLabel ? (
-          <span className="data-pill source-data-pill" title={dataTitle}>
-            {dataLabel}
-          </span>
+          dataHref ? (
+            <Link className="data-pill source-data-pill source-data-link" href={dataHref} title={dataTitle}>
+              {dataLabel}
+            </Link>
+          ) : (
+            <span className="data-pill source-data-pill" title={dataTitle}>
+              {dataLabel}
+            </span>
+          )
         ) : null}
         {qbDataLabel ? (
           <span className="data-pill source-data-pill source-data-pill-qb" title={qbDataTitle}>

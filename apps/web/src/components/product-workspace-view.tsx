@@ -11,7 +11,21 @@ type LoadState =
   | { status: "loaded"; data: ProductWorkspaceResponse; error: null }
   | { status: "error"; data: null; error: string };
 
-type SortKey = "itemCode" | "productName" | "supplierName" | "fob" | "laidIn" | "frontline" | "averageGpPercent" | "sourceHealth";
+type SortKey =
+  | "itemCode"
+  | "productName"
+  | "vintage"
+  | "pack"
+  | "supplierName"
+  | "revenueCenter"
+  | "fob"
+  | "laidIn"
+  | "landedCost"
+  | "frontline"
+  | "bestPrice"
+  | "averageGpPercent"
+  | "active"
+  | "sourceHealth";
 
 const SOURCE_LABELS: Record<string, string> = {
   quickbooks: "QB",
@@ -241,24 +255,38 @@ function ProductWorkspaceTable({
         <div className="product-workspace-layout">
           <div className="table-shell product-workspace-table">
             <table>
+              <colgroup>
+                <col className="product-col-code" />
+                <col className="product-col-name" />
+                <col className="product-col-vintage" />
+                <col className="product-col-pack" />
+                <col className="product-col-supplier" />
+                <col className="product-col-revenue" />
+                <col className="product-col-money" />
+                <col className="product-col-money" />
+                <col className="product-col-money" />
+                <col className="product-col-money-wide" />
+                <col className="product-col-money" />
+                <col className="product-col-gp" />
+                <col className="product-col-status" />
+                <col className="product-col-health" />
+              </colgroup>
               <thead>
                 <tr>
-                  <SortableHeader label="Item code" sortKey="itemCode" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="Item #" sortKey="itemCode" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Product / brand" sortKey="productName" sort={sort} onSort={changeSort} />
-                  <th>Vintage</th>
-                  <th>Pack</th>
+                  <SortableHeader label="Vintage" sortKey="vintage" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="Pack" sortKey="pack" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Supplier" sortKey="supplierName" sort={sort} onSort={changeSort} />
-                  <th>Revenue center</th>
+                  <SortableHeader label="Revenue" sortKey="revenueCenter" sort={sort} onSort={changeSort} />
                   <SortableHeader label="FOB" sortKey="fob" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Laid-in" sortKey="laidIn" sort={sort} onSort={changeSort} />
-                  <th>Landed</th>
+                  <SortableHeader label="Landed" sortKey="landedCost" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Frontline" sortKey="frontline" sort={sort} onSort={changeSort} />
-                  <th>Best</th>
+                  <SortableHeader label="Best" sortKey="bestPrice" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Avg GP" sortKey="averageGpPercent" sort={sort} onSort={changeSort} />
-                  <th>Last sold</th>
-                  <th>YTD sales</th>
-                  <th>Status</th>
-                  <SortableHeader label="Source health" sortKey="sourceHealth" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="Status" sortKey="active" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="Source" sortKey="sourceHealth" sort={sort} onSort={changeSort} />
                 </tr>
               </thead>
               <tbody>
@@ -283,8 +311,6 @@ function ProductWorkspaceTable({
                     <td>{moneyOrDash(row.frontline)}</td>
                     <td>{moneyOrDash(row.bestPrice)}</td>
                     <td>{percentOrDash(row.averageGpPercent)}</td>
-                    <td>{row.lastSold || "Not loaded"}</td>
-                    <td>{row.ytdSales === null ? "Not loaded" : formatInteger(row.ytdSales)}</td>
                     <td>{row.active === false ? "Inactive" : "Active"}</td>
                     <td>
                       <span className={`source-health source-health-${row.sourceHealth}`}>{row.sourceHealthLabel}</span>
@@ -329,6 +355,8 @@ function ProductWorkspaceDrawer({ row }: { row: ProductWorkspaceRow | null }) {
           <div><dt>Vintage</dt><dd>{row.vintage || "-"}</dd></div>
           <div><dt>Pack</dt><dd>{row.pack || "-"}</dd></div>
           <div><dt>Revenue center</dt><dd>{row.revenueCenter}</dd></div>
+          <div><dt>Last sold</dt><dd>{row.lastSold || "Not loaded"}</dd></div>
+          <div><dt>YTD sales</dt><dd>{row.ytdSales === null ? "Not loaded" : formatInteger(row.ytdSales)}</dd></div>
         </dl>
       </div>
       <div className="drawer-section">
@@ -403,6 +431,7 @@ function compareRows(a: ProductWorkspaceRow, b: ProductWorkspaceRow, key: SortKe
 
 function sortValue(row: ProductWorkspaceRow, key: SortKey) {
   const value = row[key];
+  if (key === "active") return row.active === false ? "Inactive" : "Active";
   if (typeof value === "number") return value;
   if (value === null || value === undefined) return "";
   return value;

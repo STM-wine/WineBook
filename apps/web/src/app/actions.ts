@@ -93,7 +93,7 @@ export async function refreshVinosmithReports(): Promise<RefreshVinosmithReports
     if (!token) {
       return {
         ok: false,
-        error: "Report refresh is not configured yet. Add GITHUB_WORKFLOW_DISPATCH_TOKEN in Render, then redeploy."
+        error: "Report refresh is not configured yet. Add GITHUB_WORKFLOW_DISPATCH_TOKEN in .env.local for local dev and in Render for production, then restart the app."
       };
     }
 

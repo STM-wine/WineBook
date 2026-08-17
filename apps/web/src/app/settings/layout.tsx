@@ -5,6 +5,7 @@ import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 
 const SETTINGS_NAV = [
   { href: "/settings", label: "Overview" },
+  { href: "/settings/data-sync", label: "Data Sync" },
   { href: "/settings/logic", label: "Logic Settings" },
   { href: "/settings/gross-profit-center", label: "Gross Profit Center" },
   { href: "/settings/laid-in-coverage", label: "Laid-In Coverage" },

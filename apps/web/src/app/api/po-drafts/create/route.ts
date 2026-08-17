@@ -3,7 +3,6 @@ import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from
 import { asNumber, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { formatInteger } from "@/lib/order-data";
 import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
-import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import { createClient } from "@/lib/supabase/server";
 import type {
@@ -186,9 +185,7 @@ export async function POST(request: Request) {
     .from("suppliers")
     .select("name,trucking_cost_per_bottle,pick_up_location,eta_days,freight_forwarder,notes")
     .returns<SupplierLogistics[]>();
-  const supplierDefaults = await loadImporterDefaults();
-  const suppliers = mergeSupplierDefaults(supplierRows || [], supplierDefaults);
-  const supplierMetadata = new Map(suppliers.map((row) => [normalizeSupplier(row.name), row]));
+  const supplierMetadata = new Map((supplierRows || []).map((row) => [normalizeSupplier(row.name), row]));
   const catalogProducersById = new Map(
     supplierCatalogWines.map((wine) => [wine.id, wine.producer?.trim() || null])
   );

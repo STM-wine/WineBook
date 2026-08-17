@@ -1,7 +1,6 @@
 import { OrderDashboard } from "@/components/order-dashboard";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { fetchCompanyDashboardData, unavailableCompanyDashboardData } from "@/lib/company-dashboard-data";
-import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { fetchVinosmithExplorerData, unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import { fetchQuickBooksSalesDashboardData, unavailableQuickBooksSalesDashboardData } from "@/lib/supabase/quickbooks-sales-dashboard";
@@ -195,15 +194,12 @@ export default async function HomePage() {
     `)
     .order("name", { ascending: true })
     .returns<SupplierLogistics[]>();
-  const supplierDefaults = await loadImporterDefaults();
-  const mergedSuppliers = mergeSupplierDefaults(suppliers || [], supplierDefaults);
-
   return (
     <OrderDashboard
       reportRun={latestRun}
       recommendations={recommendations || []}
       poDrafts={poDraftRows || []}
-      suppliers={mergedSuppliers}
+      suppliers={suppliers || []}
       supplierCatalogWines={supplierCatalogWines || []}
       vinosmithExplorer={vinosmithExplorer}
       wineRequests={wineRequests || []}

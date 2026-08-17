@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { poTemplateXlsxBuffer } from "@/lib/po-export";
 import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
 import { poDraftSupplierLabel, poTimestamp } from "@/lib/po-utils";
-import { loadImporterDefaults, mergeSupplierDefaults } from "@/lib/supplier-defaults";
 import { createClient } from "@/lib/supabase/server";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 
@@ -134,10 +133,7 @@ export async function GET(request: NextRequest) {
     .from("suppliers")
     .select("id,importer_id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,notes,active")
     .returns<SupplierLogistics[]>();
-  const supplierDefaults = await loadImporterDefaults();
-  const mergedSuppliers = mergeSupplierDefaults(suppliers || [], supplierDefaults);
-
-  const buffer = await poTemplateXlsxBuffer(exportDrafts, mergedSuppliers);
+  const buffer = await poTemplateXlsxBuffer(exportDrafts, suppliers || []);
   const supplierFilenamePart =
     draftId && exportDrafts[0]
       ? poDraftSupplierLabel(exportDrafts[0])

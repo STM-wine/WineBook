@@ -663,6 +663,7 @@ export function OrderDashboard({
         activeView={activeView}
         canViewSettings={canViewSettings}
         dataLabel={dataLabel}
+        dataHref={canViewSettings ? "/settings/data-sync" : undefined}
         dataTitle={dataTitle}
         qbDataLabel={qbDataLabel}
         qbDataTitle={qbDataTitle}

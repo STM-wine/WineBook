@@ -30,7 +30,6 @@ jobs:
       RB6_ATTACHMENT_KEYWORDS: ${{ vars.RB6_ATTACHMENT_KEYWORDS }}
       RADS_ATTACHMENT_KEYWORDS: ${{ vars.RADS_ATTACHMENT_KEYWORDS }}
       SUPABASE_SOURCE_BUCKET: source-files
-      IMPORTERS_CSV_BASE64: ${{ secrets.IMPORTERS_CSV_BASE64 }}
 
     steps:
       - name: Check out repo
@@ -44,14 +43,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Restore importer logistics file
-        run: |
-          if [ -n "$IMPORTERS_CSV_BASE64" ]; then
-            printf '%s' "$IMPORTERS_CSV_BASE64" | base64 -d > importers.csv
-          else
-            echo "IMPORTERS_CSV_BASE64 is not set; using tracked importers.csv from the repository."
-          fi
 
       - name: Process Vinosmith email reports
         run: |

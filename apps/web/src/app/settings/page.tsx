@@ -82,6 +82,25 @@ export default async function SettingsOverviewPage() {
 
         <section className="settings-panel">
           <div className="settings-panel-header">
+            <h2>Data Sync</h2>
+            <Link className="button button-small button-outline" href="/settings/data-sync">
+              View Sync
+            </Link>
+          </div>
+          <dl className="settings-definition-list">
+            <div>
+              <dt>Vinosmith</dt>
+              <dd>Manual refresh available</dd>
+            </div>
+            <div>
+              <dt>QuickBooks</dt>
+              <dd>Web Connector managed</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="settings-panel">
+          <div className="settings-panel-header">
             <h2>Recent Changes</h2>
             <Link className="button button-small button-outline" href="/settings/history">
               History
