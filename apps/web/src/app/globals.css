@@ -1505,7 +1505,7 @@ td {
 }
 
 .product-workspace-metrics {
-  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
 }
 
 .product-workspace-header {
@@ -1528,7 +1528,7 @@ td {
   align-items: flex-end;
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(280px, 1fr) minmax(180px, 0.34fr) minmax(170px, 0.28fr) auto;
+  grid-template-columns: minmax(260px, 1fr) minmax(160px, 0.3fr) minmax(180px, 0.34fr) minmax(160px, 0.28fr) auto;
   margin-bottom: 18px;
 }
 
@@ -1702,7 +1702,7 @@ td {
 }
 
 .product-col-status {
-  width: 60px;
+  width: 118px;
 }
 
 .product-col-health {

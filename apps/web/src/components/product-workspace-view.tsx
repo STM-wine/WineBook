@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
-import type { ProductWorkspaceResponse, ProductWorkspaceRow } from "@/lib/product-workspace-types";
+import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
 import { MetricCard } from "./metric-card";
 import { QuickBooksItemMasterView } from "./quickbooks-item-master-view";
 
@@ -33,6 +33,17 @@ const SOURCE_LABELS: Record<string, string> = {
   supplier_hub: "Supplier Hub",
   stem: "Stem"
 };
+
+const STATUS_FILTERS: Array<{ label: string; value: "All" | "gaps" | ProductWorkspaceStatusKey }> = [
+  { label: "All", value: "All" },
+  { label: "Status gaps", value: "gaps" },
+  { label: "QB active / VS inactive", value: "qb_active_vs_inactive" },
+  { label: "QB active / no VS", value: "qb_active_vs_missing" },
+  { label: "QB inactive / VS active", value: "qb_inactive_vs_active" },
+  { label: "VS active / no QB", value: "vs_active_qb_missing" },
+  { label: "Active match", value: "active_match" },
+  { label: "Inactive match", value: "inactive_match" }
+];
 
 export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostics?: boolean }) {
   const [includeInactive, setIncludeInactive] = useState(false);
@@ -151,6 +162,7 @@ function ProductWorkspaceTable({
 }) {
   const [search, setSearch] = useState("");
   const [supplier, setSupplier] = useState("All");
+  const [statusFilter, setStatusFilter] = useState<"All" | "gaps" | ProductWorkspaceStatusKey>("All");
   const [health, setHealth] = useState("All");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "productName", direction: "asc" });
   const [selectedId, setSelectedId] = useState<string | null>(data.rows[0]?.id || null);
@@ -163,6 +175,8 @@ function ProductWorkspaceTable({
     return [...data.rows]
       .filter((row) => {
         if (supplier !== "All" && (row.supplierName || "Unknown") !== supplier) return false;
+        if (statusFilter === "gaps" && !isLifecycleMismatch(row.statusKey)) return false;
+        if (statusFilter !== "All" && statusFilter !== "gaps" && row.statusKey !== statusFilter) return false;
         if (health !== "All" && row.sourceHealth !== health) return false;
         if (!query) return true;
         return [
@@ -178,7 +192,7 @@ function ProductWorkspaceTable({
           .some((value) => String(value).toLowerCase().includes(query));
       })
       .sort((a, b) => compareRows(a, b, sort.key, sort.direction));
-  }, [data.rows, health, search, sort, supplier]);
+  }, [data.rows, health, search, sort, statusFilter, supplier]);
   const selectedRow = visibleRows.find((row) => row.id === selectedId) || visibleRows[0] || null;
 
   useEffect(() => {
@@ -197,9 +211,10 @@ function ProductWorkspaceTable({
   return (
     <>
       <section className="metric-grid product-workspace-metrics">
-        <MetricCard label="Visible Items" value={formatInteger(data.summary.visible)} detail={includeInactive ? "Active and inactive" : "Active by default"} tone="ink" />
+        <MetricCard label="Visible Items" value={formatInteger(data.summary.visible)} detail={includeInactive ? "Active and inactive" : "Active plus status gaps"} tone="ink" />
         <MetricCard label="Active" value={formatInteger(data.summary.active)} detail="QuickBooks active items" tone="green" />
         <MetricCard label="Inactive" value={formatInteger(data.summary.inactive)} detail="Available when included" tone="gold" />
+        <MetricCard label="Status Gaps" value={formatInteger(data.summary.lifecycleMismatches)} detail="QB and VS do not match" tone={data.summary.lifecycleMismatches ? "red" : "green"} />
         <MetricCard label="Ready" value={formatInteger(data.summary.ready)} detail="Cost and price sources present" tone="blue" />
         <MetricCard label="Needs Review" value={formatInteger(data.summary.needsReview)} detail="Missing core source data" tone={data.summary.needsReview ? "red" : "green"} />
       </section>
@@ -234,6 +249,14 @@ function ProductWorkspaceTable({
             <select value={supplier} onChange={(event) => setSupplier(event.target.value)}>
               {supplierOptions.map((option) => (
                 <option key={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field-control">
+            <span>Status</span>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+              {STATUS_FILTERS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
           </label>
@@ -444,4 +467,11 @@ function moneyOrDash(value: number | null) {
 
 function percentOrDash(value: number | null) {
   return value === null ? "-" : `${value.toFixed(1)}%`;
+}
+
+function isLifecycleMismatch(statusKey: ProductWorkspaceStatusKey) {
+  return statusKey === "qb_active_vs_inactive" ||
+    statusKey === "qb_active_vs_missing" ||
+    statusKey === "qb_inactive_vs_active" ||
+    statusKey === "vs_active_qb_missing";
 }

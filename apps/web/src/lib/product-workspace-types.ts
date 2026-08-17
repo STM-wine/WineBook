@@ -1,5 +1,13 @@
 export type ProductWorkspaceSource = "quickbooks" | "vinosmith" | "supplier_hub" | "stem";
 
+export type ProductWorkspaceStatusKey =
+  | "active_match"
+  | "inactive_match"
+  | "qb_active_vs_inactive"
+  | "qb_active_vs_missing"
+  | "qb_inactive_vs_active"
+  | "vs_active_qb_missing";
+
 export type ProductWorkspacePriceLevel = {
   id: string;
   name: string;
@@ -22,6 +30,7 @@ export type ProductWorkspaceRow = {
   supplierSource: string | null;
   revenueCenter: string;
   active: boolean | null;
+  statusKey: ProductWorkspaceStatusKey;
   statusLabel: string;
   statusDetail: string;
   fob: number | null;
@@ -72,6 +81,11 @@ export type ProductWorkspaceSummary = {
   ready: number;
   partial: number;
   needsReview: number;
+  lifecycleMismatches: number;
+  qbActiveVsInactive: number;
+  qbActiveVsMissing: number;
+  qbInactiveVsActive: number;
+  vsActiveQbMissing: number;
 };
 
 export type ProductWorkspaceResponse = {
