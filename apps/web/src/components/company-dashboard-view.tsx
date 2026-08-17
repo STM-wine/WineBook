@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { WineLoadingProgress } from "@/components/wine-loading-progress";
 import type { CompanyDashboardBusinessLine, CompanyDashboardData, CompanyDashboardPeriod } from "@/lib/company-dashboard-data";
@@ -36,6 +36,7 @@ const number = new Intl.NumberFormat("en-US");
 
 const RANGE_PLACEHOLDER = "- Choose -";
 const CUSTOM_RANGE_LABEL = "Custom";
+const MAX_AUTO_GROSS_PROFIT_DAYS = 45;
 
 const DATE_RANGE_LABELS = [
   RANGE_PLACEHOLDER,
@@ -118,6 +119,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const [repSort, setRepSort] = useState<SortState>({ key: "net", direction: "desc" });
   const [accountSort, setAccountSort] = useState<SortState>({ key: "net", direction: "desc" });
   const [accountInvoicePanel, setAccountInvoicePanel] = useState<AccountInvoicePanelState | null>(null);
+  const activeDashboardRequests = useRef<Set<AbortController>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [isProfitLoading, setIsProfitLoading] = useState(false);
   const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
@@ -138,14 +140,37 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const hasGpComparison = comparison?.summary.grossProfitPercent !== null && comparison?.summary.grossProfitPercent !== undefined;
   const sampleCostRate = data.summary.netSales === 0 ? null : data.summary.sampleCost / data.summary.netSales;
   const deliveryDays = mtdDeliveryDayComparison(data.generatedAt);
+  const canAutoLoadGrossProfitForVisibleRange = canAutoLoadGrossProfit(data.dateFrom, data.dateTo);
   const loadingStatus = dashboardLoadingStatus({ isDrilldownLoading, isLoading, isProfitLoading });
   const topReps = useMemo(() => sortSummaryRows(data.byRep, repSort).slice(0, 20), [data.byRep, repSort]);
   const accountRows = useMemo(() => sortSummaryRows(accountData.byAccount, accountSort), [accountData.byAccount, accountSort]);
 
   useEffect(() => {
     setTopbarControlTarget(document.getElementById("topbar-context-controls"));
-    return () => setTopbarControlTarget(null);
+    return () => {
+      activeDashboardRequests.current.forEach((controller) => controller.abort());
+      activeDashboardRequests.current.clear();
+      setTopbarControlTarget(null);
+    };
   }, []);
+
+  function startDashboardRequest() {
+    const controller = new AbortController();
+    activeDashboardRequests.current.add(controller);
+    return controller;
+  }
+
+  function finishDashboardRequest(controller: AbortController) {
+    activeDashboardRequests.current.delete(controller);
+  }
+
+  function stopLoading() {
+    activeDashboardRequests.current.forEach((controller) => controller.abort());
+    activeDashboardRequests.current.clear();
+    setIsLoading(false);
+    setIsProfitLoading(false);
+    setIsDrilldownLoading(false);
+  }
 
   async function selectDateRange(rangeLabel: DateRangeLabel) {
     setSelectedRangeLabel(rangeLabel);
@@ -157,10 +182,13 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
     const preset = dateRangeForLabel(rangeLabel);
     const nextPeriod = preset.period || "custom";
-    const nextKey = cacheKeyFor(nextPeriod, preset.dateFrom, preset.dateTo, selectedBusinessLine);
+    const canLoadProfitForPreset = canAutoLoadGrossProfit(preset.dateFrom, preset.dateTo);
+    const nextBusinessLine = canLoadProfitForPreset ? selectedBusinessLine : "all";
+    const nextKey = cacheKeyFor(nextPeriod, preset.dateFrom, preset.dateTo, nextBusinessLine);
     setActivePeriod(nextPeriod);
     setDateFrom(preset.dateFrom);
     setDateTo(preset.dateTo);
+    setSelectedBusinessLine(nextBusinessLine);
     setSelectedRep(null);
     setAccountInvoicePanel(null);
     setErrorMessage("");
@@ -175,15 +203,17 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       return;
     }
 
+    const controller = startDashboardRequest();
     setIsLoading(true);
     try {
-      const requiresProfit = selectedBusinessLine !== "all";
+      const requiresProfit = nextBusinessLine !== "all";
       const dashboardData = await loadCompanyDashboard({
         dateFrom: preset.period ? undefined : preset.dateFrom,
         dateTo: preset.period ? undefined : preset.dateTo,
         period: preset.period,
         includeProfit: requiresProfit,
-        businessLine: selectedBusinessLine
+        businessLine: nextBusinessLine,
+        signal: controller.signal
       });
       setDateFrom(dashboardData.dateFrom);
       setDateTo(dashboardData.dateTo);
@@ -191,8 +221,10 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
       if (!requiresProfit) void hydrateProfit(dashboardData);
     } catch (error) {
+      if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load company dashboard.");
     } finally {
+      finishDashboardRequest(controller);
       setIsLoading(false);
     }
   }
@@ -200,10 +232,13 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   async function applyCustomRange() {
     setActivePeriod("custom");
     setSelectedRangeLabel(CUSTOM_RANGE_LABEL);
+    const canLoadProfitForCustom = canAutoLoadGrossProfit(dateFrom, dateTo);
+    const nextBusinessLine = canLoadProfitForCustom ? selectedBusinessLine : "all";
+    setSelectedBusinessLine(nextBusinessLine);
     setSelectedRep(null);
     setAccountInvoicePanel(null);
     setErrorMessage("");
-    const key = cacheKeyFor("custom", dateFrom, dateTo, selectedBusinessLine);
+    const key = cacheKeyFor("custom", dateFrom, dateTo, nextBusinessLine);
     if (dataByPeriod[key]) {
       setAccountData(dataByPeriod[key]);
       if (dataByPeriod[key].summary.grossProfitPercent === null) {
@@ -212,21 +247,25 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       return;
     }
 
+    const controller = startDashboardRequest();
     setIsLoading(true);
     try {
-      const requiresProfit = selectedBusinessLine !== "all";
+      const requiresProfit = nextBusinessLine !== "all";
       const dashboardData = await loadCompanyDashboard({
         dateFrom,
         dateTo,
         includeProfit: requiresProfit,
-        businessLine: selectedBusinessLine
+        businessLine: nextBusinessLine,
+        signal: controller.signal
       });
       setAccountData(dashboardData);
       setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
       if (!requiresProfit) void hydrateProfit(dashboardData);
     } catch (error) {
+      if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load company dashboard.");
     } finally {
+      finishDashboardRequest(controller);
       setIsLoading(false);
     }
   }
@@ -235,6 +274,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setSelectedRep(row.label);
     setAccountInvoicePanel(null);
     setErrorMessage("");
+    const controller = startDashboardRequest();
     setIsDrilldownLoading(true);
     try {
       const drilldownData = await loadCompanyDashboard({
@@ -242,12 +282,15 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         dateFrom: data.dateFrom,
         dateTo: data.dateTo,
         rep: row.label,
-        businessLine: selectedBusinessLine
+        businessLine: selectedBusinessLine,
+        signal: controller.signal
       });
       setAccountData(drilldownData);
     } catch (error) {
+      if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load rep accounts.");
     } finally {
+      finishDashboardRequest(controller);
       setIsDrilldownLoading(false);
     }
   }
@@ -260,6 +303,10 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
   async function selectBusinessLine(nextBusinessLine: CompanyDashboardBusinessLine) {
     if (nextBusinessLine === selectedBusinessLine) return;
+    if (nextBusinessLine !== "all" && !canAutoLoadGrossProfit(dateFrom, dateTo)) {
+      setErrorMessage("Stem/GRW filtering needs a 45-day-or-less range for now.");
+      return;
+    }
     setSelectedBusinessLine(nextBusinessLine);
     setSelectedRep(null);
     setAccountInvoicePanel(null);
@@ -275,6 +322,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       return;
     }
 
+    const controller = startDashboardRequest();
     setIsLoading(true);
     try {
       const dashboardData = await loadCompanyDashboard({
@@ -282,21 +330,26 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         dateTo: activePeriod === "custom" ? dateTo : undefined,
         period: activePeriod === "custom" ? undefined : activePeriod,
         includeProfit: true,
-        businessLine: nextBusinessLine
+        businessLine: nextBusinessLine,
+        signal: controller.signal
       });
       setDateFrom(dashboardData.dateFrom);
       setDateTo(dashboardData.dateTo);
       setAccountData(dashboardData);
       setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
     } catch (error) {
+      if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load business line.");
     } finally {
+      finishDashboardRequest(controller);
       setIsLoading(false);
     }
   }
 
   async function hydrateProfit(baseData: CompanyDashboardData) {
     if (baseData.selectedRep) return;
+    if (!canAutoLoadGrossProfit(baseData.dateFrom, baseData.dateTo)) return;
+    const controller = startDashboardRequest();
     setIsProfitLoading(true);
     try {
       const dashboardData = await loadCompanyDashboard({
@@ -304,15 +357,18 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         dateTo: baseData.period === "custom" ? baseData.dateTo : undefined,
         period: baseData.period === "custom" ? undefined : baseData.period,
         includeProfit: true,
-        businessLine: baseData.businessLine
+        businessLine: baseData.businessLine,
+        signal: controller.signal
       });
       setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
       setAccountData((current) =>
         current.selectedRep || current.dateFrom !== baseData.dateFrom || current.dateTo !== baseData.dateTo ? current : dashboardData
       );
     } catch (error) {
+      if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not calculate gross profit.");
     } finally {
+      finishDashboardRequest(controller);
       setIsProfitLoading(false);
     }
   }
@@ -374,7 +430,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
   return (
     <section className="company-dashboard-view">
-      {loadingStatus ? <WineLoadingProgress message={loadingStatus.message} detail={loadingStatus.detail} /> : null}
+      {loadingStatus ? <WineLoadingProgress message={loadingStatus.message} detail={loadingStatus.detail} onStop={stopLoading} /> : null}
       {topbarControlTarget
         ? createPortal(
             <DashboardDateControls
@@ -439,11 +495,19 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
           detail={
             isProfitLoading && data.summary.grossProfit === null
               ? "Calculating GP from QB + VS"
+              : !canAutoLoadGrossProfitForVisibleRange && data.summary.grossProfit === null
+                ? "Use 45 days or less for GP"
               : data.summary.grossProfit === null
                 ? "Gross profit unavailable"
                 : `${currency.format(data.summary.grossProfit)} gross profit`
           }
-          meta={isProfitLoading && data.summary.grossProfitPercent === null ? "Background calculation running" : data.summary.grossProfitUnavailableReason || "QuickBooks + Vinosmith cost basis"}
+          meta={
+            isProfitLoading && data.summary.grossProfitPercent === null
+              ? "Background calculation running"
+              : !canAutoLoadGrossProfitForVisibleRange && data.summary.grossProfit === null
+                ? "Long-range GP disabled for now"
+                : data.summary.grossProfitUnavailableReason || "QuickBooks + Vinosmith cost basis"
+          }
           helpText="Gross profit uses QuickBooks sales lines, current QuickBooks item FOB cost, and the Stem laid-in per bottle from Supplier Logistics. When Vinosmith order and price data can be matched, Vinosmith billbacks reduce effective cost."
         />
         <DashboardMetric
@@ -955,7 +1019,8 @@ async function loadCompanyDashboard({
   dateTo,
   includeProfit,
   period,
-  rep
+  rep,
+  signal
 }: {
   businessLine?: CompanyDashboardBusinessLine;
   dateFrom?: string;
@@ -963,6 +1028,7 @@ async function loadCompanyDashboard({
   includeProfit?: boolean;
   period?: CompanyDashboardPeriod;
   rep?: string;
+  signal?: AbortSignal;
 }) {
   const params = new URLSearchParams();
   if (dateFrom && dateTo) {
@@ -974,12 +1040,16 @@ async function loadCompanyDashboard({
   if (includeProfit === false) params.set("includeProfit", "false");
   if (businessLine && businessLine !== "all") params.set("businessLine", businessLine);
   if (rep) params.set("rep", rep);
-  const response = await fetch(`/api/company-dashboard?${params.toString()}`);
+  const response = await fetch(`/api/company-dashboard?${params.toString()}`, { signal });
   const result = (await response.json()) as CompanyDashboardData | { error?: string };
   if (!response.ok || "error" in result) {
     throw new Error("error" in result && result.error ? result.error : "Could not load company dashboard.");
   }
   return result as CompanyDashboardData;
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 async function loadAccountTransactions({
@@ -1152,6 +1222,14 @@ function parseIsoDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function canAutoLoadGrossProfit(dateFrom: string, dateTo: string) {
+  const from = parseIsoDate(dateFrom);
+  const to = parseIsoDate(dateTo);
+  if (!from || !to) return false;
+  const days = Math.floor((to.getTime() - from.getTime()) / 86400000) + 1;
+  return days > 0 && days <= MAX_AUTO_GROSS_PROFIT_DAYS;
 }
 
 function mtdDeliveryDayComparison(referenceValue: string) {

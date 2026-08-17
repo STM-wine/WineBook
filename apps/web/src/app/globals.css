@@ -393,8 +393,10 @@ textarea {
   border-radius: 8px;
   box-shadow: 0 14px 32px rgba(35, 31, 28, 0.14);
   color: var(--ink);
+  align-items: center;
   display: grid;
   gap: 7px;
+  grid-template-columns: minmax(0, 1fr) auto;
   max-width: min(300px, calc(100vw - 32px));
   min-width: min(260px, calc(100vw - 32px));
   padding: 11px 12px 12px;
@@ -422,10 +424,30 @@ textarea {
   line-height: 1.2;
 }
 
+.wine-loader-stop {
+  background: #fbfaf7;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #3c3934;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+  min-height: 28px;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.wine-loader-stop:hover,
+.wine-loader-stop:focus-visible {
+  border-color: rgba(183, 82, 78, 0.45);
+  color: var(--red);
+}
+
 .wine-loader-bar {
   background: #eee7dc;
   border-radius: 999px;
   display: block;
+  grid-column: 1 / -1;
   height: 4px;
   overflow: hidden;
 }
