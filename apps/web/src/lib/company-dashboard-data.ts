@@ -192,6 +192,7 @@ type GrossProfitRollup = {
   netSales: number;
   invoiceCount: number;
   creditMemoCount: number;
+  sampleCost: number;
   grossProfit: number | null;
   grossProfitPercent: number | null;
 };
@@ -359,6 +360,7 @@ function emptyLineRollup(): MutableGrossProfitRollup {
     netSales: 0,
     invoiceCount: 0,
     creditMemoCount: 0,
+    sampleCost: 0,
     grossProfit: 0,
     grossProfitPercent: null,
     invoiceTxnIds: new Set(),
@@ -367,7 +369,10 @@ function emptyLineRollup(): MutableGrossProfitRollup {
 }
 
 function addLineToRollup(rollup: MutableGrossProfitRollup, line: GrossProfitCenterLine) {
-  if (line.confidenceBucket === "sample_zero_dollar_or_100_discount") return;
+  if (line.confidenceBucket === "sample_zero_dollar_or_100_discount") {
+    rollup.sampleCost += Math.abs(money(line.effectiveCost ?? line.grossCostBeforeBillback));
+    return;
+  }
 
   const amount = money(line.qbGrossSales);
   if (line.transactionType === "invoice") {
@@ -395,7 +400,8 @@ function salesRowFromRollup(key: string, label: string, rollup: GrossProfitRollu
     creditMemoCount: rollup.creditMemoCount,
     creditMemoRate: rollup.invoiceSales > 0 ? rollup.creditMemos / rollup.invoiceSales : 0,
     grossProfit: rollup.grossProfit,
-    grossProfitPercent: rollup.grossProfitPercent
+    grossProfitPercent: rollup.grossProfitPercent,
+    sampleCost: rollup.sampleCost
   };
 }
 
@@ -405,7 +411,8 @@ function mergeGrossProfitRows(rows: QuickBooksSalesSummaryRow[], rollups: Map<st
     return {
       ...row,
       grossProfit: rollup?.grossProfit ?? null,
-      grossProfitPercent: rollup?.grossProfitPercent ?? null
+      grossProfitPercent: rollup?.grossProfitPercent ?? null,
+      sampleCost: rollup?.sampleCost ?? row.sampleCost ?? 0
     };
   });
 }

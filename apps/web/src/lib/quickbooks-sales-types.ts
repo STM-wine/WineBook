@@ -10,6 +10,7 @@ export type QuickBooksSalesSummaryRow = {
   grossProfit?: number | null;
   grossProfitPercent?: number | null;
   grossProfitUnavailableReason?: string | null;
+  sampleCost?: number;
 };
 
 export type QuickBooksSalesMonthColumn = {

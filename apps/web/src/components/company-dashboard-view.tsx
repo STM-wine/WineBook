@@ -72,7 +72,7 @@ const DATE_RANGE_LABELS = [
 
 type DateRangeLabel = (typeof DATE_RANGE_LABELS)[number];
 
-type SortKey = "label" | "gross" | "credits" | "net" | "gp" | "invoices";
+type SortKey = "label" | "gross" | "credits" | "net" | "gp" | "samples" | "invoices";
 type SortState = {
   key: SortKey;
   direction: "asc" | "desc";
@@ -400,6 +400,14 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                   numeric
                   helpText="Calculated from QuickBooks sales lines using current QuickBooks item cost. Matched Vinosmith billbacks reduce effective cost where available."
                 />
+                <SortableHeader
+                  label="Samples"
+                  sortKey="samples"
+                  sort={repSort}
+                  onSort={setRepSort}
+                  numeric
+                  helpText="Landed cost of sample, zero-dollar, or fully discounted lines. Shown for manager visibility; excluded from GP %."
+                />
                 <SortableHeader label="Invoices" sortKey="invoices" sort={repSort} onSort={setRepSort} numeric />
               </tr>
             </thead>
@@ -415,7 +423,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
               ))}
               {topReps.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>No sales found for this period.</td>
+                  <td colSpan={7}>No sales found for this period.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -454,6 +462,14 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                   numeric
                   helpText="Calculated from QuickBooks sales lines using current QuickBooks item cost. Matched Vinosmith billbacks reduce effective cost where available."
                 />
+                <SortableHeader
+                  label="Samples"
+                  sortKey="samples"
+                  sort={accountSort}
+                  onSort={setAccountSort}
+                  numeric
+                  helpText="Landed cost of sample, zero-dollar, or fully discounted lines. Shown for manager visibility; excluded from GP %."
+                />
                 <SortableHeader label="Invoices" sortKey="invoices" sort={accountSort} onSort={setAccountSort} numeric />
               </tr>
             </thead>
@@ -467,7 +483,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
               ))}
               {accountRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>No accounts found for this period.</td>
+                  <td colSpan={7}>No accounts found for this period.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -683,6 +699,7 @@ function SummaryRow({
       <td className="numeric negative">{currency.format(row.creditMemos)}</td>
       <td className={row.netSales < 0 ? "numeric negative" : "numeric"}>{currency.format(row.netSales)}</td>
       <td className="numeric">{formatRowProfitPercent(row, showProfitLoading)}</td>
+      <td className="numeric">{formatSampleCost(row.sampleCost)}</td>
       <td className="numeric">{number.format(row.invoiceCount)}</td>
     </tr>
   );
@@ -935,6 +952,7 @@ function valueForSort(row: QuickBooksSalesSummaryRow, key: SortKey) {
   if (key === "gross") return row.invoiceSales;
   if (key === "credits") return row.creditMemos;
   if (key === "gp") return row.grossProfitPercent ?? Number.NEGATIVE_INFINITY;
+  if (key === "samples") return row.sampleCost ?? 0;
   if (key === "invoices") return row.invoiceCount;
   return row.netSales;
 }
@@ -969,6 +987,11 @@ function formatSignedCurrency(value: number | null) {
   if (value > 0) return `+${formatted}`;
   if (value < 0) return `-${formatted}`;
   return formatted;
+}
+
+function formatSampleCost(value: number | null | undefined) {
+  if (!value) return "-";
+  return currency.format(value);
 }
 
 function formatSignedPercent(value: number | null) {

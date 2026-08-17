@@ -4640,7 +4640,7 @@ tr.has-recommendation .sticky-name {
 
 .company-rep-table,
 .company-account-table {
-  min-width: 860px;
+  min-width: 960px;
 }
 
 .company-rep-table th:first-child,
