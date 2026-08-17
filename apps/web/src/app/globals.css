@@ -1506,7 +1506,7 @@ td {
 
 .product-workspace-metrics {
   gap: 10px;
-  grid-template-columns: repeat(2, minmax(180px, 260px));
+  grid-template-columns: repeat(3, minmax(180px, 240px));
   justify-content: start;
 }
 

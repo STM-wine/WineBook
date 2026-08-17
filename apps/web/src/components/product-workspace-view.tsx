@@ -201,6 +201,18 @@ function ProductWorkspaceTable({
     () => data.rows.filter((row) => row.sourceHealth === "needs_review").length,
     [data.rows]
   );
+  const gpRiskCounts = useMemo(
+    () => data.rows.reduce(
+      (counts, row) => {
+        const tone = gpToneClass(row);
+        if (tone === "gp-cell-critical") counts.red += 1;
+        if (tone === "gp-cell-warning") counts.yellow += 1;
+        return counts;
+      },
+      { red: 0, yellow: 0 }
+    ),
+    [data.rows]
+  );
   const selectedRow = visibleRows.find((row) => row.id === selectedId) || visibleRows[0] || null;
 
   useEffect(() => {
@@ -221,6 +233,7 @@ function ProductWorkspaceTable({
       <section className="metric-grid product-workspace-metrics">
         <MetricCard label="Status Gaps" value={formatInteger(statusGapCount)} detail="QB and VS do not match" tone={statusGapCount ? "red" : "green"} />
         <MetricCard label="Needs Review" value={formatInteger(needsReviewCount)} detail="Missing core source data" tone={needsReviewCount ? "red" : "green"} />
+        <MetricCard label="GP Risk" value={`${formatInteger(gpRiskCounts.red)} / ${formatInteger(gpRiskCounts.yellow)}`} detail="Red / yellow low-GP items" tone={gpRiskCounts.red ? "red" : gpRiskCounts.yellow ? "gold" : "green"} />
       </section>
 
       <section className="panel product-workspace-header">
