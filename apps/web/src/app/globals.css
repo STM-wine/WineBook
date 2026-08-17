@@ -4640,7 +4640,7 @@ tr.has-recommendation .sticky-name {
 
 .company-rep-table,
 .company-account-table {
-  min-width: 960px;
+  min-width: 1120px;
 }
 
 .company-rep-table th:first-child,
@@ -4693,6 +4693,21 @@ th.numeric .company-sort-button {
   color: var(--red);
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.company-change-up {
+  color: #3f6845;
+  font-weight: 850;
+}
+
+.company-change-down {
+  color: #a0412d;
+  font-weight: 850;
+}
+
+.company-change-flat {
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .company-rep-table tr.is-selected td {

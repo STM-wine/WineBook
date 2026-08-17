@@ -61,14 +61,17 @@ export async function fetchCompanyDashboardData(
     filters.dateFrom && filters.dateTo
       ? { from: filters.dateFrom, to: filters.dateTo }
       : rangeForPeriod(period);
-  const comparisonRange = !filters.rep ? lastYearSameRange(range) : null;
+  const comparisonRange = lastYearSameRange(range);
   const includeGrossProfit = filters.includeGrossProfit !== false;
   const businessLine = parseCompanyDashboardBusinessLine(filters.businessLine);
 
   const [current, comparison] = await Promise.all([
     fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit, businessLine }),
-    comparisonRange ? fetchPeriodDashboardData(supabase, comparisonRange, undefined, { includeGrossProfit, businessLine }) : Promise.resolve(null)
+    comparisonRange
+      ? fetchPeriodDashboardData(supabase, comparisonRange, filters.rep, { includeGrossProfit, businessLine })
+      : Promise.resolve(null)
   ]);
+  const currentRows = comparison ? mergeLastYearNetSales(current, comparison) : current;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -86,9 +89,9 @@ export async function fetchCompanyDashboardData(
           summary: comparison.summary
         }
       : null,
-    businessLineSummaries: current.businessLineSummaries,
-    byRep: current.byRep,
-    byAccount: current.byAccount,
+    businessLineSummaries: currentRows.businessLineSummaries,
+    byRep: currentRows.byRep,
+    byAccount: currentRows.byAccount,
     selectedRep: cleanFilter(filters.rep) || null,
     unavailableReason: current.unavailableReason
   };
@@ -187,6 +190,34 @@ async function fetchPeriodDashboardData(
       grossProfitUnavailableReason: grossProfit.unavailableReason
     }
   };
+}
+
+type PeriodDashboardData = Awaited<ReturnType<typeof fetchPeriodDashboardData>>;
+
+function mergeLastYearNetSales(current: PeriodDashboardData, comparison: PeriodDashboardData): PeriodDashboardData {
+  return {
+    ...current,
+    byRep: mergeLastYearNetSalesRows(current.byRep, comparison.byRep),
+    byAccount: mergeLastYearNetSalesRows(current.byAccount, comparison.byAccount)
+  };
+}
+
+function mergeLastYearNetSalesRows(rows: QuickBooksSalesSummaryRow[], lastYearRows: QuickBooksSalesSummaryRow[]) {
+  const lastYearByKey = new Map(lastYearRows.map((row) => [row.key || rowKey(row.label), row]));
+  return rows.map((row) => {
+    const lastYear = lastYearByKey.get(row.key) || lastYearByKey.get(rowKey(row.label));
+    const lastYearNetSales = lastYear?.netSales ?? null;
+    return {
+      ...row,
+      lastYearNetSales,
+      netSalesChangePercent: lastYearNetSales === null ? null : netSalesChangeRate(row.netSales, lastYearNetSales)
+    };
+  });
+}
+
+function netSalesChangeRate(current: number, previous: number) {
+  if (previous === 0) return current === 0 ? 0 : null;
+  return (current - previous) / Math.abs(previous);
 }
 
 type GrossProfitRollup = {

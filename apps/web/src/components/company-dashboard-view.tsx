@@ -82,7 +82,7 @@ const DATE_RANGE_LABELS = [
 
 type DateRangeLabel = (typeof DATE_RANGE_LABELS)[number];
 
-type SortKey = "label" | "gross" | "credits" | "net" | "gp" | "samples" | "invoices";
+type SortKey = "label" | "gross" | "credits" | "net" | "lastYearNet" | "netChange" | "gp" | "samples" | "invoices";
 type SortState = {
   key: SortKey;
   direction: "asc" | "desc";
@@ -488,6 +488,22 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                 <SortableHeader label="Credits" sortKey="credits" sort={repSort} onSort={setRepSort} numeric />
                 <SortableHeader label="Net" sortKey="net" sort={repSort} onSort={setRepSort} numeric />
                 <SortableHeader
+                  label="LY Net"
+                  sortKey="lastYearNet"
+                  sort={repSort}
+                  onSort={setRepSort}
+                  numeric
+                  helpText="QuickBooks net sales for the same date range last year."
+                />
+                <SortableHeader
+                  label="Change %"
+                  sortKey="netChange"
+                  sort={repSort}
+                  onSort={setRepSort}
+                  numeric
+                  helpText="Current QuickBooks net sales compared to QuickBooks net sales for the same date range last year."
+                />
+                <SortableHeader
                   label="GP %"
                   sortKey="gp"
                   sort={repSort}
@@ -519,7 +535,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
               ))}
               {topReps.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>No sales found for this period.</td>
+                  <td colSpan={9}>No sales found for this period.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -550,6 +566,22 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                 <SortableHeader label="Gross" sortKey="gross" sort={accountSort} onSort={setAccountSort} numeric />
                 <SortableHeader label="Credits" sortKey="credits" sort={accountSort} onSort={setAccountSort} numeric />
                 <SortableHeader label="Net" sortKey="net" sort={accountSort} onSort={setAccountSort} numeric />
+                <SortableHeader
+                  label="LY Net"
+                  sortKey="lastYearNet"
+                  sort={accountSort}
+                  onSort={setAccountSort}
+                  numeric
+                  helpText="QuickBooks net sales for the same date range last year."
+                />
+                <SortableHeader
+                  label="Change %"
+                  sortKey="netChange"
+                  sort={accountSort}
+                  onSort={setAccountSort}
+                  numeric
+                  helpText="Current QuickBooks net sales compared to QuickBooks net sales for the same date range last year."
+                />
                 <SortableHeader
                   label="GP %"
                   sortKey="gp"
@@ -584,7 +616,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
               ))}
               {accountRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>No accounts found for this period.</td>
+                  <td colSpan={8}>No accounts found for this period.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -801,6 +833,8 @@ function SummaryRow({
       <td className="numeric">{currency.format(row.invoiceSales)}</td>
       <td className="numeric negative">{currency.format(row.creditMemos)}</td>
       <td className={row.netSales < 0 ? "numeric negative" : "numeric"}>{currency.format(row.netSales)}</td>
+      <td className="numeric">{formatOptionalCurrency(row.lastYearNetSales)}</td>
+      <td className={changeClassName(row.netSalesChangePercent)}>{formatSignedPercent(row.netSalesChangePercent)}</td>
       <td className="numeric">{formatRowProfitPercent(row, showProfitLoading)}</td>
       {showSamples ? <td className="numeric">{formatSampleCost(row.sampleCost)}</td> : null}
       <td className="numeric">{number.format(row.invoiceCount)}</td>
@@ -828,7 +862,7 @@ function AccountInvoiceExpansion({
   const hasHitLimit = panel.transactions.length >= visibleLimit;
   return (
     <tr className="company-account-expanded-row">
-      <td colSpan={6}>
+      <td colSpan={8}>
         <div className="company-account-expansion">
           <div className="company-account-expansion-heading">
             <div>
@@ -1197,6 +1231,8 @@ function sortSummaryRows(rows: QuickBooksSalesSummaryRow[], sort: SortState) {
 function valueForSort(row: QuickBooksSalesSummaryRow, key: SortKey) {
   if (key === "gross") return row.invoiceSales;
   if (key === "credits") return row.creditMemos;
+  if (key === "lastYearNet") return row.lastYearNetSales ?? Number.NEGATIVE_INFINITY;
+  if (key === "netChange") return row.netSalesChangePercent ?? Number.NEGATIVE_INFINITY;
   if (key === "gp") return row.grossProfitPercent ?? Number.NEGATIVE_INFINITY;
   if (key === "samples") return row.sampleCost ?? 0;
   if (key === "invoices") return row.invoiceCount;
@@ -1240,11 +1276,22 @@ function formatSampleCost(value: number | null | undefined) {
   return currency.format(value);
 }
 
-function formatSignedPercent(value: number | null) {
-  if (value === null) return "New activity";
+function formatOptionalCurrency(value: number | null | undefined) {
+  return value === null || value === undefined ? "-" : currency.format(value);
+}
+
+function formatSignedPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) return "New activity";
   if (value > 0) return `+${percent.format(value)}`;
   if (value < 0) return `-${percent.format(Math.abs(value))}`;
   return percent.format(0);
+}
+
+function changeClassName(value: number | null | undefined) {
+  if (value === null || value === undefined) return "numeric company-change-flat";
+  if (value > 0) return "numeric company-change-up";
+  if (value < 0) return "numeric company-change-down";
+  return "numeric company-change-flat";
 }
 
 function formatSignedPoints(value: number | null) {
