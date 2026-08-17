@@ -19,8 +19,11 @@ export type ProductWorkspaceRow = {
   vintage: string | null;
   pack: string | null;
   supplierName: string | null;
+  supplierSource: string | null;
   revenueCenter: string;
   active: boolean | null;
+  statusLabel: string;
+  statusDetail: string;
   fob: number | null;
   fobSource: string | null;
   laidIn: number | null;

@@ -303,7 +303,7 @@ function ProductWorkspaceTable({
                     </td>
                     <td>{row.vintage || "-"}</td>
                     <td>{row.pack || "-"}</td>
-                    <td>{row.supplierName || "Unmatched"}</td>
+                    <td title={row.supplierSource || "No supplier source matched"}>{row.supplierName || "Unmatched"}</td>
                     <td>{row.revenueCenter}</td>
                     <td title={row.fobSource || "Missing QuickBooks FOB"}>{moneyOrDash(row.fob)}</td>
                     <td title={row.laidInSource || "Missing Supplier Logistics laid-in"}>{moneyOrDash(row.laidIn)}</td>
@@ -311,7 +311,7 @@ function ProductWorkspaceTable({
                     <td>{moneyOrDash(row.frontline)}</td>
                     <td>{moneyOrDash(row.bestPrice)}</td>
                     <td>{percentOrDash(row.averageGpPercent)}</td>
-                    <td>{row.active === false ? "Inactive" : "Active"}</td>
+                    <td title={row.statusDetail}>{row.statusLabel}</td>
                     <td>
                       <span className={`source-health source-health-${row.sourceHealth}`}>{row.sourceHealthLabel}</span>
                     </td>
@@ -351,10 +351,11 @@ function ProductWorkspaceDrawer({ row }: { row: ProductWorkspaceRow | null }) {
       <div className="drawer-section">
         <h3>Overview</h3>
         <dl>
-          <div><dt>Supplier</dt><dd>{row.supplierName || "Unmatched"}</dd></div>
+          <div><dt>Supplier</dt><dd>{row.supplierName || "Unmatched"} <small>{row.supplierSource || "No source"}</small></dd></div>
           <div><dt>Vintage</dt><dd>{row.vintage || "-"}</dd></div>
           <div><dt>Pack</dt><dd>{row.pack || "-"}</dd></div>
           <div><dt>Revenue center</dt><dd>{row.revenueCenter}</dd></div>
+          <div><dt>Status</dt><dd title={row.statusDetail}>{row.statusLabel}</dd></div>
           <div><dt>Last sold</dt><dd>{row.lastSold || "Not loaded"}</dd></div>
           <div><dt>YTD sales</dt><dd>{row.ytdSales === null ? "Not loaded" : formatInteger(row.ytdSales)}</dd></div>
         </dl>
@@ -431,7 +432,7 @@ function compareRows(a: ProductWorkspaceRow, b: ProductWorkspaceRow, key: SortKe
 
 function sortValue(row: ProductWorkspaceRow, key: SortKey) {
   const value = row[key];
-  if (key === "active") return row.active === false ? "Inactive" : "Active";
+  if (key === "active") return row.statusLabel;
   if (typeof value === "number") return value;
   if (value === null || value === undefined) return "";
   return value;
