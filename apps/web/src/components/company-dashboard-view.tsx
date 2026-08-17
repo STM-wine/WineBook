@@ -135,6 +135,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const gpDelta = comparison && data.summary.grossProfitPercent !== null && comparison.summary.grossProfitPercent !== null
     ? data.summary.grossProfitPercent - comparison.summary.grossProfitPercent
     : null;
+  const hasGpComparison = comparison?.summary.grossProfitPercent !== null && comparison?.summary.grossProfitPercent !== undefined;
   const sampleCostRate = data.summary.netSales === 0 ? null : data.summary.sampleCost / data.summary.netSales;
   const deliveryDays = mtdDeliveryDayComparison(data.generatedAt);
   const loadingStatus = dashboardLoadingStatus({ isDrilldownLoading, isLoading, isProfitLoading });
@@ -447,16 +448,16 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         />
         <DashboardMetric
           label={comparison ? gpComparisonLabel(data.period) : "GP Trend"}
-          value={isProfitLoading && gpDelta === null ? "Calculating..." : comparison ? formatSignedPoints(gpDelta) : "-"}
+          value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : hasGpComparison ? formatSignedPoints(gpDelta) : "-"}
           detail={
-            isProfitLoading && gpDelta === null
-              ? "Calculating LY comparison"
-              : comparison
+            isProfitLoading && data.summary.grossProfitPercent === null
+              ? "Calculating current GP"
+              : hasGpComparison
                 ? `${formatPercent(comparison.summary.grossProfitPercent)} last year`
-                : "Comparison unavailable"
+                : "Current period only"
           }
           tone={toneFor(gpDelta)}
-          helpText="Compares this period's GP percentage against the same date range last year using the same QuickBooks cost, Supplier Logistics laid-in, and Vinosmith billback method."
+          helpText="Current GP is calculated from QuickBooks costs, Supplier Logistics laid-in, and Vinosmith billbacks. LY GP comparison is disabled for now to avoid expensive historical line-level calculations."
         />
         <DashboardMetric
           label={`${compactScopedPeriodLabel} Samples`}
@@ -1321,7 +1322,8 @@ function formatOptionalCurrency(value: number | null | undefined) {
 }
 
 function formatSignedPercent(value: number | null | undefined) {
-  if (value === null || value === undefined) return "New activity";
+  if (value === undefined) return "-";
+  if (value === null) return "New activity";
   if (value > 0) return `+${percent.format(value)}`;
   if (value < 0) return `-${percent.format(Math.abs(value))}`;
   return percent.format(0);

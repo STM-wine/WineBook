@@ -51,6 +51,7 @@ export type CompanyDashboardData = {
 };
 
 const DASHBOARD_TIME_ZONE = "America/Phoenix";
+const QUICKBOOKS_SALES_HISTORY_FROM = process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_HISTORY_FROM || "2025-01-01";
 
 export async function fetchCompanyDashboardData(
   supabase: SupabaseClient,
@@ -61,14 +62,14 @@ export async function fetchCompanyDashboardData(
     filters.dateFrom && filters.dateTo
       ? { from: filters.dateFrom, to: filters.dateTo }
       : rangeForPeriod(period);
-  const comparisonRange = lastYearSameRange(range);
   const includeGrossProfit = filters.includeGrossProfit !== false;
   const businessLine = parseCompanyDashboardBusinessLine(filters.businessLine);
+  const comparisonRange = businessLine === "all" ? comparableLastYearRange(range) : null;
 
   const [current, comparison] = await Promise.all([
     fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit, businessLine }),
     comparisonRange
-      ? fetchPeriodDashboardData(supabase, comparisonRange, filters.rep, { includeGrossProfit, businessLine })
+      ? fetchPeriodDashboardData(supabase, comparisonRange, filters.rep, { includeGrossProfit: false, businessLine: "all" })
       : Promise.resolve(null)
   ]);
   const currentRows = comparison ? mergeLastYearNetSales(current, comparison) : current;
@@ -551,6 +552,11 @@ function lastYearSameRange(range: { from: string; to: string }) {
     from: shiftYear(range.from, -1),
     to: shiftYear(range.to, -1)
   };
+}
+
+function comparableLastYearRange(range: { from: string; to: string }) {
+  const comparisonRange = lastYearSameRange(range);
+  return comparisonRange.from < QUICKBOOKS_SALES_HISTORY_FROM ? null : comparisonRange;
 }
 
 function todayInTimeZone() {
