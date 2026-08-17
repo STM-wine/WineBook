@@ -370,6 +370,40 @@ export type VinosmithExplorerCheckpoint = {
   requested_end_date: string | null;
 };
 
+export type VinosmithProductHealthIssue = {
+  id: string;
+  itemCode: string | null;
+  productName: string;
+  supplierName: string | null;
+  quickBooksStatus: string;
+  vinosmithStatus: string;
+  issue: string;
+  lastSeenAt: string | null;
+};
+
+export type VinosmithProductHealth = {
+  latestSuccessfulPullAt: string | null;
+  latestCompletedRunId: string | null;
+  failedRecentSyncs: number;
+  activeQbVsInactiveOrMissingVs: number;
+  activeQbVsInactiveVs: number;
+  activeQbVsMissingVs: number;
+  activeOrderableVsVsInactiveOrMissingQb: number;
+  activeOrderableVsVsInactiveQb: number;
+  activeOrderableVsVsMissingQb: number;
+  missingSupplierImporterOrBrand: number;
+  unmatchedItemCodes: number;
+  changedRecordsSinceLastSync: number | null;
+  changedRecordsWindowStart: string | null;
+  changedRecordsNote: string;
+  examples: {
+    qbActiveVsInactiveOrMissingVs: VinosmithProductHealthIssue[];
+    vsActiveOrderableVsInactiveOrMissingQb: VinosmithProductHealthIssue[];
+    metadataGaps: VinosmithProductHealthIssue[];
+    unmatchedItemCodes: VinosmithProductHealthIssue[];
+  };
+};
+
 export type VinosmithExplorerData = {
   error: string | null;
   counts: {
@@ -395,4 +429,5 @@ export type VinosmithExplorerData = {
   recentOrders: VinosmithExplorerOrder[];
   syncRuns: VinosmithExplorerSyncRun[];
   checkpoints: VinosmithExplorerCheckpoint[];
+  productHealth: VinosmithProductHealth;
 };

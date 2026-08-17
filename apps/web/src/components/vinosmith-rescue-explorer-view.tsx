@@ -86,8 +86,8 @@ export function VinosmithRescueExplorerView({ data }: { data: VinosmithExplorerD
     <section className="panel rescue-explorer-panel" id="vinosmith-rescue">
       <div className="section-heading">
         <div>
-          <h1>Vinosmith Rescue Explorer</h1>
-          <p>Read-only operational view of rescued Vinosmith wines, accounts, orders, and sync health.</p>
+          <h1>Vinosmith Plumbing</h1>
+          <p>Read-only operational view of Vinosmith wines, accounts, orders, and sync health.</p>
         </div>
         <span className="data-pill">Read Only</span>
       </div>

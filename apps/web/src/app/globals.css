@@ -1270,6 +1270,15 @@ textarea {
   padding: 12px 14px;
 }
 
+.warning-banner {
+  background: #fff0d3;
+  border: 1px solid #efd49e;
+  border-radius: 10px;
+  color: #7f520f;
+  font-weight: 750;
+  padding: 12px 14px;
+}
+
 .status-strip {
   display: grid;
   gap: 10px;
@@ -3681,6 +3690,35 @@ tr.has-recommendation .sticky-name {
   color: var(--ink);
 }
 
+.settings-sidebar a.active {
+  background: #e8f1e7;
+  color: var(--green);
+}
+
+.settings-route-progress {
+  animation: settings-route-progress 1.2s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, var(--green), var(--blue), transparent);
+  height: 3px;
+  left: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+  transform-origin: left center;
+  z-index: 60;
+}
+
+@keyframes settings-route-progress {
+  0% {
+    transform: translateX(-60%) scaleX(0.35);
+  }
+  45% {
+    transform: translateX(10%) scaleX(0.65);
+  }
+  100% {
+    transform: translateX(100%) scaleX(0.35);
+  }
+}
+
 .settings-content {
   display: grid;
   gap: 24px;
@@ -3979,6 +4017,421 @@ tr.has-recommendation .sticky-name {
 
 .data-sync-table {
   min-width: 960px;
+}
+
+.vinosmith-plumbing-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.plumbing-metrics {
+  margin-top: 0;
+}
+
+.plumbing-metrics small {
+  overflow-wrap: anywhere;
+}
+
+.plumbing-grid {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.plumbing-queue {
+  display: grid;
+  gap: 18px;
+}
+
+.plumbing-workflow-warning {
+  margin: 0;
+}
+
+.plumbing-workflow-summary-panel {
+  gap: 16px;
+}
+
+.plumbing-status-rollups {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(7, minmax(110px, 1fr));
+}
+
+.plumbing-status-rollups button {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #3c3934;
+  cursor: pointer;
+  display: grid;
+  gap: 5px;
+  min-height: 72px;
+  padding: 10px;
+  text-align: left;
+}
+
+.plumbing-status-rollups button.active,
+.plumbing-status-rollups button:hover {
+  background: #e8f1e7;
+  border-color: #bfd2c0;
+  color: var(--green);
+}
+
+.plumbing-status-rollups span {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.plumbing-status-rollups strong {
+  font-size: 24px;
+}
+
+.plumbing-filters {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(4, minmax(140px, 1fr));
+}
+
+.plumbing-filters label {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 850;
+  gap: 6px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plumbing-filters input,
+.plumbing-filters select {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  height: 40px;
+  letter-spacing: 0;
+  padding: 8px 10px;
+  text-transform: none;
+  width: 100%;
+}
+
+.plumbing-next-steps-panel {
+  gap: 14px;
+}
+
+.plumbing-next-step-list {
+  display: grid;
+  gap: 10px;
+}
+
+.plumbing-next-step {
+  align-items: start;
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 48px minmax(0, 1fr);
+  padding: 14px;
+}
+
+.plumbing-next-step > span {
+  align-items: center;
+  background: var(--surface-soft);
+  border-radius: 999px;
+  color: #3c3934;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 850;
+  height: 32px;
+  justify-content: center;
+  width: 38px;
+}
+
+.plumbing-next-step.priority-p1 > span {
+  background: #fde8e5;
+  color: #8f2c26;
+}
+
+.plumbing-next-step.priority-p2 > span {
+  background: #fff0d3;
+  color: #7f520f;
+}
+
+.plumbing-next-step.priority-p3 > span {
+  background: #eef3f4;
+  color: var(--blue);
+}
+
+.plumbing-next-step.priority-done > span {
+  background: #e8f1e7;
+  color: var(--green);
+}
+
+.plumbing-next-step strong,
+.plumbing-next-step p,
+.plumbing-next-step small,
+.plumbing-next-step b {
+  display: block;
+}
+
+.plumbing-next-step strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.plumbing-next-step p {
+  color: #3c3934;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+  margin: 5px 0;
+}
+
+.plumbing-next-step small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.plumbing-next-step b {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.35;
+  margin-top: 6px;
+}
+
+.plumbing-issue-panel {
+  overflow: hidden;
+}
+
+.source-of-truth-chip {
+  background: #eef3f4;
+  border: 1px solid #cfe0e2;
+  border-radius: 999px;
+  color: var(--blue);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+  padding: 6px 8px;
+  white-space: normal;
+}
+
+.plumbing-issue-list {
+  display: grid;
+  gap: 12px;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.plumbing-issue-row {
+  align-items: start;
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(240px, 1.15fr) minmax(150px, 0.55fr) minmax(240px, 1fr) minmax(250px, 0.85fr);
+  padding: 14px;
+}
+
+.plumbing-issue-main {
+  display: grid;
+  gap: 8px;
+}
+
+.plumbing-issue-main strong,
+.plumbing-issue-main span,
+.plumbing-issue-main p,
+.plumbing-issue-main small {
+  display: block;
+}
+
+.plumbing-issue-main strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.plumbing-issue-main span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.plumbing-issue-main p,
+.plumbing-fix-summary p {
+  color: #3c3934;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.plumbing-issue-main small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.plumbing-source-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.plumbing-source-summary span {
+  color: #3c3934;
+  display: grid;
+  font-size: 12px;
+  font-weight: 750;
+  gap: 2px;
+  line-height: 1.25;
+}
+
+.plumbing-source-summary b {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plumbing-fix-summary {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.plumbing-workflow-cell {
+  min-width: 0;
+}
+
+.plumbing-empty {
+  margin: 0;
+}
+
+.plumbing-resolved-panel {
+  gap: 14px;
+}
+
+.plumbing-resolved-list {
+  display: grid;
+  gap: 10px;
+}
+
+.plumbing-resolved-list article {
+  background: #f7fbf7;
+  border: 1px solid #d7e5d6;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.plumbing-resolved-list strong,
+.plumbing-resolved-list span,
+.plumbing-resolved-list small {
+  display: block;
+}
+
+.plumbing-resolved-list strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.plumbing-resolved-list span,
+.plumbing-resolved-list small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.plumbing-workflow-form {
+  display: grid;
+  gap: 8px;
+}
+
+.plumbing-workflow-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 10px;
+  font-weight: 850;
+  gap: 4px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plumbing-workflow-form select,
+.plumbing-workflow-form input,
+.plumbing-workflow-form textarea {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+  padding: 8px;
+  text-transform: none;
+  width: 100%;
+}
+
+.plumbing-workflow-form textarea {
+  min-height: 58px;
+  resize: vertical;
+}
+
+.plumbing-workflow-form .button {
+  justify-self: start;
+}
+
+.plumbing-workflow-form small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+@media (max-width: 1180px) {
+  .plumbing-status-rollups,
+  .plumbing-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plumbing-issue-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .plumbing-status-rollups,
+  .plumbing-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ordering-bridge-panel {
+  margin-top: 18px;
+}
+
+.settings-ordered-list {
+  color: #3c3934;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.settings-ordered-list li {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
 }
 
 .settings-publish-form {

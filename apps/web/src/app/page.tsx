@@ -87,7 +87,7 @@ export default async function HomePage() {
       return fetchVinosmithExplorerData(createServiceRoleClient());
     } catch (error) {
       return Promise.resolve(
-        unavailableVinosmithExplorerData(error instanceof Error ? error.message : "Vinosmith Rescue Explorer is not configured.")
+        unavailableVinosmithExplorerData(error instanceof Error ? error.message : "Vinosmith Plumbing is not configured.")
       );
     }
   })();

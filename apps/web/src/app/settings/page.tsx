@@ -82,19 +82,19 @@ export default async function SettingsOverviewPage() {
 
         <section className="settings-panel">
           <div className="settings-panel-header">
-            <h2>Data Sync</h2>
+            <h2>Data Health</h2>
             <Link className="button button-small button-outline" href="/settings/data-sync">
-              View Sync
+              View Health
             </Link>
           </div>
           <dl className="settings-definition-list">
             <div>
               <dt>Vinosmith</dt>
-              <dd>Manual refresh available</dd>
+              <dd>Plumbing diagnostics and refresh workflow</dd>
             </div>
             <div>
               <dt>QuickBooks</dt>
-              <dd>Web Connector managed</dd>
+              <dd>Source-health checks and item readiness</dd>
             </div>
           </dl>
         </section>

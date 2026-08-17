@@ -16,7 +16,7 @@ export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolea
   { id: "product-workspace", label: "Items" },
   { id: "order-review", label: "Order Review" },
   { id: "supplier-hub", label: "Supplier Hub" },
-  { id: "vinosmith-rescue", label: "Vinosmith Rescue", hidden: true },
+  { id: "vinosmith-rescue", label: "Vinosmith Plumbing", hidden: true },
   { id: "supplier-board", label: "Supplier Board", hidden: true },
   { id: "freight", label: "Freight" },
   { id: "po-drafts", label: "PO Drafts" },

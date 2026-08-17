@@ -7,6 +7,8 @@ import type {
   VinosmithExplorerInventory,
   VinosmithExplorerOrder,
   VinosmithExplorerPriceSummary,
+  VinosmithProductHealth,
+  VinosmithProductHealthIssue,
   VinosmithExplorerSalesRep,
   VinosmithExplorerSyncRun,
   VinosmithExplorerWine
@@ -14,11 +16,50 @@ import type {
 
 const PAGE_SIZE = 1000;
 const RECENT_ORDER_LIMIT = 300;
+const PRODUCT_HEALTH_EXAMPLE_LIMIT = 80;
 
 type CountResult = {
   count: number | null;
   error: { message: string } | null;
 };
+
+const VINOSMITH_WINE_HEALTH_COLUMNS = "wine_id,code,name,vintage,importer_name,producer_name,product_family,unit_set,bottle_size,bottle_size_label,fob_price,category,country,region,appellation,active,orderable,core,inventory_item,last_seen_at";
+
+export async function fetchVinosmithProductHealthData(supabase: SupabaseClient): Promise<VinosmithProductHealth> {
+  const [wines, syncRunsResult, checkpointsResult, quickBooksItems] = await Promise.all([
+    fetchAll<VinosmithExplorerWine>(
+      supabase,
+      "vinosmith_wines",
+      VINOSMITH_WINE_HEALTH_COLUMNS,
+      "name"
+    ),
+    supabase
+      .from("source_sync_runs")
+      .select("id,sync_type,status,requested_start_date,requested_end_date,started_at,completed_at,error_message")
+      .eq("source_system", "vinosmith")
+      .order("started_at", { ascending: false })
+      .limit(12)
+      .returns<VinosmithExplorerSyncRun[]>(),
+    supabase
+      .from("source_sync_checkpoints")
+      .select("resource_name,checkpoint_key,status,last_synced_at,requested_start_date,requested_end_date")
+      .eq("source_system", "vinosmith")
+      .order("resource_name", { ascending: true })
+      .limit(100)
+      .returns<VinosmithExplorerCheckpoint[]>(),
+    fetchQuickBooksItems(supabase)
+  ]);
+
+  if (syncRunsResult.error) throw new Error(syncRunsResult.error.message);
+  if (checkpointsResult.error) throw new Error(checkpointsResult.error.message);
+
+  return buildProductHealth({
+    wines,
+    quickBooksItems,
+    syncRuns: syncRunsResult.data || [],
+    checkpoints: checkpointsResult.data || []
+  });
+}
 
 export async function fetchVinosmithExplorerData(supabase: SupabaseClient): Promise<VinosmithExplorerData> {
   try {
@@ -41,7 +82,7 @@ export async function fetchVinosmithExplorerData(supabase: SupabaseClient): Prom
       fetchAll<VinosmithExplorerWine>(
         supabase,
         "vinosmith_wines",
-        "wine_id,code,name,vintage,importer_name,producer_name,product_family,unit_set,bottle_size,bottle_size_label,fob_price,category,country,region,appellation,active,orderable,core,inventory_item,last_seen_at",
+        VINOSMITH_WINE_HEALTH_COLUMNS,
         "name"
       ),
       fetchAll<VinosmithExplorerAccount>(
@@ -97,6 +138,8 @@ export async function fetchVinosmithExplorerData(supabase: SupabaseClient): Prom
     ]);
 
     const inventoryWineIds = new Set(latestInventory.rows.map((row) => row.wine_id).filter(Boolean));
+    const syncRuns = syncRunsResult.data || [];
+    const checkpoints = checkpointsResult.data || [];
 
     return {
       error: null,
@@ -121,12 +164,31 @@ export async function fetchVinosmithExplorerData(supabase: SupabaseClient): Prom
       contacts,
       salesReps,
       recentOrders: recentOrdersResult.data || [],
-      syncRuns: syncRunsResult.data || [],
-      checkpoints: checkpointsResult.data || []
+      syncRuns,
+      checkpoints,
+      productHealth: emptyProductHealth("Open Settings > Data Health for product health diagnostics.")
     };
   } catch (error) {
     return emptyExplorerData(error instanceof Error ? error.message : "Could not load Vinosmith rescue data.");
   }
+}
+
+type QuickBooksHealthItem = {
+  list_id: string;
+  name: string | null;
+  full_name: string | null;
+  is_active: boolean | null;
+  custom_fields: Record<string, unknown> | null;
+  last_seen_at: string | null;
+};
+
+async function fetchQuickBooksItems(supabase: SupabaseClient) {
+  return fetchAll<QuickBooksHealthItem>(
+    supabase,
+    "quickbooks_items",
+    "list_id,name,full_name,is_active,custom_fields,last_seen_at",
+    "full_name"
+  );
 }
 
 async function fetchAll<T>(
@@ -265,6 +327,265 @@ function summarizePrices(
   return Array.from(summaries.values());
 }
 
+function buildProductHealth({
+  wines,
+  quickBooksItems,
+  syncRuns,
+  checkpoints
+}: {
+  wines: VinosmithExplorerWine[];
+  quickBooksItems: QuickBooksHealthItem[];
+  syncRuns: VinosmithExplorerSyncRun[];
+  checkpoints: VinosmithExplorerCheckpoint[];
+}): VinosmithProductHealth {
+  const latestCompletedRun = syncRuns.find((run) => run.status === "completed") || null;
+  const latestSuccessfulPullAt =
+    latestCompletedRun?.completed_at ||
+    latestCompletedRun?.started_at ||
+    latestCheckpointAt(checkpoints);
+  const previousCompletedRun = syncRuns.filter((run) => run.status === "completed")[1] || null;
+  const changedRecordsWindowStart = previousCompletedRun?.completed_at || previousCompletedRun?.started_at || null;
+  const changedRecordsSinceLastSync = changedRecordsWindowStart
+    ? wines.filter((wine) => isAtOrAfter(wine.last_seen_at, changedRecordsWindowStart)).length
+    : null;
+
+  const wineLookup = buildWineLookup(wines);
+  const quickBooksLookup = buildQuickBooksLookup(quickBooksItems);
+  const matchedWineIds = new Set<string>();
+  const activeQbVsInactiveVs: VinosmithProductHealthIssue[] = [];
+  const activeQbVsMissingVs: VinosmithProductHealthIssue[] = [];
+
+  quickBooksItems.forEach((item) => {
+    const itemCode = itemCodeFromQuickBooks(item);
+    const wine = resolveVinosmithWine(item, itemCode, wineLookup);
+    if (wine) matchedWineIds.add(wine.wine_id);
+    if (item.is_active === false) return;
+
+    if (!wine) {
+      activeQbVsMissingVs.push(issueFromQuickBooksItem(item, itemCode, "QB active / no VS match", "Active", "Missing"));
+    } else if (!isVinosmithActive(wine)) {
+      activeQbVsInactiveVs.push(issueFromPair(item, itemCode, wine, "QB active / VS inactive"));
+    }
+  });
+
+  const activeOrderableVsVsInactiveQb: VinosmithProductHealthIssue[] = [];
+  const activeOrderableVsVsMissingQb: VinosmithProductHealthIssue[] = [];
+  const metadataGaps: VinosmithProductHealthIssue[] = [];
+
+  wines.forEach((wine) => {
+    const matchedItem = resolveQuickBooksItem(wine, quickBooksLookup);
+    const vsActive = isVinosmithActive(wine);
+    if (matchedItem) matchedWineIds.add(wine.wine_id);
+
+    if (vsActive && (!wine.importer_name || !wine.producer_name)) {
+      metadataGaps.push(issueFromWine(wine, metadataGapLabel(wine), matchedItem?.is_active === false ? "Inactive" : matchedItem ? "Active" : "Missing"));
+    }
+
+    if (!vsActive) return;
+    if (!matchedItem) {
+      activeOrderableVsVsMissingQb.push(issueFromWine(wine, "VS active/orderable / no QB match", "Missing"));
+    } else if (matchedItem.is_active === false) {
+      activeOrderableVsVsInactiveQb.push(issueFromPair(matchedItem, itemCodeFromQuickBooks(matchedItem), wine, "VS active/orderable / QB inactive"));
+    }
+  });
+
+  const qbActiveVsInactiveOrMissingVs = [...activeQbVsInactiveVs, ...activeQbVsMissingVs];
+  const vsActiveOrderableVsInactiveOrMissingQb = [...activeOrderableVsVsInactiveQb, ...activeOrderableVsVsMissingQb];
+  const unmatchedItemCodes = [...activeQbVsMissingVs, ...activeOrderableVsVsMissingQb];
+
+  return {
+    latestSuccessfulPullAt,
+    latestCompletedRunId: latestCompletedRun?.id || null,
+    failedRecentSyncs: syncRuns.filter((run) => run.status === "failed").length,
+    activeQbVsInactiveOrMissingVs: qbActiveVsInactiveOrMissingVs.length,
+    activeQbVsInactiveVs: activeQbVsInactiveVs.length,
+    activeQbVsMissingVs: activeQbVsMissingVs.length,
+    activeOrderableVsVsInactiveOrMissingQb: vsActiveOrderableVsInactiveOrMissingQb.length,
+    activeOrderableVsVsInactiveQb: activeOrderableVsVsInactiveQb.length,
+    activeOrderableVsVsMissingQb: activeOrderableVsVsMissingQb.length,
+    missingSupplierImporterOrBrand: metadataGaps.length,
+    unmatchedItemCodes: unmatchedItemCodes.length,
+    changedRecordsSinceLastSync,
+    changedRecordsWindowStart,
+    changedRecordsNote: changedRecordsWindowStart
+      ? "Estimated from Vinosmith last_seen_at against the previous completed sync run."
+      : "Not available until at least two completed Vinosmith sync runs are recorded.",
+    examples: {
+      qbActiveVsInactiveOrMissingVs: qbActiveVsInactiveOrMissingVs.slice(0, PRODUCT_HEALTH_EXAMPLE_LIMIT),
+      vsActiveOrderableVsInactiveOrMissingQb: vsActiveOrderableVsInactiveOrMissingQb.slice(0, PRODUCT_HEALTH_EXAMPLE_LIMIT),
+      metadataGaps: metadataGaps.slice(0, PRODUCT_HEALTH_EXAMPLE_LIMIT),
+      unmatchedItemCodes: unmatchedItemCodes.slice(0, PRODUCT_HEALTH_EXAMPLE_LIMIT)
+    }
+  };
+}
+
+function buildWineLookup(wines: VinosmithExplorerWine[]) {
+  const byCode = new Map<string, VinosmithExplorerWine>();
+  const byName = new Map<string, VinosmithExplorerWine>();
+  wines.forEach((wine) => {
+    if (wine.code) byCode.set(normalizeKey(wine.code), wine);
+    if (wine.name) byName.set(normalizeKey(wine.name), wine);
+  });
+  return { byCode, byName };
+}
+
+function buildQuickBooksLookup(items: QuickBooksHealthItem[]) {
+  const byCode = new Map<string, QuickBooksHealthItem[]>();
+  const byName = new Map<string, QuickBooksHealthItem[]>();
+  items.forEach((item) => {
+    addQuickBooksLookupValue(byCode, itemCodeFromQuickBooks(item), item);
+    addQuickBooksLookupValue(byName, item.full_name, item);
+    addQuickBooksLookupValue(byName, item.name, item);
+  });
+  return { byCode, byName };
+}
+
+function addQuickBooksLookupValue(lookup: Map<string, QuickBooksHealthItem[]>, value: unknown, item: QuickBooksHealthItem) {
+  const key = normalizeKey(value);
+  if (!key) return;
+  const existing = lookup.get(key) || [];
+  existing.push(item);
+  lookup.set(key, existing);
+}
+
+function resolveVinosmithWine(
+  item: QuickBooksHealthItem,
+  itemCode: string,
+  lookup: ReturnType<typeof buildWineLookup>
+) {
+  return lookup.byCode.get(normalizeKey(itemCode)) ||
+    lookup.byName.get(normalizeKey(item.full_name)) ||
+    lookup.byName.get(normalizeKey(item.name)) ||
+    null;
+}
+
+function resolveQuickBooksItem(wine: VinosmithExplorerWine, lookup: ReturnType<typeof buildQuickBooksLookup>) {
+  const candidates = [
+    ...(lookup.byCode.get(normalizeKey(wine.code)) || []),
+    ...(lookup.byName.get(normalizeKey(wine.name)) || [])
+  ];
+  if (candidates.length === 0) return null;
+  return candidates.find((item) => item.is_active !== false) || candidates[0] || null;
+}
+
+function issueFromQuickBooksItem(
+  item: QuickBooksHealthItem,
+  itemCode: string,
+  issue: string,
+  quickBooksStatus: string,
+  vinosmithStatus: string
+): VinosmithProductHealthIssue {
+  return {
+    id: item.list_id,
+    itemCode,
+    productName: item.full_name || item.name || "Unnamed QuickBooks item",
+    supplierName: null,
+    quickBooksStatus,
+    vinosmithStatus,
+    issue,
+    lastSeenAt: item.last_seen_at
+  };
+}
+
+function issueFromWine(wine: VinosmithExplorerWine, issue: string, quickBooksStatus: string): VinosmithProductHealthIssue {
+  return {
+    id: wine.wine_id,
+    itemCode: wine.code,
+    productName: wine.name || "Unnamed Vinosmith wine",
+    supplierName: wine.importer_name,
+    quickBooksStatus,
+    vinosmithStatus: statusLabelForVinosmith(wine),
+    issue,
+    lastSeenAt: wine.last_seen_at
+  };
+}
+
+function issueFromPair(
+  item: QuickBooksHealthItem,
+  itemCode: string,
+  wine: VinosmithExplorerWine,
+  issue: string
+): VinosmithProductHealthIssue {
+  return {
+    id: `${item.list_id}:${wine.wine_id}`,
+    itemCode: itemCode || wine.code,
+    productName: wine.name || item.full_name || item.name || "Unnamed product",
+    supplierName: wine.importer_name,
+    quickBooksStatus: item.is_active === false ? "Inactive" : "Active",
+    vinosmithStatus: statusLabelForVinosmith(wine),
+    issue,
+    lastSeenAt: wine.last_seen_at || item.last_seen_at
+  };
+}
+
+function statusLabelForVinosmith(wine: VinosmithExplorerWine) {
+  if (wine.active === true && wine.orderable === true) return "Active + orderable";
+  if (wine.active === true) return "Active";
+  if (wine.orderable === true) return "Orderable";
+  if (wine.active === false || wine.orderable === false) return "Inactive";
+  return "Unknown";
+}
+
+function metadataGapLabel(wine: VinosmithExplorerWine) {
+  const gaps = [
+    wine.importer_name ? null : "supplier/importer",
+    wine.producer_name ? null : "brand/producer"
+  ].filter(Boolean);
+  return `Missing ${gaps.join(" + ")}`;
+}
+
+function latestCheckpointAt(checkpoints: VinosmithExplorerCheckpoint[]) {
+  return checkpoints
+    .map((checkpoint) => checkpoint.last_synced_at)
+    .filter((value): value is string => Boolean(value))
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+}
+
+function isAtOrAfter(value: string | null | undefined, start: string) {
+  if (!value) return false;
+  const valueTime = new Date(value).getTime();
+  const startTime = new Date(start).getTime();
+  return Number.isFinite(valueTime) && Number.isFinite(startTime) && valueTime >= startTime;
+}
+
+function isVinosmithActive(wine: VinosmithExplorerWine | null) {
+  return wine?.active === true || wine?.orderable === true;
+}
+
+function itemCodeFromQuickBooks(item: QuickBooksHealthItem) {
+  return textFromCustomFields(item.custom_fields, [
+    "item_number",
+    "itemNumber",
+    "ItemNumber",
+    "sku",
+    "SKU",
+    "product_code",
+    "productCode",
+    "ProductCode"
+  ]) || item.name || item.full_name || item.list_id;
+}
+
+function normalizeKey(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textFromCustomFields(value: unknown, keys: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const fields = value as Record<string, unknown>;
+
+  for (const key of keys) {
+    const direct = fields[key];
+    if (typeof direct === "string" && direct.trim()) return direct.trim();
+    if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+      const nested = direct as Record<string, unknown>;
+      const text = nested.value ?? nested.Value ?? nested.text ?? nested.Text;
+      if (typeof text === "string" && text.trim()) return text.trim();
+    }
+  }
+
+  return "";
+}
+
 function emptyExplorerData(error: string | null): VinosmithExplorerData {
   return {
     error,
@@ -290,7 +611,33 @@ function emptyExplorerData(error: string | null): VinosmithExplorerData {
     salesReps: [],
     recentOrders: [],
     syncRuns: [],
-    checkpoints: []
+    checkpoints: [],
+    productHealth: emptyProductHealth("Not available because Vinosmith plumbing data could not be loaded.")
+  };
+}
+
+function emptyProductHealth(changedRecordsNote: string): VinosmithProductHealth {
+  return {
+    latestSuccessfulPullAt: null,
+    latestCompletedRunId: null,
+    failedRecentSyncs: 0,
+    activeQbVsInactiveOrMissingVs: 0,
+    activeQbVsInactiveVs: 0,
+    activeQbVsMissingVs: 0,
+    activeOrderableVsVsInactiveOrMissingQb: 0,
+    activeOrderableVsVsInactiveQb: 0,
+    activeOrderableVsVsMissingQb: 0,
+    missingSupplierImporterOrBrand: 0,
+    unmatchedItemCodes: 0,
+    changedRecordsSinceLastSync: null,
+    changedRecordsWindowStart: null,
+    changedRecordsNote,
+    examples: {
+      qbActiveVsInactiveOrMissingVs: [],
+      vsActiveOrderableVsInactiveOrMissingQb: [],
+      metadataGaps: [],
+      unmatchedItemCodes: []
+    }
   };
 }
 

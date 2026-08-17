@@ -27,6 +27,16 @@ async function requireSettingsContext(): Promise<AppContext> {
   return context;
 }
 
+const VINOSMITH_PLUMBING_STATUSES = [
+  "needs_review",
+  "in_progress",
+  "waiting_on_qb",
+  "waiting_on_vs",
+  "fixed_needs_resync",
+  "ignored",
+  "resolved"
+] as const;
+
 function settingsFromForm(formData: FormData): OrderingLogicSettings {
   const current = DEFAULT_ORDERING_LOGIC_SETTINGS;
   const monthly_multipliers = Object.fromEntries(
@@ -237,4 +247,48 @@ export async function setProfilePermission(formData: FormData) {
 
   if (result.error) throw new Error(result.error.message);
   revalidatePath("/settings/access");
+}
+
+export async function updateVinosmithPlumbingIssueWorkflow(formData: FormData) {
+  const context = await requireSettingsContext();
+  requirePermission(context, "view_settings");
+
+  const issueKey = getString(formData, "issue_key");
+  const issueType = getString(formData, "issue_type");
+  const issueTitle = getString(formData, "issue_title");
+  const sourceOfTruth = getString(formData, "source_of_truth");
+  const status = getString(formData, "status");
+  const assignedTo = getString(formData, "assigned_to");
+  const adminNote = getString(formData, "admin_note");
+  const itemCode = getString(formData, "item_code");
+  const productName = getString(formData, "product_name");
+
+  if (!issueKey || !issueType || !issueTitle || !sourceOfTruth) {
+    throw new Error("Issue metadata is required.");
+  }
+  if (!VINOSMITH_PLUMBING_STATUSES.includes(status as (typeof VINOSMITH_PLUMBING_STATUSES)[number])) {
+    throw new Error("Unsupported plumbing workflow status.");
+  }
+
+  const now = new Date().toISOString();
+  const supabase = serviceSettingsClient();
+  const { error } = await supabase.from("source_health_issue_workflows").upsert({
+    issue_key: issueKey,
+    source_system: "vinosmith",
+    issue_type: issueType,
+    issue_title: issueTitle,
+    item_code: itemCode || null,
+    product_name: productName || null,
+    source_of_truth: sourceOfTruth,
+    status,
+    assigned_to: assignedTo || null,
+    admin_note: adminNote || null,
+    last_reviewed_by: context.user.id,
+    last_reviewed_at: now,
+    resolved_at: status === "resolved" ? now : null,
+    updated_at: now
+  });
+
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings/data-sync");
 }

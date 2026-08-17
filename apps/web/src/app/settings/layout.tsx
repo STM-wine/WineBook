@@ -1,11 +1,11 @@
-import Link from "next/link";
 import type React from "react";
 import { AppTopbar } from "@/components/app-topbar";
+import { SettingsNavigation } from "@/components/settings-navigation";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 
 const SETTINGS_NAV = [
   { href: "/settings", label: "Overview" },
-  { href: "/settings/data-sync", label: "Data Sync" },
+  { href: "/settings/data-sync", label: "Data Health" },
   { href: "/settings/logic", label: "Logic Settings" },
   { href: "/settings/gross-profit-center", label: "Gross Profit Center" },
   { href: "/settings/laid-in-coverage", label: "Laid-In Coverage" },
@@ -40,13 +40,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
       <div className="settings-layout">
         <aside className="settings-sidebar" aria-label="Settings sections">
           <p className="eyebrow">Settings</p>
-          <nav>
-            {SETTINGS_NAV.map((item) => (
-              <Link key={item.href} href={item.href}>
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          <SettingsNavigation items={SETTINGS_NAV} />
         </aside>
         <section className="settings-content">{children}</section>
       </div>
