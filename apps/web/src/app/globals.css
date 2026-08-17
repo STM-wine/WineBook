@@ -1505,8 +1505,33 @@ td {
 }
 
 .product-workspace-metrics {
+  gap: 10px;
   grid-template-columns: repeat(2, minmax(180px, 260px));
   justify-content: start;
+}
+
+.product-workspace-metrics .metric-card {
+  box-shadow: none;
+  min-height: 0;
+  padding: 12px 14px 10px;
+}
+
+.product-workspace-metrics .metric-card::before {
+  height: 3px;
+}
+
+.product-workspace-metrics .metric-card span {
+  font-size: 10px;
+  margin-bottom: 5px;
+}
+
+.product-workspace-metrics .metric-card strong {
+  font-size: 24px;
+}
+
+.product-workspace-metrics .metric-card p {
+  font-size: 12px;
+  margin-top: 4px;
 }
 
 .product-workspace-header {
