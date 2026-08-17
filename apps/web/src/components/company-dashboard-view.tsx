@@ -136,6 +136,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     ? data.summary.grossProfitPercent - comparison.summary.grossProfitPercent
     : null;
   const sampleCostRate = data.summary.netSales === 0 ? null : data.summary.sampleCost / data.summary.netSales;
+  const deliveryDays = mtdDeliveryDayComparison(data.generatedAt);
   const loadingStatus = dashboardLoadingStatus({ isDrilldownLoading, isLoading, isProfitLoading });
   const topReps = useMemo(() => sortSummaryRows(data.byRep, repSort).slice(0, 20), [data.byRep, repSort]);
   const accountRows = useMemo(() => sortSummaryRows(accountData.byAccount, accountSort), [accountData.byAccount, accountSort]);
@@ -422,6 +423,14 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
           detail={comparison ? `${formatSignedPercent(netSalesDeltaRate)} vs ${comparison.label}` : "Comparison unavailable"}
           tone={toneFor(netSalesDelta)}
           helpText="Compares current QuickBooks net sales against the same date range last year."
+        />
+        <DashboardMetric
+          label="MTD Delivery Days"
+          value={formatDeliveryDayDelta(deliveryDays.delta)}
+          detail={`${deliveryDays.currentDays} this year / ${deliveryDays.lastYearDays} LY`}
+          meta="Monday-Friday delivery calendar"
+          tone={toneFor(deliveryDays.delta)}
+          helpText="Delivery days are Monday-Friday weekdays from the first day of this month through today, compared with the first day of the same month through the same calendar day last year. This card is always current MTD, even when the dashboard date filter changes."
         />
         <DashboardMetric
           label={`${compactScopedPeriodLabel} GP %`}
@@ -1144,6 +1153,30 @@ function parseIsoDate(value: string) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function mtdDeliveryDayComparison(referenceValue: string) {
+  const referenceDate = new Date(referenceValue);
+  const today = Number.isNaN(referenceDate.getTime()) ? startOfDay(new Date()) : startOfDay(referenceDate);
+  const currentStart = startOfMonth(today);
+  const lastYearDate = addYears(today, -1);
+  const lastYearStart = startOfMonth(lastYearDate);
+  const currentDays = countWeekdaysInclusive(currentStart, today);
+  const lastYearDays = countWeekdaysInclusive(lastYearStart, lastYearDate);
+  return {
+    currentDays,
+    lastYearDays,
+    delta: currentDays - lastYearDays
+  };
+}
+
+function countWeekdaysInclusive(from: Date, to: Date) {
+  let count = 0;
+  for (let current = startOfDay(from); current <= to; current = addDays(current, 1)) {
+    const day = current.getDay();
+    if (day >= 1 && day <= 5) count += 1;
+  }
+  return count;
+}
+
 function startOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
@@ -1269,6 +1302,13 @@ function formatSignedCurrency(value: number | null) {
   if (value > 0) return `+${formatted}`;
   if (value < 0) return `-${formatted}`;
   return formatted;
+}
+
+function formatDeliveryDayDelta(value: number) {
+  const unit = Math.abs(value) === 1 ? "day" : "days";
+  if (value > 0) return `Ahead ${value} ${unit}`;
+  if (value < 0) return `Behind ${Math.abs(value)} ${unit}`;
+  return "Even";
 }
 
 function formatSampleCost(value: number | null | undefined) {
