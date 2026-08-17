@@ -1,6 +1,7 @@
 export type ActiveView =
   | "company-dashboard"
   | "sales-dashboard"
+  | "product-workspace"
   | "order-review"
   | "supplier-hub"
   | "vinosmith-rescue"
@@ -14,13 +15,14 @@ export const DEFAULT_VIEW: ActiveView = "company-dashboard";
 export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolean; requiresSettings?: boolean }> = [
   { id: "company-dashboard", label: "Home" },
   { id: "sales-dashboard", label: "Sales Dashboard" },
+  { id: "product-workspace", label: "Items" },
   { id: "order-review", label: "Order Review" },
   { id: "supplier-hub", label: "Supplier Hub" },
   { id: "vinosmith-rescue", label: "Vinosmith Rescue", hidden: true },
   { id: "supplier-board", label: "Supplier Board", hidden: true },
   { id: "freight", label: "Freight" },
   { id: "po-drafts", label: "PO Drafts" },
-  { id: "quickbooks-items", label: "Items", requiresSettings: true }
+  { id: "quickbooks-items", label: "QB Diagnostics", requiresSettings: true }
 ];
 
 export const NAV_VIEW_LABELS = VIEW_LABELS.filter((view) => !view.hidden);

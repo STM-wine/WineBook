@@ -48,6 +48,7 @@ import { CompanyDashboardView } from "./company-dashboard-view";
 import { FreightView } from "./freight-view";
 import { OrderReviewView } from "./order-review-view";
 import { PoDraftsView } from "./po-drafts-view";
+import { ProductWorkspaceView } from "./product-workspace-view";
 import { QuickBooksItemMasterView } from "./quickbooks-item-master-view";
 import { StatusMessages } from "./status-messages";
 import { SalesDashboardView } from "./sales-dashboard-view";
@@ -687,6 +688,8 @@ export function OrderDashboard({
       {activeView === "company-dashboard" ? <CompanyDashboardView initialData={companyDashboard} /> : null}
 
       {activeView === "sales-dashboard" ? <SalesDashboardView data={quickBooksSales} /> : null}
+
+      {activeView === "product-workspace" ? <ProductWorkspaceView canViewDiagnostics={canViewSettings} /> : null}
 
       {activeView === "order-review" ? (
         <OrderReviewView

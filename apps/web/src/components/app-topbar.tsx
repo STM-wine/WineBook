@@ -24,7 +24,7 @@ function viewHref(view: ActiveView) {
 
 const HOME_VIEW: ActiveView = "company-dashboard";
 const SALES_VIEW: ActiveView = "sales-dashboard";
-const ORDERING_VIEWS: ActiveView[] = ["order-review", "po-drafts", "supplier-hub", "freight", "quickbooks-items"];
+const ORDERING_VIEWS: ActiveView[] = ["product-workspace", "order-review", "po-drafts", "supplier-hub", "freight", "quickbooks-items"];
 
 export function AppTopbar({
   activeModule,
@@ -67,7 +67,7 @@ export function AppTopbar({
           {onSelectView ? (
             <button
               className={isOrderingActive ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"}
-              onClick={() => onSelectView("order-review")}
+              onClick={() => onSelectView("product-workspace")}
               type="button"
               aria-haspopup="menu"
             >
