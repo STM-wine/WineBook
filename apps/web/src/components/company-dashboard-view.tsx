@@ -102,12 +102,14 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     ? data.periodLabel
     : selectedRangeLabel;
   const scopedPeriodLabel = data.businessLine === "all" ? displayPeriodLabel : `${displayPeriodLabel} ${businessLineLabel(data.businessLine)}`;
+  const compactScopedPeriodLabel = compactDashboardPeriodLabel(scopedPeriodLabel);
   const comparison = data.comparison;
   const netSalesDelta = comparison ? data.summary.netSales - comparison.summary.netSales : null;
   const netSalesDeltaRate = comparison ? changeRate(data.summary.netSales, comparison.summary.netSales) : null;
   const gpDelta = comparison && data.summary.grossProfitPercent !== null && comparison.summary.grossProfitPercent !== null
     ? data.summary.grossProfitPercent - comparison.summary.grossProfitPercent
     : null;
+  const sampleCostRate = data.summary.netSales === 0 ? null : data.summary.sampleCost / data.summary.netSales;
   const loadingStatus = dashboardLoadingStatus({ isDrilldownLoading, isLoading, isProfitLoading });
   const topReps = useMemo(() => sortSummaryRows(data.byRep, repSort).slice(0, 20), [data.byRep, repSort]);
   const accountRows = useMemo(() => sortSummaryRows(accountData.byAccount, accountSort), [accountData.byAccount, accountSort]);
@@ -322,7 +324,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
       <div className="company-kpi-grid">
         <DashboardMetric
-          label={`${scopedPeriodLabel} Sales`}
+          label={`${compactScopedPeriodLabel} Sales`}
           value={currency.format(data.summary.netSales)}
           detail={`Gross ${currency.format(data.summary.grossSales)} / Net ${currency.format(data.summary.netSales)}`}
           meta={`${number.format(data.summary.invoiceCount)} invoices, ${number.format(data.summary.creditMemoCount)} credits`}
@@ -336,7 +338,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
           helpText="Compares current QuickBooks net sales against the same date range last year."
         />
         <DashboardMetric
-          label={`${scopedPeriodLabel} GP %`}
+          label={`${compactScopedPeriodLabel} GP %`}
           value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : formatPercent(data.summary.grossProfitPercent)}
           detail={
             isProfitLoading && data.summary.grossProfit === null
@@ -362,14 +364,14 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
           helpText="Compares this period's GP percentage against the same date range last year using the same QuickBooks cost, Supplier Logistics laid-in, and Vinosmith billback method."
         />
         <DashboardMetric
-          label={`${scopedPeriodLabel} Samples`}
+          label={`${compactScopedPeriodLabel} Samples`}
           value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : currency.format(data.summary.sampleCost)}
-          detail="Landed sample cost"
-          meta="Excluded from GP %"
-          helpText="Sample cost is quantity pulled multiplied by landed bottle cost: QuickBooks FOB plus Supplier Logistics laid-in cost. It includes sample, zero-dollar, and fully discounted lines for the selected date range, and is excluded from GP %."
+          detail={`${formatPercent(sampleCostRate)} of net sales`}
+          meta="Landed sample cost"
+          helpText="Samples as a percent of net sales is landed sample cost divided by QuickBooks net sales for the selected date range. Landed sample cost is quantity pulled multiplied by QuickBooks FOB plus Supplier Logistics laid-in cost."
         />
         <DashboardMetric
-          label={`${scopedPeriodLabel} Avg Invoice`}
+          label={`${compactScopedPeriodLabel} Avg Invoice`}
           value={currency.format(data.summary.averageInvoice)}
           detail={`${number.format(data.summary.invoiceCount)} invoice basis`}
           helpText="Average invoice is QuickBooks gross invoice sales divided by the number of QuickBooks invoices in the selected range. Credit memos are not included in this average."
@@ -1057,6 +1059,16 @@ function businessLineLabel(businessLine: CompanyDashboardBusinessLine) {
   if (businessLine === "grw") return "GRW";
   if (businessLine === "stem") return "Stem";
   return "All";
+}
+
+function compactDashboardPeriodLabel(label: string) {
+  return label
+    .replaceAll("This Month-to-date", "MTD")
+    .replaceAll("This Month-To-Date", "MTD")
+    .replaceAll("Last Month-to-date", "Last MTD")
+    .replaceAll("Last Month-To-Date", "Last MTD")
+    .replaceAll("Month-to-date", "MTD")
+    .replaceAll("Month-To-Date", "MTD");
 }
 
 function revenueCenterOptionLabel(businessLine: CompanyDashboardBusinessLine) {
