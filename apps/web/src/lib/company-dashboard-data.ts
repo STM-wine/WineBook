@@ -367,6 +367,8 @@ function emptyLineRollup(): MutableGrossProfitRollup {
 }
 
 function addLineToRollup(rollup: MutableGrossProfitRollup, line: GrossProfitCenterLine) {
+  if (line.confidenceBucket === "sample_zero_dollar_or_100_discount") return;
+
   const amount = money(line.qbGrossSales);
   if (line.transactionType === "invoice") {
     rollup.invoiceSales += amount;
