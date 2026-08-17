@@ -281,11 +281,8 @@ function ProductWorkspaceTable({
               <colgroup>
                 <col className="product-col-code" />
                 <col className="product-col-name" />
-                <col className="product-col-vintage" />
-                <col className="product-col-pack" />
                 <col className="product-col-supplier" />
                 <col className="product-col-revenue" />
-                <col className="product-col-money" />
                 <col className="product-col-money" />
                 <col className="product-col-money" />
                 <col className="product-col-money-wide" />
@@ -298,13 +295,10 @@ function ProductWorkspaceTable({
                 <tr>
                   <SortableHeader label="Item #" sortKey="itemCode" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Product / brand" sortKey="productName" sort={sort} onSort={changeSort} />
-                  <SortableHeader label="Vintage" sortKey="vintage" sort={sort} onSort={changeSort} />
-                  <SortableHeader label="Pack" sortKey="pack" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Supplier" sortKey="supplierName" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Revenue" sortKey="revenueCenter" sort={sort} onSort={changeSort} />
                   <SortableHeader label="FOB" sortKey="fob" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Laid-in" sortKey="laidIn" sort={sort} onSort={changeSort} />
-                  <SortableHeader label="Landed" sortKey="landedCost" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Frontline" sortKey="frontline" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Best" sortKey="bestPrice" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Avg GP" sortKey="averageGpPercent" sort={sort} onSort={changeSort} />
@@ -324,13 +318,10 @@ function ProductWorkspaceTable({
                       <strong>{row.productName}</strong>
                       <small>{row.brand || "Brand not matched"}</small>
                     </td>
-                    <td>{row.vintage || "-"}</td>
-                    <td>{row.pack || "-"}</td>
                     <td title={row.supplierSource || "No supplier source matched"}>{row.supplierName || "Unmatched"}</td>
                     <td>{row.revenueCenter}</td>
                     <td title={row.fobSource || "Missing QuickBooks FOB"}>{moneyOrDash(row.fob)}</td>
                     <td title={row.laidInSource || "Missing Supplier Logistics laid-in"}>{moneyOrDash(row.laidIn)}</td>
-                    <td>{moneyOrDash(row.landedCost)}</td>
                     <td>{moneyOrDash(row.frontline)}</td>
                     <td>{moneyOrDash(row.bestPrice)}</td>
                     <td>{percentOrDash(row.averageGpPercent)}</td>

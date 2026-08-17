@@ -1586,7 +1586,7 @@ td {
 }
 
 .product-workspace-table table {
-  min-width: 1260px;
+  min-width: 1040px;
   table-layout: fixed;
 }
 
@@ -1626,10 +1626,14 @@ td {
   white-space: normal;
 }
 
-.product-workspace-table th:nth-child(5),
-.product-workspace-table td:nth-child(5),
-.product-workspace-table th:nth-child(6),
-.product-workspace-table td:nth-child(6) {
+.product-workspace-table th:first-child,
+.product-workspace-table td:first-child,
+.product-workspace-table th:nth-child(3),
+.product-workspace-table td:nth-child(3),
+.product-workspace-table th:nth-child(4),
+.product-workspace-table td:nth-child(4),
+.product-workspace-table th:nth-child(10),
+.product-workspace-table td:nth-child(10) {
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -1666,43 +1670,35 @@ td {
 }
 
 .product-col-code {
-  width: 84px;
-}
-
-.product-col-name {
-  width: 230px;
-}
-
-.product-col-vintage {
-  width: 54px;
-}
-
-.product-col-pack {
-  width: 62px;
-}
-
-.product-col-supplier {
-  width: 140px;
-}
-
-.product-col-revenue {
   width: 92px;
 }
 
+.product-col-name {
+  width: 285px;
+}
+
+.product-col-supplier {
+  width: 150px;
+}
+
+.product-col-revenue {
+  width: 100px;
+}
+
 .product-col-money {
-  width: 66px;
+  width: 74px;
 }
 
 .product-col-money-wide {
-  width: 72px;
+  width: 86px;
 }
 
 .product-col-gp {
-  width: 60px;
+  width: 64px;
 }
 
 .product-col-status {
-  width: 118px;
+  width: 130px;
 }
 
 .product-col-health {
@@ -1727,7 +1723,9 @@ td {
 
 th:first-child .table-sort-button,
 th:nth-child(2) .table-sort-button,
-th:nth-child(5) .table-sort-button {
+th:nth-child(3) .table-sort-button,
+th:nth-child(4) .table-sort-button,
+th:nth-child(10) .table-sort-button {
   justify-content: flex-start;
 }
 
