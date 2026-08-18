@@ -191,7 +191,6 @@ function IssueSection({
       <div className="settings-panel-header">
         <div>
           <h2>{group.title}</h2>
-          <p className="muted">{group.rows.length.toLocaleString("en-US")} examples shown for review.</p>
         </div>
       </div>
       <div className="plumbing-issue-list">
