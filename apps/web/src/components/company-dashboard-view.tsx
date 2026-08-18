@@ -3,7 +3,12 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { WineLoadingProgress } from "@/components/wine-loading-progress";
-import type { CompanyDashboardBusinessLine, CompanyDashboardData, CompanyDashboardPeriod } from "@/lib/company-dashboard-data";
+import type {
+  CompanyDashboardBusinessLine,
+  CompanyDashboardData,
+  CompanyDashboardPeriod,
+  CompanyDashboardSummary
+} from "@/lib/company-dashboard-data";
 import type {
   QuickBooksSalesDashboardData,
   QuickBooksSalesSummaryRow,
@@ -37,6 +42,7 @@ const number = new Intl.NumberFormat("en-US");
 const RANGE_PLACEHOLDER = "- Choose -";
 const CUSTOM_RANGE_LABEL = "Custom";
 const MAX_AUTO_GROSS_PROFIT_DAYS = 124;
+const COMPANY_SAMPLE_BILLBACK_ACCRUAL_RATE = 0.011;
 
 const DATE_RANGE_LABELS = [
   RANGE_PLACEHOLDER,
@@ -134,10 +140,14 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const comparison = data.comparison;
   const netSalesDelta = comparison ? data.summary.netSales - comparison.summary.netSales : null;
   const netSalesDeltaRate = comparison ? changeRate(data.summary.netSales, comparison.summary.netSales) : null;
-  const gpDelta = comparison && data.summary.grossProfitPercent !== null && comparison.summary.grossProfitPercent !== null
-    ? data.summary.grossProfitPercent - comparison.summary.grossProfitPercent
+  const companyKpiGrossProfit = companyKpiGrossProfitWithSampleAccrual(data.summary, data.businessLine);
+  const comparisonCompanyKpiGrossProfit = comparison
+    ? companyKpiGrossProfitWithSampleAccrual(comparison.summary, data.businessLine)
     : null;
-  const hasGpComparison = comparison?.summary.grossProfitPercent !== null && comparison?.summary.grossProfitPercent !== undefined;
+  const gpDelta = comparisonCompanyKpiGrossProfit && companyKpiGrossProfit.grossProfitPercent !== null && comparisonCompanyKpiGrossProfit.grossProfitPercent !== null
+    ? companyKpiGrossProfit.grossProfitPercent - comparisonCompanyKpiGrossProfit.grossProfitPercent
+    : null;
+  const hasGpComparison = comparisonCompanyKpiGrossProfit?.grossProfitPercent !== null && comparisonCompanyKpiGrossProfit?.grossProfitPercent !== undefined;
   const sampleCostRate = data.summary.netSales === 0 ? null : data.summary.sampleCost / data.summary.netSales;
   const deliveryDays = mtdDeliveryDayComparison(data.generatedAt);
   const canAutoLoadGrossProfitForVisibleRange = canAutoLoadGrossProfit(data.dateFrom, data.dateTo);
@@ -485,43 +495,45 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
           label="MTD Delivery Days"
           value={formatDeliveryDayDelta(deliveryDays.delta)}
           detail={`${deliveryDays.currentDays} this year / ${deliveryDays.lastYearDays} LY`}
-          meta="Monday-Friday delivery calendar"
+          meta="Tuesday-Friday delivery calendar"
           tone={toneFor(deliveryDays.delta)}
-          helpText="Delivery days are Monday-Friday weekdays from the first day of this month through today, compared with the first day of the same month through the same calendar day last year. This card is always current MTD, even when the dashboard date filter changes."
+          helpText="Delivery days are Tuesday-Friday from the first day of this month through today, compared with the first day of the same month through the same calendar day last year. This card is always current MTD, even when the dashboard date filter changes."
         />
         <DashboardMetric
           label={`${compactScopedPeriodLabel} GP %`}
-          value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : formatPercent(data.summary.grossProfitPercent)}
+          value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : formatPercent(companyKpiGrossProfit.grossProfitPercent)}
           detail={
             isProfitLoading && data.summary.grossProfit === null
               ? "Calculating GP from QB + VS"
               : !canAutoLoadGrossProfitForVisibleRange && data.summary.grossProfit === null
-                ? "Use a trimester or less for GP"
+              ? "Use a trimester or less for GP"
               : data.summary.grossProfit === null
                 ? "Gross profit unavailable"
-                : `${currency.format(data.summary.grossProfit)} gross profit`
+                : companyKpiGrossProfit.sampleBillbackAccrual > 0
+                  ? `${currency.format(companyKpiGrossProfit.grossProfit ?? 0)} GP incl. ${currency.format(companyKpiGrossProfit.sampleBillbackAccrual)} sample accrual`
+                  : `${currency.format(companyKpiGrossProfit.grossProfit ?? 0)} gross profit`
           }
           meta={
             isProfitLoading && data.summary.grossProfitPercent === null
               ? "Background calculation running"
               : !canAutoLoadGrossProfitForVisibleRange && data.summary.grossProfit === null
                 ? "Long-range GP disabled for now"
-                : data.summary.grossProfitUnavailableReason || "QuickBooks + Vinosmith cost basis"
+                : data.summary.grossProfitUnavailableReason || "Includes 1.1% sample accrual"
           }
-          helpText="Gross profit uses QuickBooks sales lines, current QuickBooks item FOB cost, and the Stem laid-in per bottle from Supplier Logistics. When Vinosmith order and price data can be matched, Vinosmith billbacks reduce effective cost."
+          helpText="Company KPI GP starts with QuickBooks sales lines, current QuickBooks item FOB cost, and Stem laid-in per bottle from Supplier Logistics. When Vinosmith order and price data can be matched, Vinosmith billbacks reduce effective cost. This KPI then adds an estimated sample bill-back accrual equal to 1.1% of net sales. Rep and account GP tables do not include this company-level accrual."
         />
         <DashboardMetric
           label={comparison ? gpComparisonLabel(data.period) : "GP Trend"}
           value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : hasGpComparison ? formatSignedPoints(gpDelta) : "-"}
           detail={
             isProfitLoading && data.summary.grossProfitPercent === null
-              ? "Calculating current GP"
-              : hasGpComparison
-                ? `${formatPercent(comparison.summary.grossProfitPercent)} last year`
+                ? "Calculating current GP"
+                : hasGpComparison
+                ? `${formatPercent(comparisonCompanyKpiGrossProfit?.grossProfitPercent ?? null)} last year`
                 : "Current period only"
           }
           tone={toneFor(gpDelta)}
-          helpText="Current GP is calculated from QuickBooks costs, Supplier Logistics laid-in, and Vinosmith billbacks. LY GP comparison is disabled for now to avoid expensive historical line-level calculations."
+          helpText="Company KPI GP comparison uses the same company-level GP display basis, including the estimated 1.1% of net sales sample bill-back accrual. Rep and account GP tables remain unadjusted."
         />
         <DashboardMetric
           label={`${compactScopedPeriodLabel} Samples`}
@@ -1251,7 +1263,7 @@ function countWeekdaysInclusive(from: Date, to: Date) {
   let count = 0;
   for (let current = startOfDay(from); current <= to; current = addDays(current, 1)) {
     const day = current.getDay();
-    if (day >= 1 && day <= 5) count += 1;
+    if (day >= 2 && day <= 5) count += 1;
   }
   return count;
 }
@@ -1354,6 +1366,32 @@ function valueForSort(row: QuickBooksSalesSummaryRow, key: SortKey) {
 function changeRate(current: number, previous: number) {
   if (previous === 0) return current === 0 ? 0 : null;
   return (current - previous) / Math.abs(previous);
+}
+
+function companyKpiGrossProfitWithSampleAccrual(
+  summary: CompanyDashboardSummary,
+  businessLine: CompanyDashboardBusinessLine
+) {
+  if (summary.grossProfit === null) {
+    return {
+      grossProfit: null,
+      grossProfitPercent: null,
+      sampleBillbackAccrual: 0
+    };
+  }
+  const sampleBillbackAccrual = businessLine === "grw"
+    ? 0
+    : roundDollars(Math.max(0, summary.netSales) * COMPANY_SAMPLE_BILLBACK_ACCRUAL_RATE);
+  const grossProfit = roundDollars(summary.grossProfit + sampleBillbackAccrual);
+  return {
+    grossProfit,
+    grossProfitPercent: summary.netSales === 0 ? null : grossProfit / summary.netSales,
+    sampleBillbackAccrual
+  };
+}
+
+function roundDollars(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function toneFor(value: number | null) {
