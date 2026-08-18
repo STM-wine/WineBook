@@ -49,6 +49,14 @@ export type ProductWorkspaceRow = {
   sourceHealth: "ready" | "partial" | "needs_review";
   sourceHealthLabel: string;
   sourceBadges: ProductWorkspaceSource[];
+  orderingMarker: {
+    isBtg: boolean;
+    isCore: boolean;
+    markerNote: string | null;
+    noteSource: string | null;
+    updatedAt: string | null;
+    updatedBy: string | null;
+  };
   quickbooks: {
     listId: string;
     fullName: string;
@@ -92,6 +100,8 @@ export type ProductWorkspaceSummary = {
   vsStatusUnknown: number;
   qbInactiveVsActive: number;
   vsActiveQbMissing: number;
+  btgMarkers: number;
+  coreMarkers: number;
 };
 
 export type ProductWorkspaceResponse = {

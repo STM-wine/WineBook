@@ -19,6 +19,8 @@ type SortKey =
   | "pack"
   | "supplierName"
   | "revenueCenter"
+  | "isCore"
+  | "isBtg"
   | "fob"
   | "laidIn"
   | "landedCost"
@@ -34,6 +36,8 @@ const SOURCE_LABELS: Record<string, string> = {
   supplier_hub: "Supplier Hub",
   stem: "Stem"
 };
+
+type OrderingMarker = ProductWorkspaceRow["orderingMarker"];
 
 type StatusFilter = "All" | "gaps" | "vs_status_unknown" | ProductWorkspaceStatusKey;
 
@@ -141,27 +145,62 @@ export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostic
     );
   }
 
+  function handleMarkerUpdated(itemCode: string, marker: OrderingMarker) {
+    const normalizedItemCode = normalizeCode(itemCode);
+    setState((current) => {
+      if (current.status !== "loaded") return current;
+      const rows = current.data.rows.map((row) => {
+        if (normalizeCode(row.itemCode) !== normalizedItemCode) return row;
+        return {
+          ...row,
+          orderingMarker: marker,
+          sourceBadges: sourceBadgesWithStem(row.sourceBadges)
+        };
+      });
+
+      return {
+        status: "loaded",
+        error: null,
+        data: {
+          ...current.data,
+          rows,
+          summary: {
+            ...current.data.summary,
+            btgMarkers: rows.filter((row) => row.orderingMarker.isBtg).length,
+            coreMarkers: rows.filter((row) => row.orderingMarker.isCore).length
+          }
+        }
+      };
+    });
+  }
+
   return (
     <ProductWorkspaceTable
       canViewDiagnostics={canViewDiagnostics}
+      canManageMarkers={canViewDiagnostics}
       data={state.data}
       includeInactive={includeInactive}
       onOpenDiagnostics={() => setDiagnosticsOpen(true)}
+      onMarkerUpdated={handleMarkerUpdated}
       onSetIncludeInactive={setIncludeInactive}
     />
   );
 }
 
 function ProductWorkspaceTable({
+  canManageMarkers,
   canViewDiagnostics,
   data,
   includeInactive,
+  onMarkerUpdated,
   onOpenDiagnostics,
   onSetIncludeInactive
 }: {
+  canManageMarkers?: boolean;
   canViewDiagnostics?: boolean;
   data: ProductWorkspaceResponse;
   includeInactive: boolean;
+  onMarkerUpdated: (itemCode: string, marker: OrderingMarker) => void;
   onOpenDiagnostics: () => void;
   onSetIncludeInactive: (value: boolean) => void;
 }) {
@@ -171,6 +210,8 @@ function ProductWorkspaceTable({
   const [health, setHealth] = useState("All");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "productName", direction: "asc" });
   const [selectedId, setSelectedId] = useState<string | null>(data.rows[0]?.id || null);
+  const [updatingMarkerCode, setUpdatingMarkerCode] = useState<string | null>(null);
+  const [markerError, setMarkerError] = useState<string | null>(null);
   const supplierOptions = useMemo(
     () => ["All", ...Array.from(new Set(data.rows.map((row) => row.supplierName || "Unknown").sort((a, b) => a.localeCompare(b))))],
     [data.rows]
@@ -234,6 +275,45 @@ function ProductWorkspaceTable({
     }));
   }
 
+  async function saveOrderingMarker(row: ProductWorkspaceRow, marker: OrderingMarker) {
+    const previousMarker = row.orderingMarker;
+    const note = "Manual Product Workspace marker update";
+    setMarkerError(null);
+    setUpdatingMarkerCode(row.itemCode);
+    onMarkerUpdated(row.itemCode, {
+      ...marker,
+      markerNote: note,
+      noteSource: "manual",
+      updatedAt: new Date().toISOString()
+    });
+
+    try {
+      const response = await fetch("/api/products/workspace/markers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemCode: row.itemCode,
+          quickbooksItemListId: row.quickbooks.listId || null,
+          isBtg: marker.isBtg,
+          isCore: marker.isCore,
+          note
+        })
+      });
+      const body = await response.json().catch(() => null) as { error?: string; orderingMarker?: OrderingMarker } | null;
+      if (!response.ok) {
+        throw new Error(body?.error || "Could not save ordering marker.");
+      }
+      if (body?.orderingMarker) {
+        onMarkerUpdated(row.itemCode, body.orderingMarker);
+      }
+    } catch (error) {
+      onMarkerUpdated(row.itemCode, previousMarker);
+      setMarkerError(error instanceof Error ? error.message : "Could not save ordering marker.");
+    } finally {
+      setUpdatingMarkerCode((current) => current === row.itemCode ? null : current);
+    }
+  }
+
   return (
     <>
       <section className="metric-grid product-workspace-metrics">
@@ -248,7 +328,7 @@ function ProductWorkspaceTable({
           <div>
             <p className="eyebrow">Products / Items</p>
             <h1>Product Workspace</h1>
-            <p>Read-only table using QuickBooks FOB, Supplier Logistics laid-in, and matched Vinosmith or Supplier Hub prices where available.</p>
+            <p>QuickBooks and source proof table with app-owned Core/BTG ordering markers. Live Order Review is unchanged.</p>
           </div>
           <div className="product-workspace-actions">
             {canViewDiagnostics ? (
@@ -298,6 +378,7 @@ function ProductWorkspaceTable({
             <span>Include inactive</span>
           </label>
         </div>
+        {markerError ? <p className="form-error">{markerError}</p> : null}
 
         <div className="product-workspace-layout">
           <div className="table-shell product-workspace-table">
@@ -307,6 +388,8 @@ function ProductWorkspaceTable({
                 <col className="product-col-name" />
                 <col className="product-col-supplier" />
                 <col className="product-col-revenue" />
+                <col className="product-col-marker" />
+                <col className="product-col-marker" />
                 <col className="product-col-money" />
                 <col className="product-col-money" />
                 <col className="product-col-money-wide" />
@@ -321,6 +404,8 @@ function ProductWorkspaceTable({
                   <SortableHeader label="Product / brand" sortKey="productName" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Supplier" sortKey="supplierName" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Revenue" sortKey="revenueCenter" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="Core" sortKey="isCore" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="BTG" sortKey="isBtg" sort={sort} onSort={changeSort} />
                   <SortableHeader label="FOB" sortKey="fob" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Laid-in" sortKey="laidIn" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Frontline" sortKey="frontline" sort={sort} onSort={changeSort} />
@@ -344,6 +429,22 @@ function ProductWorkspaceTable({
                     </td>
                     <td title={row.supplierSource || "No supplier source matched"}>{row.supplierName || "Unmatched"}</td>
                     <td>{row.revenueCenter}</td>
+                    <td onClick={(event) => event.stopPropagation()}>
+                      <MarkerToggle
+                        checked={row.orderingMarker.isCore}
+                        disabled={!canManageMarkers || updatingMarkerCode === row.itemCode}
+                        label="Core"
+                        onChange={(checked) => saveOrderingMarker(row, { ...row.orderingMarker, isCore: checked })}
+                      />
+                    </td>
+                    <td onClick={(event) => event.stopPropagation()}>
+                      <MarkerToggle
+                        checked={row.orderingMarker.isBtg}
+                        disabled={!canManageMarkers || updatingMarkerCode === row.itemCode}
+                        label="BTG"
+                        onChange={(checked) => saveOrderingMarker(row, { ...row.orderingMarker, isBtg: checked })}
+                      />
+                    </td>
                     <td title={row.fobSource || "Missing QuickBooks FOB"}>{moneyOrDash(row.fob)}</td>
                     <td title={row.laidInSource || "Missing Supplier Logistics laid-in"}>{moneyOrDash(row.laidIn)}</td>
                     <td>{moneyOrDash(row.frontline)}</td>
@@ -399,6 +500,15 @@ function ProductWorkspaceDrawer({ row }: { row: ProductWorkspaceRow | null }) {
         </dl>
       </div>
       <div className="drawer-section">
+        <h3>Ordering Markers</h3>
+        <dl>
+          <div><dt>Core</dt><dd>{row.orderingMarker.isCore ? "On" : "Off"}</dd></div>
+          <div><dt>BTG</dt><dd>{row.orderingMarker.isBtg ? "On" : "Off"}</dd></div>
+          <div><dt>Updated</dt><dd>{dateTimeLabel(row.orderingMarker.updatedAt)} <small>{row.orderingMarker.noteSource || "No marker row"}</small></dd></div>
+          <div><dt>Note</dt><dd>{row.orderingMarker.markerNote || "No note"}</dd></div>
+        </dl>
+      </div>
+      <div className="drawer-section">
         <h3>Source Proof</h3>
         <dl>
           <div><dt>QB Status</dt><dd>{row.active === false ? "Inactive" : row.active === true ? "Active" : "Unknown"} <small>{dateTimeLabel(row.quickbooks.lastSeenAt)}</small></dd></div>
@@ -446,6 +556,31 @@ function ProductWorkspaceDrawer({ row }: { row: ProductWorkspaceRow | null }) {
   );
 }
 
+function MarkerToggle({
+  checked,
+  disabled,
+  label,
+  onChange
+}: {
+  checked: boolean;
+  disabled: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className={`marker-toggle${checked ? " marker-toggle-on" : ""}${disabled ? " marker-toggle-disabled" : ""}`} title={`${label} ordering marker`}>
+      <input
+        aria-label={label}
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span>{checked ? "On" : "Off"}</span>
+    </label>
+  );
+}
+
 function SortableHeader({
   label,
   sort,
@@ -477,6 +612,8 @@ function compareRows(a: ProductWorkspaceRow, b: ProductWorkspaceRow, key: SortKe
 }
 
 function sortValue(row: ProductWorkspaceRow, key: SortKey) {
+  if (key === "isCore") return row.orderingMarker.isCore ? 1 : 0;
+  if (key === "isBtg") return row.orderingMarker.isBtg ? 1 : 0;
   const value = row[key];
   if (key === "active") return row.statusLabel;
   if (typeof value === "number") return value;
@@ -528,4 +665,12 @@ function sourceBlockerLabel(row: ProductWorkspaceRow) {
   if (row.sourceHealth === "needs_review") return "Core source data is missing.";
   if (row.sourceHealth === "partial") return "Some source data is available, but not all cost/price inputs are matched.";
   return "Source inputs are ready for review.";
+}
+
+function normalizeCode(value: string) {
+  return value.trim().toUpperCase();
+}
+
+function sourceBadgesWithStem(sourceBadges: ProductWorkspaceRow["sourceBadges"]): ProductWorkspaceRow["sourceBadges"] {
+  return sourceBadges.includes("stem") ? sourceBadges : [...sourceBadges, "stem"];
 }

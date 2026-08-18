@@ -93,6 +93,17 @@ type SupplierCatalogPriceLevelRow = {
   active: boolean;
 };
 
+type OrderingItemMarkerRow = {
+  item_code: string;
+  quickbooks_item_list_id: string | null;
+  is_btg: boolean | null;
+  is_core: boolean | null;
+  marker_note: string | null;
+  note_source: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+};
+
 const PAGE_SIZE = 1000;
 const MAX_WORKSPACE_ROWS = 10000;
 
@@ -130,13 +141,14 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const includeInactive = url.searchParams.get("includeInactive") === "true";
-    const [quickBooksItems, suppliers, supplierCatalogWines, supplierCatalogPriceLevels, vinosmithSupplierHints, activeVinosmithWines] = await Promise.all([
+    const [quickBooksItems, suppliers, supplierCatalogWines, supplierCatalogPriceLevels, vinosmithSupplierHints, activeVinosmithWines, orderingItemMarkers] = await Promise.all([
       fetchQuickBooksItems(supabase),
       fetchSuppliers(supabase),
       fetchSupplierCatalogWines(supabase),
       fetchSupplierCatalogPriceLevels(supabase),
       fetchVinosmithSupplierHints(supabase),
-      fetchActiveVinosmithWines(supabase)
+      fetchActiveVinosmithWines(supabase),
+      fetchOrderingItemMarkers(supabase)
     ]);
 
     const matchedWineIds = new Set<string>();
@@ -150,6 +162,7 @@ export async function GET(request: Request) {
     const quickBooksLookup = buildQuickBooksLookup(quickBooksItems);
     const catalogLookup = buildSupplierCatalogLookup(supplierCatalogWines);
     const catalogPriceLevelsByWine = groupSupplierCatalogPriceLevels(supplierCatalogPriceLevels);
+    const orderingMarkersByCode = buildOrderingMarkerLookup(orderingItemMarkers);
     const baseRows = quickBooksItems.filter((item) => includeInactive || item.is_active !== false);
     const inactiveQuickBooksVsActiveRows = includeInactive
       ? []
@@ -179,8 +192,8 @@ export async function GET(request: Request) {
         ? `Supplier Logistics trucking_cost_per_bottle${supplierResolution.source ? ` (${supplierResolution.source})` : ""}`
         : null;
       const landedCost = fob !== null && laidIn !== null ? roundMoney(fob + laidIn) : null;
-      const sourceBadges = sourceBadgesForRow(vinosmith, supplierCatalog);
       const supplierCatalogLevels = supplierCatalog ? catalogPriceLevelsByWine.get(supplierCatalog.id) || [] : [];
+      const orderingMarker = resolveOrderingMarker(itemCode, orderingMarkersByCode);
 
       return {
         item,
@@ -194,7 +207,8 @@ export async function GET(request: Request) {
         laidIn,
         laidInSource,
         landedCost,
-        sourceBadges,
+        sourceBadges: sourceBadgesForRow(vinosmith, supplierCatalog, orderingMarker),
+        orderingMarker,
         supplierCatalogLevels
       };
     });
@@ -242,6 +256,7 @@ export async function GET(request: Request) {
         sourceHealth,
         sourceHealthLabel: sourceHealthLabel(sourceHealth),
         sourceBadges: row.sourceBadges,
+        orderingMarker: productWorkspaceMarker(row.orderingMarker),
         quickbooks: {
           listId: row.item.list_id,
           fullName: row.item.full_name || row.item.name || "",
@@ -274,7 +289,13 @@ export async function GET(request: Request) {
         gpExplanation: gpExplanation(row.fob, row.laidIn, priceLevels)
       };
     }).concat(vinosmithOnlyRows.map((wine) => (
-      buildVinosmithOnlyRow(wine, supplierByName, supplierNameByCodePrefix, vinosmithPricesByWine.get(wine.wine_id) || [])
+      buildVinosmithOnlyRow(
+        wine,
+        supplierByName,
+        supplierNameByCodePrefix,
+        vinosmithPricesByWine.get(wine.wine_id) || [],
+        resolveOrderingMarker(wine.code || "", orderingMarkersByCode)
+      )
     )));
 
     const summary = {
@@ -291,7 +312,9 @@ export async function GET(request: Request) {
       qbActiveVsUnknown: rows.filter((row) => row.statusKey === "qb_active_vs_unknown").length,
       vsStatusUnknown: rows.filter((row) => row.statusKey === "qb_active_vs_unknown" || row.statusKey === "qb_inactive_vs_unknown").length,
       qbInactiveVsActive: rows.filter((row) => row.statusKey === "qb_inactive_vs_active").length,
-      vsActiveQbMissing: rows.filter((row) => row.statusKey === "vs_active_qb_missing").length
+      vsActiveQbMissing: rows.filter((row) => row.statusKey === "vs_active_qb_missing").length,
+      btgMarkers: rows.filter((row) => row.orderingMarker.isBtg).length,
+      coreMarkers: rows.filter((row) => row.orderingMarker.isCore).length
     };
 
     const response: ProductWorkspaceResponse = {
@@ -513,6 +536,34 @@ async function fetchSupplierCatalogPriceLevels(supabase: ProductWorkspaceClient)
   return data || [];
 }
 
+async function fetchOrderingItemMarkers(supabase: ProductWorkspaceClient) {
+  const rows: OrderingItemMarkerRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("ordering_item_markers")
+      .select("item_code,quickbooks_item_list_id,is_btg,is_core,marker_note,note_source,updated_at,updated_by")
+      .order("item_code", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+      .returns<OrderingItemMarkerRow[]>();
+
+    if (error) {
+      if (error.code === "PGRST205" || error.message.toLowerCase().includes("ordering_item_markers")) {
+        return [];
+      }
+      throw new Error(error.message);
+    }
+
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  return rows;
+}
+
 async function fetchVinosmithPrices(supabase: ProductWorkspaceClient, wineIds: string[]) {
   if (wineIds.length === 0) return [];
   const rows: VinosmithPriceRow[] = [];
@@ -545,6 +596,14 @@ async function countRows(
 
   if (error) throw new Error(error.message);
   return count || 0;
+}
+
+function buildOrderingMarkerLookup(rows: OrderingItemMarkerRow[]) {
+  return new Map(rows.map((row) => [normalizeKey(row.item_code), row]));
+}
+
+function resolveOrderingMarker(itemCode: string, lookup: Map<string, OrderingItemMarkerRow>) {
+  return lookup.get(normalizeKey(itemCode)) || null;
 }
 
 function buildVinosmithLookup(rows: VinosmithWineRow[]) {
@@ -705,7 +764,8 @@ function buildVinosmithOnlyRow(
   wine: VinosmithWineRow,
   supplierByName: Map<string, SupplierRow>,
   supplierNameByCodePrefix: Map<string, string>,
-  vinosmithPrices: VinosmithPriceRow[]
+  vinosmithPrices: VinosmithPriceRow[],
+  orderingMarker: OrderingItemMarkerRow | null
 ): ProductWorkspaceRow {
   const supplierResolution = resolveSupplierName(wine.code || "", wine, null, supplierNameByCodePrefix);
   const supplier = supplierResolution.name ? supplierByName.get(normalizeKey(supplierResolution.name)) || null : null;
@@ -745,7 +805,8 @@ function buildVinosmithOnlyRow(
     ytdSales: null,
     sourceHealth,
     sourceHealthLabel: sourceHealthLabel(sourceHealth),
-    sourceBadges: ["vinosmith"],
+    sourceBadges: orderingMarker ? ["vinosmith", "stem"] : ["vinosmith"],
+    orderingMarker: productWorkspaceMarker(orderingMarker),
     quickbooks: {
       listId: "",
       fullName: "No QuickBooks match",
@@ -782,11 +843,27 @@ function itemCodeFromQuickBooks(item: QuickBooksItemRow) {
   ]) || item.name || item.full_name || item.list_id;
 }
 
-function sourceBadgesForRow(vinosmith: VinosmithWineRow | null, supplierCatalog: SupplierCatalogWineRow | null) {
+function sourceBadgesForRow(
+  vinosmith: VinosmithWineRow | null,
+  supplierCatalog: SupplierCatalogWineRow | null,
+  orderingMarker: OrderingItemMarkerRow | null
+) {
   const badges: ProductWorkspaceSource[] = ["quickbooks"];
   if (vinosmith) badges.push("vinosmith");
   if (supplierCatalog) badges.push("supplier_hub");
+  if (orderingMarker) badges.push("stem");
   return badges;
+}
+
+function productWorkspaceMarker(marker: OrderingItemMarkerRow | null): ProductWorkspaceRow["orderingMarker"] {
+  return {
+    isBtg: marker?.is_btg === true,
+    isCore: marker?.is_core === true,
+    markerNote: marker?.marker_note || null,
+    noteSource: marker?.note_source || null,
+    updatedAt: marker?.updated_at || null,
+    updatedBy: marker?.updated_by || null
+  };
 }
 
 function priceLevelsFromVinosmith(rows: VinosmithPriceRow[], landedCost: number | null): ProductWorkspacePriceLevel[] {

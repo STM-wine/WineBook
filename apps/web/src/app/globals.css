@@ -1518,7 +1518,7 @@ td {
 }
 
 .product-workspace-table table {
-  min-width: 1120px;
+  min-width: 1260px;
   table-layout: fixed;
 }
 
@@ -1562,8 +1562,8 @@ td {
 .product-workspace-table td:nth-child(3),
 .product-workspace-table th:nth-child(4),
 .product-workspace-table td:nth-child(4),
-.product-workspace-table th:nth-child(10),
-.product-workspace-table td:nth-child(10) {
+.product-workspace-table th:nth-child(12),
+.product-workspace-table td:nth-child(12) {
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -1624,6 +1624,10 @@ td {
   width: 100px;
 }
 
+.product-col-marker {
+  width: 68px;
+}
+
 .product-col-money {
   width: 74px;
 }
@@ -1679,8 +1683,42 @@ th:first-child .table-sort-button,
 th:nth-child(2) .table-sort-button,
 th:nth-child(3) .table-sort-button,
 th:nth-child(4) .table-sort-button,
-th:nth-child(10) .table-sort-button {
+th:nth-child(12) .table-sort-button {
   justify-content: flex-start;
+}
+
+.marker-toggle {
+  align-items: center;
+  background: #f4f2ee;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 850;
+  justify-content: center;
+  line-height: 1;
+  min-width: 48px;
+  padding: 6px 8px;
+}
+
+.marker-toggle input {
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
+}
+
+.marker-toggle-on {
+  background: #e8f1e7;
+  border-color: #bfd5bd;
+  color: var(--green);
+}
+
+.marker-toggle-disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .source-health,
