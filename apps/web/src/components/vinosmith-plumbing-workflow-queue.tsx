@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { updateVinosmithPlumbingIssueWorkflow } from "@/app/settings/actions";
+import { markVinosmithPlumbingIssueSourceUpdated, updateVinosmithPlumbingIssueWorkflow } from "@/app/settings/actions";
 import { dateTimeLabel } from "@/lib/date-labels";
 import type { VinosmithProductHealth, VinosmithProductHealthIssue } from "@/lib/types";
 
@@ -16,6 +16,8 @@ export type VinosmithPlumbingWorkflowRow = {
   assigned_to: string | null;
   admin_note: string | null;
   last_reviewed_at: string | null;
+  source_updated_at: string | null;
+  source_updated_by_name: string | null;
   updated_at: string | null;
 };
 
@@ -197,8 +199,9 @@ function IssueSection({
           const issueKey = workflowKeyForIssue(row);
           const sourceOfTruth = sourceOfTruthForIssue(row);
           const workflow = workflowByKey.get(issueKey);
+          const isSourceUpdated = Boolean(workflow?.source_updated_at || workflow?.status === "fixed_needs_resync");
           return (
-            <article className="plumbing-issue-row" key={row.id}>
+            <article className={`plumbing-issue-row ${isSourceUpdated ? "is-source-updated" : ""}`} key={row.id}>
               <div className="plumbing-issue-main">
                 <div>
                   <strong>{row.itemCode || "-"}</strong>
@@ -221,32 +224,55 @@ function IssueSection({
 
               <div className="plumbing-workflow-cell">
                 {workflowStorageAvailable ? (
-                  <form action={updateVinosmithPlumbingIssueWorkflow} className="plumbing-workflow-form">
-                    <input name="issue_key" type="hidden" value={issueKey} />
-                    <input name="issue_type" type="hidden" value={group.issueType} />
-                    <input name="issue_title" type="hidden" value={group.title} />
-                    <input name="item_code" type="hidden" value={row.itemCode || ""} />
-                    <input name="product_name" type="hidden" value={row.productName} />
-                    <input name="source_of_truth" type="hidden" value={sourceOfTruth} />
-                    <label>
-                      <span>Status</span>
-                      <select name="status" defaultValue={workflow?.status || "needs_review"}>
-                        {PLUMBING_STATUS_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>Owner</span>
-                      <input name="assigned_to" defaultValue={workflow?.assigned_to || ""} placeholder="Name or team" />
-                    </label>
-                    <label>
-                      <span>Note</span>
-                      <textarea name="admin_note" defaultValue={workflow?.admin_note || ""} placeholder="What changed or what is blocking this?" rows={2} />
-                    </label>
-                    <button className="button button-small button-outline" type="submit">Save</button>
-                    {workflow?.last_reviewed_at ? <small>Reviewed {dateTimeLabel(workflow.last_reviewed_at)}</small> : null}
-                  </form>
+                  <div className="plumbing-workbench-actions">
+                    {isSourceUpdated ? (
+                      <div className="plumbing-source-updated-stamp">
+                        <span aria-hidden="true">✓</span>
+                        <div>
+                          <strong>Source updated</strong>
+                          <small>{initialsForName(workflow?.source_updated_by_name || workflow?.assigned_to)} · {workflow?.source_updated_by_name || workflow?.assigned_to || "Stem user"}</small>
+                          <small>{dateTimeLabel(workflow?.source_updated_at || workflow?.last_reviewed_at)}</small>
+                        </div>
+                      </div>
+                    ) : (
+                      <form action={markVinosmithPlumbingIssueSourceUpdated} className="plumbing-mark-done-form">
+                        <IssueWorkflowHiddenFields
+                          group={group}
+                          issueKey={issueKey}
+                          row={row}
+                          sourceOfTruth={sourceOfTruth}
+                        />
+                        <button className="button button-small" type="submit">Mark source updated</button>
+                      </form>
+                    )}
+
+                    <form action={updateVinosmithPlumbingIssueWorkflow} className="plumbing-workflow-form">
+                      <IssueWorkflowHiddenFields
+                        group={group}
+                        issueKey={issueKey}
+                        row={row}
+                        sourceOfTruth={sourceOfTruth}
+                      />
+                      <label>
+                        <span>Status</span>
+                        <select name="status" defaultValue={workflow?.status || "needs_review"}>
+                          {PLUMBING_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Owner</span>
+                        <input name="assigned_to" defaultValue={workflow?.assigned_to || ""} placeholder="Name or team" />
+                      </label>
+                      <label>
+                        <span>Note</span>
+                        <textarea name="admin_note" defaultValue={workflow?.admin_note || ""} placeholder="What changed or what is blocking this?" rows={2} />
+                      </label>
+                      <button className="button button-small button-outline" type="submit">Save note</button>
+                      {workflow?.last_reviewed_at ? <small>Reviewed {dateTimeLabel(workflow.last_reviewed_at)}</small> : null}
+                    </form>
+                  </div>
                 ) : (
                   <span className="data-pill is-warning">Migration needed</span>
                 )}
@@ -257,6 +283,29 @@ function IssueSection({
         {group.rows.length === 0 ? <p className="muted plumbing-empty">No issues match the current filters.</p> : null}
       </div>
     </section>
+  );
+}
+
+function IssueWorkflowHiddenFields({
+  group,
+  issueKey,
+  row,
+  sourceOfTruth
+}: {
+  group: IssueGroup;
+  issueKey: string;
+  row: VinosmithProductHealthIssue;
+  sourceOfTruth: string;
+}) {
+  return (
+    <>
+      <input name="issue_key" type="hidden" value={issueKey} />
+      <input name="issue_type" type="hidden" value={group.issueType} />
+      <input name="issue_title" type="hidden" value={group.title} />
+      <input name="item_code" type="hidden" value={row.itemCode || ""} />
+      <input name="product_name" type="hidden" value={row.productName} />
+      <input name="source_of_truth" type="hidden" value={sourceOfTruth} />
+    </>
   );
 }
 
@@ -367,4 +416,12 @@ function countBy(values: string[]) {
 
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function initialsForName(value: string | null | undefined) {
+  const parts = (value || "Stem user")
+    .split(/[\s@._-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "SI";
 }

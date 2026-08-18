@@ -4463,6 +4463,11 @@ tr.has-recommendation .sticky-name {
   padding: 14px;
 }
 
+.plumbing-issue-row.is-source-updated {
+  background: #f7fbf7;
+  border-color: #cddfcc;
+}
+
 .plumbing-issue-main {
   display: grid;
   gap: 8px;
@@ -4533,6 +4538,57 @@ tr.has-recommendation .sticky-name {
 
 .plumbing-workflow-cell {
   min-width: 0;
+}
+
+.plumbing-workbench-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.plumbing-mark-done-form {
+  display: grid;
+}
+
+.plumbing-source-updated-stamp {
+  align-items: start;
+  background: #e8f1e7;
+  border: 1px solid #bfd2c0;
+  border-radius: 8px;
+  color: var(--green);
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 32px minmax(0, 1fr);
+  padding: 10px;
+}
+
+.plumbing-source-updated-stamp > span {
+  align-items: center;
+  background: white;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 16px;
+  font-weight: 900;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.plumbing-source-updated-stamp strong,
+.plumbing-source-updated-stamp small {
+  display: block;
+}
+
+.plumbing-source-updated-stamp strong {
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.plumbing-source-updated-stamp small {
+  color: #516b50;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
 }
 
 .plumbing-empty {

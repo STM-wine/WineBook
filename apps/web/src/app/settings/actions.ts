@@ -272,6 +272,14 @@ export async function updateVinosmithPlumbingIssueWorkflow(formData: FormData) {
 
   const now = new Date().toISOString();
   const supabase = serviceSettingsClient();
+  const { data: existingWorkflow, error: existingWorkflowError } = await supabase
+    .from("source_health_issue_workflows")
+    .select("source_updated_at,source_updated_by,source_updated_by_name")
+    .eq("issue_key", issueKey)
+    .maybeSingle();
+
+  if (existingWorkflowError) throw new Error(existingWorkflowError.message);
+
   const { error } = await supabase.from("source_health_issue_workflows").upsert({
     issue_key: issueKey,
     source_system: "vinosmith",
@@ -285,7 +293,51 @@ export async function updateVinosmithPlumbingIssueWorkflow(formData: FormData) {
     admin_note: adminNote || null,
     last_reviewed_by: context.user.id,
     last_reviewed_at: now,
+    source_updated_at: existingWorkflow?.source_updated_at || null,
+    source_updated_by: existingWorkflow?.source_updated_by || null,
+    source_updated_by_name: existingWorkflow?.source_updated_by_name || null,
     resolved_at: status === "resolved" ? now : null,
+    updated_at: now
+  });
+
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings/data-sync");
+}
+
+export async function markVinosmithPlumbingIssueSourceUpdated(formData: FormData) {
+  const context = await requireSettingsContext();
+  requirePermission(context, "view_settings");
+
+  const issueKey = getString(formData, "issue_key");
+  const issueType = getString(formData, "issue_type");
+  const issueTitle = getString(formData, "issue_title");
+  const sourceOfTruth = getString(formData, "source_of_truth");
+  const itemCode = getString(formData, "item_code");
+  const productName = getString(formData, "product_name");
+
+  if (!issueKey || !issueType || !issueTitle || !sourceOfTruth) {
+    throw new Error("Issue metadata is required.");
+  }
+
+  const now = new Date().toISOString();
+  const reviewerName = context.profile.full_name || context.user.email || "Stem user";
+  const supabase = serviceSettingsClient();
+  const { error } = await supabase.from("source_health_issue_workflows").upsert({
+    issue_key: issueKey,
+    source_system: "vinosmith",
+    issue_type: issueType,
+    issue_title: issueTitle,
+    item_code: itemCode || null,
+    product_name: productName || null,
+    source_of_truth: sourceOfTruth,
+    status: "fixed_needs_resync",
+    assigned_to: reviewerName,
+    last_reviewed_by: context.user.id,
+    last_reviewed_at: now,
+    source_updated_by: context.user.id,
+    source_updated_by_name: reviewerName,
+    source_updated_at: now,
+    resolved_at: null,
     updated_at: now
   });
 

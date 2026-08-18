@@ -129,7 +129,7 @@ async function fetchVinosmithPlumbingWorkflows(
   productHealth: VinosmithProductHealth
 ) : Promise<VinosmithPlumbingWorkflowState> {
   const issueKeys = Array.from(new Set(allProductHealthIssues(productHealth).map(workflowKeyForIssue)));
-  const selectColumns = "issue_key,issue_type,issue_title,item_code,product_name,source_of_truth,status,assigned_to,admin_note,last_reviewed_at,updated_at";
+  const selectColumns = "issue_key,issue_type,issue_title,item_code,product_name,source_of_truth,status,assigned_to,admin_note,last_reviewed_at,updated_at,source_updated_at,source_updated_by_name";
 
   const currentQuery = issueKeys.length > 0
     ? supabase
@@ -151,10 +151,10 @@ async function fetchVinosmithPlumbingWorkflows(
 
   if (error) {
     const errorCode = "code" in error ? String(error.code) : "";
-    if (errorCode === "42P01" || error.message.includes("source_health_issue_workflows")) {
+    if (errorCode === "42P01" || errorCode === "42703" || error.message.includes("source_health_issue_workflows")) {
       return {
         recentResolved: [],
-        warning: "Workflow tracking is ready in the code, but the source_health_issue_workflows migration still needs to be applied before saves will work.",
+        warning: "Workflow tracking is ready in the code, but the source-health workflow migrations still need to be applied before saves will work.",
         workflows: []
       };
     }
