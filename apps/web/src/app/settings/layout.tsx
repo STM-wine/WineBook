@@ -11,6 +11,7 @@ const SETTINGS_NAV = [
   { href: "/settings/laid-in-coverage", label: "Laid-In Coverage" },
   { href: "/settings/requests", label: "Change Requests" },
   { href: "/settings/access", label: "User Access" },
+  { href: "/settings/qb-vendors", label: "QB Vendors" },
   { href: "/settings/suppliers", label: "Supplier Settings" },
   { href: "/settings/history", label: "History" }
 ];
