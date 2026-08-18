@@ -388,6 +388,7 @@ export type VinosmithProductHealth = {
   activeQbVsInactiveOrMissingVs: number;
   activeQbVsInactiveVs: number;
   activeQbVsMissingVs: number;
+  activeQbVsUnknownVs: number;
   activeOrderableVsVsInactiveOrMissingQb: number;
   activeOrderableVsVsInactiveQb: number;
   activeOrderableVsVsMissingQb: number;

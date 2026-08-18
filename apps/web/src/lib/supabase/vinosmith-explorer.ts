@@ -354,6 +354,7 @@ function buildProductHealth({
   const matchedWineIds = new Set<string>();
   const activeQbVsInactiveVs: VinosmithProductHealthIssue[] = [];
   const activeQbVsMissingVs: VinosmithProductHealthIssue[] = [];
+  const activeQbVsUnknownVs: VinosmithProductHealthIssue[] = [];
 
   quickBooksItems.forEach((item) => {
     const itemCode = itemCodeFromQuickBooks(item);
@@ -362,9 +363,12 @@ function buildProductHealth({
     if (item.is_active === false) return;
 
     if (!wine) {
+      if (!isLikelyProductItemCode(itemCode)) return;
       activeQbVsMissingVs.push(issueFromQuickBooksItem(item, itemCode, "QB active / no VS match", "Active", "Missing"));
-    } else if (!isVinosmithActive(wine)) {
+    } else if (isVinosmithInactive(wine)) {
       activeQbVsInactiveVs.push(issueFromPair(item, itemCode, wine, "QB active / VS inactive"));
+    } else if (isVinosmithStatusUnknown(wine)) {
+      activeQbVsUnknownVs.push(issueFromPair(item, itemCode, wine, "QB active / VS status unknown"));
     }
   });
 
@@ -400,6 +404,7 @@ function buildProductHealth({
     activeQbVsInactiveOrMissingVs: qbActiveVsInactiveOrMissingVs.length,
     activeQbVsInactiveVs: activeQbVsInactiveVs.length,
     activeQbVsMissingVs: activeQbVsMissingVs.length,
+    activeQbVsUnknownVs: activeQbVsUnknownVs.length,
     activeOrderableVsVsInactiveOrMissingQb: vsActiveOrderableVsInactiveOrMissingQb.length,
     activeOrderableVsVsInactiveQb: activeOrderableVsVsInactiveQb.length,
     activeOrderableVsVsMissingQb: activeOrderableVsVsMissingQb.length,
@@ -552,6 +557,14 @@ function isVinosmithActive(wine: VinosmithExplorerWine | null) {
   return wine?.active === true || wine?.orderable === true;
 }
 
+function isVinosmithInactive(wine: VinosmithExplorerWine | null) {
+  return wine?.active === false || wine?.orderable === false;
+}
+
+function isVinosmithStatusUnknown(wine: VinosmithExplorerWine | null) {
+  return wine?.active !== true && wine?.active !== false && wine?.orderable !== true && wine?.orderable !== false;
+}
+
 function itemCodeFromQuickBooks(item: QuickBooksHealthItem) {
   return textFromCustomFields(item.custom_fields, [
     "item_number",
@@ -563,6 +576,10 @@ function itemCodeFromQuickBooks(item: QuickBooksHealthItem) {
     "productCode",
     "ProductCode"
   ]) || item.name || item.full_name || item.list_id;
+}
+
+function isLikelyProductItemCode(value: string) {
+  return /^[A-Z]{2,}\d{5,6}$/i.test(value.trim());
 }
 
 function normalizeKey(value: unknown) {
@@ -624,6 +641,7 @@ function emptyProductHealth(changedRecordsNote: string): VinosmithProductHealth 
     activeQbVsInactiveOrMissingVs: 0,
     activeQbVsInactiveVs: 0,
     activeQbVsMissingVs: 0,
+    activeQbVsUnknownVs: 0,
     activeOrderableVsVsInactiveOrMissingQb: 0,
     activeOrderableVsVsInactiveQb: 0,
     activeOrderableVsVsMissingQb: 0,

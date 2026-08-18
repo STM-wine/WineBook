@@ -384,6 +384,7 @@ function VinosmithPlumbingPanel({
             <span>QB Active Issues</span>
             <strong>{productHealth.activeQbVsInactiveOrMissingVs.toLocaleString("en-US")}</strong>
             <small>{productHealth.activeQbVsInactiveVs.toLocaleString("en-US")} inactive VS / {productHealth.activeQbVsMissingVs.toLocaleString("en-US")} missing VS</small>
+            {productHealth.activeQbVsUnknownVs > 0 ? <small>{productHealth.activeQbVsUnknownVs.toLocaleString("en-US")} matched rows have unknown VS status</small> : null}
           </div>
           <div>
             <span>VS Active Issues</span>
@@ -479,6 +480,16 @@ function nextStepsForProductHealth(productHealth: VinosmithProductHealth): Plumb
       nextAction: "For each row, either reactivate/link it in Vinosmith or deactivate it in QuickBooks if it should not be sold. Active QB items with missing VS data are the biggest ordering risk.",
       countLabel: `${productHealth.activeQbVsInactiveOrMissingVs.toLocaleString("en-US")} QB active issues`,
       sourceOfTruth: "Vinosmith for sellable/orderable status; QuickBooks only if the item should be inactive"
+    });
+  }
+
+  if (productHealth.activeQbVsUnknownVs > 0) {
+    steps.push({
+      priority: "P1",
+      title: "Fix Vinosmith status visibility before assigning those rows",
+      nextAction: "These QuickBooks items have matching Vinosmith wines, but the Vinosmith active/orderable fields are blank in Stem. Confirm the Vinosmith API or mirror mapping before treating them as bookkeeper cleanup.",
+      countLabel: `${productHealth.activeQbVsUnknownVs.toLocaleString("en-US")} matched rows with unknown VS status`,
+      sourceOfTruth: "Vinosmith API/mirror mapping"
     });
   }
 
