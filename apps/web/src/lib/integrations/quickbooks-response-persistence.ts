@@ -165,24 +165,25 @@ async function persistCustomers(supabase: SupabaseClient, response: string, rawR
 async function persistVendors(supabase: SupabaseClient, response: string, rawResponseId: string) {
   const vendorBlocks = extractBlocks(response, "VendorRet");
   for (const vendorBlock of vendorBlocks) {
-    const listId = text(vendorBlock, "ListID");
-    const fullName = text(vendorBlock, "FullName");
+    const listId = directText(vendorBlock, "ListID");
+    const fullName = directText(vendorBlock, "FullName");
     if (!listId || !fullName) continue;
 
     const { error } = await supabase.from("quickbooks_vendors").upsert(
       {
         list_id: listId,
-        edit_sequence: text(vendorBlock, "EditSequence"),
-        name: text(vendorBlock, "Name"),
+        edit_sequence: directText(vendorBlock, "EditSequence"),
+        name: directText(vendorBlock, "Name"),
         full_name: fullName,
-        is_active: boolText(vendorBlock, "IsActive"),
-        account_number: text(vendorBlock, "AccountNumber"),
+        is_active: boolText(vendorBlock, "IsActive", "direct"),
+        account_number: directText(vendorBlock, "AccountNumber"),
         terms_ref: ref(vendorBlock, "TermsRef"),
-        balance: numberText(vendorBlock, "Balance"),
-        time_created: dateTimeText(vendorBlock, "TimeCreated"),
-        time_modified: dateTimeText(vendorBlock, "TimeModified"),
+        balance: numberText(vendorBlock, "Balance", "direct"),
+        time_created: dateTimeText(vendorBlock, "TimeCreated", "direct"),
+        time_modified: dateTimeText(vendorBlock, "TimeModified", "direct"),
         raw_response_id: rawResponseId,
         raw_data: {
+          vendor_type_ref: ref(vendorBlock, "VendorTypeRef"),
           vendor_address: address(vendorBlock, "VendorAddress"),
           vendor_address_block: addressBlock(vendorBlock, "VendorAddressBlock")
         },
@@ -623,15 +624,15 @@ function text(block: string, tagName: string) {
   return match ? decodeXml(match[1]).trim() || null : null;
 }
 
-function numberText(block: string, tagName: string) {
-  const value = text(block, tagName);
+function numberText(block: string, tagName: string, mode: "any" | "direct" = "any") {
+  const value = mode === "direct" ? directText(block, tagName) : text(block, tagName);
   if (!value) return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function boolText(block: string, tagName: string) {
-  const value = text(block, tagName);
+function boolText(block: string, tagName: string, mode: "any" | "direct" = "any") {
+  const value = mode === "direct" ? directText(block, tagName) : text(block, tagName);
   if (!value) return null;
   if (/^true$/i.test(value)) return true;
   if (/^false$/i.test(value)) return false;
@@ -643,8 +644,8 @@ function dateText(block: string, tagName: string) {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
 }
 
-function dateTimeText(block: string, tagName: string) {
-  const value = text(block, tagName);
+function dateTimeText(block: string, tagName: string, mode: "any" | "direct" = "any") {
+  const value = mode === "direct" ? directText(block, tagName) : text(block, tagName);
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
@@ -652,6 +653,35 @@ function dateTimeText(block: string, tagName: string) {
 
 function firstBlock(block: string, tagName: string) {
   return extractBlocks(block, tagName)[0] || null;
+}
+
+function directText(block: string, tagName: string) {
+  const openTagPattern = /<\s*(\/?)([A-Za-z0-9_:.-]+)\b[^>]*(\/?)>/g;
+  let depth = 0;
+  let match = openTagPattern.exec(block);
+
+  while (match) {
+    const isClosing = Boolean(match[1]);
+    const name = match[2];
+    const isSelfClosing = Boolean(match[3]);
+
+    if (isClosing) {
+      depth = Math.max(0, depth - 1);
+    } else {
+      if (name === tagName && depth === 0) {
+        const contentStart = openTagPattern.lastIndex;
+        const closePattern = new RegExp(`<\\/${tagName}>`, "i");
+        const closeMatch = closePattern.exec(block.slice(contentStart));
+        if (!closeMatch) return null;
+        return decodeXml(block.slice(contentStart, contentStart + closeMatch.index)).trim() || null;
+      }
+      if (!isSelfClosing) depth += 1;
+    }
+
+    match = openTagPattern.exec(block);
+  }
+
+  return null;
 }
 
 function extractBlocks(xml: string, tagName: string) {
