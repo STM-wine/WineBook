@@ -22,6 +22,7 @@ import type {
   Recommendation,
   ReportRun,
   SupplierCatalogWine,
+  SupplierQuickBooksVendorMatch,
   VinosmithExplorerData,
   WineRequest,
   SupplierLogistics
@@ -63,6 +64,7 @@ type Props = {
   vinosmithExplorer: VinosmithExplorerData;
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
+  quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   canViewSettings?: boolean;
@@ -92,6 +94,7 @@ export function OrderDashboard({
   vinosmithExplorer,
   wineRequests,
   priceChangeEvents,
+  quickBooksSupplierMatches,
   companyDashboard,
   quickBooksLastSyncAt,
   canViewSettings
@@ -721,6 +724,7 @@ export function OrderDashboard({
           supplierCatalogWines={supplierCatalogWines}
           wineRequests={wineRequests}
           priceChangeEvents={priceChangeEvents}
+          quickBooksSupplierMatches={quickBooksSupplierMatches}
           isPending={isPending}
           onCreateWineRequest={createWineRequest}
           onDeleteCatalogWine={deleteCatalogWine}

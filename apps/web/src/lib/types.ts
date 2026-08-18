@@ -111,6 +111,15 @@ export type QuickBooksVendorMapping = {
   updated_at: string | null;
 };
 
+export type SupplierQuickBooksVendorMatch = {
+  supplier_id: string;
+  quickbooks_vendor_list_id: string;
+  vendor_name: string;
+  vendor_classification: QuickBooksVendorClassification;
+  vendor_is_active: boolean | null;
+  notes: string | null;
+};
+
 export type SupplierCatalogWine = {
   id: string;
   supplier_id: string | null;

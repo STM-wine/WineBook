@@ -9,8 +9,11 @@ import type {
   Recommendation,
   ReportRun,
   SupplierCatalogWine,
+  SupplierQuickBooksVendorMatch,
   WineRequest,
-  SupplierLogistics
+  SupplierLogistics,
+  QuickBooksVendor,
+  QuickBooksVendorMapping
 } from "@/lib/types";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
@@ -183,6 +186,9 @@ export default async function HomePage() {
     `)
     .order("name", { ascending: true })
     .returns<SupplierLogistics[]>();
+
+  const quickBooksSupplierMatches = await fetchQuickBooksSupplierMatches(serviceRoleSupabase);
+
   return (
     <OrderDashboard
       reportRun={latestRun}
@@ -193,9 +199,42 @@ export default async function HomePage() {
       vinosmithExplorer={vinosmithExplorer}
       wineRequests={wineRequests || []}
       priceChangeEvents={priceChangeEvents || []}
+      quickBooksSupplierMatches={quickBooksSupplierMatches}
       companyDashboard={companyDashboard}
       quickBooksLastSyncAt={quickBooksLastSyncAt}
       canViewSettings={hasPermission(permissions, "view_settings")}
     />
   );
+}
+
+async function fetchQuickBooksSupplierMatches(supabase: ReturnType<typeof createServiceRoleClient>): Promise<SupplierQuickBooksVendorMatch[]> {
+  const { data: mappings } = await supabase
+    .from("quickbooks_vendor_mappings")
+    .select("quickbooks_vendor_list_id,supplier_id,vendor_classification,notes,updated_by,updated_at")
+    .not("supplier_id", "is", null)
+    .returns<QuickBooksVendorMapping[]>();
+
+  const vendorIds = Array.from(new Set((mappings || []).map((mapping) => mapping.quickbooks_vendor_list_id).filter(Boolean)));
+  if (vendorIds.length === 0) return [];
+
+  const { data: vendors } = await supabase
+    .from("quickbooks_vendors")
+    .select("list_id,name,full_name,is_active,account_number,terms_ref,raw_data,last_seen_at")
+    .in("list_id", vendorIds)
+    .returns<QuickBooksVendor[]>();
+
+  const vendorById = new Map((vendors || []).map((vendor) => [vendor.list_id, vendor]));
+  return (mappings || [])
+    .filter((mapping): mapping is QuickBooksVendorMapping & { supplier_id: string } => Boolean(mapping.supplier_id))
+    .map((mapping) => {
+      const vendor = vendorById.get(mapping.quickbooks_vendor_list_id);
+      return {
+        supplier_id: mapping.supplier_id,
+        quickbooks_vendor_list_id: mapping.quickbooks_vendor_list_id,
+        vendor_name: vendor?.name || vendor?.full_name || mapping.quickbooks_vendor_list_id,
+        vendor_classification: mapping.vendor_classification,
+        vendor_is_active: vendor?.is_active ?? null,
+        notes: mapping.notes
+      };
+    });
 }

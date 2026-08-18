@@ -4,6 +4,7 @@ import type {
   PriceChangeEvent,
   SupplierCatalogWine,
   SupplierLogistics,
+  SupplierQuickBooksVendorMatch,
   WineRequest
 } from "@/lib/types";
 import { asNumber, formatCurrency, formatCurrencyCents, formatInteger, uniqueSorted } from "@/lib/order-data";
@@ -89,6 +90,7 @@ export function SupplierHubView({
   supplierCatalogWines,
   wineRequests,
   priceChangeEvents,
+  quickBooksSupplierMatches,
   isPending,
   onCreateWineRequest,
   onDeleteCatalogWine,
@@ -100,6 +102,7 @@ export function SupplierHubView({
   supplierCatalogWines: SupplierCatalogWine[];
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
+  quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
   isPending: boolean;
   onCreateWineRequest: (input: CreateWineRequestInput) => void;
   onDeleteCatalogWine: (input: DeleteCatalogWineInput) => void;
@@ -188,7 +191,14 @@ export function SupplierHubView({
         />
       ) : null}
       {activeArea === "price-changes" ? <PriceChangesPanel events={priceChangeEvents} /> : null}
-      {activeArea === "logistics" ? <SupplierLogisticsPanel suppliers={suppliers} isPending={isPending} onSaveSuppliers={onSaveSuppliers} /> : null}
+      {activeArea === "logistics" ? (
+        <SupplierLogisticsPanel
+          suppliers={suppliers}
+          quickBooksSupplierMatches={quickBooksSupplierMatches}
+          isPending={isPending}
+          onSaveSuppliers={onSaveSuppliers}
+        />
+      ) : null}
     </section>
   );
 }
@@ -1706,10 +1716,12 @@ function PriceChangesPanel({ events }: { events: PriceChangeEvent[] }) {
 
 function SupplierLogisticsPanel({
   suppliers,
+  quickBooksSupplierMatches,
   isPending,
   onSaveSuppliers
 }: {
   suppliers: SupplierLogistics[];
+  quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
   isPending: boolean;
   onSaveSuppliers: (suppliers: SupplierLogistics[]) => void;
 }) {
@@ -1729,6 +1741,13 @@ function SupplierLogisticsPanel({
     () => ["All", ...uniqueSorted(rows.map((supplier) => supplier.pick_up_location))],
     [rows]
   );
+  const qbMatchesBySupplierId = useMemo(() => {
+    const grouped = new Map<string, SupplierQuickBooksVendorMatch[]>();
+    quickBooksSupplierMatches.forEach((match) => {
+      grouped.set(match.supplier_id, [...(grouped.get(match.supplier_id) || []), match]);
+    });
+    return grouped;
+  }, [quickBooksSupplierMatches]);
   const filteredRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
 
@@ -1839,6 +1858,10 @@ function SupplierLogisticsPanel({
           <span>Avg Laid In</span>
           <strong>{formatCurrency(averageLaidIn)}</strong>
         </div>
+        <div>
+          <span>QB Matched</span>
+          <strong>{formatInteger(new Set(quickBooksSupplierMatches.map((match) => match.supplier_id)).size)}</strong>
+        </div>
       </div>
       <div className="supplier-hub-toolbar">
         <label className="search-field">
@@ -1869,6 +1892,7 @@ function SupplierLogisticsPanel({
           <thead>
             <tr>
               <th>Supplier</th>
+              <th>QB Vendor</th>
               <th>Importer ID</th>
               <th>TDM</th>
               <th>Pickup</th>
@@ -1886,6 +1910,7 @@ function SupplierLogisticsPanel({
               <SupplierLogisticsRow
                 key={supplier.id}
                 supplier={supplier}
+                quickBooksMatches={qbMatchesBySupplierId.get(supplier.id) || []}
                 original={originalById.get(supplier.id) || null}
                 disabled={isPending}
                 onPatchSupplier={patchSupplier}
@@ -1893,7 +1918,7 @@ function SupplierLogisticsPanel({
                 onDiscardDraft={discardDraftRow}
               />
             ))}
-            {filteredRows.length === 0 ? <EmptyRow colSpan={11} label="No suppliers match the current filters." /> : null}
+            {filteredRows.length === 0 ? <EmptyRow colSpan={12} label="No suppliers match the current filters." /> : null}
           </tbody>
         </table>
       </div>
@@ -1903,6 +1928,7 @@ function SupplierLogisticsPanel({
 
 function SupplierLogisticsRow({
   supplier,
+  quickBooksMatches,
   original,
   disabled,
   onPatchSupplier,
@@ -1910,6 +1936,7 @@ function SupplierLogisticsRow({
   onDiscardDraft
 }: {
   supplier: SupplierLogistics;
+  quickBooksMatches: SupplierQuickBooksVendorMatch[];
   original: SupplierLogistics | null;
   disabled: boolean;
   onPatchSupplier: (id: string, patch: Partial<SupplierLogistics>) => void;
@@ -1936,6 +1963,9 @@ function SupplierLogisticsRow({
     <tr className={rowClassName || undefined}>
       <td>
         <input aria-label="Supplier name" value={row.name} onChange={(event) => patch({ name: event.target.value })} />
+      </td>
+      <td>
+        <QuickBooksVendorMatchCell matches={isNew ? [] : quickBooksMatches} />
       </td>
       <td>
         <input aria-label="Importer ID" value={row.importer_id || ""} onChange={(event) => patch({ importer_id: event.target.value })} />
@@ -2010,6 +2040,34 @@ function SupplierLogisticsRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+function QuickBooksVendorMatchCell({ matches }: { matches: SupplierQuickBooksVendorMatch[] }) {
+  if (matches.length === 0) {
+    return (
+      <div className="qb-match-cell">
+        <span className="status-pill status-muted">No QB match</span>
+      </div>
+    );
+  }
+
+  const activeInventoryMatches = matches.filter(
+    (match) => match.vendor_classification === "inventory_wine" && match.vendor_is_active !== false
+  );
+  const hasInactiveMatch = matches.some((match) => match.vendor_is_active === false);
+  const hasNonInventoryMatch = matches.some((match) => match.vendor_classification !== "inventory_wine");
+  const primaryMatch = activeInventoryMatches[0] || matches[0];
+  const statusLabel = activeInventoryMatches.length > 0 ? "QB matched" : hasInactiveMatch ? "Inactive QB vendor" : "Review QB type";
+  const statusClass = activeInventoryMatches.length > 0 ? "status-good" : "status-progress";
+  const detail = matches.length > 1 ? `${matches.length} QB vendors` : primaryMatch.vendor_name;
+
+  return (
+    <div className="qb-match-cell">
+      <span className={`status-pill ${statusClass}`}>{statusLabel}</span>
+      <small>{detail}</small>
+      {hasNonInventoryMatch ? <small>Stem type is not Inventory / Wine</small> : null}
+    </div>
   );
 }
 
