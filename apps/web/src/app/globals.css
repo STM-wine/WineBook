@@ -4163,6 +4163,96 @@ tr.has-recommendation .sticky-name {
   white-space: nowrap;
 }
 
+.ordering-logic-bridge-panel {
+  gap: 16px;
+}
+
+.ordering-bridge-proof-strip {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ordering-bridge-proof-strip article,
+.ordering-bridge-warning-list article {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.ordering-bridge-proof-strip strong,
+.ordering-bridge-proof-strip span {
+  display: block;
+}
+
+.ordering-bridge-proof-strip strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.ordering-bridge-proof-strip span,
+.ordering-bridge-warning-list article {
+  color: #3c3934;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.ordering-bridge-metrics {
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+}
+
+.ordering-bridge-warning-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ordering-bridge-warning-list article {
+  background: #fff8e8;
+  border-color: #efd29c;
+}
+
+.ordering-bridge-table-wrap {
+  margin-top: 2px;
+}
+
+.ordering-bridge-supplier-table {
+  min-width: 1120px;
+}
+
+.ordering-bridge-blocker-table {
+  min-width: 860px;
+}
+
+.ordering-bridge-delta-table {
+  min-width: 1180px;
+}
+
+.ordering-bridge-supplier-table th:first-child,
+.ordering-bridge-supplier-table td:first-child,
+.ordering-bridge-blocker-table th:first-child,
+.ordering-bridge-blocker-table td:first-child,
+.ordering-bridge-delta-table th:first-child,
+.ordering-bridge-delta-table td:first-child {
+  min-width: 220px;
+}
+
+.ordering-bridge-blocker-table td:first-child,
+.ordering-bridge-delta-table td:first-child {
+  max-width: 320px;
+  white-space: normal;
+}
+
+.ordering-bridge-blocker-table td:nth-child(3) {
+  color: #765112;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 .data-health-refresh-guide {
   display: grid;
   gap: 10px;
@@ -4835,6 +4925,8 @@ tr.has-recommendation .sticky-name {
   .plumbing-filters,
   .data-health-proof-grid,
   .ordering-source-truth-grid,
+  .ordering-bridge-proof-strip,
+  .ordering-bridge-warning-list,
   .ordering-readiness-blockers,
   .data-health-refresh-guide,
   .data-health-lookup-source-list {
@@ -4851,6 +4943,8 @@ tr.has-recommendation .sticky-name {
   .plumbing-filters,
   .data-health-proof-grid,
   .ordering-source-truth-grid,
+  .ordering-bridge-proof-strip,
+  .ordering-bridge-warning-list,
   .ordering-readiness-blockers,
   .data-health-refresh-guide,
   .data-health-lookup-form,
