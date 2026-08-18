@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { updateVinosmithPlumbingIssueWorkflow } from "@/app/settings/actions";
+import { dateTimeLabel } from "@/lib/date-labels";
 import type { VinosmithProductHealth, VinosmithProductHealthIssue } from "@/lib/types";
 
 export type VinosmithPlumbingWorkflowRow = {
@@ -356,18 +357,6 @@ function nextStepForIssue(row: VinosmithProductHealthIssue) {
     return "Fill the missing source fields, then re-sync Vinosmith.";
   }
   return "Review source ownership, correct the source record, then re-sync.";
-}
-
-function dateTimeLabel(value: string | null | undefined) {
-  if (!value) return "Not recorded";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not recorded";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(date);
 }
 
 function countBy(values: string[]) {

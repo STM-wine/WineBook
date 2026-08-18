@@ -6,6 +6,7 @@ import { VinosmithResyncButton } from "@/components/vinosmith-resync-button";
 import { VinosmithPlumbingWorkflowQueue, type VinosmithPlumbingWorkflowRow } from "@/components/vinosmith-plumbing-workflow-queue";
 import { DataHealthSourceLookup } from "@/components/data-health-source-lookup";
 import { queueQuickBooksItemMirrorRefresh } from "@/app/settings/actions";
+import { dateTimeLabel } from "@/lib/date-labels";
 
 type SyncRunRow = {
   id: string;
@@ -37,18 +38,6 @@ type VinosmithPlumbingWorkflowState = {
   warning: string | null;
   workflows: VinosmithPlumbingWorkflowRow[];
 };
-
-function dateTimeLabel(value: string | null | undefined) {
-  if (!value) return "Not recorded";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not recorded";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(date);
-}
 
 function statusTone(status: string | null | undefined) {
   const value = (status || "").toLowerCase();

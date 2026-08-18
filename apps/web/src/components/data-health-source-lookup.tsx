@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { dateTimeLabel } from "@/lib/date-labels";
 
 type LookupSourceRow = {
   source: "QuickBooks" | "Vinosmith";
@@ -119,16 +120,4 @@ export function DataHealthSourceLookup() {
       ) : null}
     </section>
   );
-}
-
-function dateTimeLabel(value: string | null | undefined) {
-  if (!value) return "Not recorded";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not recorded";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(date);
 }
