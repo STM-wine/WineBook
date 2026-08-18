@@ -603,7 +603,7 @@ function OrderingSourceReadinessPanel({ readiness }: { readiness: OrderingSource
         </article>
         <article>
           <strong>Vinosmith is the live availability source</strong>
-          <span>Available, hold, future, pending sync transfer, and unconfirmed line item context.</span>
+          <span>Available inventory is the required live ordering input.</span>
         </article>
         <article>
           <strong>Stem supplier logistics completes the cost basis</strong>
@@ -1059,7 +1059,7 @@ function orderingReadinessBlockers(readiness: OrderingSourceReadiness) {
   if (!readiness.vinosmithLatestInventoryAt || readiness.vinosmithInventorySnapshotRows === 0) {
     blockers.push({
       title: "Vinosmith live availability proof is missing",
-      detail: "Ordering still needs VS available, hold, future, pending sync, and unconfirmed context."
+      detail: "Ordering still needs Vinosmith Available inventory proof."
     });
   }
   if (readiness.qbActiveMissingVs > 0 || readiness.vsActiveMissingQb > 0) {

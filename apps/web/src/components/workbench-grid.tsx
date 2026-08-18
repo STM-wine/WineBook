@@ -279,7 +279,7 @@ export function WorkbenchGrid({
         field: "true_available",
         width: 126,
         headerTooltip:
-          "Formula: Available Inventory - Unconfirmed Line Item Qty. This estimates bottles actually available for buying decisions.",
+          "Current report value. The new ordering source path will use Vinosmith Available inventory.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,

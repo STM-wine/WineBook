@@ -175,7 +175,6 @@ export async function fetchOrderingLogicBridgeData(supabase: BridgeClient): Prom
     warnings: [
       "Line-item test only: Order Review still uses the current report output.",
       "Vinosmith is only tested for live inventory overview fields. Available is the required API number for now.",
-      "Unconfirmed line item quantity is not treated as required API data; when present, it is usually an anomaly to review separately.",
       "Core and BTG are shown from the current report as a temporary placeholder. The real next source of truth should be an app-owned marker table, seeded once and maintained in Stem.",
       "QuickBooks sales use invoice lines minus credit memo lines. Sales differences do not mean Vinosmith cleanup is needed."
     ]
