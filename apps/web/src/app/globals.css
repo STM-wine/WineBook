@@ -4335,6 +4335,40 @@ tr.has-recommendation .sticky-name {
   padding-left: 18px;
 }
 
+.ordering-bridge-deferred-card {
+  align-items: start;
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 16px;
+}
+
+.ordering-bridge-deferred-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ordering-bridge-deferred-card strong {
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.ordering-bridge-deferred-card p {
+  color: #3c3934;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  margin: 0;
+  max-width: 900px;
+}
+
 .ordering-bridge-examples {
   border: 1px solid var(--line);
   border-radius: 8px;

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AccountPending, getAppContext } from "@/lib/auth";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchVinosmithProductHealthData } from "@/lib/supabase/vinosmith-explorer";
@@ -154,9 +155,10 @@ async function loadVinosmithSyncData() {
     fetchLatestSourceCheckpoint("quickbooks_desktop", "quickbooks_items"),
     fetchLatestSourceCheckpoint("vinosmith", "wines")
   ]);
-  const workflowState = await fetchVinosmithPlumbingWorkflows(supabase, productHealth);
-  const orderingReadiness = await fetchOrderingSourceReadiness(supabase);
-  const orderingLogicBridge = await fetchOrderingLogicBridgeData(supabase);
+  const [workflowState, orderingReadiness] = await Promise.all([
+    fetchVinosmithPlumbingWorkflows(supabase, productHealth),
+    fetchOrderingSourceReadiness(supabase)
+  ]);
 
   return {
     runs,
@@ -167,7 +169,6 @@ async function loadVinosmithSyncData() {
     quickBooksItemCheckpoint,
     productHealth,
     orderingReadiness,
-    orderingLogicBridge,
     workflowState,
     counts: {
       wines: wineCount,
@@ -389,10 +390,18 @@ function allProductHealthIssues(productHealth: VinosmithProductHealth) {
   ];
 }
 
-export default async function DataSyncSettingsPage() {
+function singleParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+type DataSyncSearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function DataSyncSettingsPage({ searchParams }: { searchParams?: DataSyncSearchParams }) {
   const context = await getAppContext();
   if ("pendingEmail" in context) return <AccountPending email={context.pendingEmail} />;
   const refreshConfigured = Boolean(process.env.GITHUB_WORKFLOW_DISPATCH_TOKEN);
+  const params = searchParams ? await searchParams : {};
+  const bridgeRequested = singleParam(params.bridge) === "1";
 
   let data: Awaited<ReturnType<typeof loadVinosmithSyncData>> | null = null;
   let errorMessage = "";
@@ -485,7 +494,13 @@ export default async function DataSyncSettingsPage() {
             </div>
           </section>
 
-          <OrderingLogicBridgePanel bridge={data.orderingLogicBridge} />
+          {bridgeRequested ? (
+            <Suspense fallback={<OrderingLogicBridgeLoadingPanel />}>
+              <OrderingLogicBridgePanelLoader />
+            </Suspense>
+          ) : (
+            <OrderingLogicBridgeDeferredPanel />
+          )}
 
           <OrderingSourceReadinessPanel readiness={data.orderingReadiness} />
 
@@ -676,12 +691,73 @@ function OrderingSourceReadinessPanel({ readiness }: { readiness: OrderingSource
   );
 }
 
+async function OrderingLogicBridgePanelLoader() {
+  try {
+    const supabase = createServiceRoleClient();
+    const bridge = await fetchOrderingLogicBridgeData(supabase);
+    return <OrderingLogicBridgePanel bridge={bridge} />;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not load ordering bridge diagnostics.";
+    return (
+      <section id="ordering-logic-bridge" className="settings-panel ordering-logic-bridge-panel">
+        <div className="settings-panel-header">
+          <div>
+            <h2>Ordering Logic Bridge</h2>
+            <p className="muted">Diagnostic only; live ordering is unchanged.</p>
+          </div>
+          <span className="data-pill is-danger">Error</span>
+        </div>
+        <p className="error-banner">{message}</p>
+      </section>
+    );
+  }
+}
+
+function OrderingLogicBridgeLoadingPanel() {
+  return (
+    <section id="ordering-logic-bridge" className="settings-panel ordering-logic-bridge-panel">
+      <div className="settings-panel-header">
+        <div>
+          <h2>Ordering Logic Bridge</h2>
+          <p className="muted">Building the matched report-to-database comparison. Data Health remains read-only.</p>
+        </div>
+        <span className="data-pill is-warning">Loading</span>
+      </div>
+      <div className="ordering-bridge-deferred-card">
+        <span>Diagnostic Only</span>
+        <strong>Loading bridge examples</strong>
+        <p>This can take a bit because it compares QuickBooks sales windows, item inventory, Vinosmith status, supplier logistics, and the current report output by exact item code.</p>
+      </div>
+    </section>
+  );
+}
+
+function OrderingLogicBridgeDeferredPanel() {
+  return (
+    <section id="ordering-logic-bridge" className="settings-panel ordering-logic-bridge-panel">
+      <div className="settings-panel-header">
+        <div>
+          <h2>Ordering Logic Bridge</h2>
+          <p className="muted">Diagnostic only; live ordering is unchanged.</p>
+        </div>
+        <span className="data-pill is-warning">On Demand</span>
+      </div>
+      <div className="ordering-bridge-deferred-card">
+        <span>Load When Needed</span>
+        <strong>Bridge examples are paused so Data Health opens quickly</strong>
+        <p>The matched ordering-table comparison is still available, but it pulls several source tables and sales windows. Run it only when you want to trace API-vs-report examples.</p>
+        <a className="button button-small button-outline" href="/settings/data-sync?bridge=1#ordering-logic-bridge">Load bridge comparison</a>
+      </div>
+    </section>
+  );
+}
+
 function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData }) {
   const summary = bridge.summary;
   const decision = bridge.moveDecision;
 
   return (
-    <section className="settings-panel ordering-logic-bridge-panel">
+    <section id="ordering-logic-bridge" className="settings-panel ordering-logic-bridge-panel">
       <div className="settings-panel-header">
         <div>
           <h2>Ordering Logic Bridge</h2>
