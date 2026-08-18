@@ -58,20 +58,22 @@ export default async function HomePage() {
     .limit(100)
     .returns<PriceChangeEvent[]>();
 
-  const quickBooksVendorsPromise = supabase
+  const serviceRoleSupabase = createServiceRoleClient();
+
+  const quickBooksVendorsPromise = serviceRoleSupabase
     .from("quickbooks_vendors")
     .select("list_id,name,full_name,is_active,account_number,terms_ref,raw_data,last_seen_at")
     .order("name", { ascending: true })
     .returns<QuickBooksVendor[]>();
 
-  const quickBooksVendorMappingsPromise = supabase
+  const quickBooksVendorMappingsPromise = serviceRoleSupabase
     .from("quickbooks_vendor_mappings")
     .select("quickbooks_vendor_list_id,supplier_id,vendor_classification,notes,updated_by,updated_at")
     .returns<QuickBooksVendorMapping[]>();
 
   const quickBooksLastSyncPromise = (async () => {
     try {
-      const { data, error } = await createServiceRoleClient()
+      const { data, error } = await serviceRoleSupabase
         .from("source_api_responses")
         .select("fetched_at")
         .eq("source_system", "quickbooks_desktop")
@@ -87,7 +89,7 @@ export default async function HomePage() {
 
   const companyDashboardPromise = (() => {
     try {
-      return fetchCompanyDashboardData(createServiceRoleClient(), "mtd");
+      return fetchCompanyDashboardData(serviceRoleSupabase, "mtd");
     } catch (error) {
       return Promise.resolve(
         unavailableCompanyDashboardData(error instanceof Error ? error.message : "Company Dashboard is not configured.", "mtd")
@@ -97,7 +99,7 @@ export default async function HomePage() {
 
   const vinosmithExplorerPromise = (() => {
     try {
-      return fetchVinosmithExplorerData(createServiceRoleClient());
+      return fetchVinosmithExplorerData(serviceRoleSupabase);
     } catch (error) {
       return Promise.resolve(
         unavailableVinosmithExplorerData(error instanceof Error ? error.message : "Vinosmith Plumbing is not configured.")
