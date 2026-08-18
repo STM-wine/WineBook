@@ -4230,6 +4230,78 @@ tr.has-recommendation .sticky-name {
   grid-template-columns: repeat(6, minmax(130px, 1fr));
 }
 
+.ordering-bridge-triage-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ordering-bridge-triage-card {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.ordering-bridge-triage-card.tone-positive {
+  border-color: #cfe2cd;
+}
+
+.ordering-bridge-triage-card.tone-warning {
+  background: #fff8e8;
+  border-color: #efd29c;
+}
+
+.ordering-bridge-triage-card.tone-danger {
+  background: #fff4ef;
+  border-color: #efc3ad;
+}
+
+.ordering-bridge-triage-card div {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.ordering-bridge-triage-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ordering-bridge-triage-card strong {
+  color: var(--ink);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.ordering-bridge-triage-card p,
+.ordering-bridge-triage-card b,
+.ordering-bridge-triage-card li,
+.ordering-bridge-triage-card small {
+  color: #3c3934;
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.ordering-bridge-triage-card b {
+  color: var(--ink);
+  font-weight: 850;
+}
+
+.ordering-bridge-triage-card ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
 .ordering-bridge-warning-list {
   display: grid;
   gap: 10px;
@@ -4951,6 +5023,7 @@ tr.has-recommendation .sticky-name {
   .data-health-proof-grid,
   .ordering-source-truth-grid,
   .ordering-bridge-proof-strip,
+  .ordering-bridge-triage-grid,
   .ordering-bridge-warning-list,
   .ordering-readiness-blockers,
   .data-health-refresh-guide,
@@ -4969,6 +5042,7 @@ tr.has-recommendation .sticky-name {
   .data-health-proof-grid,
   .ordering-source-truth-grid,
   .ordering-bridge-proof-strip,
+  .ordering-bridge-triage-grid,
   .ordering-bridge-warning-list,
   .ordering-readiness-blockers,
   .data-health-refresh-guide,

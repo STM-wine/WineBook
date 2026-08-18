@@ -705,6 +705,28 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
         </article>
       </div>
 
+      <div className="ordering-bridge-triage-grid">
+        {bridge.triage.map((section) => (
+          <article key={section.key} className={`ordering-bridge-triage-card tone-${section.tone}`}>
+            <div>
+              <span>{section.title}</span>
+              <strong>{section.count.toLocaleString("en-US")}</strong>
+            </div>
+            <p>{section.summary}</p>
+            <b>{section.action}</b>
+            {section.examples.length > 0 ? (
+              <ul>
+                {section.examples.map((example) => (
+                  <li key={example}>{example}</li>
+                ))}
+              </ul>
+            ) : (
+              <small>No examples in the current sample.</small>
+            )}
+          </article>
+        ))}
+      </div>
+
       <div className="settings-metrics data-sync-metrics ordering-bridge-metrics">
         <div>
           <span>Row Counts</span>

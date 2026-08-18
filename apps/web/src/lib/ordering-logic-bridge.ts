@@ -172,6 +172,16 @@ export type OrderingLogicBridgeSummary = {
   estimatedFobDelta: number;
 };
 
+export type OrderingLogicBridgeTriageSection = {
+  key: "ignore" | "source_cleanup" | "bridge_review";
+  title: string;
+  count: number;
+  tone: "positive" | "warning" | "danger";
+  summary: string;
+  action: string;
+  examples: string[];
+};
+
 export type OrderingLogicBridgeData = {
   generatedAt: string;
   diagnosticOnly: true;
@@ -179,6 +189,7 @@ export type OrderingLogicBridgeData = {
   referenceDate: string;
   salesHistoryFrom: string;
   warnings: string[];
+  triage: OrderingLogicBridgeTriageSection[];
   summary: OrderingLogicBridgeSummary;
   supplierRows: OrderingLogicBridgeSupplierRow[];
   deltaRows: OrderingLogicBridgeDeltaRow[];
@@ -516,10 +527,10 @@ function buildBridgeData({
   const matchedCodes = Array.from(currentCodes).filter((code) => proposedCodes.has(code));
   const missingCurrentCodes = Array.from(proposedCodes).filter((code) => !currentCodes.has(code));
   const missingProposedCodes = Array.from(currentCodes).filter((code) => !proposedCodes.has(code));
-  const deltaRows = matchedCodes
+  const allDeltaRows = matchedCodes
     .map((code) => deltaRowFor(code, currentByCode.get(code)!, proposedByCode.get(code)!))
-    .sort((a, b) => deltaMagnitude(b) - deltaMagnitude(a))
-    .slice(0, 12);
+    .sort((a, b) => deltaMagnitude(b) - deltaMagnitude(a));
+  const deltaRows = allDeltaRows.slice(0, 12);
   const blockerRows = proposedRows
     .filter((row) => row.blockers.length > 0)
     .sort((a, b) => b.blockers.length - a.blockers.length || a.supplierName.localeCompare(b.supplierName) || a.itemCode.localeCompare(b.itemCode))
@@ -532,6 +543,16 @@ function buildBridgeData({
     }));
   const supplierRows = buildSupplierRows({ matchedCodes, missingCurrentCodes, missingProposedCodes, currentByCode, proposedByCode, proposedRows });
   const proposedRowsWithBlockingInputs = proposedRows.filter((row) => row.blockers.length > 0).length;
+  const triage = buildTriageSections({
+    matchedCodes,
+    missingCurrentCodes,
+    missingProposedCodes,
+    currentRowsWithoutUsableCode,
+    currentByCode,
+    proposedByCode,
+    proposedRows,
+    deltaRows: allDeltaRows
+  });
   const currentRecommendedBottles = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded));
   const proposedRecommendedBottles = sum(proposedRows, (row) => row.recommendedQtyRounded || 0);
   const currentEstimatedFob = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded) * asNumber(row.fob));
@@ -549,6 +570,7 @@ function buildBridgeData({
     referenceDate,
     salesHistoryFrom: SALES_HISTORY_FROM,
     warnings,
+    triage,
     summary: {
       currentReportRows: recommendations.length,
       proposedDatabaseRows: proposedRows.length,
@@ -574,6 +596,141 @@ function buildBridgeData({
     deltaRows,
     blockerRows
   };
+}
+
+function buildTriageSections({
+  matchedCodes,
+  missingCurrentCodes,
+  missingProposedCodes,
+  currentRowsWithoutUsableCode,
+  currentByCode,
+  proposedByCode,
+  proposedRows,
+  deltaRows
+}: {
+  matchedCodes: string[];
+  missingCurrentCodes: string[];
+  missingProposedCodes: string[];
+  currentRowsWithoutUsableCode: number;
+  currentByCode: Map<string, Recommendation>;
+  proposedByCode: Map<string, OrderingLogicBridgeInputRow>;
+  proposedRows: OrderingLogicBridgeInputRow[];
+  deltaRows: OrderingLogicBridgeDeltaRow[];
+}): OrderingLogicBridgeTriageSection[] {
+  const sourceBlockedCodes = new Set(proposedRows.filter((row) => row.blockers.length > 0).map((row) => row.itemCode));
+  const logicReviewRows = deltaRows.filter((row) => {
+    if (sourceBlockedCodes.has(row.itemCode)) return false;
+    return isMeaningfulLogicDelta(row);
+  });
+  const reportAnomalyCount = missingProposedCodes.length + currentRowsWithoutUsableCode;
+  const sourceCleanupCount = sourceBlockedCodes.size;
+  const bridgeReviewCount = logicReviewRows.length;
+  const ignoreCount = Math.max(
+    0,
+    matchedCodes.length -
+      matchedCodes.filter((code) => sourceBlockedCodes.has(code)).length -
+      bridgeReviewCount
+  ) + reportAnomalyCount;
+
+  return [
+    {
+      key: "source_cleanup",
+      title: "Needs Source Cleanup",
+      count: sourceCleanupCount,
+      tone: sourceCleanupCount > 0 ? "danger" : "positive",
+      summary: sourceCleanupCount > 0
+        ? "These are database-source blockers, not noisy export/report mismatches. Confirm them before assigning cleanup."
+        : "No source-cleanup blockers are visible in the bridge sample.",
+      action: "Only fix QuickBooks, Vinosmith, or Supplier Logistics when the row is confirmed and recurring; then refresh that source and reload Data Health.",
+      examples: sourceCleanupExamples({ proposedRows })
+    },
+    {
+      key: "bridge_review",
+      title: "Needs Bridge Logic Review",
+      count: bridgeReviewCount,
+      tone: bridgeReviewCount > 0 ? "warning" : "positive",
+      summary: bridgeReviewCount > 0
+        ? "These rows have enough source data, but the report output and database output do not line up yet."
+        : "No meaningful source-backed bridge deltas are visible in the top comparison rows.",
+      action: "Review these after source cleanup. They point to matching, sales-window, inventory-field, pack-size, or rounding logic differences.",
+      examples: logicReviewRows.slice(0, 4).map((row) => `${row.itemCode} ${row.productName}: largest delta is ${row.largestDeltaLabel}`)
+    },
+    {
+      key: "ignore",
+      title: "Can Ignore For Now",
+      count: ignoreCount,
+      tone: "positive",
+      summary: "These matched rows, report-only rows, and bad export-file leftovers should not drive action right now.",
+      action: "Park these unless the same item keeps appearing after fresh QuickBooks and Vinosmith syncs.",
+      examples: ignoreExamples({
+        matchedCodes,
+        missingProposedCodes,
+        currentRowsWithoutUsableCode,
+        sourceBlockedCodes,
+        logicReviewRows,
+        currentByCode,
+        proposedByCode
+      })
+    }
+  ];
+}
+
+function sourceCleanupExamples({
+  proposedRows
+}: {
+  proposedRows: OrderingLogicBridgeInputRow[];
+}) {
+  return proposedRows
+    .filter((row) => row.blockers.length > 0)
+    .slice(0, 4)
+    .map((row) => `${row.itemCode} ${row.productName}: ${row.blockers[0]}`);
+}
+
+function ignoreExamples({
+  matchedCodes,
+  missingProposedCodes,
+  currentRowsWithoutUsableCode,
+  sourceBlockedCodes,
+  logicReviewRows,
+  currentByCode,
+  proposedByCode
+}: {
+  matchedCodes: string[];
+  missingProposedCodes: string[];
+  currentRowsWithoutUsableCode: number;
+  sourceBlockedCodes: Set<string>;
+  logicReviewRows: OrderingLogicBridgeDeltaRow[];
+  currentByCode: Map<string, Recommendation>;
+  proposedByCode: Map<string, OrderingLogicBridgeInputRow>;
+}) {
+  const logicReviewCodes = new Set(logicReviewRows.map((row) => row.itemCode));
+  const examples = missingProposedCodes.slice(0, 2).map((code) => {
+    const row = currentByCode.get(code);
+    return `${code} ${row?.product_name || "report row"}: report-only, likely export anomaly`;
+  });
+  if (currentRowsWithoutUsableCode > 0 && examples.length < 4) {
+    examples.push(`${currentRowsWithoutUsableCode.toLocaleString("en-US")} current report rows have no usable item code`);
+  }
+  for (const code of missingProposedCodes.slice(2, 2 + Math.max(0, 4 - examples.length))) {
+    const row = currentByCode.get(code);
+    examples.push(`${code} ${row?.product_name || "report row"}: report-only`);
+  }
+  for (const code of matchedCodes) {
+    if (examples.length >= 4) break;
+    if (sourceBlockedCodes.has(code) || logicReviewCodes.has(code)) continue;
+    const proposed = proposedByCode.get(code);
+    const current = currentByCode.get(code);
+    examples.push(`${code} ${proposed?.productName || current?.product_name || "matched row"}`);
+  }
+  return examples;
+}
+
+function isMeaningfulLogicDelta(row: OrderingLogicBridgeDeltaRow) {
+  return Math.abs(row.currentRecommendedQty - (row.proposedRecommendedQty || 0)) >= 12 ||
+    Math.abs(row.currentSales30 - row.proposedSales30) >= 12 ||
+    Math.abs(row.currentOnHand - (row.proposedOnHand || 0)) >= 12 ||
+    Math.abs(row.currentOnOrder - (row.proposedOnOrder || 0)) >= 12 ||
+    Math.abs(row.currentFob - (row.proposedFob || 0)) >= 1;
 }
 
 function buildSupplierRows({
