@@ -754,7 +754,8 @@ function recoveryResources(): QuickBooksRecoveryResource[] {
 function initialRecoveryResources(): QuickBooksRecoveryResource[] {
   return [
     "quickbooks_sales_reps",
-    "quickbooks_customers"
+    "quickbooks_customers",
+    "quickbooks_vendors"
   ];
 }
 
@@ -774,7 +775,6 @@ function itemRecoveryResources(): QuickBooksRecoveryResource[] {
 function followUpRecoveryResources(): QuickBooksRecoveryResource[] {
   return [
     "quickbooks_receive_payments",
-    "quickbooks_vendors",
     "quickbooks_purchase_orders",
     "quickbooks_txn_deleted"
   ];
