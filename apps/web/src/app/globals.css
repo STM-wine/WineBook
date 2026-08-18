@@ -4077,6 +4077,92 @@ tr.has-recommendation .sticky-name {
   margin-top: 6px;
 }
 
+.ordering-source-readiness-panel {
+  gap: 16px;
+}
+
+.ordering-source-truth-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ordering-source-truth-grid article {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.ordering-source-truth-grid strong,
+.ordering-source-truth-grid span {
+  display: block;
+}
+
+.ordering-source-truth-grid strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.ordering-source-truth-grid span {
+  color: #3c3934;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.ordering-readiness-metrics {
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+}
+
+.ordering-readiness-blockers {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ordering-readiness-blockers article {
+  background: #fff8e8;
+  border: 1px solid #efd29c;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.ordering-readiness-blockers strong,
+.ordering-readiness-blockers span {
+  display: block;
+}
+
+.ordering-readiness-blockers strong {
+  color: #765112;
+  font-size: 14px;
+}
+
+.ordering-readiness-blockers span {
+  color: #3c3934;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.ordering-supplier-readiness-wrap {
+  margin-top: 2px;
+}
+
+.ordering-supplier-readiness-table {
+  min-width: 760px;
+}
+
+.ordering-supplier-readiness-table th:first-child,
+.ordering-supplier-readiness-table td:first-child {
+  min-width: 220px;
+  white-space: nowrap;
+}
+
 .data-health-refresh-guide {
   display: grid;
   gap: 10px;
@@ -4748,6 +4834,8 @@ tr.has-recommendation .sticky-name {
   .plumbing-status-rollups,
   .plumbing-filters,
   .data-health-proof-grid,
+  .ordering-source-truth-grid,
+  .ordering-readiness-blockers,
   .data-health-refresh-guide,
   .data-health-lookup-source-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4762,6 +4850,8 @@ tr.has-recommendation .sticky-name {
   .plumbing-status-rollups,
   .plumbing-filters,
   .data-health-proof-grid,
+  .ordering-source-truth-grid,
+  .ordering-readiness-blockers,
   .data-health-refresh-guide,
   .data-health-lookup-form,
   .data-health-lookup-source-list {

@@ -33,6 +33,70 @@ type CountResult = {
   error: { message: string } | null;
 };
 
+type QuickBooksOrderingItemRow = {
+  list_id: string;
+  name: string | null;
+  full_name: string | null;
+  is_active: boolean | null;
+  item_type: string | null;
+  quantity_on_hand: number | string | null;
+  quantity_on_order: number | string | null;
+  purchase_cost: number | string | null;
+  average_cost: number | string | null;
+  custom_fields: Record<string, unknown> | null;
+  last_seen_at: string | null;
+};
+
+type VinosmithOrderingWineRow = {
+  wine_id: string;
+  code: string | null;
+  name: string | null;
+  active: boolean | null;
+  orderable: boolean | null;
+  inventory_item: boolean | null;
+  importer_name: string | null;
+  last_seen_at: string | null;
+};
+
+type SupplierOrderingRow = {
+  id: string;
+  name: string;
+  active: boolean | null;
+  eta_days: number | string | null;
+  trucking_cost_per_bottle: number | string | null;
+};
+
+type OrderingSourceReadiness = {
+  requiredSalesStart: string;
+  quickBooksLatestItemAt: string | null;
+  quickBooksLatestInvoiceDate: string | null;
+  quickBooksLatestCreditMemoDate: string | null;
+  quickBooksInvoiceCount: number;
+  quickBooksCreditMemoCount: number;
+  quickBooksActiveProductItems: number;
+  quickBooksMissingCost: number;
+  quickBooksMissingInventory: number;
+  vinosmithLatestInventoryAt: string | null;
+  vinosmithInventorySnapshotRows: number;
+  vinosmithActiveOrderableWines: number;
+  exactMatchedActiveCodes: number;
+  qbActiveMissingVs: number;
+  vsActiveMissingQb: number;
+  duplicateQbCodes: number;
+  duplicateVsCodes: number;
+  activeSuppliers: number;
+  readySuppliers: number;
+  supplierRows: OrderingSupplierReadinessRow[];
+};
+
+type OrderingSupplierReadinessRow = {
+  name: string;
+  activeVsWines: number;
+  matchedCodes: number;
+  missingQbCodes: number;
+  logisticsReady: boolean;
+};
+
 type VinosmithPlumbingWorkflowState = {
   recentResolved: VinosmithPlumbingWorkflowRow[];
   warning: string | null;
@@ -90,6 +154,7 @@ async function loadVinosmithSyncData() {
     fetchLatestSourceCheckpoint("vinosmith", "wines")
   ]);
   const workflowState = await fetchVinosmithPlumbingWorkflows(supabase, productHealth);
+  const orderingReadiness = await fetchOrderingSourceReadiness(supabase);
 
   return {
     runs,
@@ -99,6 +164,7 @@ async function loadVinosmithSyncData() {
     latestVinosmithCheckpoint,
     quickBooksItemCheckpoint,
     productHealth,
+    orderingReadiness,
     workflowState,
     counts: {
       wines: wineCount,
@@ -107,6 +173,151 @@ async function loadVinosmithSyncData() {
       orderLines: lineCount
     }
   };
+}
+
+async function fetchOrderingSourceReadiness(supabase: ReturnType<typeof createServiceRoleClient>): Promise<OrderingSourceReadiness> {
+  const requiredSalesStart = "2025-01-01";
+  const today = new Date().toISOString().slice(0, 10);
+  const [
+    quickBooksItems,
+    vinosmithWines,
+    suppliers,
+    quickBooksLatestInvoiceDate,
+    quickBooksLatestCreditMemoDate,
+    quickBooksInvoiceCount,
+    quickBooksCreditMemoCount,
+    quickBooksLatestItemAt,
+    vinosmithLatestInventoryAt,
+    vinosmithInventorySnapshotRows
+  ] = await Promise.all([
+    fetchAll<QuickBooksOrderingItemRow>(supabase, "quickbooks_items", `
+      list_id,
+      name,
+      full_name,
+      is_active,
+      item_type,
+      quantity_on_hand,
+      quantity_on_order,
+      purchase_cost,
+      average_cost,
+      custom_fields,
+      last_seen_at
+    `, "list_id"),
+    fetchAll<VinosmithOrderingWineRow>(supabase, "vinosmith_wines", "wine_id,code,name,active,orderable,inventory_item,importer_name,last_seen_at", "wine_id"),
+    fetchAll<SupplierOrderingRow>(supabase, "suppliers", "id,name,active,eta_days,trucking_cost_per_bottle", "name"),
+    latestDateForTable(supabase, "quickbooks_invoices", "txn_date", requiredSalesStart, today),
+    latestDateForTable(supabase, "quickbooks_credit_memos", "txn_date", requiredSalesStart, today),
+    countRowsInDateRange(supabase, "quickbooks_invoices", "txn_date", requiredSalesStart, today),
+    countRowsInDateRange(supabase, "quickbooks_credit_memos", "txn_date", requiredSalesStart, today),
+    latestDateForTable(supabase, "quickbooks_items", "last_seen_at"),
+    latestDateForTable(supabase, "vinosmith_inventory_snapshots", "snapshot_at"),
+    countRows("vinosmith_inventory_snapshots")
+  ]);
+
+  const activeQbItems = quickBooksItems
+    .filter((item) => item.is_active !== false)
+    .map((item) => ({ item, code: normalizeCode(itemCodeFromQuickBooks(item)) }))
+    .filter((row) => isLikelyProductItemCode(row.code));
+  const activeVsWines = vinosmithWines
+    .filter((wine) => isVinosmithActive(wine) && wine.code)
+    .map((wine) => ({ wine, code: normalizeCode(wine.code) }))
+    .filter((row) => isLikelyProductItemCode(row.code));
+
+  const qbByCode = groupByCode(activeQbItems);
+  const vsByCode = groupByCode(activeVsWines);
+  const qbCodes = new Set(qbByCode.keys());
+  const vsCodes = new Set(vsByCode.keys());
+  const exactMatchedActiveCodes = Array.from(qbCodes).filter((code) => vsCodes.has(code)).length;
+  const activeSupplierRows = suppliers.filter((supplier) => supplier.active !== false);
+  const supplierRows = activeSupplierRows
+    .map((supplier) => supplierReadinessRow(supplier, activeVsWines, qbCodes))
+    .sort((a, b) => b.missingQbCodes - a.missingQbCodes || b.activeVsWines - a.activeVsWines || a.name.localeCompare(b.name));
+
+  return {
+    requiredSalesStart,
+    quickBooksLatestItemAt,
+    quickBooksLatestInvoiceDate,
+    quickBooksLatestCreditMemoDate,
+    quickBooksInvoiceCount,
+    quickBooksCreditMemoCount,
+    quickBooksActiveProductItems: activeQbItems.length,
+    quickBooksMissingCost: activeQbItems.filter(({ item }) => numberOrNull(item.purchase_cost) === null && numberOrNull(item.average_cost) === null).length,
+    quickBooksMissingInventory: activeQbItems.filter(({ item }) => numberOrNull(item.quantity_on_hand) === null || numberOrNull(item.quantity_on_order) === null).length,
+    vinosmithLatestInventoryAt,
+    vinosmithInventorySnapshotRows,
+    vinosmithActiveOrderableWines: activeVsWines.length,
+    exactMatchedActiveCodes,
+    qbActiveMissingVs: Array.from(qbCodes).filter((code) => !vsCodes.has(code)).length,
+    vsActiveMissingQb: Array.from(vsCodes).filter((code) => !qbCodes.has(code)).length,
+    duplicateQbCodes: Array.from(qbByCode.values()).filter((rows) => rows.length > 1).length,
+    duplicateVsCodes: Array.from(vsByCode.values()).filter((rows) => rows.length > 1).length,
+    activeSuppliers: activeSupplierRows.length,
+    readySuppliers: supplierRows.filter((row) => row.logisticsReady && row.activeVsWines > 0 && row.missingQbCodes === 0).length,
+    supplierRows: supplierRows.slice(0, 12)
+  };
+}
+
+async function fetchAll<Row>(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  table: string,
+  columns: string,
+  orderBy: string
+) {
+  const rows: Row[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .order(orderBy, { ascending: true })
+      .range(from, from + pageSize - 1)
+      .returns<Row[]>();
+
+    if (error) throw new Error(error.message);
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function latestDateForTable(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  table: string,
+  field: string,
+  from?: string,
+  to?: string
+) {
+  let query = supabase
+    .from(table)
+    .select(field)
+    .not(field, "is", null);
+  if (from) query = query.gte(field, from);
+  if (to) query = query.lte(field, to);
+  const { data, error } = await query
+    .order(field, { ascending: false })
+    .limit(1)
+    .maybeSingle<Record<string, string | null>>();
+
+  if (error) throw new Error(error.message);
+  return data?.[field] || null;
+}
+
+async function countRowsInDateRange(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  table: string,
+  field: string,
+  from: string,
+  to: string
+) {
+  const { count, error } = await supabase
+    .from(table)
+    .select("*", { count: "exact", head: true })
+    .gte(field, from)
+    .lte(field, to) as CountResult;
+
+  if (error) throw new Error(error.message);
+  return count || 0;
 }
 
 async function fetchLatestSourceCheckpoint(sourceSystem: string, resourceName: string) {
@@ -271,6 +482,8 @@ export default async function DataSyncSettingsPage() {
             </div>
           </section>
 
+          <OrderingSourceReadinessPanel readiness={data.orderingReadiness} />
+
           <VinosmithPlumbingPanel productHealth={data.productHealth} workflowState={data.workflowState} />
 
           <DataHealthSourceLookup />
@@ -344,6 +557,117 @@ export default async function DataSyncSettingsPage() {
         </>
       ) : null}
     </>
+  );
+}
+
+function OrderingSourceReadinessPanel({ readiness }: { readiness: OrderingSourceReadiness }) {
+  const blockers = orderingReadinessBlockers(readiness);
+  const canStartBridge = blockers.length === 0;
+
+  return (
+    <section className="settings-panel ordering-source-readiness-panel">
+      <div className="settings-panel-header">
+        <div>
+          <h2>Ordering Source Readiness</h2>
+          <p className="muted">Proof that Stem can build ordering from database sources before removing Vinosmith report uploads.</p>
+        </div>
+        <span className={`data-pill ${canStartBridge ? "is-positive" : "is-warning"}`}>
+          {canStartBridge ? "Ready for Bridge" : "Needs Proof"}
+        </span>
+      </div>
+
+      <div className="ordering-source-truth-grid">
+        <article>
+          <strong>QuickBooks is the ordering math source</strong>
+          <span>Sales history, on hand, on order, item active status, and FOB/cost.</span>
+        </article>
+        <article>
+          <strong>Vinosmith is the live availability source</strong>
+          <span>Available, hold, future, pending sync transfer, and unconfirmed line item context.</span>
+        </article>
+        <article>
+          <strong>Stem supplier logistics completes the cost basis</strong>
+          <span>Laid-in, freight, ETA, TDM, and supplier settings.</span>
+        </article>
+      </div>
+
+      <div className="settings-metrics data-sync-metrics ordering-readiness-metrics">
+        <div>
+          <span>QB Sales History</span>
+          <strong>{dateTimeLabel(readiness.quickBooksLatestInvoiceDate)}</strong>
+          <small>{readiness.quickBooksInvoiceCount.toLocaleString("en-US")} invoices since {readiness.requiredSalesStart}</small>
+          <small>{readiness.quickBooksCreditMemoCount.toLocaleString("en-US")} credit memos; latest {dateTimeLabel(readiness.quickBooksLatestCreditMemoDate)}</small>
+        </div>
+        <div>
+          <span>QB Inventory</span>
+          <strong>{readiness.quickBooksActiveProductItems.toLocaleString("en-US")}</strong>
+          <small>Active product item codes</small>
+          <small>{dateTimeLabel(readiness.quickBooksLatestItemAt)} item proof</small>
+        </div>
+        <div>
+          <span>VS Availability</span>
+          <strong>{readiness.vinosmithActiveOrderableWines.toLocaleString("en-US")}</strong>
+          <small>Active/orderable wine codes</small>
+          <small>{dateTimeLabel(readiness.vinosmithLatestInventoryAt)} inventory proof</small>
+        </div>
+        <div>
+          <span>Exact Code Matches</span>
+          <strong>{readiness.exactMatchedActiveCodes.toLocaleString("en-US")}</strong>
+          <small>{readiness.qbActiveMissingVs.toLocaleString("en-US")} QB-only / {readiness.vsActiveMissingQb.toLocaleString("en-US")} VS-only</small>
+          <small>{readiness.duplicateQbCodes + readiness.duplicateVsCodes} duplicate active codes</small>
+        </div>
+        <div>
+          <span>Supplier Readiness</span>
+          <strong>{readiness.readySuppliers.toLocaleString("en-US")} / {readiness.activeSuppliers.toLocaleString("en-US")}</strong>
+          <small>Active suppliers ready by code/logistics</small>
+        </div>
+      </div>
+
+      {blockers.length > 0 ? (
+        <div className="ordering-readiness-blockers" aria-label="Ordering source blockers">
+          {blockers.map((blocker) => (
+            <article key={blocker.title}>
+              <strong>{blocker.title}</strong>
+              <span>{blocker.detail}</span>
+            </article>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="settings-table-wrap ordering-supplier-readiness-wrap">
+        <table className="settings-table data-sync-table ordering-supplier-readiness-table">
+          <thead>
+            <tr>
+              <th>Supplier</th>
+              <th>VS Active Codes</th>
+              <th>Matched Codes</th>
+              <th>Missing QB Codes</th>
+              <th>Logistics</th>
+            </tr>
+          </thead>
+          <tbody>
+            {readiness.supplierRows.map((row) => (
+              <tr key={row.name}>
+                <td>{row.name}</td>
+                <td>{row.activeVsWines.toLocaleString("en-US")}</td>
+                <td>{row.matchedCodes.toLocaleString("en-US")}</td>
+                <td>{row.missingQbCodes.toLocaleString("en-US")}</td>
+                <td>
+                  <span className={`data-pill ${row.logisticsReady ? "is-positive" : "is-warning"}`}>
+                    {row.logisticsReady ? "Ready" : "Needs logistics"}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {readiness.supplierRows.length === 0 ? (
+              <tr>
+                <td colSpan={5}>No active supplier readiness rows found.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -536,4 +860,117 @@ function workflowKeyForIssue(row: VinosmithProductHealthIssue) {
 
 function normalizeWorkflowKey(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function orderingReadinessBlockers(readiness: OrderingSourceReadiness) {
+  const blockers: Array<{ title: string; detail: string }> = [];
+  if (!readiness.quickBooksLatestInvoiceDate || readiness.quickBooksInvoiceCount === 0) {
+    blockers.push({
+      title: "QuickBooks sales history is not visible yet",
+      detail: `Ordering velocity needs invoices from ${readiness.requiredSalesStart} forward, less credit memos.`
+    });
+  }
+  if (!readiness.quickBooksLatestItemAt) {
+    blockers.push({
+      title: "QuickBooks item inventory proof is missing",
+      detail: "Ordering needs QB on hand and on order before replacing report uploads."
+    });
+  }
+  if (!readiness.vinosmithLatestInventoryAt || readiness.vinosmithInventorySnapshotRows === 0) {
+    blockers.push({
+      title: "Vinosmith live availability proof is missing",
+      detail: "Ordering still needs VS available, hold, future, pending sync, and unconfirmed context."
+    });
+  }
+  if (readiness.qbActiveMissingVs > 0 || readiness.vsActiveMissingQb > 0) {
+    blockers.push({
+      title: "Some active item codes do not match across systems",
+      detail: `${readiness.qbActiveMissingVs.toLocaleString("en-US")} QB-only active codes and ${readiness.vsActiveMissingQb.toLocaleString("en-US")} VS-only active codes need review.`
+    });
+  }
+  if (readiness.duplicateQbCodes > 0 || readiness.duplicateVsCodes > 0) {
+    blockers.push({
+      title: "Duplicate active item codes need cleanup",
+      detail: `${readiness.duplicateQbCodes.toLocaleString("en-US")} QB duplicate codes and ${readiness.duplicateVsCodes.toLocaleString("en-US")} VS duplicate codes were found.`
+    });
+  }
+  if (readiness.quickBooksMissingCost > 0 || readiness.quickBooksMissingInventory > 0) {
+    blockers.push({
+      title: "Some QuickBooks items are missing ordering fields",
+      detail: `${readiness.quickBooksMissingCost.toLocaleString("en-US")} active product items are missing cost and ${readiness.quickBooksMissingInventory.toLocaleString("en-US")} are missing on-hand/on-order values.`
+    });
+  }
+  return blockers;
+}
+
+function supplierReadinessRow(
+  supplier: SupplierOrderingRow,
+  activeVsWines: Array<{ wine: VinosmithOrderingWineRow; code: string }>,
+  qbCodes: Set<string>
+): OrderingSupplierReadinessRow {
+  const supplierKey = normalizeKey(supplier.name);
+  const supplierWines = activeVsWines.filter(({ wine }) => normalizeKey(wine.importer_name) === supplierKey);
+  const matchedCodes = supplierWines.filter(({ code }) => qbCodes.has(code)).length;
+  return {
+    name: supplier.name,
+    activeVsWines: supplierWines.length,
+    matchedCodes,
+    missingQbCodes: supplierWines.length - matchedCodes,
+    logisticsReady: numberOrNull(supplier.trucking_cost_per_bottle) !== null && numberOrNull(supplier.eta_days) !== null
+  };
+}
+
+function groupByCode<Row extends { code: string }>(rows: Row[]) {
+  const grouped = new Map<string, Row[]>();
+  rows.forEach((row) => {
+    const existing = grouped.get(row.code) || [];
+    existing.push(row);
+    grouped.set(row.code, existing);
+  });
+  return grouped;
+}
+
+function itemCodeFromQuickBooks(item: QuickBooksOrderingItemRow) {
+  return textFromCustomFields(item.custom_fields, [
+    "item_number",
+    "itemNumber",
+    "ItemNumber",
+    "sku",
+    "SKU",
+    "product_code",
+    "productCode",
+    "ProductCode"
+  ]) || item.name || item.full_name || item.list_id;
+}
+
+function textFromCustomFields(customFields: Record<string, unknown> | null | undefined, keys: string[]) {
+  if (!customFields || typeof customFields !== "object") return "";
+  for (const key of keys) {
+    const value = customFields[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+
+function isVinosmithActive(wine: Pick<VinosmithOrderingWineRow, "active" | "orderable">) {
+  return wine.active === true || wine.orderable === true;
+}
+
+function isLikelyProductItemCode(value: string) {
+  return /^[A-Z]{2,}\d{5,6}$/i.test(value.trim());
+}
+
+function normalizeCode(value: unknown) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function normalizeKey(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function numberOrNull(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
