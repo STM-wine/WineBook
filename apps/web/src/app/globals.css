@@ -4427,6 +4427,71 @@ tr.has-recommendation .sticky-name {
   margin-top: 6px;
 }
 
+.plumbing-refresh-reminder {
+  align-items: center;
+  background: #eef6ed;
+  border: 1px solid #bfd2c0;
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(29, 44, 30, 0.14);
+  color: var(--green);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  max-width: 620px;
+  padding: 14px 16px;
+  position: fixed;
+  right: 24px;
+  top: 96px;
+  z-index: 80;
+}
+
+.plumbing-refresh-reminder strong,
+.plumbing-refresh-reminder p {
+  margin: 0;
+}
+
+.plumbing-refresh-reminder strong {
+  color: var(--green);
+  display: block;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.plumbing-refresh-reminder p {
+  color: #4d654c;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.plumbing-refresh-reminder button {
+  background: white;
+  border: 1px solid #bfd2c0;
+  border-radius: 999px;
+  color: var(--green);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 8px 11px;
+}
+
+@media (max-width: 720px) {
+  .plumbing-refresh-reminder {
+    align-items: stretch;
+    flex-direction: column;
+    left: 16px;
+    max-width: none;
+    right: 16px;
+    top: 76px;
+  }
+
+  .plumbing-refresh-reminder button {
+    align-self: start;
+  }
+}
+
 .plumbing-issue-panel {
   overflow: hidden;
 }

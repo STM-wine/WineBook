@@ -374,16 +374,11 @@ function buildProductHealth({
 
   const activeOrderableVsVsInactiveQb: VinosmithProductHealthIssue[] = [];
   const activeOrderableVsVsMissingQb: VinosmithProductHealthIssue[] = [];
-  const metadataGaps: VinosmithProductHealthIssue[] = [];
 
   wines.forEach((wine) => {
     const matchedItem = resolveQuickBooksItem(wine, quickBooksLookup);
     const vsActive = isVinosmithActive(wine);
     if (matchedItem) matchedWineIds.add(wine.wine_id);
-
-    if (vsActive && (!wine.importer_name || !wine.producer_name)) {
-      metadataGaps.push(issueFromWine(wine, metadataGapLabel(wine), matchedItem?.is_active === false ? "Inactive" : matchedItem ? "Active" : "Missing"));
-    }
 
     if (!vsActive) return;
     if (!matchedItem) {
@@ -408,7 +403,7 @@ function buildProductHealth({
     activeOrderableVsVsInactiveOrMissingQb: vsActiveOrderableVsInactiveOrMissingQb.length,
     activeOrderableVsVsInactiveQb: activeOrderableVsVsInactiveQb.length,
     activeOrderableVsVsMissingQb: activeOrderableVsVsMissingQb.length,
-    missingSupplierImporterOrBrand: metadataGaps.length,
+    missingSupplierImporterOrBrand: 0,
     unmatchedItemCodes: unmatchedItemCodes.length,
     changedRecordsSinceLastSync,
     changedRecordsWindowStart,
@@ -418,7 +413,7 @@ function buildProductHealth({
     examples: {
       qbActiveVsInactiveOrMissingVs: qbActiveVsInactiveOrMissingVs.slice(0, PRODUCT_HEALTH_EXAMPLE_LIMIT),
       vsActiveOrderableVsInactiveOrMissingQb: vsActiveOrderableVsInactiveOrMissingQb.slice(0, PRODUCT_HEALTH_EXAMPLE_LIMIT),
-      metadataGaps: metadataGaps.slice(0, PRODUCT_HEALTH_EXAMPLE_LIMIT),
+      metadataGaps: [],
       unmatchedItemCodes: unmatchedItemCodes.slice(0, PRODUCT_HEALTH_EXAMPLE_LIMIT)
     }
   };
@@ -529,14 +524,6 @@ function statusLabelForVinosmith(wine: VinosmithExplorerWine) {
   if (wine.orderable === true) return "Orderable";
   if (wine.active === false || wine.orderable === false) return "Inactive";
   return "Unknown";
-}
-
-function metadataGapLabel(wine: VinosmithExplorerWine) {
-  const gaps = [
-    wine.importer_name ? null : "supplier/importer",
-    wine.producer_name ? null : "brand/producer"
-  ].filter(Boolean);
-  return `Missing ${gaps.join(" + ")}`;
 }
 
 function latestCheckpointAt(checkpoints: VinosmithExplorerCheckpoint[]) {

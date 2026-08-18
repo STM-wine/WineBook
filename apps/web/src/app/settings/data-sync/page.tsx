@@ -171,7 +171,6 @@ function allProductHealthIssues(productHealth: VinosmithProductHealth) {
   return [
     ...productHealth.examples.qbActiveVsInactiveOrMissingVs,
     ...productHealth.examples.vsActiveOrderableVsInactiveOrMissingQb,
-    ...productHealth.examples.metadataGaps,
     ...productHealth.examples.unmatchedItemCodes
   ];
 }
@@ -392,11 +391,6 @@ function VinosmithPlumbingPanel({
             <small>{productHealth.activeOrderableVsVsInactiveQb.toLocaleString("en-US")} inactive QB / {productHealth.activeOrderableVsVsMissingQb.toLocaleString("en-US")} missing QB</small>
           </div>
           <div>
-            <span>Metadata Gaps</span>
-            <strong>{productHealth.missingSupplierImporterOrBrand.toLocaleString("en-US")}</strong>
-            <small>Missing supplier/importer or brand</small>
-          </div>
-          <div>
             <span>Changed Records</span>
             <strong>{productHealth.changedRecordsSinceLastSync === null ? "N/A" : productHealth.changedRecordsSinceLastSync.toLocaleString("en-US")}</strong>
             <small>{productHealth.changedRecordsWindowStart ? `Since ${dateTimeLabel(productHealth.changedRecordsWindowStart)}` : productHealth.changedRecordsNote}</small>
@@ -408,7 +402,7 @@ function VinosmithPlumbingPanel({
         <div className="settings-panel-header">
           <div>
             <h2>What Needs To Happen Next</h2>
-            <p className="muted">Admin fix queue based on the current source-health findings.</p>
+            <p className="muted">Admin fix queue based on source-system mismatches that can affect calculations.</p>
           </div>
         </div>
         <div className="plumbing-next-step-list">
@@ -510,16 +504,6 @@ function nextStepsForProductHealth(productHealth: VinosmithProductHealth): Plumb
       nextAction: "Normalize the item code/name in the source system or add a Stem crosswalk before using Product Workspace as the ordering foundation.",
       countLabel: `${productHealth.unmatchedItemCodes.toLocaleString("en-US")} unmatched examples`,
       sourceOfTruth: "QuickBooks item number and Vinosmith code; Stem crosswalk when source names cannot be changed"
-    });
-  }
-
-  if (productHealth.missingSupplierImporterOrBrand > 0) {
-    steps.push({
-      priority: "P2",
-      title: "Fill supplier and brand metadata",
-      nextAction: "Add missing importer/supplier and producer/brand values in Vinosmith, then re-sync. These fields drive supplier grouping, laid-in matching, and review confidence.",
-      countLabel: `${productHealth.missingSupplierImporterOrBrand.toLocaleString("en-US")} metadata gaps`,
-      sourceOfTruth: "Vinosmith wine record"
     });
   }
 

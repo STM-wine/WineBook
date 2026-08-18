@@ -57,8 +57,12 @@ export function VinosmithPlumbingWorkflowQueue({
   const [issueTypeFilter, setIssueTypeFilter] = useState("All");
   const [ownerFilter, setOwnerFilter] = useState("All");
   const [search, setSearch] = useState("");
+  const [showRefreshReminder, setShowRefreshReminder] = useState(false);
+  const [refreshReminderDismissed, setRefreshReminderDismissed] = useState(false);
 
   const workflowByKey = useMemo(() => new Map(workflows.map((workflow) => [workflow.issue_key, workflow])), [workflows]);
+  const hasPendingSourceUpdates = workflows.some((workflow) => workflow.source_updated_at || workflow.status === "fixed_needs_resync");
+  const shouldShowRefreshReminder = (showRefreshReminder || hasPendingSourceUpdates) && !refreshReminderDismissed;
   const issueGroups = useMemo(() => issueGroupsForHealth(productHealth), [productHealth]);
   const allIssues = useMemo(
     () => issueGroups.flatMap((group) => group.rows.map((row) => enrichIssue(group, row, workflowByKey))),
@@ -162,11 +166,24 @@ export function VinosmithPlumbingWorkflowQueue({
       </section>
 
       {workflowWarning ? <p className="warning-banner plumbing-workflow-warning">{workflowWarning}</p> : null}
+      {shouldShowRefreshReminder ? (
+        <div className="plumbing-refresh-reminder" role="status">
+          <div>
+            <strong>Next step: refresh sources</strong>
+            <p>Run QuickBooks Web Connector, then re-sync Vinosmith. Rows clear after Stem sees both source systems refreshed.</p>
+          </div>
+          <button type="button" onClick={() => setRefreshReminderDismissed(true)}>Dismiss</button>
+        </div>
+      ) : null}
 
       {filteredIssueGroups.map((group) => (
         <IssueSection
           group={group}
           key={group.issueType}
+          onIssueUpdateSubmit={() => {
+            setRefreshReminderDismissed(false);
+            setShowRefreshReminder(true);
+          }}
           workflowByKey={workflowByKey}
           workflowStorageAvailable={workflowStorageAvailable}
         />
@@ -179,10 +196,12 @@ export function VinosmithPlumbingWorkflowQueue({
 
 function IssueSection({
   group,
+  onIssueUpdateSubmit,
   workflowByKey,
   workflowStorageAvailable
 }: {
   group: IssueGroup;
+  onIssueUpdateSubmit: () => void;
   workflowByKey: Map<string, VinosmithPlumbingWorkflowRow>;
   workflowStorageAvailable: boolean;
 }) {
@@ -235,7 +254,7 @@ function IssueSection({
                         </div>
                       </div>
                     ) : (
-                      <form action={markVinosmithPlumbingIssueSourceUpdated} className="plumbing-workflow-form">
+                      <form action={markVinosmithPlumbingIssueSourceUpdated} className="plumbing-workflow-form" onSubmit={onIssueUpdateSubmit}>
                         <IssueWorkflowHiddenFields
                           group={group}
                           issueKey={issueKey}
@@ -321,11 +340,6 @@ function issueGroupsForHealth(productHealth: VinosmithProductHealth): IssueGroup
       issueType: "vs_active_orderable_vs_inactive_or_missing_qb",
       title: "Active/orderable in VS, inactive or missing in QB",
       rows: productHealth.examples.vsActiveOrderableVsInactiveOrMissingQb
-    },
-    {
-      issueType: "missing_supplier_importer_or_brand",
-      title: "Missing supplier/importer/brand data",
-      rows: productHealth.examples.metadataGaps
     },
     {
       issueType: "unmatched_item_codes",
