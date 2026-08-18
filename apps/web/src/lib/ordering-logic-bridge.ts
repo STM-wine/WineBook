@@ -74,6 +74,9 @@ export type OrderingLineItemTestRow = {
   quickBooksOnHand: number | null;
   reportFob: number;
   quickBooksFob: number | null;
+  reportPackSize: number;
+  quickBooksPackSize: number | null;
+  quickBooksPackSizeSource: string | null;
   reportSales30: number;
   quickBooksSales30: number;
   reportRecommendedQty: number;
@@ -95,6 +98,8 @@ export type OrderingLogicBridgeData = {
     missingVinosmithInventoryRows: number;
     availableDeltaRows: number;
     salesDeltaRows: number;
+    packSizeDeltaRows: number;
+    missingQuickBooksPackSizeRows: number;
     markerPlaceholderRows: number;
   };
   lineRows: OrderingLineItemTestRow[];
@@ -169,12 +174,15 @@ export async function fetchOrderingLogicBridgeData(supabase: BridgeClient): Prom
       missingVinosmithInventoryRows: allLineRows.filter((row) => row.status === "needs_vinosmith_inventory").length,
       availableDeltaRows: allLineRows.filter((row) => row.vinosmithAvailable !== null && Math.abs(row.reportTrueAvailable - row.vinosmithAvailable) >= 1).length,
       salesDeltaRows: allLineRows.filter((row) => Math.abs(row.reportSales30 - row.quickBooksSales30) >= 1).length,
+      packSizeDeltaRows: allLineRows.filter((row) => row.quickBooksPackSize !== null && row.reportPackSize !== row.quickBooksPackSize).length,
+      missingQuickBooksPackSizeRows: allLineRows.filter((row) => row.status === "ready" && row.quickBooksPackSize === null).length,
       markerPlaceholderRows: reportRows.length
     },
     lineRows,
     warnings: [
       "Line-item test only: Order Review still uses the current report output.",
       "Vinosmith is only tested for live inventory overview fields. Available is the required API number for now.",
+      "Pack size now comes from QuickBooks custom field PACK SIZE when present. Item-name parsing should only be a fallback.",
       "Core and BTG are shown from the current report as a temporary placeholder. The real next source of truth should be an app-owned marker table, seeded once and maintained in Stem.",
       "QuickBooks sales use invoice lines minus credit memo lines. Sales differences do not mean Vinosmith cleanup is needed."
     ]
@@ -195,9 +203,11 @@ function buildLineItemTestRow({
   quickBooksSales30: number;
 }): OrderingLineItemTestRow {
   const notes: string[] = [];
+  const packSizeProof = quickBooksItem ? packSizeFromQuickBooks(quickBooksItem) : null;
   if (!quickBooksItem) notes.push("No active QuickBooks item by exact item code");
   if (!wine) notes.push("No Vinosmith wine by exact item code");
   if (wine && !inventory) notes.push("No latest Vinosmith inventory snapshot");
+  if (quickBooksItem && !packSizeProof) notes.push("No QuickBooks PACK SIZE custom field");
   notes.push("Core/BTG marker currently comes from report until app-owned markers exist");
 
   return {
@@ -216,6 +226,9 @@ function buildLineItemTestRow({
     quickBooksOnHand: quickBooksItem ? numberOrNull(quickBooksItem.quantity_on_hand) : null,
     reportFob: asNumber(reportRow.fob),
     quickBooksFob: quickBooksItem ? numberOrNull(quickBooksItem.purchase_cost) ?? numberOrNull(quickBooksItem.average_cost) : null,
+    reportPackSize: Math.max(1, Math.round(asNumber(reportRow.pack_size) || 12)),
+    quickBooksPackSize: packSizeProof?.packSize ?? null,
+    quickBooksPackSizeSource: packSizeProof?.source ?? null,
     reportSales30: asNumber(reportRow.last_30_day_sales),
     quickBooksSales30,
     reportRecommendedQty: asNumber(reportRow.recommended_qty_rounded),
@@ -443,19 +456,62 @@ function itemCodeFromQuickBooks(item: QuickBooksItemRow) {
 function textFromCustomFields(value: unknown, keys: string[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   const fields = value as Record<string, unknown>;
+  const normalized = new Map<string, unknown>();
+  for (const [key, fieldValue] of Object.entries(fields)) {
+    normalized.set(normalizeCustomFieldKey(key), fieldValue);
+  }
 
   for (const key of keys) {
-    const direct = fields[key];
-    if (typeof direct === "string" && direct.trim()) return direct.trim();
-    if (typeof direct === "number" && Number.isFinite(direct)) return String(direct);
-    if (direct && typeof direct === "object" && !Array.isArray(direct)) {
-      const nested = direct as Record<string, unknown>;
-      const text = nested.value ?? nested.Value ?? nested.text ?? nested.Text;
-      if (typeof text === "string" && text.trim()) return text.trim();
-    }
+    const direct = fields[key] ?? normalized.get(normalizeCustomFieldKey(key));
+    const text = textFromCustomFieldValue(direct);
+    if (text) return text;
   }
 
   return "";
+}
+
+function packSizeFromQuickBooks(item: QuickBooksItemRow) {
+  const customFieldText = textFromCustomFields(item.custom_fields, [
+    "PACK SIZE",
+    "Pack Size",
+    "pack_size",
+    "packSize",
+    "PackSize",
+    "pack"
+  ]);
+  const fromCustomField = integerFromPackSizeText(customFieldText);
+  if (fromCustomField !== null) {
+    return { packSize: fromCustomField, source: "QB custom field PACK SIZE" };
+  }
+
+  const fromName = integerFromPackSizeText(item.name || item.full_name || "");
+  if (fromName !== null) return { packSize: fromName, source: "QB item name fallback" };
+  return null;
+}
+
+function textFromCustomFieldValue(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const nested = value as Record<string, unknown>;
+    const text = nested.value ?? nested.Value ?? nested.text ?? nested.Text ?? nested.DataExtValue;
+    if (typeof text === "string" && text.trim()) return text.trim();
+    if (typeof text === "number" && Number.isFinite(text)) return String(text);
+  }
+  return "";
+}
+
+function integerFromPackSizeText(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const match = text.match(/(?:^|[^0-9])(\d{1,3})(?=\s*(?:\/|x|pk|pack|case|cs|btl|bottle|$))/i) || text.match(/^(\d{1,3})$/);
+  const parsed = match ? Number(match[1]) : Number(text);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.trunc(parsed);
+}
+
+function normalizeCustomFieldKey(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 function statusSort(status: OrderingLineItemTestRow["status"]) {

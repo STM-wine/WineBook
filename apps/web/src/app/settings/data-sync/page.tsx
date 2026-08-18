@@ -811,6 +811,12 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
           <strong>{summary.salesDeltaRows.toLocaleString("en-US")}</strong>
           <small>Expected while report sales miss credit memos</small>
         </div>
+        <div>
+          <span>Pack Size Proof</span>
+          <strong>{summary.missingQuickBooksPackSizeRows.toLocaleString("en-US")}</strong>
+          <small>Ready rows missing QB PACK SIZE</small>
+          <small>{summary.packSizeDeltaRows.toLocaleString("en-US")} report/QB differences</small>
+        </div>
       </div>
 
       <div className="ordering-bridge-warning-list">
@@ -829,6 +835,7 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
               <th>Available</th>
               <th>On Order</th>
               <th>FOB</th>
+              <th>Pack Size</th>
               <th>Sales 30</th>
               <th>Core / BTG</th>
               <th>Notes</th>
@@ -846,6 +853,10 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
                 <td>{lineItemPair(row.reportTrueAvailable, row.vinosmithAvailable, "Report true available", "VS Available")}</td>
                 <td>{lineItemPair(row.reportOnOrder, row.quickBooksOnOrder, "Report", "QB")}</td>
                 <td>{lineItemPair(row.reportFob, row.quickBooksFob, "Report", "QB", "money")}</td>
+                <td>
+                  {lineItemPair(row.reportPackSize, row.quickBooksPackSize, "Report", "QB")}
+                  {row.quickBooksPackSizeSource ? <small>{row.quickBooksPackSizeSource}</small> : null}
+                </td>
                 <td>{lineItemPair(row.reportSales30, row.quickBooksSales30, "Report", "QB minus credits")}</td>
                 <td>
                   <strong>{orderingFlagsLabel(row.reportIsBtg, row.reportIsCore)}</strong>
@@ -856,7 +867,7 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
             ))}
             {bridge.lineRows.length === 0 ? (
               <tr>
-                <td colSpan={9}>No line-item tests found.</td>
+                <td colSpan={10}>No line-item tests found.</td>
               </tr>
             ) : null}
           </tbody>

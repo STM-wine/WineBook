@@ -201,6 +201,7 @@ async function persistItems(supabase: SupabaseClient, response: string, rawRespo
       const listId = text(itemBlock, "ListID");
       const fullName = text(itemBlock, "FullName");
       if (!listId || !fullName) continue;
+      const itemCustomFields = customFields(itemBlock);
 
       const { error } = await supabase.from("quickbooks_items").upsert(
         {
@@ -221,11 +222,14 @@ async function persistItems(supabase: SupabaseClient, response: string, rawRespo
           income_account_ref: ref(itemBlock, "IncomeAccountRef"),
           cogs_account_ref: ref(itemBlock, "COGSAccountRef"),
           asset_account_ref: ref(itemBlock, "AssetAccountRef"),
-          custom_fields: {},
+          custom_fields: itemCustomFields,
           time_created: dateTimeText(itemBlock, "TimeCreated"),
           time_modified: dateTimeText(itemBlock, "TimeModified"),
           raw_response_id: rawResponseId,
-          raw_data: { parent_ref: ref(itemBlock, "ParentRef") },
+          raw_data: {
+            parent_ref: ref(itemBlock, "ParentRef"),
+            custom_field_count: customFieldCount(itemBlock)
+          },
           last_seen_at: new Date().toISOString()
         },
         { onConflict: "list_id" }
@@ -241,6 +245,7 @@ async function persistInvoices(supabase: SupabaseClient, response: string, rawRe
     const txnId = text(invoiceBlock, "TxnID");
     if (!txnId) continue;
 
+    const invoiceCustomFields = customFields(invoiceBlock);
     const customerRef = ref(invoiceBlock, "CustomerRef");
     const salesRepRef = ref(invoiceBlock, "SalesRepRef");
     const termsRef = ref(invoiceBlock, "TermsRef");
@@ -265,13 +270,15 @@ async function persistInvoices(supabase: SupabaseClient, response: string, rawRe
         is_paid: boolText(invoiceBlock, "IsPaid"),
         is_pending: boolText(invoiceBlock, "IsPending"),
         linked_txns: linkedTxns,
+        custom_fields: invoiceCustomFields,
         time_created: dateTimeText(invoiceBlock, "TimeCreated"),
         time_modified: dateTimeText(invoiceBlock, "TimeModified"),
         raw_response_id: rawResponseId,
         raw_data: {
           customer_ref: customerRef,
           sales_rep_ref: enrichSalesRepRef(salesRepRef),
-          line_count: lines.length
+          line_count: lines.length,
+          custom_field_count: customFieldCount(invoiceBlock)
         },
         last_seen_at: new Date().toISOString()
       },
@@ -289,6 +296,7 @@ async function persistCreditMemos(supabase: SupabaseClient, response: string, ra
     const txnId = text(creditMemoBlock, "TxnID");
     if (!txnId) continue;
 
+    const creditMemoCustomFields = customFields(creditMemoBlock);
     const customerRef = ref(creditMemoBlock, "CustomerRef");
     const salesRepRef = ref(creditMemoBlock, "SalesRepRef");
     const linkedTxns = extractBlocks(creditMemoBlock, "LinkedTxn").map((block) => rawLinkedTxn(block));
@@ -305,14 +313,15 @@ async function persistCreditMemos(supabase: SupabaseClient, response: string, ra
         subtotal: numberText(creditMemoBlock, "Subtotal"),
         total_amount: numberText(creditMemoBlock, "TotalAmount"),
         linked_txns: linkedTxns,
-        custom_fields: {},
+        custom_fields: creditMemoCustomFields,
         time_created: dateTimeText(creditMemoBlock, "TimeCreated"),
         time_modified: dateTimeText(creditMemoBlock, "TimeModified"),
         raw_response_id: rawResponseId,
         raw_data: {
           customer_ref: customerRef,
           sales_rep_ref: enrichSalesRepRef(salesRepRef),
-          line_count: lines.length
+          line_count: lines.length,
+          custom_field_count: customFieldCount(creditMemoBlock)
         },
         last_seen_at: new Date().toISOString()
       },
@@ -365,6 +374,7 @@ async function persistPurchaseOrders(supabase: SupabaseClient, response: string,
     const txnId = text(purchaseOrderBlock, "TxnID");
     if (!txnId) continue;
 
+    const purchaseOrderCustomFields = customFields(purchaseOrderBlock);
     const vendorRef = ref(purchaseOrderBlock, "VendorRef");
     const linkedTxns = extractBlocks(purchaseOrderBlock, "LinkedTxn").map((block) => rawLinkedTxn(block));
     const lines = parsePurchaseOrderLines(purchaseOrderBlock);
@@ -383,13 +393,14 @@ async function persistPurchaseOrders(supabase: SupabaseClient, response: string,
         total_amount: numberText(purchaseOrderBlock, "TotalAmount"),
         is_fully_received: boolText(purchaseOrderBlock, "IsFullyReceived"),
         linked_txns: linkedTxns,
-        custom_fields: {},
+        custom_fields: purchaseOrderCustomFields,
         time_created: dateTimeText(purchaseOrderBlock, "TimeCreated"),
         time_modified: dateTimeText(purchaseOrderBlock, "TimeModified"),
         raw_response_id: rawResponseId,
         raw_data: {
           vendor_ref: vendorRef,
-          line_count: lines.length
+          line_count: lines.length,
+          custom_field_count: customFieldCount(purchaseOrderBlock)
         },
         last_seen_at: new Date().toISOString()
       },
@@ -575,6 +586,35 @@ function ref(block: string, tagName: string): QbRef {
     ListID: text(refBlock, "ListID"),
     FullName: text(refBlock, "FullName")
   };
+}
+
+function customFields(block: string) {
+  const fields: Record<string, unknown> = {};
+  for (const fieldBlock of extractBlocks(block, "DataExtRet")) {
+    const name = text(fieldBlock, "DataExtName");
+    if (!name) continue;
+
+    const value = text(fieldBlock, "DataExtValue");
+    const normalizedKey = normalizeCustomFieldKey(name);
+    const field = {
+      name,
+      value,
+      ownerId: text(fieldBlock, "OwnerID"),
+      type: text(fieldBlock, "DataExtType")
+    };
+
+    fields[name] = field;
+    fields[normalizedKey] = field;
+  }
+  return fields;
+}
+
+function customFieldCount(block: string) {
+  return extractBlocks(block, "DataExtRet").filter((fieldBlock) => text(fieldBlock, "DataExtName")).length;
+}
+
+function normalizeCustomFieldKey(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 function text(block: string, tagName: string) {
