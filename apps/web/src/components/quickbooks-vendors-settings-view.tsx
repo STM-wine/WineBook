@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveQuickBooksVendorMappings } from "@/app/actions";
+import { dateTimeLabel } from "@/lib/date-labels";
 import { formatInteger } from "@/lib/order-data";
 import type {
   QuickBooksVendor,
@@ -31,6 +32,7 @@ export function QuickBooksVendorsSettingsView({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [editedMappings, setEditedMappings] = useState<QuickBooksVendorMapping[]>(mappings);
+  const [baselineMappings, setBaselineMappings] = useState<QuickBooksVendorMapping[]>(mappings);
   const [search, setSearch] = useState("");
   const [classification, setClassification] = useState<QuickBooksVendorClassification | "All">("All");
   const [matchStatus, setMatchStatus] = useState<"All" | "matched" | "unmatched">("All");
@@ -44,8 +46,8 @@ export function QuickBooksVendorsSettingsView({
     [editedMappings]
   );
   const originalByVendorId = useMemo(
-    () => new Map(mappings.map((mapping) => [mapping.quickbooks_vendor_list_id, mapping])),
-    [mappings]
+    () => new Map(baselineMappings.map((mapping) => [mapping.quickbooks_vendor_list_id, mapping])),
+    [baselineMappings]
   );
   const supplierOptions = useMemo(
     () => suppliers.filter((supplier) => supplier.active !== false).sort((a, b) => a.name.localeCompare(b.name)),
@@ -58,6 +60,12 @@ export function QuickBooksVendorsSettingsView({
     () => editedMappings.filter((mapping) => JSON.stringify(mappingForCompare(mapping)) !== JSON.stringify(mappingForCompare(originalByVendorId.get(mapping.quickbooks_vendor_list_id)))),
     [editedMappings, originalByVendorId]
   );
+  const hasUnsavedChanges = changedMappings.length > 0;
+
+  useEffect(() => {
+    setBaselineMappings(mappings);
+    setEditedMappings(mappings);
+  }, [mappings]);
 
   const filteredVendors = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -100,20 +108,24 @@ export function QuickBooksVendorsSettingsView({
 
   function saveChanges() {
     if (changedMappings.length === 0) return;
-    setMessage(`Saving ${changedMappings.length.toLocaleString()} vendor classification change(s)...`);
+    const mappingsToSave = changedMappings;
+    setMessage(`Saving ${mappingsToSave.length.toLocaleString()} vendor classification change(s)...`);
     setErrorMessage("");
 
     startTransition(async () => {
       try {
         const result = await saveQuickBooksVendorMappings({
-          mappings: changedMappings.map((row) => ({
+          mappings: mappingsToSave.map((row) => ({
             quickBooksVendorListId: row.quickbooks_vendor_list_id,
             supplierId: row.supplier_id || null,
             vendorClassification: row.vendor_classification,
             notes: row.notes || null
           }))
         });
-        setMessage(`Vendor classifications saved (${result.saved.toLocaleString()} change(s)).`);
+        const savedAt = new Date().toISOString();
+        setBaselineMappings((current) => mergeMappings(current, mappingsToSave));
+        setEditedMappings((current) => mergeMappings(current, mappingsToSave));
+        setMessage(`All changes saved at ${dateTimeLabel(savedAt)} (${result.saved.toLocaleString()} change(s)).`);
         router.refresh();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save vendor classifications.");
@@ -138,15 +150,18 @@ export function QuickBooksVendorsSettingsView({
           </div>
           <button
             className="button button-small"
-            disabled={isPending || changedMappings.length === 0}
+            disabled={isPending || !hasUnsavedChanges}
             onClick={saveChanges}
             type="button"
           >
-            Save Changes
+            {hasUnsavedChanges ? `Save ${changedMappings.length.toLocaleString()} Change${changedMappings.length === 1 ? "" : "s"}` : "Saved"}
           </button>
         </div>
 
-        {message ? <p className="muted">{message}</p> : null}
+        <div className={`vendor-save-state ${hasUnsavedChanges ? "vendor-save-state-dirty" : "vendor-save-state-clean"}`}>
+          <strong>{hasUnsavedChanges ? `${changedMappings.length.toLocaleString()} unsaved change${changedMappings.length === 1 ? "" : "s"}` : "No unsaved changes"}</strong>
+          <span>{message || (hasUnsavedChanges ? "Click Save Changes before leaving this page." : "Saved rows are written to Supabase vendor mappings.")}</span>
+        </div>
         {errorMessage ? <div className="warning-banner">{errorMessage}</div> : null}
 
         <div className="supplier-hub-summary logistics-summary">
@@ -299,6 +314,14 @@ function mappingForCompare(mapping: QuickBooksVendorMapping | undefined) {
     vendor_classification: mapping.vendor_classification,
     notes: mapping.notes || null
   };
+}
+
+function mergeMappings(current: QuickBooksVendorMapping[], updates: QuickBooksVendorMapping[]) {
+  const byVendorId = new Map(current.map((mapping) => [mapping.quickbooks_vendor_list_id, mapping]));
+  updates.forEach((mapping) => {
+    byVendorId.set(mapping.quickbooks_vendor_list_id, mapping);
+  });
+  return Array.from(byVendorId.values());
 }
 
 function vendorTypeLabel(vendor: QuickBooksVendor) {

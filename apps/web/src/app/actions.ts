@@ -470,6 +470,7 @@ export async function saveQuickBooksVendorMappings(input: {
   }
 
   revalidatePath("/");
+  revalidatePath("/settings/qb-vendors");
   return { saved: mappings.length };
 }
 

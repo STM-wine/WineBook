@@ -2644,6 +2644,36 @@ th:nth-child(12) .table-sort-button {
   color: #8f2c26;
 }
 
+.vendor-save-state {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+}
+
+.vendor-save-state strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.vendor-save-state span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.vendor-save-state-clean {
+  background: #f3f8ef;
+  border-color: #c9ddbf;
+}
+
+.vendor-save-state-dirty {
+  background: #fff6df;
+  border-color: #f0cf88;
+}
+
 .catalog-table-shell table,
 .request-table-shell table,
 .pending-table-shell table,
