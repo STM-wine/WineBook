@@ -485,9 +485,9 @@ export default async function DataSyncSettingsPage() {
             </div>
           </section>
 
-          <OrderingSourceReadinessPanel readiness={data.orderingReadiness} />
-
           <OrderingLogicBridgePanel bridge={data.orderingLogicBridge} />
+
+          <OrderingSourceReadinessPanel readiness={data.orderingReadiness} />
 
           <VinosmithPlumbingPanel productHealth={data.productHealth} workflowState={data.workflowState} />
 
@@ -678,56 +678,102 @@ function OrderingSourceReadinessPanel({ readiness }: { readiness: OrderingSource
 
 function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData }) {
   const summary = bridge.summary;
-  const parityBlocked = summary.proposedRowsWithBlockingInputs > 0 || summary.missingCurrentRows > 0 || summary.missingProposedRows > 0;
+  const decision = bridge.moveDecision;
 
   return (
     <section className="settings-panel ordering-logic-bridge-panel">
       <div className="settings-panel-header">
         <div>
           <h2>Ordering Logic Bridge</h2>
-          <p className="muted">Shadow comparison between Current report output and Proposed database output. Diagnostic only; live ordering is unchanged.</p>
+          <p className="muted">Can the API reproduce the current report-created ordering table? Diagnostic only; live ordering is unchanged.</p>
         </div>
-        <span className={`data-pill ${parityBlocked ? "is-warning" : "is-positive"}`}>Diagnostic Only</span>
+        <span className={`data-pill ${decision.status === "ready" ? "is-positive" : "is-warning"}`}>
+          {decision.status === "ready" ? "Pilot Ready" : "Not Ready"}
+        </span>
       </div>
 
-      <div className="ordering-bridge-proof-strip">
-        <article>
-          <strong>Current report output</strong>
-          <span>{bridge.reportRun ? `Report ${bridge.reportRun.id.slice(0, 8)} from ${dateTimeLabel(bridge.reportRun.report_date || bridge.reportRun.completed_at)}` : "No completed report run found"}</span>
-        </article>
-        <article>
-          <strong>Proposed database output</strong>
-          <span>Exact item-code match from QuickBooks, Vinosmith, Supplier Logistics, and QB sales history since {bridge.salesHistoryFrom}.</span>
-        </article>
-        <article>
-          <strong>Review rule</strong>
-          <span>Rows with missing source proof stay blocked until reviewed; nothing is saved into live recommendations.</span>
-        </article>
-      </div>
-
-      <div className="ordering-bridge-triage-grid">
-        {bridge.triage.map((section) => (
-          <article key={section.key} className={`ordering-bridge-triage-card tone-${section.tone}`}>
-            <div>
-              <span>{section.title}</span>
-              <strong>{section.count.toLocaleString("en-US")}</strong>
-            </div>
-            <p>{section.summary}</p>
-            <b>{section.action}</b>
-            {section.examples.length > 0 ? (
-              <ul>
-                {section.examples.map((example) => (
-                  <li key={example}>{example}</li>
-                ))}
-              </ul>
-            ) : (
-              <small>No examples in the current sample.</small>
-            )}
+      <div className={`ordering-bridge-decision-card status-${decision.status}`}>
+        <div>
+          <span>Move To API?</span>
+          <strong>{decision.title}</strong>
+          <p>{decision.summary}</p>
+        </div>
+        <div className="ordering-bridge-decision-stats">
+          <article>
+            <span>Matched Test Rows</span>
+            <strong>{summary.matchedItemCodes.toLocaleString("en-US")}</strong>
           </article>
-        ))}
+          <article>
+            <span>Qty Rows Changed</span>
+            <strong>{summary.recommendedQtyDeltaRows.toLocaleString("en-US")}</strong>
+          </article>
+          <article>
+            <span>Bottle Delta</span>
+            <strong>{summary.recommendedBottleDelta.toLocaleString("en-US")}</strong>
+          </article>
+        </div>
+        <div className="ordering-bridge-decision-lists">
+          <article>
+            <h3>Why We Can Keep Testing</h3>
+            <ul>
+              {decision.canMoveReasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </article>
+          <article>
+            <h3>Why We Cannot Switch Yet</h3>
+            <ul>
+              {decision.cannotMoveReasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </article>
+        </div>
+        <b>{decision.nextStep}</b>
       </div>
 
-      <div className="settings-metrics data-sync-metrics ordering-bridge-metrics">
+      <details className="ordering-bridge-details">
+        <summary>Show diagnostic evidence</summary>
+
+        <div className="ordering-bridge-proof-strip">
+          <article>
+            <strong>Current report output</strong>
+            <span>{bridge.reportRun ? `Report ${bridge.reportRun.id.slice(0, 8)} from ${dateTimeLabel(bridge.reportRun.report_date || bridge.reportRun.completed_at)}` : "No completed report run found"}</span>
+          </article>
+          <article>
+            <strong>Proposed database output</strong>
+            <span>Exact item-code match from QuickBooks, Vinosmith, Supplier Logistics, and QB sales history since {bridge.salesHistoryFrom}.</span>
+          </article>
+          <article>
+            <strong>Review rule</strong>
+            <span>Rows with missing source proof stay blocked until reviewed; nothing is saved into live recommendations.</span>
+          </article>
+        </div>
+
+        <div className="ordering-bridge-triage-grid">
+          {bridge.triage.map((section) => (
+            <article key={section.key} className={`ordering-bridge-triage-card tone-${section.tone}`}>
+              <div>
+                <span>{section.title}</span>
+                <strong>{section.count.toLocaleString("en-US")}</strong>
+              </div>
+              <p>{section.summary}</p>
+              <b>{section.action}</b>
+              {section.examples.length > 0 ? (
+                <ul>
+                  {section.examples.map((example) => (
+                    <li key={example}>{example}</li>
+                  ))}
+                </ul>
+              ) : (
+                <small>No examples in the current sample.</small>
+              )}
+            </article>
+          ))}
+        </div>
+
+        <div className="settings-metrics data-sync-metrics ordering-bridge-metrics">
         <div>
           <span>Row Counts</span>
           <strong>{summary.currentReportRows.toLocaleString("en-US")} / {summary.proposedDatabaseRows.toLocaleString("en-US")}</strong>
@@ -872,6 +918,7 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
           </table>
         </div>
       ) : null}
+      </details>
     </section>
   );
 }

@@ -182,6 +182,15 @@ export type OrderingLogicBridgeTriageSection = {
   examples: string[];
 };
 
+export type OrderingLogicBridgeMoveDecision = {
+  status: "not_ready" | "pilot_ready" | "ready";
+  title: string;
+  summary: string;
+  canMoveReasons: string[];
+  cannotMoveReasons: string[];
+  nextStep: string;
+};
+
 export type OrderingLogicBridgeData = {
   generatedAt: string;
   diagnosticOnly: true;
@@ -189,6 +198,7 @@ export type OrderingLogicBridgeData = {
   referenceDate: string;
   salesHistoryFrom: string;
   warnings: string[];
+  moveDecision: OrderingLogicBridgeMoveDecision;
   triage: OrderingLogicBridgeTriageSection[];
   summary: OrderingLogicBridgeSummary;
   supplierRows: OrderingLogicBridgeSupplierRow[];
@@ -540,9 +550,35 @@ function buildBridgeData({
       productName: row.productName,
       supplierName: row.supplierName,
       blockers: row.blockers
-    }));
+  }));
   const supplierRows = buildSupplierRows({ matchedCodes, missingCurrentCodes, missingProposedCodes, currentByCode, proposedByCode, proposedRows });
   const proposedRowsWithBlockingInputs = proposedRows.filter((row) => row.blockers.length > 0).length;
+  const currentRecommendedBottles = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded));
+  const proposedRecommendedBottles = sum(proposedRows, (row) => row.recommendedQtyRounded || 0);
+  const currentEstimatedFob = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded) * asNumber(row.fob));
+  const proposedEstimatedFob = sum(proposedRows, (row) => (row.recommendedQtyRounded || 0) * (row.qbFob || 0));
+  const summary = {
+    currentReportRows: recommendations.length,
+    proposedDatabaseRows: proposedRows.length,
+    matchedItemCodes: matchedCodes.length,
+    missingCurrentRows: missingCurrentCodes.length,
+    missingProposedRows: missingProposedCodes.length,
+    currentRowsWithoutUsableCode,
+    proposedRowsWithBlockingInputs,
+    suppliersWithBlockers: new Set(proposedRows.filter((row) => row.blockers.length > 0).map((row) => row.supplierName)).size,
+    salesDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.last_30_day_sales) - (proposedByCode.get(code)?.sales.last30 || 0)) >= 1).length,
+    onHandDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.true_available) - (proposedByCode.get(code)?.qbOnHand || 0)) >= 1).length,
+    onOrderDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.on_order) - (proposedByCode.get(code)?.qbOnOrder || 0)) >= 1).length,
+    fobDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.fob) - (proposedByCode.get(code)?.qbFob || 0)) >= 0.01).length,
+    recommendedQtyDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.recommended_qty_rounded) - (proposedByCode.get(code)?.recommendedQtyRounded || 0)) >= 1).length,
+    currentRecommendedBottles,
+    proposedRecommendedBottles,
+    recommendedBottleDelta: proposedRecommendedBottles - currentRecommendedBottles,
+    currentEstimatedFob,
+    proposedEstimatedFob,
+    estimatedFobDelta: proposedEstimatedFob - currentEstimatedFob
+  };
+  const moveDecision = buildMoveDecision({ summary, deltaRows: allDeltaRows });
   const triage = buildTriageSections({
     matchedCodes,
     missingCurrentCodes,
@@ -553,10 +589,6 @@ function buildBridgeData({
     proposedRows,
     deltaRows: allDeltaRows
   });
-  const currentRecommendedBottles = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded));
-  const proposedRecommendedBottles = sum(proposedRows, (row) => row.recommendedQtyRounded || 0);
-  const currentEstimatedFob = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded) * asNumber(row.fob));
-  const proposedEstimatedFob = sum(proposedRows, (row) => (row.recommendedQtyRounded || 0) * (row.qbFob || 0));
   const warnings = [
     "Diagnostic only: Order Review still uses the current report output.",
     "Database rows are matched by exact item code. Report rows without product_code are counted as blockers, not fuzzy-matched.",
@@ -570,31 +602,80 @@ function buildBridgeData({
     referenceDate,
     salesHistoryFrom: SALES_HISTORY_FROM,
     warnings,
+    moveDecision,
     triage,
-    summary: {
-      currentReportRows: recommendations.length,
-      proposedDatabaseRows: proposedRows.length,
-      matchedItemCodes: matchedCodes.length,
-      missingCurrentRows: missingCurrentCodes.length,
-      missingProposedRows: missingProposedCodes.length,
-      currentRowsWithoutUsableCode,
-      proposedRowsWithBlockingInputs,
-      suppliersWithBlockers: new Set(proposedRows.filter((row) => row.blockers.length > 0).map((row) => row.supplierName)).size,
-      salesDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.last_30_day_sales) - (proposedByCode.get(code)?.sales.last30 || 0)) >= 1).length,
-      onHandDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.true_available) - (proposedByCode.get(code)?.qbOnHand || 0)) >= 1).length,
-      onOrderDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.on_order) - (proposedByCode.get(code)?.qbOnOrder || 0)) >= 1).length,
-      fobDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.fob) - (proposedByCode.get(code)?.qbFob || 0)) >= 0.01).length,
-      recommendedQtyDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.recommended_qty_rounded) - (proposedByCode.get(code)?.recommendedQtyRounded || 0)) >= 1).length,
-      currentRecommendedBottles,
-      proposedRecommendedBottles,
-      recommendedBottleDelta: proposedRecommendedBottles - currentRecommendedBottles,
-      currentEstimatedFob,
-      proposedEstimatedFob,
-      estimatedFobDelta: proposedEstimatedFob - currentEstimatedFob
-    },
+    summary,
     supplierRows,
     deltaRows,
     blockerRows
+  };
+}
+
+function buildMoveDecision({
+  summary,
+  deltaRows
+}: {
+  summary: OrderingLogicBridgeSummary;
+  deltaRows: OrderingLogicBridgeDeltaRow[];
+}): OrderingLogicBridgeMoveDecision {
+  const materialRecommendedRows = deltaRows.filter((row) => Math.abs(row.currentRecommendedQty - (row.proposedRecommendedQty || 0)) >= 12);
+  const materialSalesRows = deltaRows.filter((row) => Math.abs(row.currentSales30 - row.proposedSales30) >= 12);
+  const materialInventoryRows = deltaRows.filter((row) =>
+    Math.abs(row.currentOnHand - (row.proposedOnHand || 0)) >= 12 ||
+    Math.abs(row.currentOnOrder - (row.proposedOnOrder || 0)) >= 12
+  );
+  const canMoveReasons = [
+    `${summary.matchedItemCodes.toLocaleString("en-US")} current report rows can be compared to database rows by exact item code.`,
+    summary.fobDeltaRows === 0
+      ? "FOB is matching on the compared rows."
+      : `${summary.fobDeltaRows.toLocaleString("en-US")} compared rows have FOB differences to review.`,
+    "Live Order Review is still report-driven, so this bridge is safe to keep testing without changing ordering."
+  ];
+  const cannotMoveReasons = [];
+
+  if (summary.recommendedQtyDeltaRows > 0) {
+    cannotMoveReasons.push(
+      `${summary.recommendedQtyDeltaRows.toLocaleString("en-US")} matched rows change recommended quantity; the database output is ${Math.abs(summary.recommendedBottleDelta).toLocaleString("en-US")} bottles ${summary.recommendedBottleDelta < 0 ? "lower" : "higher"} than the current report.`
+    );
+  }
+  if (materialSalesRows.length > 0) {
+    cannotMoveReasons.push(`${materialSalesRows.length.toLocaleString("en-US")} matched rows have meaningful sales-window differences.`);
+  }
+  if (materialInventoryRows.length > 0) {
+    cannotMoveReasons.push(`${materialInventoryRows.length.toLocaleString("en-US")} matched rows have meaningful on-hand or on-order differences.`);
+  }
+  if (summary.missingCurrentRows > 0) {
+    cannotMoveReasons.push(`${summary.missingCurrentRows.toLocaleString("en-US")} database rows are not in the current report output. Treat these as report-filter/API-scope differences before enabling the API path.`);
+  }
+  if (summary.proposedRowsWithBlockingInputs > 0) {
+    cannotMoveReasons.push("Many proposed rows still have Vinosmith status/inventory proof gaps. Do not assign broad cleanup from this alone; use it only after matched-row parity is understood.");
+  }
+
+  const topRecommendationExamples = materialRecommendedRows.slice(0, 3).map((row) =>
+    `${row.itemCode}: report recommends ${row.currentRecommendedQty.toLocaleString("en-US")}, database recommends ${(row.proposedRecommendedQty || 0).toLocaleString("en-US")}`
+  );
+
+  if (cannotMoveReasons.length === 0) {
+    return {
+      status: "ready",
+      title: "Yes: API Ordering Looks Ready To Pilot",
+      summary: "The matched ordering table is lining up with the current report output closely enough for a controlled API pilot.",
+      canMoveReasons,
+      cannotMoveReasons: [],
+      nextStep: "Pick one supplier, run the API shadow output beside the report output for the next order cycle, and keep Order Review report-driven until that pilot is approved."
+    };
+  }
+
+  return {
+    status: "not_ready",
+    title: "Not Yet: Keep Live Ordering On Reports",
+    summary: "The bridge is useful for testing now, but the matched ordering table does not yet reproduce the current report-created recommendations.",
+    canMoveReasons,
+    cannotMoveReasons: [
+      ...cannotMoveReasons,
+      ...topRecommendationExamples.map((example) => `Example: ${example}`)
+    ].slice(0, 7),
+    nextStep: "Next test the matched table only: compare recommendation math for the top changed rows, especially BTG/Core flags, target days, pack size, sales windows, and whether the database path is intentionally using QB inventory instead of report availability."
   };
 }
 

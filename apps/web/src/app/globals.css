@@ -4230,6 +4230,120 @@ tr.has-recommendation .sticky-name {
   grid-template-columns: repeat(6, minmax(130px, 1fr));
 }
 
+.ordering-bridge-decision-card {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.ordering-bridge-decision-card.status-not_ready {
+  background: #fff8e8;
+  border-color: #efd29c;
+}
+
+.ordering-bridge-decision-card.status-ready,
+.ordering-bridge-decision-card.status-pilot_ready {
+  background: #f7fbf7;
+  border-color: #cfe2cd;
+}
+
+.ordering-bridge-decision-card > div:first-child {
+  display: grid;
+  gap: 7px;
+}
+
+.ordering-bridge-decision-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ordering-bridge-decision-card strong {
+  color: var(--ink);
+  font-size: 32px;
+  line-height: 1.05;
+}
+
+.ordering-bridge-decision-card p,
+.ordering-bridge-decision-card li,
+.ordering-bridge-decision-card b {
+  color: #3c3934;
+  font-size: 14px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.ordering-bridge-decision-card b {
+  color: var(--ink);
+  font-weight: 850;
+}
+
+.ordering-bridge-decision-stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ordering-bridge-decision-stats article {
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.ordering-bridge-decision-stats strong {
+  font-size: 28px;
+}
+
+.ordering-bridge-decision-lists {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ordering-bridge-decision-lists article {
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.ordering-bridge-decision-lists h3 {
+  color: var(--ink);
+  font-size: 16px;
+  margin: 0 0 10px;
+}
+
+.ordering-bridge-decision-lists ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ordering-bridge-details {
+  display: grid;
+  gap: 16px;
+}
+
+.ordering-bridge-details summary {
+  color: var(--green);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.ordering-bridge-details[open] summary {
+  margin-bottom: 16px;
+}
+
 .ordering-bridge-triage-grid {
   display: grid;
   gap: 12px;
@@ -5022,6 +5136,8 @@ tr.has-recommendation .sticky-name {
   .plumbing-filters,
   .data-health-proof-grid,
   .ordering-source-truth-grid,
+  .ordering-bridge-decision-stats,
+  .ordering-bridge-decision-lists,
   .ordering-bridge-proof-strip,
   .ordering-bridge-triage-grid,
   .ordering-bridge-warning-list,
@@ -5041,6 +5157,8 @@ tr.has-recommendation .sticky-name {
   .plumbing-filters,
   .data-health-proof-grid,
   .ordering-source-truth-grid,
+  .ordering-bridge-decision-stats,
+  .ordering-bridge-decision-lists,
   .ordering-bridge-proof-strip,
   .ordering-bridge-triage-grid,
   .ordering-bridge-warning-list,
