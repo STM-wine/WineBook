@@ -65,14 +65,18 @@ Unconfirmed line item quantity should not be part of the new ordering path.
 
 Create an app-owned marker source keyed by exact item code.
 
+Database foundation added in `20260818110000_ordering_item_markers.sql`.
+
 Fields:
 
 - `item_code`
 - `is_btg`
 - `is_core`
+- `marker_note`
+- `note_source`
 - `updated_by`
 - `updated_at`
-- optional source/import note
+- change history for inserts, updates, and deletes
 
 Workflow:
 
@@ -146,4 +150,3 @@ Possible table shape:
 - Product Workspace remains read-only unless explicitly scoped otherwise.
 - Keep Settings > Data Health focused on diagnostics and source readiness.
 - Keep UX table-first and practical.
-
