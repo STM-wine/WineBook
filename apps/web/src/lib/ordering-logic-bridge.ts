@@ -2,7 +2,6 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { asNumber } from "@/lib/order-data";
-import { normalizeOrderingLogicSettings, type OrderingLogicSettings } from "@/lib/ordering-logic";
 import type { Recommendation, ReportRun } from "@/lib/types";
 
 type BridgeClient = SupabaseClient<any, "public", any>;
@@ -18,22 +17,13 @@ type QuickBooksItemRow = {
   purchase_cost: number | string | null;
   average_cost: number | string | null;
   custom_fields: Record<string, unknown> | null;
-  last_seen_at: string | null;
 };
 
 type VinosmithWineRow = {
   wine_id: string;
   code: string | null;
   name: string | null;
-  vintage: string | null;
   importer_name: string | null;
-  producer_name: string | null;
-  unit_set: number | string | null;
-  active: boolean | null;
-  orderable: boolean | null;
-  core: boolean | null;
-  inventory_item: boolean | null;
-  last_seen_at: string | null;
 };
 
 type VinosmithInventorySnapshotRow = {
@@ -41,24 +31,9 @@ type VinosmithInventorySnapshotRow = {
   wine_id: string;
   snapshot_at: string | null;
   available: number | string | null;
-  on_hand: number | string | null;
   on_hold: number | string | null;
-  on_order: number | string | null;
   on_future: number | string | null;
   on_pending_sync: number | string | null;
-  raw_data: Record<string, unknown> | null;
-};
-
-type SupplierRow = {
-  id: string;
-  name: string;
-  active: boolean | null;
-  eta_days: number | string | null;
-  pick_up_location: string | null;
-  freight_forwarder: string | null;
-  order_frequency: string | null;
-  tdm: string | null;
-  trucking_cost_per_bottle: number | string | null;
 };
 
 type QuickBooksTransactionRow = {
@@ -75,137 +50,35 @@ type QuickBooksLineRow = {
   quantity: number | string | null;
 };
 
-type SalesWindowTotals = {
-  last30: number;
-  last60: number;
-  last90: number;
-  prior30: number;
-  next30Ly: number;
-  next60Ly: number;
-  next90Ly: number;
+type VinosmithInventoryProof = {
+  snapshotAt: string | null;
+  available: number;
+  hold: number;
+  future: number;
+  pendingSync: number;
 };
 
-export type OrderingLogicBridgeInputRow = {
+export type OrderingLineItemTestRow = {
   itemCode: string;
   productName: string;
   supplierName: string;
-  qbActive: boolean | null;
-  vsStatus: "active" | "inactive" | "unknown" | "missing";
-  qbOnHand: number | null;
-  qbOnOrder: number | null;
-  qbFob: number | null;
-  vsAvailable: number | null;
-  vsOnHold: number | null;
-  vsOnFuture: number | null;
-  vsPendingSync: number | null;
-  vsUnconfirmedLineItemQty: number | null;
-  sales: SalesWindowTotals;
-  weeklyVelocity: number;
-  packSize: number;
-  isBtg: boolean;
-  isCore: boolean;
-  targetDays: number;
-  monthlyMultiplier: number;
-  truckingCostPerBottle: number | null;
-  etaDays: number | null;
-  tdm: string | null;
-  recommendedQtyRounded: number | null;
-  blockers: string[];
-};
-
-export type OrderingLogicBridgeSupplierRow = {
-  supplier: string;
-  currentRows: number;
-  proposedRows: number;
-  matchedCodes: number;
-  missingCurrentCodes: number;
-  missingProposedCodes: number;
-  salesDeltaAbs: number;
-  onHandDeltaAbs: number;
-  onOrderDeltaAbs: number;
-  fobDeltaAbs: number;
-  recommendedQtyDelta: number;
-  blockingRows: number;
-};
-
-export type OrderingLogicBridgeDeltaRow = {
-  itemCode: string;
-  productName: string;
-  supplierName: string;
-  currentSales30: number;
-  proposedSales30: number;
-  currentOnHand: number;
-  proposedOnHand: number | null;
-  currentOnOrder: number;
-  proposedOnOrder: number | null;
-  currentFob: number;
-  proposedFob: number | null;
-  currentRecommendedQty: number;
-  proposedRecommendedQty: number | null;
-  currentWeeklyVelocity: number;
-  proposedWeeklyVelocity: number;
-  currentPackSize: number;
-  proposedPackSize: number;
-  currentIsBtg: boolean;
-  proposedIsBtg: boolean;
-  currentIsCore: boolean;
-  proposedIsCore: boolean;
-  currentTargetDays: number;
-  proposedTargetDays: number;
-  currentCoverageQty: number;
-  proposedCoverageQty: number;
-  currentRawNeed: number;
-  proposedRawNeed: number;
-  largestDeltaLabel: string;
-  likelyCause: string;
-};
-
-export type OrderingLogicBridgeBlockerRow = {
-  itemCode: string;
-  productName: string;
-  supplierName: string;
-  blockers: string[];
-};
-
-export type OrderingLogicBridgeSummary = {
-  currentReportRows: number;
-  proposedDatabaseRows: number;
-  matchedItemCodes: number;
-  missingCurrentRows: number;
-  missingProposedRows: number;
-  currentRowsWithoutUsableCode: number;
-  proposedRowsWithBlockingInputs: number;
-  suppliersWithBlockers: number;
-  salesDeltaRows: number;
-  onHandDeltaRows: number;
-  onOrderDeltaRows: number;
-  fobDeltaRows: number;
-  recommendedQtyDeltaRows: number;
-  currentRecommendedBottles: number;
-  proposedRecommendedBottles: number;
-  recommendedBottleDelta: number;
-  currentEstimatedFob: number;
-  proposedEstimatedFob: number;
-  estimatedFobDelta: number;
-};
-
-export type OrderingLogicBridgeTriageSection = {
-  key: "ignore" | "source_cleanup" | "bridge_review";
-  title: string;
-  count: number;
-  tone: "positive" | "warning" | "danger";
-  summary: string;
-  action: string;
-  examples: string[];
-};
-
-export type OrderingLogicBridgeMoveDecision = {
-  status: "not_ready" | "pilot_ready" | "ready";
-  title: string;
-  summary: string;
-  canMoveReasons: string[];
-  cannotMoveReasons: string[];
-  nextStep: string;
+  status: "ready" | "needs_qb_item" | "needs_vinosmith_inventory";
+  notes: string[];
+  reportTrueAvailable: number;
+  vinosmithAvailable: number | null;
+  vinosmithHold: number | null;
+  vinosmithFuture: number | null;
+  vinosmithPendingSync: number | null;
+  reportOnOrder: number;
+  quickBooksOnOrder: number | null;
+  quickBooksOnHand: number | null;
+  reportFob: number;
+  quickBooksFob: number | null;
+  reportSales30: number;
+  quickBooksSales30: number;
+  reportRecommendedQty: number;
+  reportIsBtg: boolean;
+  reportIsCore: boolean;
 };
 
 export type OrderingLogicBridgeData = {
@@ -214,13 +87,18 @@ export type OrderingLogicBridgeData = {
   reportRun: ReportRun | null;
   referenceDate: string;
   salesHistoryFrom: string;
+  summary: {
+    reportRows: number;
+    testedRows: number;
+    readyRows: number;
+    missingQuickBooksRows: number;
+    missingVinosmithInventoryRows: number;
+    availableDeltaRows: number;
+    salesDeltaRows: number;
+    markerPlaceholderRows: number;
+  };
+  lineRows: OrderingLineItemTestRow[];
   warnings: string[];
-  moveDecision: OrderingLogicBridgeMoveDecision;
-  triage: OrderingLogicBridgeTriageSection[];
-  summary: OrderingLogicBridgeSummary;
-  supplierRows: OrderingLogicBridgeSupplierRow[];
-  deltaRows: OrderingLogicBridgeDeltaRow[];
-  blockerRows: OrderingLogicBridgeBlockerRow[];
 };
 
 const PAGE_SIZE = 1000;
@@ -230,53 +108,121 @@ const SALES_HISTORY_FROM = "2025-01-01";
 export async function fetchOrderingLogicBridgeData(supabase: BridgeClient): Promise<OrderingLogicBridgeData> {
   const { reportRun, recommendations } = await fetchLatestReportOutput(supabase);
   const referenceDate = reportRun?.report_date || reportRun?.completed_at?.slice(0, 10) || todayKey();
-  const settings = normalizeOrderingLogicSettings(reportRun?.configuration_snapshot as Partial<OrderingLogicSettings> | null | undefined);
+  const reportRows = recommendations.filter((row) => isLikelyProductItemCode(normalizeCode(row.product_code)));
 
-  const [
-    quickBooksItems,
-    vinosmithWines,
-    suppliers
-  ] = await Promise.all([
-    fetchAll<QuickBooksItemRow>(supabase, "quickbooks_items", "list_id,name,full_name,is_active,item_type,quantity_on_hand,quantity_on_order,purchase_cost,average_cost,custom_fields,last_seen_at", "list_id"),
-    fetchAll<VinosmithWineRow>(supabase, "vinosmith_wines", "wine_id,code,name,vintage,importer_name,producer_name,unit_set,active,orderable,core,inventory_item,last_seen_at", "wine_id"),
-    fetchAll<SupplierRow>(supabase, "suppliers", "id,name,active,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle", "name")
-  ]);
-
-  const qbItemsWithCodes = quickBooksItems
-    .map((item) => ({ item, itemCode: normalizeCode(itemCodeFromQuickBooks(item)) }))
-    .filter(({ item, itemCode }) => item.is_active !== false && isLikelyProductItemCode(itemCode));
-  const qbItemCodeByListId = new Map(qbItemsWithCodes.map(({ item, itemCode }) => [item.list_id, itemCode]));
-  const [salesByCode, inventorySnapshots] = await Promise.all([
-    fetchQuickBooksSalesByCode(supabase, qbItemCodeByListId, referenceDate),
+  const [quickBooksItems, vinosmithWines, inventorySnapshots] = await Promise.all([
+    fetchAll<QuickBooksItemRow>(
+      supabase,
+      "quickbooks_items",
+      "list_id,name,full_name,is_active,item_type,quantity_on_hand,quantity_on_order,purchase_cost,average_cost,custom_fields",
+      "list_id"
+    ),
+    fetchAll<VinosmithWineRow>(
+      supabase,
+      "vinosmith_wines",
+      "wine_id,code,name,importer_name",
+      "wine_id"
+    ),
     fetchLatestVinosmithInventorySnapshots(supabase)
   ]);
+
+  const quickBooksItemsByCode = new Map<string, QuickBooksItemRow>();
+  const quickBooksCodeByListId = new Map<string, string>();
+  for (const item of quickBooksItems) {
+    const itemCode = normalizeCode(itemCodeFromQuickBooks(item));
+    if (!isLikelyProductItemCode(itemCode) || item.is_active === false) continue;
+    if (!quickBooksItemsByCode.has(itemCode)) quickBooksItemsByCode.set(itemCode, item);
+    quickBooksCodeByListId.set(item.list_id, itemCode);
+  }
+
   const winesByCode = firstByCode(vinosmithWines);
   const inventoryByWineId = aggregateLatestInventoryByWine(inventorySnapshots);
-  const suppliersByName = new Map(suppliers.map((supplier) => [normalizeKey(supplier.name), supplier]));
+  const salesByCode = await fetchQuickBooksSalesByCode(supabase, quickBooksCodeByListId, referenceDate);
 
-  const proposedRows = qbItemsWithCodes.map(({ item, itemCode }) => {
+  const allLineRows = reportRows.map((reportRow) => {
+    const itemCode = normalizeCode(reportRow.product_code);
     const wine = winesByCode.get(itemCode) || null;
-    const inventory = wine ? inventoryByWineId.get(wine.wine_id) || null : null;
-    const supplier = wine?.importer_name ? suppliersByName.get(normalizeKey(wine.importer_name)) || null : null;
-    return buildProposedRow({
-      item,
-      itemCode,
+    return buildLineItemTestRow({
+      reportRow,
+      quickBooksItem: quickBooksItemsByCode.get(itemCode) || null,
       wine,
-      inventory,
-      supplier,
-      sales: salesByCode.get(itemCode) || emptySales(),
-      settings,
-      referenceDate
+      inventory: wine ? inventoryByWineId.get(wine.wine_id) || null : null,
+      quickBooksSales30: salesByCode.get(itemCode) || 0
     });
   });
 
-  return buildBridgeData({
+  const lineRows = allLineRows
+    .sort((a, b) => statusSort(a.status) - statusSort(b.status) || Math.abs((b.vinosmithAvailable ?? 0) - b.reportTrueAvailable) - Math.abs((a.vinosmithAvailable ?? 0) - a.reportTrueAvailable))
+    .slice(0, 80);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    diagnosticOnly: true,
     reportRun,
-    recommendations,
-    proposedRows,
     referenceDate,
-    settings
-  });
+    salesHistoryFrom: SALES_HISTORY_FROM,
+    summary: {
+      reportRows: recommendations.length,
+      testedRows: reportRows.length,
+      readyRows: allLineRows.filter((row) => row.status === "ready").length,
+      missingQuickBooksRows: allLineRows.filter((row) => row.status === "needs_qb_item").length,
+      missingVinosmithInventoryRows: allLineRows.filter((row) => row.status === "needs_vinosmith_inventory").length,
+      availableDeltaRows: allLineRows.filter((row) => row.vinosmithAvailable !== null && Math.abs(row.reportTrueAvailable - row.vinosmithAvailable) >= 1).length,
+      salesDeltaRows: allLineRows.filter((row) => Math.abs(row.reportSales30 - row.quickBooksSales30) >= 1).length,
+      markerPlaceholderRows: reportRows.length
+    },
+    lineRows,
+    warnings: [
+      "Line-item test only: Order Review still uses the current report output.",
+      "Vinosmith is only tested for live inventory overview fields. Available is the required API number for now.",
+      "Unconfirmed line item quantity is not treated as required API data; when present, it is usually an anomaly to review separately.",
+      "Core and BTG are shown from the current report as a temporary placeholder. The real next source of truth should be an app-owned marker table, seeded once and maintained in Stem.",
+      "QuickBooks sales use invoice lines minus credit memo lines. Sales differences do not mean Vinosmith cleanup is needed."
+    ]
+  };
+}
+
+function buildLineItemTestRow({
+  reportRow,
+  quickBooksItem,
+  wine,
+  inventory,
+  quickBooksSales30
+}: {
+  reportRow: Recommendation;
+  quickBooksItem: QuickBooksItemRow | null;
+  wine: VinosmithWineRow | null;
+  inventory: VinosmithInventoryProof | null;
+  quickBooksSales30: number;
+}): OrderingLineItemTestRow {
+  const notes: string[] = [];
+  if (!quickBooksItem) notes.push("No active QuickBooks item by exact item code");
+  if (!wine) notes.push("No Vinosmith wine by exact item code");
+  if (wine && !inventory) notes.push("No latest Vinosmith inventory snapshot");
+  notes.push("Core/BTG marker currently comes from report until app-owned markers exist");
+
+  return {
+    itemCode: normalizeCode(reportRow.product_code),
+    productName: reportRow.product_name || wine?.name || normalizeCode(reportRow.product_code),
+    supplierName: reportRow.supplier_name || wine?.importer_name || "Unknown Supplier",
+    status: !quickBooksItem ? "needs_qb_item" : !inventory ? "needs_vinosmith_inventory" : "ready",
+    notes,
+    reportTrueAvailable: asNumber(reportRow.true_available),
+    vinosmithAvailable: inventory?.available ?? null,
+    vinosmithHold: inventory?.hold ?? null,
+    vinosmithFuture: inventory?.future ?? null,
+    vinosmithPendingSync: inventory?.pendingSync ?? null,
+    reportOnOrder: asNumber(reportRow.on_order),
+    quickBooksOnOrder: quickBooksItem ? numberOrNull(quickBooksItem.quantity_on_order) : null,
+    quickBooksOnHand: quickBooksItem ? numberOrNull(quickBooksItem.quantity_on_hand) : null,
+    reportFob: asNumber(reportRow.fob),
+    quickBooksFob: quickBooksItem ? numberOrNull(quickBooksItem.purchase_cost) ?? numberOrNull(quickBooksItem.average_cost) : null,
+    reportSales30: asNumber(reportRow.last_30_day_sales),
+    quickBooksSales30,
+    reportRecommendedQty: asNumber(reportRow.recommended_qty_rounded),
+    reportIsBtg: reportRow.is_btg === true,
+    reportIsCore: reportRow.is_core === true
+  };
 }
 
 async function fetchLatestReportOutput(supabase: BridgeClient) {
@@ -301,34 +247,14 @@ async function fetchLatestReportOutput(supabase: BridgeClient) {
       product_name,
       product_code,
       supplier_name,
-      brand_manager,
       is_btg,
       is_core,
       last_30_day_sales,
-      last_60_day_sales,
-      last_90_day_sales,
-      prior_30_day_sales,
-      next_30_day_forecast,
-      next_60_day_forecast,
-      next_90_day_forecast,
-      weekly_velocity,
-      velocity_trend_pct,
-      velocity_trend_label,
-      weeks_on_hand,
-      weeks_on_hand_with_on_order,
       true_available,
       on_order,
       recommended_qty_rounded,
-      approved_qty,
-      recommendation_status,
-      reorder_status,
-      risk_level,
-      pickup_location,
-      order_cost,
       fob,
-      pack_size,
-      trucking_cost_per_bottle,
-      landed_cost
+      pack_size
     `,
     "planning_sku",
     (query) => query.eq("report_run_id", reportRun.id)
@@ -339,16 +265,14 @@ async function fetchLatestReportOutput(supabase: BridgeClient) {
 
 async function fetchQuickBooksSalesByCode(
   supabase: BridgeClient,
-  qbItemCodeByListId: Map<string, string>,
+  quickBooksCodeByListId: Map<string, string>,
   referenceDate: string
 ) {
-  const salesByCode = new Map<string, SalesWindowTotals>();
-  const ranges = salesComparisonRanges(referenceDate);
+  const salesByCode = new Map<string, number>();
   const [invoices, creditMemos] = await Promise.all([
-    fetchTransactionsForRanges(supabase, "quickbooks_invoices", "txn_id,txn_date,is_void,is_pending", ranges),
-    fetchTransactionsForRanges(supabase, "quickbooks_credit_memos", "txn_id,txn_date", ranges)
+    fetchTransactionsForRange(supabase, "quickbooks_invoices", "txn_id,txn_date,is_void,is_pending", addDays(referenceDate, -30), referenceDate),
+    fetchTransactionsForRange(supabase, "quickbooks_credit_memos", "txn_id,txn_date", addDays(referenceDate, -30), referenceDate)
   ]);
-
   const invoiceDateById = new Map(
     invoices
       .filter((row) => row.txn_date && row.is_void !== true && row.is_pending !== true)
@@ -365,29 +289,25 @@ async function fetchQuickBooksSalesByCode(
     fetchLinesForTransactions(supabase, "quickbooks_credit_memo_lines", Array.from(creditMemoDateById.keys()))
   ]);
 
-  applySalesLines(salesByCode, invoiceLines, invoiceDateById, qbItemCodeByListId, referenceDate, 1);
-  applySalesLines(salesByCode, creditMemoLines, creditMemoDateById, qbItemCodeByListId, referenceDate, -1);
+  applySalesLines(salesByCode, invoiceLines, quickBooksCodeByListId, 1);
+  applySalesLines(salesByCode, creditMemoLines, quickBooksCodeByListId, -1);
   return salesByCode;
 }
 
-async function fetchTransactionsForRanges(
+async function fetchTransactionsForRange(
   supabase: BridgeClient,
   table: string,
   columns: string,
-  ranges: Array<{ from: string; to: string }>
+  from: string,
+  to: string
 ) {
-  const byId = new Map<string, QuickBooksTransactionRow>();
-  for (const range of ranges) {
-    const rows = await fetchAll<QuickBooksTransactionRow>(
-      supabase,
-      table,
-      columns,
-      "txn_id",
-      (query) => query.gte("txn_date", range.from).lte("txn_date", range.to)
-    );
-    rows.forEach((row) => byId.set(row.txn_id, row));
-  }
-  return Array.from(byId.values());
+  return fetchAll<QuickBooksTransactionRow>(
+    supabase,
+    table,
+    columns,
+    "txn_id",
+    (query) => query.gte("txn_date", from).lte("txn_date", to)
+  );
 }
 
 async function fetchLatestVinosmithInventorySnapshots(supabase: BridgeClient) {
@@ -405,7 +325,7 @@ async function fetchLatestVinosmithInventorySnapshots(supabase: BridgeClient) {
   return fetchAll<VinosmithInventorySnapshotRow>(
     supabase,
     "vinosmith_inventory_snapshots",
-    "id,wine_id,snapshot_at,available,on_hand,on_hold,on_order,on_future,on_pending_sync,raw_data",
+    "id,wine_id,snapshot_at,available,on_hold,on_future,on_pending_sync",
     "wine_id",
     (query) => query.eq("snapshot_at", data.snapshot_at)
   );
@@ -428,629 +348,43 @@ async function fetchLinesForTransactions(supabase: BridgeClient, table: string, 
 }
 
 function applySalesLines(
-  salesByCode: Map<string, SalesWindowTotals>,
+  salesByCode: Map<string, number>,
   lines: QuickBooksLineRow[],
-  txnDateById: Map<string, string>,
-  qbItemCodeByListId: Map<string, string>,
-  referenceDate: string,
+  quickBooksCodeByListId: Map<string, string>,
   sign: 1 | -1
 ) {
   for (const line of lines) {
-    const txnDate = txnDateById.get(line.txn_id);
-    if (!txnDate) continue;
-    const code = codeForSalesLine(line, qbItemCodeByListId);
+    const code = codeForSalesLine(line, quickBooksCodeByListId);
     if (!code) continue;
-    const quantity = asNumber(line.quantity) * sign;
-    if (quantity === 0) continue;
-    const totals = salesByCode.get(code) || emptySales();
-    if (withinTrailingWindow(txnDate, referenceDate, 30)) totals.last30 += quantity;
-    if (withinTrailingWindow(txnDate, referenceDate, 60)) totals.last60 += quantity;
-    if (withinTrailingWindow(txnDate, referenceDate, 90)) totals.last90 += quantity;
-    if (withinPriorWindow(txnDate, referenceDate, 60, 30)) totals.prior30 += quantity;
-    if (withinSameFutureWindowLastYear(txnDate, referenceDate, 30)) totals.next30Ly += quantity;
-    if (withinSameFutureWindowLastYear(txnDate, referenceDate, 60)) totals.next60Ly += quantity;
-    if (withinSameFutureWindowLastYear(txnDate, referenceDate, 90)) totals.next90Ly += quantity;
-    salesByCode.set(code, totals);
+    salesByCode.set(code, (salesByCode.get(code) || 0) + asNumber(line.quantity) * sign);
   }
 }
 
-function buildProposedRow({
-  item,
-  itemCode,
-  wine,
-  inventory,
-  supplier,
-  sales,
-  settings,
-  referenceDate
-}: {
-  item: QuickBooksItemRow;
-  itemCode: string;
-  wine: VinosmithWineRow | null;
-  inventory: AggregatedInventory | null;
-  supplier: SupplierRow | null;
-  sales: SalesWindowTotals;
-  settings: OrderingLogicSettings;
-  referenceDate: string;
-}): OrderingLogicBridgeInputRow {
-  const qbOnHand = numberOrNull(item.quantity_on_hand);
-  const qbOnOrder = numberOrNull(item.quantity_on_order);
-  const purchaseCost = numberOrNull(item.purchase_cost);
-  const qbFob = purchaseCost ?? numberOrNull(item.average_cost);
-  const truckingCostPerBottle = supplier ? numberOrNull(supplier.trucking_cost_per_bottle) : null;
-  const etaDays = supplier ? numberOrNull(supplier.eta_days) : null;
-  const isCore = Boolean(wine?.core) || boolFromCustomFields(item.custom_fields, ["is_core", "Is Core", "core"]);
-  const isBtg = boolFromCustomFields(item.custom_fields, ["is_btg", "Is BTG", "btg"]);
-  const packSize = Math.max(1, Math.round(numberOrNull(wine?.unit_set) || numberFromCustomFields(item.custom_fields, ["pack_size", "Pack Size"]) || settings.default_pack_size));
-  const weeklyVelocity = sales.last30 / 4.345;
-  const targetDays = isBtg ? settings.btg_target_days : isCore ? settings.core_target_days : settings.standard_target_days;
-  const month = Number(referenceDate.slice(5, 7));
-  const monthlyMultiplier = settings.monthly_mode_enabled ? settings.monthly_multipliers[String(month)]?.multiplier || 1 : 1;
-  const recommendedQtyRounded = qbOnHand === null || qbOnOrder === null
-    ? null
-    : recommendedQuantity({
-        weeklyVelocity,
-        targetDays,
-        qbOnHand,
-        qbOnOrder,
-        monthlyMultiplier,
-        packSize,
-        isBtg,
-        isCore,
-        settings
-      });
-  const blockers = blockersForProposedRow({ wine, inventory, supplier, qbOnHand, qbOnOrder, qbFob, truckingCostPerBottle, etaDays });
-
-  return {
-    itemCode,
-    productName: wine?.name || item.full_name || item.name || itemCode,
-    supplierName: wine?.importer_name || "Unknown Supplier",
-    qbActive: item.is_active,
-    vsStatus: vinosmithStatus(wine),
-    qbOnHand,
-    qbOnOrder,
-    qbFob,
-    vsAvailable: inventory?.available ?? null,
-    vsOnHold: inventory?.onHold ?? null,
-    vsOnFuture: inventory?.onFuture ?? null,
-    vsPendingSync: inventory?.onPendingSync ?? null,
-    vsUnconfirmedLineItemQty: inventory?.unconfirmedLineItemQty ?? null,
-    sales,
-    weeklyVelocity,
-    packSize,
-    isBtg,
-    isCore,
-    targetDays,
-    monthlyMultiplier,
-    truckingCostPerBottle,
-    etaDays,
-    tdm: supplier?.tdm || null,
-    recommendedQtyRounded,
-    blockers
-  };
-}
-
-function buildBridgeData({
-  reportRun,
-  recommendations,
-  proposedRows,
-  referenceDate,
-  settings
-}: {
-  reportRun: ReportRun | null;
-  recommendations: Recommendation[];
-  proposedRows: OrderingLogicBridgeInputRow[];
-  referenceDate: string;
-  settings: OrderingLogicSettings;
-}): OrderingLogicBridgeData {
-  const currentByCode = new Map<string, Recommendation>();
-  let currentRowsWithoutUsableCode = 0;
-  for (const row of recommendations) {
-    const code = normalizeCode(row.product_code);
-    if (!isLikelyProductItemCode(code)) {
-      currentRowsWithoutUsableCode += 1;
-      continue;
-    }
-    if (!currentByCode.has(code)) currentByCode.set(code, row);
-  }
-  const proposedByCode = new Map(proposedRows.map((row) => [row.itemCode, row]));
-  const currentCodes = new Set(currentByCode.keys());
-  const proposedCodes = new Set(proposedByCode.keys());
-  const matchedCodes = Array.from(currentCodes).filter((code) => proposedCodes.has(code));
-  const missingCurrentCodes = Array.from(proposedCodes).filter((code) => !currentCodes.has(code));
-  const missingProposedCodes = Array.from(currentCodes).filter((code) => !proposedCodes.has(code));
-  const allDeltaRows = matchedCodes
-    .map((code) => deltaRowFor(code, currentByCode.get(code)!, proposedByCode.get(code)!, settings))
-    .sort((a, b) => deltaMagnitude(b) - deltaMagnitude(a));
-  const deltaRows = allDeltaRows.slice(0, 12);
-  const blockerRows = proposedRows
-    .filter((row) => row.blockers.length > 0)
-    .sort((a, b) => b.blockers.length - a.blockers.length || a.supplierName.localeCompare(b.supplierName) || a.itemCode.localeCompare(b.itemCode))
-    .slice(0, 12)
-    .map((row) => ({
-      itemCode: row.itemCode,
-      productName: row.productName,
-      supplierName: row.supplierName,
-      blockers: row.blockers
-  }));
-  const supplierRows = buildSupplierRows({ matchedCodes, missingCurrentCodes, missingProposedCodes, currentByCode, proposedByCode, proposedRows });
-  const proposedRowsWithBlockingInputs = proposedRows.filter((row) => row.blockers.length > 0).length;
-  const currentRecommendedBottles = sum(matchedCodes, (code) => asNumber(currentByCode.get(code)?.recommended_qty_rounded));
-  const proposedRecommendedBottles = sum(matchedCodes, (code) => proposedByCode.get(code)?.recommendedQtyRounded || 0);
-  const currentEstimatedFob = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded) * asNumber(row.fob));
-  const proposedEstimatedFob = sum(proposedRows, (row) => (row.recommendedQtyRounded || 0) * (row.qbFob || 0));
-  const summary = {
-    currentReportRows: recommendations.length,
-    proposedDatabaseRows: proposedRows.length,
-    matchedItemCodes: matchedCodes.length,
-    missingCurrentRows: missingCurrentCodes.length,
-    missingProposedRows: missingProposedCodes.length,
-    currentRowsWithoutUsableCode,
-    proposedRowsWithBlockingInputs,
-    suppliersWithBlockers: new Set(proposedRows.filter((row) => row.blockers.length > 0).map((row) => row.supplierName)).size,
-    salesDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.last_30_day_sales) - (proposedByCode.get(code)?.sales.last30 || 0)) >= 1).length,
-    onHandDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.true_available) - (proposedByCode.get(code)?.qbOnHand || 0)) >= 1).length,
-    onOrderDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.on_order) - (proposedByCode.get(code)?.qbOnOrder || 0)) >= 1).length,
-    fobDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.fob) - (proposedByCode.get(code)?.qbFob || 0)) >= 0.01).length,
-    recommendedQtyDeltaRows: matchedCodes.filter((code) => Math.abs(asNumber(currentByCode.get(code)?.recommended_qty_rounded) - (proposedByCode.get(code)?.recommendedQtyRounded || 0)) >= 1).length,
-    currentRecommendedBottles,
-    proposedRecommendedBottles,
-    recommendedBottleDelta: proposedRecommendedBottles - currentRecommendedBottles,
-    currentEstimatedFob,
-    proposedEstimatedFob,
-    estimatedFobDelta: proposedEstimatedFob - currentEstimatedFob
-  };
-  const moveDecision = buildMoveDecision({ summary, deltaRows: allDeltaRows });
-  const triage = buildTriageSections({
-    matchedCodes,
-    missingCurrentCodes,
-    missingProposedCodes,
-    currentRowsWithoutUsableCode,
-    currentByCode,
-    proposedByCode,
-    proposedRows,
-    deltaRows: allDeltaRows
-  });
-  const warnings = [
-    "Diagnostic only: Order Review still uses the current report output.",
-    "Database rows are matched by exact item code. Report rows without product_code are counted as blockers, not fuzzy-matched.",
-    "Database sales use QuickBooks invoice lines minus credit memo lines. Sales differences can be expected where current report/Vinosmith export sales do not include credit memos.",
-    "Recommended quantity deltas are shadow calculations until supplier-by-supplier parity is reviewed."
-  ];
-
-  return {
-    generatedAt: new Date().toISOString(),
-    diagnosticOnly: true,
-    reportRun,
-    referenceDate,
-    salesHistoryFrom: SALES_HISTORY_FROM,
-    warnings,
-    moveDecision,
-    triage,
-    summary,
-    supplierRows,
-    deltaRows,
-    blockerRows
-  };
-}
-
-function buildMoveDecision({
-  summary,
-  deltaRows
-}: {
-  summary: OrderingLogicBridgeSummary;
-  deltaRows: OrderingLogicBridgeDeltaRow[];
-}): OrderingLogicBridgeMoveDecision {
-  const materialRecommendedRows = deltaRows.filter((row) => Math.abs(row.currentRecommendedQty - (row.proposedRecommendedQty || 0)) >= 12);
-  const materialSalesRows = deltaRows.filter((row) => Math.abs(row.currentSales30 - row.proposedSales30) >= 12);
-  const materialInventoryRows = deltaRows.filter((row) =>
-    Math.abs(row.currentOnHand - (row.proposedOnHand || 0)) >= 12 ||
-    Math.abs(row.currentOnOrder - (row.proposedOnOrder || 0)) >= 12
-  );
-  const canMoveReasons = [
-    `${summary.matchedItemCodes.toLocaleString("en-US")} current report rows can be compared to database rows by exact item code.`,
-    summary.fobDeltaRows === 0
-      ? "FOB is matching on the compared rows."
-      : `${summary.fobDeltaRows.toLocaleString("en-US")} compared rows have FOB differences to review.`,
-    "Live Order Review is still report-driven, so this bridge is safe to keep testing without changing ordering."
-  ];
-  const cannotMoveReasons = [];
-
-  if (summary.recommendedQtyDeltaRows > 0) {
-    cannotMoveReasons.push(
-      `${summary.recommendedQtyDeltaRows.toLocaleString("en-US")} matched rows change recommended quantity; on matched rows, proposed database recommendations total ${Math.abs(summary.recommendedBottleDelta).toLocaleString("en-US")} bottles ${summary.recommendedBottleDelta < 0 ? "lower" : "higher"} than the current report.`
-    );
-  }
-  if (materialSalesRows.length > 0) {
-    cannotMoveReasons.push(`${materialSalesRows.length.toLocaleString("en-US")} matched rows have sales-window differences. Treat these as expected report/export limitations when the database side is using QuickBooks invoices minus credit memos.`);
-  }
-  if (materialInventoryRows.length > 0) {
-    cannotMoveReasons.push(`${materialInventoryRows.length.toLocaleString("en-US")} matched rows have meaningful on-hand or on-order differences.`);
-  }
-  if (summary.missingCurrentRows > 0) {
-    cannotMoveReasons.push(`${summary.missingCurrentRows.toLocaleString("en-US")} database rows are not in the current report output. Treat these as report-filter/API-scope differences before enabling the API path.`);
-  }
-  if (summary.proposedRowsWithBlockingInputs > 0) {
-    cannotMoveReasons.push("Many proposed rows still have Vinosmith status/inventory proof gaps. Do not assign broad cleanup from this alone; use it only after matched-row parity is understood.");
+function aggregateLatestInventoryByWine(rows: VinosmithInventorySnapshotRow[]) {
+  const byWine = new Map<string, VinosmithInventorySnapshotRow[]>();
+  for (const row of rows) {
+    const existing = byWine.get(row.wine_id) || [];
+    existing.push(row);
+    byWine.set(row.wine_id, existing);
   }
 
-  const topRecommendationExamples = materialRecommendedRows.slice(0, 3).map((row) =>
-    `${row.itemCode}: report recommends ${row.currentRecommendedQty.toLocaleString("en-US")}, database recommends ${(row.proposedRecommendedQty || 0).toLocaleString("en-US")}`
-  );
-
-  if (cannotMoveReasons.length === 0) {
-    return {
-      status: "ready",
-      title: "Yes: API Ordering Looks Ready To Pilot",
-      summary: "The matched ordering table is lining up with the current report output closely enough for a controlled API pilot.",
-      canMoveReasons,
-      cannotMoveReasons: [],
-      nextStep: "Pick one supplier, run the API shadow output beside the report output for the next order cycle, and keep Order Review report-driven until that pilot is approved."
-    };
+  const aggregated = new Map<string, VinosmithInventoryProof>();
+  for (const [wineId, wineRows] of byWine.entries()) {
+    const latest = wineRows
+      .map((row) => row.snapshot_at)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) || null;
+    const latestRows = latest ? wineRows.filter((row) => row.snapshot_at === latest) : wineRows;
+    aggregated.set(wineId, {
+      snapshotAt: latest,
+      available: sum(latestRows, (row) => asNumber(row.available)),
+      hold: sum(latestRows, (row) => asNumber(row.on_hold)),
+      future: sum(latestRows, (row) => asNumber(row.on_future)),
+      pendingSync: sum(latestRows, (row) => asNumber(row.on_pending_sync))
+    });
   }
-
-  return {
-    status: "not_ready",
-    title: "Not Yet: Keep Live Ordering On Reports",
-    summary: "The bridge is useful for testing now, but the matched ordering table does not yet reproduce the current report-created recommendations.",
-    canMoveReasons,
-    cannotMoveReasons: [
-      ...cannotMoveReasons,
-      ...topRecommendationExamples.map((example) => `Example: ${example}`)
-    ].slice(0, 7),
-    nextStep: "Next test the matched table only: compare recommendation math for the top changed rows, especially BTG/Core flags, target days, pack size, sales windows, and whether the database path is intentionally using QB inventory instead of report availability."
-  };
-}
-
-function buildTriageSections({
-  matchedCodes,
-  missingCurrentCodes,
-  missingProposedCodes,
-  currentRowsWithoutUsableCode,
-  currentByCode,
-  proposedByCode,
-  proposedRows,
-  deltaRows
-}: {
-  matchedCodes: string[];
-  missingCurrentCodes: string[];
-  missingProposedCodes: string[];
-  currentRowsWithoutUsableCode: number;
-  currentByCode: Map<string, Recommendation>;
-  proposedByCode: Map<string, OrderingLogicBridgeInputRow>;
-  proposedRows: OrderingLogicBridgeInputRow[];
-  deltaRows: OrderingLogicBridgeDeltaRow[];
-}): OrderingLogicBridgeTriageSection[] {
-  const sourceBlockedCodes = new Set(proposedRows.filter((row) => row.blockers.length > 0).map((row) => row.itemCode));
-  const logicReviewRows = deltaRows.filter((row) => {
-    if (sourceBlockedCodes.has(row.itemCode)) return false;
-    return isMeaningfulLogicDelta(row);
-  });
-  const reportAnomalyCount = missingProposedCodes.length + currentRowsWithoutUsableCode;
-  const sourceCleanupCount = sourceBlockedCodes.size;
-  const bridgeReviewCount = logicReviewRows.length;
-  const ignoreCount = Math.max(
-    0,
-    matchedCodes.length -
-      matchedCodes.filter((code) => sourceBlockedCodes.has(code)).length -
-      bridgeReviewCount
-  ) + reportAnomalyCount;
-
-  return [
-    {
-      key: "source_cleanup",
-      title: "Needs Source Cleanup",
-      count: sourceCleanupCount,
-      tone: sourceCleanupCount > 0 ? "danger" : "positive",
-      summary: sourceCleanupCount > 0
-        ? "These are database-source blockers, not noisy export/report mismatches. Confirm them before assigning cleanup."
-        : "No source-cleanup blockers are visible in the bridge sample.",
-      action: "Only fix QuickBooks, Vinosmith, or Supplier Logistics when the row is confirmed and recurring; then refresh that source and reload Data Health.",
-      examples: sourceCleanupExamples({ proposedRows })
-    },
-    {
-      key: "bridge_review",
-      title: "Needs Bridge Logic Review",
-      count: bridgeReviewCount,
-      tone: bridgeReviewCount > 0 ? "warning" : "positive",
-      summary: bridgeReviewCount > 0
-        ? "These rows have enough source data, but the report output and database output do not line up yet."
-        : "No meaningful source-backed bridge deltas are visible in the top comparison rows.",
-      action: "Review these after source cleanup. They point to matching, sales-window, inventory-field, pack-size, or rounding logic differences.",
-      examples: logicReviewRows.slice(0, 4).map((row) => `${row.itemCode} ${row.productName}: largest delta is ${row.largestDeltaLabel}`)
-    },
-    {
-      key: "ignore",
-      title: "Can Ignore For Now",
-      count: ignoreCount,
-      tone: "positive",
-      summary: "These matched rows, report-only rows, and bad export-file leftovers should not drive action right now.",
-      action: "Park these unless the same item keeps appearing after fresh QuickBooks and Vinosmith syncs.",
-      examples: ignoreExamples({
-        matchedCodes,
-        missingProposedCodes,
-        currentRowsWithoutUsableCode,
-        sourceBlockedCodes,
-        logicReviewRows,
-        currentByCode,
-        proposedByCode
-      })
-    }
-  ];
-}
-
-function sourceCleanupExamples({
-  proposedRows
-}: {
-  proposedRows: OrderingLogicBridgeInputRow[];
-}) {
-  return proposedRows
-    .filter((row) => row.blockers.length > 0)
-    .slice(0, 4)
-    .map((row) => `${row.itemCode} ${row.productName}: ${row.blockers[0]}`);
-}
-
-function ignoreExamples({
-  matchedCodes,
-  missingProposedCodes,
-  currentRowsWithoutUsableCode,
-  sourceBlockedCodes,
-  logicReviewRows,
-  currentByCode,
-  proposedByCode
-}: {
-  matchedCodes: string[];
-  missingProposedCodes: string[];
-  currentRowsWithoutUsableCode: number;
-  sourceBlockedCodes: Set<string>;
-  logicReviewRows: OrderingLogicBridgeDeltaRow[];
-  currentByCode: Map<string, Recommendation>;
-  proposedByCode: Map<string, OrderingLogicBridgeInputRow>;
-}) {
-  const logicReviewCodes = new Set(logicReviewRows.map((row) => row.itemCode));
-  const examples = missingProposedCodes.slice(0, 2).map((code) => {
-    const row = currentByCode.get(code);
-    return `${code} ${row?.product_name || "report row"}: report-only, likely export anomaly`;
-  });
-  if (currentRowsWithoutUsableCode > 0 && examples.length < 4) {
-    examples.push(`${currentRowsWithoutUsableCode.toLocaleString("en-US")} current report rows have no usable item code`);
-  }
-  for (const code of missingProposedCodes.slice(2, 2 + Math.max(0, 4 - examples.length))) {
-    const row = currentByCode.get(code);
-    examples.push(`${code} ${row?.product_name || "report row"}: report-only`);
-  }
-  for (const code of matchedCodes) {
-    if (examples.length >= 4) break;
-    if (sourceBlockedCodes.has(code) || logicReviewCodes.has(code)) continue;
-    const proposed = proposedByCode.get(code);
-    const current = currentByCode.get(code);
-    examples.push(`${code} ${proposed?.productName || current?.product_name || "matched row"}`);
-  }
-  return examples;
-}
-
-function isMeaningfulLogicDelta(row: OrderingLogicBridgeDeltaRow) {
-  return Math.abs(row.currentRecommendedQty - (row.proposedRecommendedQty || 0)) >= 12 ||
-    Math.abs(row.currentSales30 - row.proposedSales30) >= 12 ||
-    Math.abs(row.currentOnHand - (row.proposedOnHand || 0)) >= 12 ||
-    Math.abs(row.currentOnOrder - (row.proposedOnOrder || 0)) >= 12 ||
-    Math.abs(row.currentFob - (row.proposedFob || 0)) >= 1;
-}
-
-function buildSupplierRows({
-  matchedCodes,
-  missingCurrentCodes,
-  missingProposedCodes,
-  currentByCode,
-  proposedByCode,
-  proposedRows
-}: {
-  matchedCodes: string[];
-  missingCurrentCodes: string[];
-  missingProposedCodes: string[];
-  currentByCode: Map<string, Recommendation>;
-  proposedByCode: Map<string, OrderingLogicBridgeInputRow>;
-  proposedRows: OrderingLogicBridgeInputRow[];
-}) {
-  const rows = new Map<string, OrderingLogicBridgeSupplierRow>();
-  const ensure = (supplier: string) => {
-    const key = supplier || "Unknown Supplier";
-    const existing = rows.get(key);
-    if (existing) return existing;
-    const next = {
-      supplier: key,
-      currentRows: 0,
-      proposedRows: 0,
-      matchedCodes: 0,
-      missingCurrentCodes: 0,
-      missingProposedCodes: 0,
-      salesDeltaAbs: 0,
-      onHandDeltaAbs: 0,
-      onOrderDeltaAbs: 0,
-      fobDeltaAbs: 0,
-      recommendedQtyDelta: 0,
-      blockingRows: 0
-    };
-    rows.set(key, next);
-    return next;
-  };
-
-  for (const row of currentByCode.values()) ensure(row.supplier_name || "Unknown Supplier").currentRows += 1;
-  for (const row of proposedRows) {
-    const supplierRow = ensure(row.supplierName);
-    supplierRow.proposedRows += 1;
-    if (row.blockers.length > 0) supplierRow.blockingRows += 1;
-  }
-  for (const code of matchedCodes) {
-    const current = currentByCode.get(code)!;
-    const proposed = proposedByCode.get(code)!;
-    const supplierRow = ensure(proposed.supplierName || current.supplier_name || "Unknown Supplier");
-    supplierRow.matchedCodes += 1;
-    supplierRow.salesDeltaAbs += Math.abs(asNumber(current.last_30_day_sales) - proposed.sales.last30);
-    supplierRow.onHandDeltaAbs += Math.abs(asNumber(current.true_available) - (proposed.qbOnHand || 0));
-    supplierRow.onOrderDeltaAbs += Math.abs(asNumber(current.on_order) - (proposed.qbOnOrder || 0));
-    supplierRow.fobDeltaAbs += Math.abs(asNumber(current.fob) - (proposed.qbFob || 0));
-    supplierRow.recommendedQtyDelta += (proposed.recommendedQtyRounded || 0) - asNumber(current.recommended_qty_rounded);
-  }
-  for (const code of missingCurrentCodes) ensure(proposedByCode.get(code)?.supplierName || "Unknown Supplier").missingCurrentCodes += 1;
-  for (const code of missingProposedCodes) ensure(currentByCode.get(code)?.supplier_name || "Unknown Supplier").missingProposedCodes += 1;
-
-  return Array.from(rows.values())
-    .filter((row) => row.currentRows > 0 || row.proposedRows > 0 || row.blockingRows > 0)
-    .sort((a, b) => b.blockingRows - a.blockingRows || b.missingCurrentCodes + b.missingProposedCodes - (a.missingCurrentCodes + a.missingProposedCodes) || a.supplier.localeCompare(b.supplier))
-    .slice(0, 12);
-}
-
-function deltaRowFor(
-  itemCode: string,
-  current: Recommendation,
-  proposed: OrderingLogicBridgeInputRow,
-  settings: OrderingLogicSettings
-): OrderingLogicBridgeDeltaRow {
-  const currentSales30 = asNumber(current.last_30_day_sales);
-  const proposedSales30 = proposed.sales.last30;
-  const currentOnHand = asNumber(current.true_available);
-  const proposedOnHand = proposed.qbOnHand;
-  const currentOnOrder = asNumber(current.on_order);
-  const proposedOnOrder = proposed.qbOnOrder;
-  const currentFob = asNumber(current.fob);
-  const proposedFob = proposed.qbFob;
-  const currentRecommendedQty = asNumber(current.recommended_qty_rounded);
-  const proposedRecommendedQty = proposed.recommendedQtyRounded;
-  const currentIsBtg = current.is_btg === true;
-  const currentIsCore = current.is_core === true;
-  const currentTargetDays = targetDaysFor(currentIsBtg, currentIsCore, settings);
-  const currentWeeklyVelocity = asNumber(current.weekly_velocity) || currentSales30 / 4.345;
-  const currentPackSize = Math.max(1, Math.round(asNumber(current.pack_size) || proposed.packSize || settings.default_pack_size));
-  const currentCoverageQty = currentOnHand + currentOnOrder;
-  const proposedCoverageQty = (proposedOnHand || 0) + (proposedOnOrder || 0);
-  const currentRawNeed = Math.max(0, currentWeeklyVelocity * (currentTargetDays / 7) - currentCoverageQty);
-  const proposedRawNeed = proposedOnHand === null || proposedOnOrder === null
-    ? 0
-    : Math.max(0, proposed.weeklyVelocity * (proposed.targetDays / 7) - proposedCoverageQty) * proposed.monthlyMultiplier;
-  const deltas = [
-    { label: "Recommended qty", value: Math.abs(currentRecommendedQty - (proposedRecommendedQty || 0)) },
-    { label: "Target days", value: Math.abs(currentTargetDays - proposed.targetDays) },
-    { label: "Sales", value: Math.abs(currentSales30 - proposedSales30) },
-    { label: "On hand", value: Math.abs(currentOnHand - (proposedOnHand || 0)) },
-    { label: "On order", value: Math.abs(currentOnOrder - (proposedOnOrder || 0)) },
-    { label: "Pack size", value: Math.abs(currentPackSize - proposed.packSize) },
-    { label: "FOB", value: Math.abs(currentFob - (proposedFob || 0)) }
-  ].sort((a, b) => b.value - a.value);
-
-  return {
-    itemCode,
-    productName: proposed.productName || current.product_name || itemCode,
-    supplierName: proposed.supplierName || current.supplier_name || "Unknown Supplier",
-    currentSales30,
-    proposedSales30,
-    currentOnHand,
-    proposedOnHand,
-    currentOnOrder,
-    proposedOnOrder,
-    currentFob,
-    proposedFob,
-    currentRecommendedQty,
-    proposedRecommendedQty,
-    currentWeeklyVelocity,
-    proposedWeeklyVelocity: proposed.weeklyVelocity,
-    currentPackSize,
-    proposedPackSize: proposed.packSize,
-    currentIsBtg,
-    proposedIsBtg: proposed.isBtg,
-    currentIsCore,
-    proposedIsCore: proposed.isCore,
-    currentTargetDays,
-    proposedTargetDays: proposed.targetDays,
-    currentCoverageQty,
-    proposedCoverageQty,
-    currentRawNeed,
-    proposedRawNeed,
-    largestDeltaLabel: deltas[0]?.value ? deltas[0].label : "Matched",
-    likelyCause: likelyCauseForDelta({
-      currentSales30,
-      proposedSales30,
-      currentOnHand,
-      proposedOnHand,
-      currentOnOrder,
-      proposedOnOrder,
-      currentPackSize,
-      proposedPackSize: proposed.packSize,
-      currentIsBtg,
-      proposedIsBtg: proposed.isBtg,
-      currentIsCore,
-      proposedIsCore: proposed.isCore,
-      currentTargetDays,
-      proposedTargetDays: proposed.targetDays,
-      currentRecommendedQty,
-      proposedRecommendedQty,
-      proposedRawNeed
-    })
-  };
-}
-
-function targetDaysFor(isBtg: boolean, isCore: boolean, settings: OrderingLogicSettings) {
-  if (isBtg) return settings.btg_target_days;
-  if (isCore) return settings.core_target_days;
-  return settings.standard_target_days;
-}
-
-function likelyCauseForDelta({
-  currentSales30,
-  proposedSales30,
-  currentOnHand,
-  proposedOnHand,
-  currentOnOrder,
-  proposedOnOrder,
-  currentPackSize,
-  proposedPackSize,
-  currentIsBtg,
-  proposedIsBtg,
-  currentIsCore,
-  proposedIsCore,
-  currentTargetDays,
-  proposedTargetDays,
-  currentRecommendedQty,
-  proposedRecommendedQty,
-  proposedRawNeed
-}: {
-  currentSales30: number;
-  proposedSales30: number;
-  currentOnHand: number;
-  proposedOnHand: number | null;
-  currentOnOrder: number;
-  proposedOnOrder: number | null;
-  currentPackSize: number;
-  proposedPackSize: number;
-  currentIsBtg: boolean;
-  proposedIsBtg: boolean;
-  currentIsCore: boolean;
-  proposedIsCore: boolean;
-  currentTargetDays: number;
-  proposedTargetDays: number;
-  currentRecommendedQty: number;
-  proposedRecommendedQty: number | null;
-  proposedRawNeed: number;
-}) {
-  if (currentRecommendedQty > 0 && (proposedRecommendedQty || 0) === 0 && proposedRawNeed <= 0) {
-    if (currentTargetDays !== proposedTargetDays || currentIsBtg !== proposedIsBtg || currentIsCore !== proposedIsCore) {
-      return "DB recommendation is zero because the API path sees different BTG/Core target coverage and enough QB inventory for that target.";
-    }
-    return "DB recommendation is zero because QuickBooks on hand plus on order covers the API target.";
-  }
-  if (currentTargetDays !== proposedTargetDays || currentIsBtg !== proposedIsBtg || currentIsCore !== proposedIsCore) {
-    return "BTG/Core flags change the target days used by the recommendation math.";
-  }
-  if (Math.abs(currentSales30 - proposedSales30) >= 12) {
-    return "Sales differs; DB uses QuickBooks invoices minus credit memos, while the current report/export sales can miss credit memos.";
-  }
-  if (Math.abs(currentOnHand - (proposedOnHand || 0)) >= 12 || Math.abs(currentOnOrder - (proposedOnOrder || 0)) >= 12) {
-    return "Inventory differs between current report availability/on order and QuickBooks inventory/on order.";
-  }
-  if (currentPackSize !== proposedPackSize) {
-    return "Pack size differs, so rounding can change the recommended quantity.";
-  }
-  return "Recommendation differs after matching core inputs; review rounding/minimum logic next.";
+  return aggregated;
 }
 
 async function fetchAll<Row>(
@@ -1077,113 +411,8 @@ async function fetchAll<Row>(
   return rows;
 }
 
-type AggregatedInventory = {
-  snapshotAt: string | null;
-  available: number;
-  onHold: number;
-  onFuture: number;
-  onPendingSync: number;
-  unconfirmedLineItemQty: number | null;
-};
-
-function aggregateLatestInventoryByWine(rows: VinosmithInventorySnapshotRow[]) {
-  const byWine = new Map<string, VinosmithInventorySnapshotRow[]>();
-  for (const row of rows) {
-    const existing = byWine.get(row.wine_id) || [];
-    existing.push(row);
-    byWine.set(row.wine_id, existing);
-  }
-
-  const aggregated = new Map<string, AggregatedInventory>();
-  for (const [wineId, wineRows] of byWine.entries()) {
-    const latest = wineRows
-      .map((row) => row.snapshot_at)
-      .filter((value): value is string => Boolean(value))
-      .sort()
-      .at(-1) || null;
-    const latestRows = latest ? wineRows.filter((row) => row.snapshot_at === latest) : wineRows;
-    const unconfirmedValues = latestRows
-      .map((row) => unconfirmedLineItemQtyFromRaw(row.raw_data))
-      .filter((value): value is number => value !== null);
-    aggregated.set(wineId, {
-      snapshotAt: latest,
-      available: sum(latestRows, (row) => asNumber(row.available)),
-      onHold: sum(latestRows, (row) => asNumber(row.on_hold)),
-      onFuture: sum(latestRows, (row) => asNumber(row.on_future)),
-      onPendingSync: sum(latestRows, (row) => asNumber(row.on_pending_sync)),
-      unconfirmedLineItemQty: unconfirmedValues.length ? sum(unconfirmedValues, (value) => value) : null
-    });
-  }
-  return aggregated;
-}
-
-function blockersForProposedRow({
-  wine,
-  inventory,
-  supplier,
-  qbOnHand,
-  qbOnOrder,
-  qbFob,
-  truckingCostPerBottle,
-  etaDays
-}: {
-  wine: VinosmithWineRow | null;
-  inventory: AggregatedInventory | null;
-  supplier: SupplierRow | null;
-  qbOnHand: number | null;
-  qbOnOrder: number | null;
-  qbFob: number | null;
-  truckingCostPerBottle: number | null;
-  etaDays: number | null;
-}) {
-  const blockers: string[] = [];
-  if (!wine) blockers.push("No exact Vinosmith code match");
-  if (wine && vinosmithStatus(wine) === "unknown") blockers.push("Vinosmith active/orderable status unknown");
-  if (wine && vinosmithStatus(wine) === "inactive") blockers.push("Vinosmith not active/orderable");
-  if (!inventory) blockers.push("No latest Vinosmith inventory snapshot");
-  if (qbOnHand === null) blockers.push("Missing QB on hand");
-  if (qbOnOrder === null) blockers.push("Missing QB on order");
-  if (qbFob === null) blockers.push("Missing QB FOB/cost");
-  if (!supplier) blockers.push("No exact Supplier Logistics match");
-  if (supplier && truckingCostPerBottle === null) blockers.push("Missing laid-in/trucking cost");
-  if (supplier && etaDays === null) blockers.push("Missing supplier ETA");
-  return blockers;
-}
-
-function recommendedQuantity({
-  weeklyVelocity,
-  targetDays,
-  qbOnHand,
-  qbOnOrder,
-  monthlyMultiplier,
-  packSize,
-  isBtg,
-  isCore,
-  settings
-}: {
-  weeklyVelocity: number;
-  targetDays: number;
-  qbOnHand: number;
-  qbOnOrder: number;
-  monthlyMultiplier: number;
-  packSize: number;
-  isBtg: boolean;
-  isCore: boolean;
-  settings: OrderingLogicSettings;
-}) {
-  const targetQty = weeklyVelocity * (targetDays / 7);
-  const raw = Math.max(0, targetQty - (qbOnHand + qbOnOrder)) * monthlyMultiplier;
-  if (raw <= 0) return 0;
-  const preserveSubPack =
-    (isBtg && settings.btg_round_sub_case_to_one_pack) ||
-    (isCore && settings.core_round_sub_case_to_one_pack);
-  const minimumQty = preserveSubPack ? 0 : settings.standard_minimum_packs * packSize;
-  if (raw < minimumQty) return 0;
-  return Math.ceil(raw / packSize) * packSize;
-}
-
-function codeForSalesLine(line: QuickBooksLineRow, qbItemCodeByListId: Map<string, string>) {
-  const byItemId = line.item_list_id ? qbItemCodeByListId.get(line.item_list_id) : null;
+function codeForSalesLine(line: QuickBooksLineRow, quickBooksCodeByListId: Map<string, string>) {
+  const byItemId = line.item_list_id ? quickBooksCodeByListId.get(line.item_list_id) : null;
   if (byItemId) return byItemId;
   const fromFullName = normalizeCode(line.item_full_name);
   return isLikelyProductItemCode(fromFullName) ? fromFullName : "";
@@ -1230,83 +459,10 @@ function textFromCustomFields(value: unknown, keys: string[]) {
   return "";
 }
 
-function numberFromCustomFields(value: unknown, keys: string[]) {
-  const text = textFromCustomFields(value, keys);
-  const parsed = Number(text);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function boolFromCustomFields(value: unknown, keys: string[]) {
-  const text = textFromCustomFields(value, keys).toLowerCase();
-  return text === "true" || text === "yes" || text === "1";
-}
-
-function unconfirmedLineItemQtyFromRaw(value: unknown): number | null {
-  if (!value || typeof value !== "object") return null;
-  const fields = value as Record<string, unknown>;
-  const direct = numberFromKeys(fields, [
-    "unconfirmed_line_item_qty",
-    "unconfirmedLineItemQty",
-    "unconfirmed_line_items",
-    "unconfirmed"
-  ]);
-  if (direct !== null) return direct;
-  const inventory = fields.inventory;
-  return inventory && typeof inventory === "object" ? numberFromKeys(inventory as Record<string, unknown>, [
-    "unconfirmed_line_item_qty",
-    "unconfirmedLineItemQty",
-    "unconfirmed_line_items",
-    "unconfirmed"
-  ]) : null;
-}
-
-function numberFromKeys(fields: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const parsed = numberOrNull(fields[key]);
-    if (parsed !== null) return parsed;
-  }
-  return null;
-}
-
-function vinosmithStatus(wine: VinosmithWineRow | null): OrderingLogicBridgeInputRow["vsStatus"] {
-  if (!wine) return "missing";
-  if (wine.active === true || wine.orderable === true) return "active";
-  if (wine.active === false || wine.orderable === false) return "inactive";
-  return "unknown";
-}
-
-function emptySales(): SalesWindowTotals {
-  return {
-    last30: 0,
-    last60: 0,
-    last90: 0,
-    prior30: 0,
-    next30Ly: 0,
-    next60Ly: 0,
-    next90Ly: 0
-  };
-}
-
-function withinTrailingWindow(txnDate: string, referenceDate: string, days: number) {
-  return txnDate >= addDays(referenceDate, -days) && txnDate <= referenceDate;
-}
-
-function withinPriorWindow(txnDate: string, referenceDate: string, startDaysAgo: number, endDaysAgo: number) {
-  return txnDate >= addDays(referenceDate, -startDaysAgo) && txnDate < addDays(referenceDate, -endDaysAgo);
-}
-
-function withinSameFutureWindowLastYear(txnDate: string, referenceDate: string, days: number) {
-  return txnDate >= addDays(referenceDate, -365) && txnDate <= addDays(referenceDate, days - 365);
-}
-
-function salesComparisonRanges(referenceDate: string) {
-  const trailingStart = addDays(referenceDate, -90);
-  const lyStart = addDays(referenceDate, -365);
-  const lyEnd = addDays(referenceDate, 90 - 365);
-  return [
-    { from: trailingStart, to: referenceDate },
-    { from: lyStart, to: lyEnd }
-  ];
+function statusSort(status: OrderingLineItemTestRow["status"]) {
+  if (status === "needs_qb_item") return 0;
+  if (status === "needs_vinosmith_inventory") return 1;
+  return 2;
 }
 
 function addDays(dateKey: string, days: number) {
@@ -1323,10 +479,6 @@ function normalizeCode(value: unknown) {
   return String(value || "").trim().toUpperCase();
 }
 
-function normalizeKey(value: unknown) {
-  return String(value || "").trim().toLowerCase();
-}
-
 function isLikelyProductItemCode(value: string) {
   return /^[A-Z]{2,}\d{5,6}$/i.test(value.trim());
 }
@@ -1339,14 +491,6 @@ function numberOrNull(value: unknown) {
 
 function sum<Row>(rows: Row[], valueForRow: (row: Row) => number) {
   return rows.reduce((total, row) => total + valueForRow(row), 0);
-}
-
-function deltaMagnitude(row: OrderingLogicBridgeDeltaRow) {
-  return Math.abs(row.currentRecommendedQty - (row.proposedRecommendedQty || 0)) * 10 +
-    Math.abs(row.currentSales30 - row.proposedSales30) +
-    Math.abs(row.currentOnHand - (row.proposedOnHand || 0)) +
-    Math.abs(row.currentOnOrder - (row.proposedOnOrder || 0)) +
-    Math.abs(row.currentFob - (row.proposedFob || 0));
 }
 
 function unique(values: string[]) {

@@ -702,7 +702,7 @@ async function OrderingLogicBridgePanelLoader() {
       <section id="ordering-logic-bridge" className="settings-panel ordering-logic-bridge-panel">
         <div className="settings-panel-header">
           <div>
-            <h2>Ordering Logic Bridge</h2>
+            <h2>Ordering Line Item Tests</h2>
             <p className="muted">Diagnostic only; live ordering is unchanged.</p>
           </div>
           <span className="data-pill is-danger">Error</span>
@@ -718,15 +718,15 @@ function OrderingLogicBridgeLoadingPanel() {
     <section id="ordering-logic-bridge" className="settings-panel ordering-logic-bridge-panel">
       <div className="settings-panel-header">
         <div>
-          <h2>Ordering Logic Bridge</h2>
-          <p className="muted">Building the matched report-to-database comparison. Data Health remains read-only.</p>
+          <h2>Ordering Line Item Tests</h2>
+          <p className="muted">Checking current report rows against the source fields needed for ordering. Data Health remains read-only.</p>
         </div>
         <span className="data-pill is-warning">Loading</span>
       </div>
       <div className="ordering-bridge-deferred-card">
         <span>Diagnostic Only</span>
-        <strong>Loading bridge examples</strong>
-        <p>This can take a bit because it compares QuickBooks sales windows, item inventory, Vinosmith status, supplier logistics, and the current report output by exact item code.</p>
+        <strong>Loading line-item tests</strong>
+        <p>This checks exact item-code matches across QuickBooks and Vinosmith inventory without changing live ordering.</p>
       </div>
     </section>
   );
@@ -737,16 +737,16 @@ function OrderingLogicBridgeDeferredPanel() {
     <section id="ordering-logic-bridge" className="settings-panel ordering-logic-bridge-panel">
       <div className="settings-panel-header">
         <div>
-          <h2>Ordering Logic Bridge</h2>
+          <h2>Ordering Line Item Tests</h2>
           <p className="muted">Diagnostic only; live ordering is unchanged.</p>
         </div>
         <span className="data-pill is-warning">On Demand</span>
       </div>
       <div className="ordering-bridge-deferred-card">
         <span>Load When Needed</span>
-        <strong>Bridge examples are paused so Data Health opens quickly</strong>
-        <p>The matched ordering-table comparison is still available, but it pulls several source tables and sales windows. Run it only when you want to trace API-vs-report examples.</p>
-        <a className="button button-small button-outline" href="/settings/data-sync?bridge=1#ordering-logic-bridge">Load bridge comparison</a>
+        <strong>Line-item tests are paused so Data Health opens quickly</strong>
+        <p>Run this when you want to compare current report rows to the source fields Stem actually needs: QuickBooks sales/cost/order data and Vinosmith Available inventory.</p>
+        <a className="button button-small button-outline" href="/settings/data-sync?bridge=1#ordering-logic-bridge">Run line-item tests</a>
       </div>
     </section>
   );
@@ -754,177 +754,62 @@ function OrderingLogicBridgeDeferredPanel() {
 
 function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData }) {
   const summary = bridge.summary;
-  const decision = bridge.moveDecision;
 
   return (
     <section id="ordering-logic-bridge" className="settings-panel ordering-logic-bridge-panel">
       <div className="settings-panel-header">
         <div>
-          <h2>Ordering Logic Bridge</h2>
-          <p className="muted">Can the API reproduce the current report-created ordering table? Diagnostic only; live ordering is unchanged.</p>
+          <h2>Ordering Line Item Tests</h2>
+          <p className="muted">Can the current report rows be matched to the source fields Stem actually needs? Diagnostic only; live ordering is unchanged.</p>
         </div>
-        <span className={`data-pill ${decision.status === "ready" ? "is-positive" : "is-warning"}`}>
-          {decision.status === "ready" ? "Pilot Ready" : "Not Ready"}
-        </span>
+        <span className="data-pill is-warning">Diagnostic Only</span>
       </div>
 
-      <div className={`ordering-bridge-decision-card status-${decision.status}`}>
-        <div>
-          <span>Move To API?</span>
-          <strong>{decision.title}</strong>
-          <p>{decision.summary}</p>
-        </div>
-        <div className="ordering-bridge-decision-stats">
-          <article>
-            <span>Matched Test Rows</span>
-            <strong>{summary.matchedItemCodes.toLocaleString("en-US")}</strong>
-          </article>
-          <article>
-            <span>Qty Rows Changed</span>
-            <strong>{summary.recommendedQtyDeltaRows.toLocaleString("en-US")}</strong>
-          </article>
-          <article>
-            <span>Matched Rec Qty Delta</span>
-            <strong>{summary.recommendedBottleDelta.toLocaleString("en-US")}</strong>
-            <small>Database recommended bottles minus report recommended bottles</small>
-          </article>
-        </div>
-        <div className="ordering-bridge-decision-lists">
-          <article>
-            <h3>Why We Can Keep Testing</h3>
-            <ul>
-              {decision.canMoveReasons.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          </article>
-          <article>
-            <h3>Why We Cannot Switch Yet</h3>
-            <ul>
-              {decision.cannotMoveReasons.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          </article>
-        </div>
-        <b>{decision.nextStep}</b>
+      <div className="ordering-bridge-proof-strip">
+        <article>
+          <strong>Current report output</strong>
+          <span>{bridge.reportRun ? `Report ${bridge.reportRun.id.slice(0, 8)} from ${dateTimeLabel(bridge.reportRun.report_date || bridge.reportRun.completed_at)}` : "No completed report run found"}</span>
+        </article>
+        <article>
+          <strong>Proposed source fields</strong>
+          <span>QuickBooks for sales, on order, FOB/cost, and item master. Vinosmith only for Available inventory.</span>
+        </article>
+        <article>
+          <strong>Marker plan</strong>
+          <span>Core and BTG stay report placeholders until they are seeded into an app-owned marker table.</span>
+        </article>
       </div>
 
-      {bridge.deltaRows.length > 0 ? (
-        <div className="ordering-bridge-examples">
-          <div>
-            <h3>Specific Examples To Trace First</h3>
-            <p>Start with these matched item codes. Each value shows current report output compared to proposed database output.</p>
-          </div>
-          <div className="settings-table-wrap ordering-bridge-table-wrap">
-            <table className="settings-table data-sync-table ordering-bridge-example-table">
-              <thead>
-                <tr>
-                  <th>Matched Item</th>
-                  <th>Supplier</th>
-                  <th>Likely Cause</th>
-                  <th>Recommended Qty</th>
-                  <th>Sales 30</th>
-                  <th>Coverage</th>
-                  <th>Flags / Target</th>
-                  <th>Pack</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bridge.deltaRows.slice(0, 6).map((row) => (
-                  <tr key={row.itemCode}>
-                    <td>
-                      <strong>{row.itemCode}</strong>
-                      <small>{row.productName}</small>
-                    </td>
-                    <td>{row.supplierName}</td>
-                    <td>{row.likelyCause}</td>
-                    <td>{tracePair(row.currentRecommendedQty, row.proposedRecommendedQty)}</td>
-                    <td>{tracePair(row.currentSales30, row.proposedSales30)}</td>
-                    <td>{coveragePair(row)}</td>
-                    <td>{flagsTargetPair(row)}</td>
-                    <td>{tracePair(row.currentPackSize, row.proposedPackSize)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="ordering-bridge-examples-note">
-            Matched Rec Qty Delta is database recommended bottles minus report recommended bottles for matched rows only. Sales differences are expected where the report/Vinosmith export misses credit memos; the database side uses QuickBooks invoice lines minus credit memo lines.
-          </p>
-        </div>
-      ) : null}
-
-      <details className="ordering-bridge-details">
-        <summary>Show diagnostic evidence</summary>
-
-        <div className="ordering-bridge-proof-strip">
-          <article>
-            <strong>Current report output</strong>
-            <span>{bridge.reportRun ? `Report ${bridge.reportRun.id.slice(0, 8)} from ${dateTimeLabel(bridge.reportRun.report_date || bridge.reportRun.completed_at)}` : "No completed report run found"}</span>
-          </article>
-          <article>
-            <strong>Proposed database output</strong>
-            <span>Exact item-code match from QuickBooks, Vinosmith, Supplier Logistics, and QB sales history since {bridge.salesHistoryFrom}.</span>
-          </article>
-          <article>
-            <strong>Review rule</strong>
-            <span>Rows with missing source proof stay blocked until reviewed; nothing is saved into live recommendations.</span>
-          </article>
-        </div>
-
-        <div className="ordering-bridge-triage-grid">
-          {bridge.triage.map((section) => (
-            <article key={section.key} className={`ordering-bridge-triage-card tone-${section.tone}`}>
-              <div>
-                <span>{section.title}</span>
-                <strong>{section.count.toLocaleString("en-US")}</strong>
-              </div>
-              <p>{section.summary}</p>
-              <b>{section.action}</b>
-              {section.examples.length > 0 ? (
-                <ul>
-                  {section.examples.map((example) => (
-                    <li key={example}>{example}</li>
-                  ))}
-                </ul>
-              ) : (
-                <small>No examples in the current sample.</small>
-              )}
-            </article>
-          ))}
-        </div>
-
-        <div className="settings-metrics data-sync-metrics ordering-bridge-metrics">
+      <div className="settings-metrics data-sync-metrics ordering-bridge-metrics">
         <div>
-          <span>Row Counts</span>
-          <strong>{summary.currentReportRows.toLocaleString("en-US")} / {summary.proposedDatabaseRows.toLocaleString("en-US")}</strong>
-          <small>Current report / proposed database rows</small>
+          <span>Report Rows</span>
+          <strong>{summary.reportRows.toLocaleString("en-US")}</strong>
+          <small>{summary.testedRows.toLocaleString("en-US")} rows have usable item codes</small>
         </div>
         <div>
-          <span>Matched Codes</span>
-          <strong>{summary.matchedItemCodes.toLocaleString("en-US")}</strong>
-          <small>{summary.missingCurrentRows.toLocaleString("en-US")} database-only / {summary.missingProposedRows.toLocaleString("en-US")} report-only</small>
+          <span>Ready Inputs</span>
+          <strong>{summary.readyRows.toLocaleString("en-US")}</strong>
+          <small>Exact QB item + Vinosmith inventory</small>
         </div>
         <div>
-          <span>Input Blockers</span>
-          <strong>{summary.proposedRowsWithBlockingInputs.toLocaleString("en-US")}</strong>
-          <small>{summary.suppliersWithBlockers.toLocaleString("en-US")} suppliers with blocked database rows</small>
+          <span>Missing QB</span>
+          <strong>{summary.missingQuickBooksRows.toLocaleString("en-US")}</strong>
+          <small>Exact active item-code match</small>
         </div>
         <div>
-          <span>Qty Delta</span>
-          <strong>{summary.recommendedBottleDelta.toLocaleString("en-US")}</strong>
-          <small>{summary.recommendedQtyDeltaRows.toLocaleString("en-US")} matched rows changed; database minus report recommended bottles</small>
+          <span>Missing VS Inventory</span>
+          <strong>{summary.missingVinosmithInventoryRows.toLocaleString("en-US")}</strong>
+          <small>Exact wine code + latest inventory</small>
         </div>
         <div>
-          <span>FOB Delta</span>
-          <strong>{moneyLabel(summary.estimatedFobDelta)}</strong>
-          <small>Estimated recommended FOB movement</small>
+          <span>Available Deltas</span>
+          <strong>{summary.availableDeltaRows.toLocaleString("en-US")}</strong>
+          <small>Report true available vs VS Available</small>
         </div>
         <div>
-          <span>Source Deltas</span>
+          <span>Sales Deltas</span>
           <strong>{summary.salesDeltaRows.toLocaleString("en-US")}</strong>
-          <small>{summary.onHandDeltaRows.toLocaleString("en-US")} on hand / {summary.onOrderDeltaRows.toLocaleString("en-US")} on order / {summary.fobDeltaRows.toLocaleString("en-US")} FOB</small>
+          <small>Expected while report sales miss credit memos</small>
         </div>
       </div>
 
@@ -932,115 +817,51 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
         {bridge.warnings.map((warning) => (
           <article key={warning}>{warning}</article>
         ))}
-        {summary.currentRowsWithoutUsableCode > 0 ? (
-          <article>{summary.currentRowsWithoutUsableCode.toLocaleString("en-US")} current report rows do not have a usable item code for exact matching.</article>
-        ) : null}
       </div>
 
       <div className="settings-table-wrap ordering-bridge-table-wrap">
-        <table className="settings-table data-sync-table ordering-bridge-supplier-table">
+        <table className="settings-table data-sync-table ordering-line-item-test-table">
           <thead>
             <tr>
+              <th>Item</th>
               <th>Supplier</th>
-              <th>Current</th>
-              <th>Proposed</th>
-              <th>Matched</th>
-              <th>Missing</th>
-              <th>Input Blockers</th>
-              <th>Qty Delta</th>
-              <th>Abs Source Deltas</th>
+              <th>Status</th>
+              <th>Available</th>
+              <th>On Order</th>
+              <th>FOB</th>
+              <th>Sales 30</th>
+              <th>Core / BTG</th>
+              <th>Notes</th>
             </tr>
           </thead>
           <tbody>
-            {bridge.supplierRows.map((row) => (
-              <tr key={row.supplier}>
-                <td><strong>{row.supplier}</strong></td>
-                <td>{row.currentRows.toLocaleString("en-US")}</td>
-                <td>{row.proposedRows.toLocaleString("en-US")}</td>
-                <td>{row.matchedCodes.toLocaleString("en-US")}</td>
+            {bridge.lineRows.map((row) => (
+              <tr key={row.itemCode}>
                 <td>
-                  <strong>{row.missingCurrentCodes.toLocaleString("en-US")} database-only</strong>
-                  <small>{row.missingProposedCodes.toLocaleString("en-US")} report-only</small>
+                  <strong>{row.itemCode}</strong>
+                  <small>{row.productName}</small>
                 </td>
-                <td>{row.blockingRows.toLocaleString("en-US")}</td>
-                <td>{row.recommendedQtyDelta.toLocaleString("en-US")}</td>
+                <td>{row.supplierName}</td>
+                <td><span className={`data-pill ${row.status === "ready" ? "is-positive" : "is-warning"}`}>{lineItemStatusLabel(row.status)}</span></td>
+                <td>{lineItemPair(row.reportTrueAvailable, row.vinosmithAvailable, "Report true available", "VS Available")}</td>
+                <td>{lineItemPair(row.reportOnOrder, row.quickBooksOnOrder, "Report", "QB")}</td>
+                <td>{lineItemPair(row.reportFob, row.quickBooksFob, "Report", "QB", "money")}</td>
+                <td>{lineItemPair(row.reportSales30, row.quickBooksSales30, "Report", "QB minus credits")}</td>
                 <td>
-                  <strong>{row.salesDeltaAbs.toLocaleString("en-US")} sales</strong>
-                  <small>{row.onHandDeltaAbs.toLocaleString("en-US")} on hand / {row.onOrderDeltaAbs.toLocaleString("en-US")} on order / {moneyLabel(row.fobDeltaAbs)} FOB</small>
+                  <strong>{orderingFlagsLabel(row.reportIsBtg, row.reportIsCore)}</strong>
+                  <small>Current report placeholder</small>
                 </td>
+                <td>{row.notes.join("; ")}</td>
               </tr>
             ))}
-            {bridge.supplierRows.length === 0 ? (
+            {bridge.lineRows.length === 0 ? (
               <tr>
-                <td colSpan={8}>No supplier bridge rows found.</td>
+                <td colSpan={9}>No line-item tests found.</td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
-
-      {bridge.blockerRows.length > 0 ? (
-        <div className="settings-table-wrap ordering-bridge-table-wrap">
-          <table className="settings-table data-sync-table ordering-bridge-blocker-table">
-            <thead>
-              <tr>
-                <th>Blocked Item</th>
-                <th>Supplier</th>
-                <th>What Prevents Parity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bridge.blockerRows.map((row) => (
-                <tr key={row.itemCode}>
-                  <td>
-                    <strong>{row.itemCode}</strong>
-                    <small>{row.productName}</small>
-                  </td>
-                  <td>{row.supplierName}</td>
-                  <td>{row.blockers.join("; ")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-
-      {bridge.deltaRows.length > 0 ? (
-        <div className="settings-table-wrap ordering-bridge-table-wrap">
-          <table className="settings-table data-sync-table ordering-bridge-delta-table">
-            <thead>
-              <tr>
-                <th>Matched Item</th>
-                <th>Supplier</th>
-                <th>Largest Delta</th>
-                <th>Sales 30</th>
-                <th>On Hand</th>
-                <th>On Order</th>
-                <th>FOB</th>
-                <th>Recommended</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bridge.deltaRows.map((row) => (
-                <tr key={row.itemCode}>
-                  <td>
-                    <strong>{row.itemCode}</strong>
-                    <small>{row.productName}</small>
-                  </td>
-                  <td>{row.supplierName}</td>
-                  <td>{row.largestDeltaLabel}</td>
-                  <td>{deltaPair(row.currentSales30, row.proposedSales30)}</td>
-                  <td>{deltaPair(row.currentOnHand, row.proposedOnHand)}</td>
-                  <td>{deltaPair(row.currentOnOrder, row.proposedOnOrder)}</td>
-                  <td>{deltaPair(row.currentFob, row.proposedFob, "money")}</td>
-                  <td>{deltaPair(row.currentRecommendedQty, row.proposedRecommendedQty)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-      </details>
     </section>
   );
 }
@@ -1343,28 +1164,11 @@ function moneyLabel(value: number) {
   }).format(value);
 }
 
-function deltaPair(
+function lineItemPair(
   current: number,
   proposed: number | null,
-  format: "number" | "money" = "number"
-) {
-  const currentLabel = format === "money" ? moneyLabel(current) : current.toLocaleString("en-US");
-  const proposedLabel = proposed === null
-    ? "N/A"
-    : format === "money"
-      ? moneyLabel(proposed)
-      : proposed.toLocaleString("en-US");
-  return (
-    <>
-      <strong>{currentLabel}</strong>
-      <small>{proposedLabel}</small>
-    </>
-  );
-}
-
-function tracePair(
-  current: number,
-  proposed: number | null,
+  currentLabelText: string,
+  proposedLabelText: string,
   format: "number" | "money" = "number"
 ) {
   const currentLabel = format === "money" ? moneyLabel(current) : current.toLocaleString("en-US");
@@ -1382,32 +1186,16 @@ function tracePair(
   return (
     <>
       <strong>{currentLabel} to {proposedLabel}</strong>
-      <small>Report to DB</small>
+      <small>{currentLabelText} to {proposedLabelText}</small>
       <small>{deltaLabel}</small>
     </>
   );
 }
 
-function coveragePair(row: OrderingLogicBridgeData["deltaRows"][number]) {
-  const proposedLabel = row.proposedCoverageQty.toLocaleString("en-US");
-  return (
-    <>
-      <strong>{row.currentCoverageQty.toLocaleString("en-US")} to {proposedLabel}</strong>
-      <small>Report avail+OO to QB OH+OO</small>
-      <small>DB raw need {row.proposedRawNeed.toLocaleString("en-US", { maximumFractionDigits: 1 })}</small>
-    </>
-  );
-}
-
-function flagsTargetPair(row: OrderingLogicBridgeData["deltaRows"][number]) {
-  const currentFlags = orderingFlagsLabel(row.currentIsBtg, row.currentIsCore);
-  const proposedFlags = orderingFlagsLabel(row.proposedIsBtg, row.proposedIsCore);
-  return (
-    <>
-      <strong>{currentFlags} to {proposedFlags}</strong>
-      <small>{row.currentTargetDays.toLocaleString("en-US")} to {row.proposedTargetDays.toLocaleString("en-US")} target days</small>
-    </>
-  );
+function lineItemStatusLabel(status: OrderingLogicBridgeData["lineRows"][number]["status"]) {
+  if (status === "ready") return "Ready";
+  if (status === "needs_qb_item") return "Needs QB";
+  return "Needs VS inventory";
 }
 
 function orderingFlagsLabel(isBtg: boolean, isCore: boolean) {
