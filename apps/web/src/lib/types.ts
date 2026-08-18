@@ -84,6 +84,33 @@ export type SupplierLogistics = {
   active: boolean | null;
 };
 
+export type QuickBooksVendorClassification =
+  | "unclassified"
+  | "inventory_wine"
+  | "freight_logistics"
+  | "service_expense"
+  | "other";
+
+export type QuickBooksVendor = {
+  list_id: string;
+  name: string | null;
+  full_name: string;
+  is_active: boolean | null;
+  account_number: string | null;
+  terms_ref: Record<string, unknown> | null;
+  raw_data: Record<string, unknown> | null;
+  last_seen_at: string | null;
+};
+
+export type QuickBooksVendorMapping = {
+  quickbooks_vendor_list_id: string;
+  supplier_id: string | null;
+  vendor_classification: QuickBooksVendorClassification;
+  notes: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
+};
+
 export type SupplierCatalogWine = {
   id: string;
   supplier_id: string | null;

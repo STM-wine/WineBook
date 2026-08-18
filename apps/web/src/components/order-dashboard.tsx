@@ -9,6 +9,7 @@ import {
   refreshVinosmithReports,
   saveSupplierCatalogWine,
   saveSupplierLogisticsBatch,
+  saveQuickBooksVendorMappings,
   updateSupplierCatalogWorkbenchItems,
   updateSupplierWineRequestApproval,
   updatePurchaseOrderDraftStatus,
@@ -19,6 +20,8 @@ import type { CompanyDashboardData } from "@/lib/company-dashboard-data";
 import type {
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
+  QuickBooksVendor,
+  QuickBooksVendorMapping,
   Recommendation,
   ReportRun,
   SupplierCatalogWine,
@@ -63,6 +66,8 @@ type Props = {
   vinosmithExplorer: VinosmithExplorerData;
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
+  quickBooksVendors: QuickBooksVendor[];
+  quickBooksVendorMappings: QuickBooksVendorMapping[];
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   canViewSettings?: boolean;
@@ -92,6 +97,8 @@ export function OrderDashboard({
   vinosmithExplorer,
   wineRequests,
   priceChangeEvents,
+  quickBooksVendors,
+  quickBooksVendorMappings,
   companyDashboard,
   quickBooksLastSyncAt,
   canViewSettings
@@ -586,6 +593,29 @@ export function OrderDashboard({
     });
   }
 
+  function saveVendorMappings(updatedMappings: QuickBooksVendorMapping[]) {
+    setPendingMessage(`Saving ${updatedMappings.length.toLocaleString()} vendor classification change(s)...`);
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        const result = await saveQuickBooksVendorMappings({
+          mappings: updatedMappings.map((row) => ({
+            quickBooksVendorListId: row.quickbooks_vendor_list_id,
+            supplierId: row.supplier_id || null,
+            vendorClassification: row.vendor_classification,
+            notes: row.notes || null
+          }))
+        });
+        setPendingMessage(`Vendor classifications saved (${result.saved.toLocaleString()} change(s)).`);
+        router.refresh();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not save vendor classifications.");
+        setPendingMessage("");
+      }
+    });
+  }
+
   function saveCatalogWine(input: Parameters<typeof saveSupplierCatalogWine>[0]) {
     setPendingMessage("Saving supplier wine...");
     setErrorMessage("");
@@ -721,11 +751,14 @@ export function OrderDashboard({
           supplierCatalogWines={supplierCatalogWines}
           wineRequests={wineRequests}
           priceChangeEvents={priceChangeEvents}
+          quickBooksVendors={quickBooksVendors}
+          quickBooksVendorMappings={quickBooksVendorMappings}
           isPending={isPending}
           onCreateWineRequest={createWineRequest}
           onDeleteCatalogWine={deleteCatalogWine}
           onSaveCatalogWine={saveCatalogWine}
           onSaveSuppliers={saveSuppliers}
+          onSaveVendorMappings={saveVendorMappings}
           onUpdateWineRequestApproval={updateWineRequestApproval}
         />
       ) : null}

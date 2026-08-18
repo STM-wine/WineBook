@@ -6,6 +6,8 @@ import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import type {
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
+  QuickBooksVendor,
+  QuickBooksVendorMapping,
   Recommendation,
   ReportRun,
   SupplierCatalogWine,
@@ -56,6 +58,17 @@ export default async function HomePage() {
     .limit(100)
     .returns<PriceChangeEvent[]>();
 
+  const quickBooksVendorsPromise = supabase
+    .from("quickbooks_vendors")
+    .select("list_id,name,full_name,is_active,account_number,terms_ref,raw_data,last_seen_at")
+    .order("name", { ascending: true })
+    .returns<QuickBooksVendor[]>();
+
+  const quickBooksVendorMappingsPromise = supabase
+    .from("quickbooks_vendor_mappings")
+    .select("quickbooks_vendor_list_id,supplier_id,vendor_classification,notes,updated_by,updated_at")
+    .returns<QuickBooksVendorMapping[]>();
+
   const quickBooksLastSyncPromise = (async () => {
     try {
       const { data, error } = await createServiceRoleClient()
@@ -97,6 +110,8 @@ export default async function HomePage() {
     { data: supplierCatalogWines },
     { data: wineRequests },
     { data: priceChangeEvents },
+    { data: quickBooksVendors },
+    { data: quickBooksVendorMappings },
     vinosmithExplorer,
     companyDashboard,
     quickBooksLastSyncAt
@@ -105,6 +120,8 @@ export default async function HomePage() {
     supplierCatalogPromise,
     wineRequestsPromise,
     priceChangeEventsPromise,
+    quickBooksVendorsPromise,
+    quickBooksVendorMappingsPromise,
     vinosmithExplorerPromise,
     companyDashboardPromise,
     quickBooksLastSyncPromise
@@ -191,6 +208,8 @@ export default async function HomePage() {
       vinosmithExplorer={vinosmithExplorer}
       wineRequests={wineRequests || []}
       priceChangeEvents={priceChangeEvents || []}
+      quickBooksVendors={quickBooksVendors || []}
+      quickBooksVendorMappings={quickBooksVendorMappings || []}
       companyDashboard={companyDashboard}
       quickBooksLastSyncAt={quickBooksLastSyncAt}
       canViewSettings={hasPermission(permissions, "view_settings")}

@@ -20,7 +20,7 @@ import {
   type ConversionStatus
 } from "@/lib/supplier-catalog";
 import { createClient } from "@/lib/supabase/server";
-import type { SupplierCatalogWine, WineRequest } from "@/lib/types";
+import type { QuickBooksVendorClassification, SupplierCatalogWine, WineRequest } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 const VALID_STATUSES = new Set(["rejected", "approved", "edited", "deferred"]);
@@ -31,6 +31,13 @@ const VALID_SYSTEM_TAGS = new Set<string>(SYSTEM_TAGS);
 const VALID_PLACEMENT_TYPES = new Set<string>(PLACEMENT_TYPES);
 const VALID_APPROVERS = new Set<string>(APPROVER_NAMES);
 const VALID_APPROVAL_DECISIONS = new Set<string>(APPROVAL_DECISIONS);
+const VALID_VENDOR_CLASSIFICATIONS = new Set<QuickBooksVendorClassification>([
+  "unclassified",
+  "inventory_wine",
+  "freight_logistics",
+  "service_expense",
+  "other"
+]);
 const DEFAULT_GITHUB_WORKFLOW_REPO = "STM-wine/WineBook";
 const DEFAULT_GITHUB_WORKFLOW_REF = "main";
 const DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID = "daily-vinosmith-ingest.yml";
@@ -419,6 +426,51 @@ export async function saveSupplierLogisticsBatch(input: {
 
   revalidatePath("/");
   return { saved: suppliers.length };
+}
+
+export async function saveQuickBooksVendorMappings(input: {
+  mappings: Array<{
+    quickBooksVendorListId: string;
+    supplierId?: string | null;
+    vendorClassification: QuickBooksVendorClassification;
+    notes?: string | null;
+  }>;
+}) {
+  const mappings = input.mappings
+    .map((mapping) => ({
+      quickbooks_vendor_list_id: mapping.quickBooksVendorListId.trim(),
+      supplier_id: mapping.supplierId?.trim() || null,
+      vendor_classification: mapping.vendorClassification,
+      notes: mapping.notes?.trim() || null
+    }))
+    .filter((mapping) => mapping.quickbooks_vendor_list_id);
+
+  if (mappings.length === 0) {
+    throw new Error("No vendor classification changes are ready to save.");
+  }
+
+  const invalid = mappings.find((mapping) => !VALID_VENDOR_CLASSIFICATIONS.has(mapping.vendor_classification));
+  if (invalid) {
+    throw new Error("Unsupported vendor classification.");
+  }
+
+  const { supabase, user } = await requireWriteAccess();
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("quickbooks_vendor_mappings").upsert(
+    mappings.map((mapping) => ({
+      ...mapping,
+      updated_by: user.id,
+      updated_at: now
+    })),
+    { onConflict: "quickbooks_vendor_list_id" }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/");
+  return { saved: mappings.length };
 }
 
 export async function saveSupplierCatalogWine(input: {

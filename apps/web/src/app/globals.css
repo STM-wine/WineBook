@@ -2639,7 +2639,8 @@ th:nth-child(12) .table-sort-button {
 .catalog-table-shell table,
 .request-table-shell table,
 .pending-table-shell table,
-.price-change-table-shell table {
+.price-change-table-shell table,
+.qb-vendor-table-shell table {
   min-width: 1180px;
 }
 
@@ -2647,7 +2648,8 @@ th:nth-child(12) .table-sort-button {
 .request-table-shell td:nth-child(1),
 .request-table-shell td:nth-child(2),
 .pending-table-shell td:first-child,
-.price-change-table-shell td:first-child {
+.price-change-table-shell td:first-child,
+.qb-vendor-table-shell td:first-child {
   min-width: 280px;
   text-align: left;
   white-space: normal;
@@ -2660,14 +2662,17 @@ th:nth-child(12) .table-sort-button {
 .pending-table-shell td:first-child strong,
 .pending-table-shell td:first-child span,
 .price-change-table-shell td:first-child strong,
-.price-change-table-shell td:first-child span {
+.price-change-table-shell td:first-child span,
+.qb-vendor-table-shell td:first-child strong,
+.qb-vendor-table-shell td:first-child span {
   display: block;
 }
 
 .catalog-table-shell td:first-child span,
 .request-table-shell td span,
 .pending-table-shell td:first-child span,
-.price-change-table-shell td:first-child span {
+.price-change-table-shell td:first-child span,
+.qb-vendor-table-shell td:first-child span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
