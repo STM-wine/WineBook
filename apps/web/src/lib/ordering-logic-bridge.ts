@@ -104,6 +104,8 @@ export type OrderingLogicBridgeInputRow = {
   packSize: number;
   isBtg: boolean;
   isCore: boolean;
+  targetDays: number;
+  monthlyMultiplier: number;
   truckingCostPerBottle: number | null;
   etaDays: number | null;
   tdm: string | null;
@@ -140,7 +142,22 @@ export type OrderingLogicBridgeDeltaRow = {
   proposedFob: number | null;
   currentRecommendedQty: number;
   proposedRecommendedQty: number | null;
+  currentWeeklyVelocity: number;
+  proposedWeeklyVelocity: number;
+  currentPackSize: number;
+  proposedPackSize: number;
+  currentIsBtg: boolean;
+  proposedIsBtg: boolean;
+  currentIsCore: boolean;
+  proposedIsCore: boolean;
+  currentTargetDays: number;
+  proposedTargetDays: number;
+  currentCoverageQty: number;
+  proposedCoverageQty: number;
+  currentRawNeed: number;
+  proposedRawNeed: number;
   largestDeltaLabel: string;
+  likelyCause: string;
 };
 
 export type OrderingLogicBridgeBlockerRow = {
@@ -257,7 +274,8 @@ export async function fetchOrderingLogicBridgeData(supabase: BridgeClient): Prom
     reportRun,
     recommendations,
     proposedRows,
-    referenceDate
+    referenceDate,
+    settings
   });
 }
 
@@ -502,6 +520,8 @@ function buildProposedRow({
     packSize,
     isBtg,
     isCore,
+    targetDays,
+    monthlyMultiplier,
     truckingCostPerBottle,
     etaDays,
     tdm: supplier?.tdm || null,
@@ -514,12 +534,14 @@ function buildBridgeData({
   reportRun,
   recommendations,
   proposedRows,
-  referenceDate
+  referenceDate,
+  settings
 }: {
   reportRun: ReportRun | null;
   recommendations: Recommendation[];
   proposedRows: OrderingLogicBridgeInputRow[];
   referenceDate: string;
+  settings: OrderingLogicSettings;
 }): OrderingLogicBridgeData {
   const currentByCode = new Map<string, Recommendation>();
   let currentRowsWithoutUsableCode = 0;
@@ -538,7 +560,7 @@ function buildBridgeData({
   const missingCurrentCodes = Array.from(proposedCodes).filter((code) => !currentCodes.has(code));
   const missingProposedCodes = Array.from(currentCodes).filter((code) => !proposedCodes.has(code));
   const allDeltaRows = matchedCodes
-    .map((code) => deltaRowFor(code, currentByCode.get(code)!, proposedByCode.get(code)!))
+    .map((code) => deltaRowFor(code, currentByCode.get(code)!, proposedByCode.get(code)!, settings))
     .sort((a, b) => deltaMagnitude(b) - deltaMagnitude(a));
   const deltaRows = allDeltaRows.slice(0, 12);
   const blockerRows = proposedRows
@@ -592,6 +614,7 @@ function buildBridgeData({
   const warnings = [
     "Diagnostic only: Order Review still uses the current report output.",
     "Database rows are matched by exact item code. Report rows without product_code are counted as blockers, not fuzzy-matched.",
+    "Database sales use QuickBooks invoice lines minus credit memo lines. Sales differences can be expected where current report/Vinosmith export sales do not include credit memos.",
     "Recommended quantity deltas are shadow calculations until supplier-by-supplier parity is reviewed."
   ];
 
@@ -639,7 +662,7 @@ function buildMoveDecision({
     );
   }
   if (materialSalesRows.length > 0) {
-    cannotMoveReasons.push(`${materialSalesRows.length.toLocaleString("en-US")} matched rows have meaningful sales-window differences.`);
+    cannotMoveReasons.push(`${materialSalesRows.length.toLocaleString("en-US")} matched rows have sales-window differences. Treat these as expected report/export limitations when the database side is using QuickBooks invoices minus credit memos.`);
   }
   if (materialInventoryRows.length > 0) {
     cannotMoveReasons.push(`${materialInventoryRows.length.toLocaleString("en-US")} matched rows have meaningful on-hand or on-order differences.`);
@@ -878,31 +901,156 @@ function buildSupplierRows({
     .slice(0, 12);
 }
 
-function deltaRowFor(itemCode: string, current: Recommendation, proposed: OrderingLogicBridgeInputRow): OrderingLogicBridgeDeltaRow {
+function deltaRowFor(
+  itemCode: string,
+  current: Recommendation,
+  proposed: OrderingLogicBridgeInputRow,
+  settings: OrderingLogicSettings
+): OrderingLogicBridgeDeltaRow {
+  const currentSales30 = asNumber(current.last_30_day_sales);
+  const proposedSales30 = proposed.sales.last30;
+  const currentOnHand = asNumber(current.true_available);
+  const proposedOnHand = proposed.qbOnHand;
+  const currentOnOrder = asNumber(current.on_order);
+  const proposedOnOrder = proposed.qbOnOrder;
+  const currentFob = asNumber(current.fob);
+  const proposedFob = proposed.qbFob;
+  const currentRecommendedQty = asNumber(current.recommended_qty_rounded);
+  const proposedRecommendedQty = proposed.recommendedQtyRounded;
+  const currentIsBtg = current.is_btg === true;
+  const currentIsCore = current.is_core === true;
+  const currentTargetDays = targetDaysFor(currentIsBtg, currentIsCore, settings);
+  const currentWeeklyVelocity = asNumber(current.weekly_velocity) || currentSales30 / 4.345;
+  const currentPackSize = Math.max(1, Math.round(asNumber(current.pack_size) || proposed.packSize || settings.default_pack_size));
+  const currentCoverageQty = currentOnHand + currentOnOrder;
+  const proposedCoverageQty = (proposedOnHand || 0) + (proposedOnOrder || 0);
+  const currentRawNeed = Math.max(0, currentWeeklyVelocity * (currentTargetDays / 7) - currentCoverageQty);
+  const proposedRawNeed = proposedOnHand === null || proposedOnOrder === null
+    ? 0
+    : Math.max(0, proposed.weeklyVelocity * (proposed.targetDays / 7) - proposedCoverageQty) * proposed.monthlyMultiplier;
   const deltas = [
-    { label: "Sales", value: Math.abs(asNumber(current.last_30_day_sales) - proposed.sales.last30) },
-    { label: "On hand", value: Math.abs(asNumber(current.true_available) - (proposed.qbOnHand || 0)) },
-    { label: "On order", value: Math.abs(asNumber(current.on_order) - (proposed.qbOnOrder || 0)) },
-    { label: "FOB", value: Math.abs(asNumber(current.fob) - (proposed.qbFob || 0)) },
-    { label: "Recommended qty", value: Math.abs(asNumber(current.recommended_qty_rounded) - (proposed.recommendedQtyRounded || 0)) }
+    { label: "Recommended qty", value: Math.abs(currentRecommendedQty - (proposedRecommendedQty || 0)) },
+    { label: "Target days", value: Math.abs(currentTargetDays - proposed.targetDays) },
+    { label: "Sales", value: Math.abs(currentSales30 - proposedSales30) },
+    { label: "On hand", value: Math.abs(currentOnHand - (proposedOnHand || 0)) },
+    { label: "On order", value: Math.abs(currentOnOrder - (proposedOnOrder || 0)) },
+    { label: "Pack size", value: Math.abs(currentPackSize - proposed.packSize) },
+    { label: "FOB", value: Math.abs(currentFob - (proposedFob || 0)) }
   ].sort((a, b) => b.value - a.value);
 
   return {
     itemCode,
     productName: proposed.productName || current.product_name || itemCode,
     supplierName: proposed.supplierName || current.supplier_name || "Unknown Supplier",
-    currentSales30: asNumber(current.last_30_day_sales),
-    proposedSales30: proposed.sales.last30,
-    currentOnHand: asNumber(current.true_available),
-    proposedOnHand: proposed.qbOnHand,
-    currentOnOrder: asNumber(current.on_order),
-    proposedOnOrder: proposed.qbOnOrder,
-    currentFob: asNumber(current.fob),
-    proposedFob: proposed.qbFob,
-    currentRecommendedQty: asNumber(current.recommended_qty_rounded),
-    proposedRecommendedQty: proposed.recommendedQtyRounded,
-    largestDeltaLabel: deltas[0]?.value ? deltas[0].label : "Matched"
+    currentSales30,
+    proposedSales30,
+    currentOnHand,
+    proposedOnHand,
+    currentOnOrder,
+    proposedOnOrder,
+    currentFob,
+    proposedFob,
+    currentRecommendedQty,
+    proposedRecommendedQty,
+    currentWeeklyVelocity,
+    proposedWeeklyVelocity: proposed.weeklyVelocity,
+    currentPackSize,
+    proposedPackSize: proposed.packSize,
+    currentIsBtg,
+    proposedIsBtg: proposed.isBtg,
+    currentIsCore,
+    proposedIsCore: proposed.isCore,
+    currentTargetDays,
+    proposedTargetDays: proposed.targetDays,
+    currentCoverageQty,
+    proposedCoverageQty,
+    currentRawNeed,
+    proposedRawNeed,
+    largestDeltaLabel: deltas[0]?.value ? deltas[0].label : "Matched",
+    likelyCause: likelyCauseForDelta({
+      currentSales30,
+      proposedSales30,
+      currentOnHand,
+      proposedOnHand,
+      currentOnOrder,
+      proposedOnOrder,
+      currentPackSize,
+      proposedPackSize: proposed.packSize,
+      currentIsBtg,
+      proposedIsBtg: proposed.isBtg,
+      currentIsCore,
+      proposedIsCore: proposed.isCore,
+      currentTargetDays,
+      proposedTargetDays: proposed.targetDays,
+      currentRecommendedQty,
+      proposedRecommendedQty,
+      proposedRawNeed
+    })
   };
+}
+
+function targetDaysFor(isBtg: boolean, isCore: boolean, settings: OrderingLogicSettings) {
+  if (isBtg) return settings.btg_target_days;
+  if (isCore) return settings.core_target_days;
+  return settings.standard_target_days;
+}
+
+function likelyCauseForDelta({
+  currentSales30,
+  proposedSales30,
+  currentOnHand,
+  proposedOnHand,
+  currentOnOrder,
+  proposedOnOrder,
+  currentPackSize,
+  proposedPackSize,
+  currentIsBtg,
+  proposedIsBtg,
+  currentIsCore,
+  proposedIsCore,
+  currentTargetDays,
+  proposedTargetDays,
+  currentRecommendedQty,
+  proposedRecommendedQty,
+  proposedRawNeed
+}: {
+  currentSales30: number;
+  proposedSales30: number;
+  currentOnHand: number;
+  proposedOnHand: number | null;
+  currentOnOrder: number;
+  proposedOnOrder: number | null;
+  currentPackSize: number;
+  proposedPackSize: number;
+  currentIsBtg: boolean;
+  proposedIsBtg: boolean;
+  currentIsCore: boolean;
+  proposedIsCore: boolean;
+  currentTargetDays: number;
+  proposedTargetDays: number;
+  currentRecommendedQty: number;
+  proposedRecommendedQty: number | null;
+  proposedRawNeed: number;
+}) {
+  if (currentRecommendedQty > 0 && (proposedRecommendedQty || 0) === 0 && proposedRawNeed <= 0) {
+    if (currentTargetDays !== proposedTargetDays || currentIsBtg !== proposedIsBtg || currentIsCore !== proposedIsCore) {
+      return "DB recommendation is zero because the API path sees different BTG/Core target coverage and enough QB inventory for that target.";
+    }
+    return "DB recommendation is zero because QuickBooks on hand plus on order covers the API target.";
+  }
+  if (currentTargetDays !== proposedTargetDays || currentIsBtg !== proposedIsBtg || currentIsCore !== proposedIsCore) {
+    return "BTG/Core flags change the target days used by the recommendation math.";
+  }
+  if (Math.abs(currentSales30 - proposedSales30) >= 12) {
+    return "Sales differs; DB uses QuickBooks invoices minus credit memos, while the current report/export sales can miss credit memos.";
+  }
+  if (Math.abs(currentOnHand - (proposedOnHand || 0)) >= 12 || Math.abs(currentOnOrder - (proposedOnOrder || 0)) >= 12) {
+    return "Inventory differs between current report availability/on order and QuickBooks inventory/on order.";
+  }
+  if (currentPackSize !== proposedPackSize) {
+    return "Pack size differs, so rounding can change the recommended quantity.";
+  }
+  return "Recommendation differs after matching core inputs; review rounding/minimum logic next.";
 }
 
 async function fetchAll<Row>(

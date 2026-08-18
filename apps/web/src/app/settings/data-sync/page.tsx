@@ -822,12 +822,12 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
                 <tr>
                   <th>Matched Item</th>
                   <th>Supplier</th>
-                  <th>Trace Focus</th>
+                  <th>Likely Cause</th>
                   <th>Recommended Qty</th>
                   <th>Sales 30</th>
-                  <th>On Hand</th>
-                  <th>On Order</th>
-                  <th>FOB</th>
+                  <th>Coverage</th>
+                  <th>Flags / Target</th>
+                  <th>Pack</th>
                 </tr>
               </thead>
               <tbody>
@@ -838,19 +838,19 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
                       <small>{row.productName}</small>
                     </td>
                     <td>{row.supplierName}</td>
-                    <td>{row.largestDeltaLabel}</td>
+                    <td>{row.likelyCause}</td>
                     <td>{tracePair(row.currentRecommendedQty, row.proposedRecommendedQty)}</td>
                     <td>{tracePair(row.currentSales30, row.proposedSales30)}</td>
-                    <td>{tracePair(row.currentOnHand, row.proposedOnHand)}</td>
-                    <td>{tracePair(row.currentOnOrder, row.proposedOnOrder)}</td>
-                    <td>{tracePair(row.currentFob, row.proposedFob, "money")}</td>
+                    <td>{coveragePair(row)}</td>
+                    <td>{flagsTargetPair(row)}</td>
+                    <td>{tracePair(row.currentPackSize, row.proposedPackSize)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <p className="ordering-bridge-examples-note">
-            Matched Rec Qty Delta is the sum of database recommended bottles minus report recommended bottles for matched rows only. It is not on hand or available inventory.
+            Matched Rec Qty Delta is database recommended bottles minus report recommended bottles for matched rows only. Sales differences are expected where the report/Vinosmith export misses credit memos; the database side uses QuickBooks invoice lines minus credit memo lines.
           </p>
         </div>
       ) : null}
@@ -1386,6 +1386,35 @@ function tracePair(
       <small>{deltaLabel}</small>
     </>
   );
+}
+
+function coveragePair(row: OrderingLogicBridgeData["deltaRows"][number]) {
+  const proposedLabel = row.proposedCoverageQty.toLocaleString("en-US");
+  return (
+    <>
+      <strong>{row.currentCoverageQty.toLocaleString("en-US")} to {proposedLabel}</strong>
+      <small>Report avail+OO to QB OH+OO</small>
+      <small>DB raw need {row.proposedRawNeed.toLocaleString("en-US", { maximumFractionDigits: 1 })}</small>
+    </>
+  );
+}
+
+function flagsTargetPair(row: OrderingLogicBridgeData["deltaRows"][number]) {
+  const currentFlags = orderingFlagsLabel(row.currentIsBtg, row.currentIsCore);
+  const proposedFlags = orderingFlagsLabel(row.proposedIsBtg, row.proposedIsCore);
+  return (
+    <>
+      <strong>{currentFlags} to {proposedFlags}</strong>
+      <small>{row.currentTargetDays.toLocaleString("en-US")} to {row.proposedTargetDays.toLocaleString("en-US")} target days</small>
+    </>
+  );
+}
+
+function orderingFlagsLabel(isBtg: boolean, isCore: boolean) {
+  const flags = [];
+  if (isBtg) flags.push("BTG");
+  if (isCore) flags.push("Core");
+  return flags.length ? flags.join("/") : "Standard";
 }
 
 function signedNumberLabel(value: number) {
