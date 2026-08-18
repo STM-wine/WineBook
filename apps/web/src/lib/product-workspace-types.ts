@@ -5,6 +5,9 @@ export type ProductWorkspaceStatusKey =
   | "inactive_match"
   | "qb_active_vs_inactive"
   | "qb_active_vs_missing"
+  | "qb_active_vs_unknown"
+  | "qb_active_non_product"
+  | "qb_inactive_vs_unknown"
   | "qb_inactive_vs_active"
   | "vs_active_qb_missing";
 
@@ -61,6 +64,7 @@ export type ProductWorkspaceRow = {
     name: string | null;
     active: boolean | null;
     orderable: boolean | null;
+    lastSeenAt: string | null;
   } | null;
   supplierCatalog: {
     id: string;
@@ -84,6 +88,8 @@ export type ProductWorkspaceSummary = {
   lifecycleMismatches: number;
   qbActiveVsInactive: number;
   qbActiveVsMissing: number;
+  qbActiveVsUnknown: number;
+  vsStatusUnknown: number;
   qbInactiveVsActive: number;
   vsActiveQbMissing: number;
 };

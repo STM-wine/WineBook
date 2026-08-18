@@ -37,6 +37,7 @@ type VinosmithWineRow = {
   category: string | null;
   active: boolean | null;
   orderable: boolean | null;
+  last_seen_at: string | null;
 };
 
 type VinosmithPriceRow = {
@@ -256,7 +257,8 @@ export async function GET(request: Request) {
               code: row.vinosmith.code,
               name: row.vinosmith.name,
               active: row.vinosmith.active,
-              orderable: row.vinosmith.orderable
+              orderable: row.vinosmith.orderable,
+              lastSeenAt: row.vinosmith.last_seen_at
             }
           : null,
         supplierCatalog: row.supplierCatalog
@@ -286,6 +288,8 @@ export async function GET(request: Request) {
       lifecycleMismatches: rows.filter((row) => isLifecycleMismatch(row.statusKey)).length,
       qbActiveVsInactive: rows.filter((row) => row.statusKey === "qb_active_vs_inactive").length,
       qbActiveVsMissing: rows.filter((row) => row.statusKey === "qb_active_vs_missing").length,
+      qbActiveVsUnknown: rows.filter((row) => row.statusKey === "qb_active_vs_unknown").length,
+      vsStatusUnknown: rows.filter((row) => row.statusKey === "qb_active_vs_unknown" || row.statusKey === "qb_inactive_vs_unknown").length,
       qbInactiveVsActive: rows.filter((row) => row.statusKey === "qb_inactive_vs_active").length,
       vsActiveQbMissing: rows.filter((row) => row.statusKey === "vs_active_qb_missing").length
     };
@@ -756,7 +760,8 @@ function buildVinosmithOnlyRow(
       code: wine.code,
       name: wine.name,
       active: wine.active,
-      orderable: wine.orderable
+      orderable: wine.orderable,
+      lastSeenAt: wine.last_seen_at
     },
     supplierCatalog: null,
     priceLevels,
@@ -853,19 +858,42 @@ function sourceHealthLabel(sourceHealth: ProductWorkspaceRow["sourceHealth"]) {
 function statusForRow(item: QuickBooksItemRow, vinosmith: VinosmithWineRow | null) {
   const qbActive = item.is_active !== false;
   if (!vinosmith) {
+    if (qbActive && !isLikelyProductItemCode(itemCodeFromQuickBooks(item))) {
+      return {
+        key: "qb_active_non_product",
+        label: "QB active / non-product",
+        detail: "This QuickBooks row looks like an accounting, service, fee, or other non-wine item. No Vinosmith wine match is expected."
+      } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+    }
     return {
       key: qbActive ? "qb_active_vs_missing" : "inactive_match",
-      label: qbActive ? "QB active" : "QB inactive",
+      label: qbActive ? "QB active / no VS" : "QB inactive",
       detail: "No matched Vinosmith wine status."
     } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
   }
 
   const vsActive = isVinosmithActive(vinosmith);
-  if (qbActive && !vsActive) {
+  const vsInactive = isVinosmithInactive(vinosmith);
+  const vsUnknown = isVinosmithStatusUnknown(vinosmith);
+  if (qbActive && vsUnknown) {
+    return {
+      key: "qb_active_vs_unknown",
+      label: "QB active / VS unknown",
+      detail: "QuickBooks is active, but Vinosmith active/orderable status is blank in Stem. This is source visibility, not a confirmed inactive product."
+    } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+  }
+  if (!qbActive && vsUnknown) {
+    return {
+      key: "qb_inactive_vs_unknown",
+      label: "QB inactive / VS unknown",
+      detail: "QuickBooks is inactive, and Vinosmith active/orderable status is blank in Stem."
+    } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+  }
+  if (qbActive && vsInactive) {
     return {
       key: "qb_active_vs_inactive",
       label: "QB active / VS inactive",
-      detail: "QuickBooks is active, but Vinosmith active/orderable is not confirmed."
+      detail: "QuickBooks is active, but Vinosmith is marked inactive or not orderable."
     } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
   }
   if (!qbActive && vsActive) {
@@ -885,6 +913,21 @@ function statusForRow(item: QuickBooksItemRow, vinosmith: VinosmithWineRow | nul
 
 function isVinosmithActive(vinosmith: VinosmithWineRow | null) {
   return vinosmith?.active === true || vinosmith?.orderable === true;
+}
+
+function isVinosmithInactive(vinosmith: VinosmithWineRow | null) {
+  return vinosmith?.active === false || vinosmith?.orderable === false;
+}
+
+function isVinosmithStatusUnknown(vinosmith: VinosmithWineRow | null) {
+  return vinosmith?.active !== true &&
+    vinosmith?.active !== false &&
+    vinosmith?.orderable !== true &&
+    vinosmith?.orderable !== false;
+}
+
+function isLikelyProductItemCode(value: string) {
+  return /^[A-Z]{2,}\d{5,6}$/i.test(value.trim());
 }
 
 function isLifecycleMismatch(statusKey: ProductWorkspaceStatusKey) {

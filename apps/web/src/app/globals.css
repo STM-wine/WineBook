@@ -1412,7 +1412,7 @@ td {
 
 .product-workspace-metrics {
   gap: 10px;
-  grid-template-columns: repeat(3, minmax(180px, 240px));
+  grid-template-columns: repeat(4, minmax(170px, 240px));
   justify-content: start;
 }
 
@@ -1518,7 +1518,7 @@ td {
 }
 
 .product-workspace-table table {
-  min-width: 1040px;
+  min-width: 1120px;
   table-layout: fixed;
 }
 
@@ -1558,8 +1558,6 @@ td {
   white-space: normal;
 }
 
-.product-workspace-table th:first-child,
-.product-workspace-table td:first-child,
 .product-workspace-table th:nth-child(3),
 .product-workspace-table td:nth-child(3),
 .product-workspace-table th:nth-child(4),
@@ -1570,6 +1568,14 @@ td {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: normal;
+}
+
+.product-workspace-table th:first-child,
+.product-workspace-table td:first-child {
+  overflow-wrap: normal;
+  text-align: left;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .product-workspace-table td:nth-child(2) strong,
@@ -1599,10 +1605,11 @@ td {
   font-variant-numeric: tabular-nums;
   font-weight: 650;
   letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .product-col-code {
-  width: 92px;
+  width: 112px;
 }
 
 .product-col-name {

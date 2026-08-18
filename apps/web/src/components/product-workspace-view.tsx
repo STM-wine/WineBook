@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { dateTimeLabel } from "@/lib/date-labels";
 import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
 import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
 import { MetricCard } from "./metric-card";
@@ -34,11 +35,15 @@ const SOURCE_LABELS: Record<string, string> = {
   stem: "Stem"
 };
 
-const STATUS_FILTERS: Array<{ label: string; value: "All" | "gaps" | ProductWorkspaceStatusKey }> = [
+type StatusFilter = "All" | "gaps" | "vs_status_unknown" | ProductWorkspaceStatusKey;
+
+const STATUS_FILTERS: Array<{ label: string; value: StatusFilter }> = [
   { label: "All", value: "All" },
-  { label: "Status gaps", value: "gaps" },
+  { label: "True status gaps", value: "gaps" },
+  { label: "VS status unknown", value: "vs_status_unknown" },
   { label: "QB active / VS inactive", value: "qb_active_vs_inactive" },
   { label: "QB active / no VS", value: "qb_active_vs_missing" },
+  { label: "QB active / non-product", value: "qb_active_non_product" },
   { label: "QB inactive / VS active", value: "qb_inactive_vs_active" },
   { label: "VS active / no QB", value: "vs_active_qb_missing" },
   { label: "Active match", value: "active_match" },
@@ -162,7 +167,7 @@ function ProductWorkspaceTable({
 }) {
   const [search, setSearch] = useState("");
   const [supplier, setSupplier] = useState("All");
-  const [statusFilter, setStatusFilter] = useState<"All" | "gaps" | ProductWorkspaceStatusKey>("All");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [health, setHealth] = useState("All");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "productName", direction: "asc" });
   const [selectedId, setSelectedId] = useState<string | null>(data.rows[0]?.id || null);
@@ -176,7 +181,8 @@ function ProductWorkspaceTable({
       .filter((row) => {
         if (supplier !== "All" && (row.supplierName || "Unknown") !== supplier) return false;
         if (statusFilter === "gaps" && !isLifecycleMismatch(row.statusKey)) return false;
-        if (statusFilter !== "All" && statusFilter !== "gaps" && row.statusKey !== statusFilter) return false;
+        if (statusFilter === "vs_status_unknown" && !isVinosmithStatusUnknown(row.statusKey)) return false;
+        if (statusFilter !== "All" && statusFilter !== "gaps" && statusFilter !== "vs_status_unknown" && row.statusKey !== statusFilter) return false;
         if (health !== "All" && row.sourceHealth !== health) return false;
         if (!query) return true;
         return [
@@ -231,7 +237,8 @@ function ProductWorkspaceTable({
   return (
     <>
       <section className="metric-grid product-workspace-metrics">
-        <MetricCard label="Status Gaps" value={formatInteger(statusGapCount)} detail="QB and VS do not match" tone={statusGapCount ? "red" : "green"} />
+        <MetricCard label="True Status Gaps" value={formatInteger(statusGapCount)} detail="Confirmed QB and VS mismatch" tone={statusGapCount ? "red" : "green"} />
+        <MetricCard label="VS Status Unknown" value={formatInteger(data.summary.vsStatusUnknown)} detail={`${formatInteger(data.summary.qbActiveVsUnknown)} active QB rows`} tone={data.summary.vsStatusUnknown ? "gold" : "green"} />
         <MetricCard label="Needs Review" value={formatInteger(needsReviewCount)} detail="Missing core source data" tone={needsReviewCount ? "red" : "green"} />
         <MetricCard label="GP Risk" value={`${formatInteger(gpRiskCounts.red)} / ${formatInteger(gpRiskCounts.yellow)}`} detail="Red / yellow low-GP items" tone={gpRiskCounts.red ? "red" : gpRiskCounts.yellow ? "gold" : "green"} />
       </section>
@@ -392,6 +399,14 @@ function ProductWorkspaceDrawer({ row }: { row: ProductWorkspaceRow | null }) {
         </dl>
       </div>
       <div className="drawer-section">
+        <h3>Source Proof</h3>
+        <dl>
+          <div><dt>QB Status</dt><dd>{row.active === false ? "Inactive" : row.active === true ? "Active" : "Unknown"} <small>{dateTimeLabel(row.quickbooks.lastSeenAt)}</small></dd></div>
+          <div><dt>VS Status</dt><dd>{vinosmithStatusLabel(row)} <small>{row.vinosmith ? dateTimeLabel(row.vinosmith.lastSeenAt) : "No VS match"}</small></dd></div>
+          <div><dt>Blocker</dt><dd>{sourceBlockerLabel(row)}</dd></div>
+        </dl>
+      </div>
+      <div className="drawer-section">
         <h3>Cost Basis</h3>
         <dl>
           <div><dt>FOB</dt><dd title={row.fobSource || undefined}>{moneyOrDash(row.fob)} <small>{row.fobSource || "No QB cost"}</small></dd></div>
@@ -491,4 +506,26 @@ function isLifecycleMismatch(statusKey: ProductWorkspaceStatusKey) {
     statusKey === "qb_active_vs_missing" ||
     statusKey === "qb_inactive_vs_active" ||
     statusKey === "vs_active_qb_missing";
+}
+
+function isVinosmithStatusUnknown(statusKey: ProductWorkspaceStatusKey) {
+  return statusKey === "qb_active_vs_unknown" || statusKey === "qb_inactive_vs_unknown";
+}
+
+function vinosmithStatusLabel(row: ProductWorkspaceRow) {
+  if (!row.vinosmith) return "Missing";
+  if (row.vinosmith.active === true && row.vinosmith.orderable === true) return "Active + orderable";
+  if (row.vinosmith.active === true) return "Active";
+  if (row.vinosmith.orderable === true) return "Orderable";
+  if (row.vinosmith.active === false || row.vinosmith.orderable === false) return "Inactive";
+  return "Unknown";
+}
+
+function sourceBlockerLabel(row: ProductWorkspaceRow) {
+  if (row.statusKey === "qb_active_non_product") return "No Vinosmith wine expected for this QuickBooks item.";
+  if (isVinosmithStatusUnknown(row.statusKey)) return "Vinosmith status is blank in Stem.";
+  if (isLifecycleMismatch(row.statusKey)) return row.statusDetail;
+  if (row.sourceHealth === "needs_review") return "Core source data is missing.";
+  if (row.sourceHealth === "partial") return "Some source data is available, but not all cost/price inputs are matched.";
+  return "Source inputs are ready for review.";
 }
