@@ -247,7 +247,7 @@ function IssueSection({
                           <span>Note</span>
                           <textarea name="admin_note" defaultValue={workflow?.admin_note || ""} placeholder="Optional context for this source update" rows={2} />
                         </label>
-                        <button className="button button-small" type="submit">Mark source updated</button>
+                        <button className="button button-small" type="submit">Update</button>
                       </form>
                     )}
                   </div>
