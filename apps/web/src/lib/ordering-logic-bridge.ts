@@ -197,12 +197,10 @@ export async function fetchOrderingLogicBridgeData(supabase: BridgeClient): Prom
   const [
     quickBooksItems,
     vinosmithWines,
-    inventorySnapshots,
     suppliers
   ] = await Promise.all([
     fetchAll<QuickBooksItemRow>(supabase, "quickbooks_items", "list_id,name,full_name,is_active,item_type,quantity_on_hand,quantity_on_order,purchase_cost,average_cost,custom_fields,last_seen_at", "list_id"),
     fetchAll<VinosmithWineRow>(supabase, "vinosmith_wines", "wine_id,code,name,vintage,importer_name,producer_name,unit_set,active,orderable,core,inventory_item,last_seen_at", "wine_id"),
-    fetchAll<VinosmithInventorySnapshotRow>(supabase, "vinosmith_inventory_snapshots", "id,wine_id,snapshot_at,available,on_hand,on_hold,on_order,on_future,on_pending_sync,raw_data", "wine_id"),
     fetchAll<SupplierRow>(supabase, "suppliers", "id,name,active,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle", "name")
   ]);
 
@@ -210,7 +208,10 @@ export async function fetchOrderingLogicBridgeData(supabase: BridgeClient): Prom
     .map((item) => ({ item, itemCode: normalizeCode(itemCodeFromQuickBooks(item)) }))
     .filter(({ item, itemCode }) => item.is_active !== false && isLikelyProductItemCode(itemCode));
   const qbItemCodeByListId = new Map(qbItemsWithCodes.map(({ item, itemCode }) => [item.list_id, itemCode]));
-  const salesByCode = await fetchQuickBooksSalesByCode(supabase, qbItemCodeByListId, referenceDate);
+  const [salesByCode, inventorySnapshots] = await Promise.all([
+    fetchQuickBooksSalesByCode(supabase, qbItemCodeByListId, referenceDate),
+    fetchLatestVinosmithInventorySnapshots(supabase)
+  ]);
   const winesByCode = firstByCode(vinosmithWines);
   const inventoryByWineId = aggregateLatestInventoryByWine(inventorySnapshots);
   const suppliersByName = new Map(suppliers.map((supplier) => [normalizeKey(supplier.name), supplier]));
@@ -303,21 +304,10 @@ async function fetchQuickBooksSalesByCode(
   referenceDate: string
 ) {
   const salesByCode = new Map<string, SalesWindowTotals>();
+  const ranges = salesComparisonRanges(referenceDate);
   const [invoices, creditMemos] = await Promise.all([
-    fetchAll<QuickBooksTransactionRow>(
-      supabase,
-      "quickbooks_invoices",
-      "txn_id,txn_date,is_void,is_pending",
-      "txn_id",
-      (query) => query.gte("txn_date", SALES_HISTORY_FROM).lte("txn_date", referenceDate)
-    ),
-    fetchAll<QuickBooksTransactionRow>(
-      supabase,
-      "quickbooks_credit_memos",
-      "txn_id,txn_date",
-      "txn_id",
-      (query) => query.gte("txn_date", SALES_HISTORY_FROM).lte("txn_date", referenceDate)
-    )
+    fetchTransactionsForRanges(supabase, "quickbooks_invoices", "txn_id,txn_date,is_void,is_pending", ranges),
+    fetchTransactionsForRanges(supabase, "quickbooks_credit_memos", "txn_id,txn_date", ranges)
   ]);
 
   const invoiceDateById = new Map(
@@ -339,6 +329,47 @@ async function fetchQuickBooksSalesByCode(
   applySalesLines(salesByCode, invoiceLines, invoiceDateById, qbItemCodeByListId, referenceDate, 1);
   applySalesLines(salesByCode, creditMemoLines, creditMemoDateById, qbItemCodeByListId, referenceDate, -1);
   return salesByCode;
+}
+
+async function fetchTransactionsForRanges(
+  supabase: BridgeClient,
+  table: string,
+  columns: string,
+  ranges: Array<{ from: string; to: string }>
+) {
+  const byId = new Map<string, QuickBooksTransactionRow>();
+  for (const range of ranges) {
+    const rows = await fetchAll<QuickBooksTransactionRow>(
+      supabase,
+      table,
+      columns,
+      "txn_id",
+      (query) => query.gte("txn_date", range.from).lte("txn_date", range.to)
+    );
+    rows.forEach((row) => byId.set(row.txn_id, row));
+  }
+  return Array.from(byId.values());
+}
+
+async function fetchLatestVinosmithInventorySnapshots(supabase: BridgeClient) {
+  const { data, error } = await supabase
+    .from("vinosmith_inventory_snapshots")
+    .select("snapshot_at")
+    .not("snapshot_at", "is", null)
+    .order("snapshot_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ snapshot_at: string | null }>();
+
+  if (error) throw new Error(error.message);
+  if (!data?.snapshot_at) return [];
+
+  return fetchAll<VinosmithInventorySnapshotRow>(
+    supabase,
+    "vinosmith_inventory_snapshots",
+    "id,wine_id,snapshot_at,available,on_hand,on_hold,on_order,on_future,on_pending_sync,raw_data",
+    "wine_id",
+    (query) => query.eq("snapshot_at", data.snapshot_at)
+  );
 }
 
 async function fetchLinesForTransactions(supabase: BridgeClient, table: string, txnIds: string[]) {
@@ -880,6 +911,16 @@ function withinPriorWindow(txnDate: string, referenceDate: string, startDaysAgo:
 
 function withinSameFutureWindowLastYear(txnDate: string, referenceDate: string, days: number) {
   return txnDate >= addDays(referenceDate, -365) && txnDate <= addDays(referenceDate, days - 365);
+}
+
+function salesComparisonRanges(referenceDate: string) {
+  const trailingStart = addDays(referenceDate, -90);
+  const lyStart = addDays(referenceDate, -365);
+  const lyEnd = addDays(referenceDate, 90 - 365);
+  return [
+    { from: trailingStart, to: referenceDate },
+    { from: lyStart, to: lyEnd }
+  ];
 }
 
 function addDays(dateKey: string, days: number) {

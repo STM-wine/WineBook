@@ -4034,6 +4034,31 @@ tr.has-recommendation .sticky-name {
   gap: 14px;
 }
 
+.data-health-loading-panel {
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.data-health-loading-pulse {
+  animation: data-health-loading-pulse 1s ease-in-out infinite alternate;
+  background: #e8f1e7;
+  border: 1px solid #bfd4bb;
+  border-radius: 8px;
+  height: 46px;
+  width: 46px;
+}
+
+@keyframes data-health-loading-pulse {
+  from {
+    opacity: 0.45;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .data-health-proof-grid {
   display: grid;
   gap: 10px;
