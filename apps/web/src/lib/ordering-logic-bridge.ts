@@ -553,8 +553,8 @@ function buildBridgeData({
   }));
   const supplierRows = buildSupplierRows({ matchedCodes, missingCurrentCodes, missingProposedCodes, currentByCode, proposedByCode, proposedRows });
   const proposedRowsWithBlockingInputs = proposedRows.filter((row) => row.blockers.length > 0).length;
-  const currentRecommendedBottles = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded));
-  const proposedRecommendedBottles = sum(proposedRows, (row) => row.recommendedQtyRounded || 0);
+  const currentRecommendedBottles = sum(matchedCodes, (code) => asNumber(currentByCode.get(code)?.recommended_qty_rounded));
+  const proposedRecommendedBottles = sum(matchedCodes, (code) => proposedByCode.get(code)?.recommendedQtyRounded || 0);
   const currentEstimatedFob = sum(recommendations, (row) => asNumber(row.recommended_qty_rounded) * asNumber(row.fob));
   const proposedEstimatedFob = sum(proposedRows, (row) => (row.recommendedQtyRounded || 0) * (row.qbFob || 0));
   const summary = {
@@ -635,7 +635,7 @@ function buildMoveDecision({
 
   if (summary.recommendedQtyDeltaRows > 0) {
     cannotMoveReasons.push(
-      `${summary.recommendedQtyDeltaRows.toLocaleString("en-US")} matched rows change recommended quantity; the database output is ${Math.abs(summary.recommendedBottleDelta).toLocaleString("en-US")} bottles ${summary.recommendedBottleDelta < 0 ? "lower" : "higher"} than the current report.`
+      `${summary.recommendedQtyDeltaRows.toLocaleString("en-US")} matched rows change recommended quantity; on matched rows, proposed database recommendations total ${Math.abs(summary.recommendedBottleDelta).toLocaleString("en-US")} bottles ${summary.recommendedBottleDelta < 0 ? "lower" : "higher"} than the current report.`
     );
   }
   if (materialSalesRows.length > 0) {

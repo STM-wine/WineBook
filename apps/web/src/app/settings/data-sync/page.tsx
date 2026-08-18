@@ -708,8 +708,9 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
             <strong>{summary.recommendedQtyDeltaRows.toLocaleString("en-US")}</strong>
           </article>
           <article>
-            <span>Bottle Delta</span>
+            <span>Matched Rec Qty Delta</span>
             <strong>{summary.recommendedBottleDelta.toLocaleString("en-US")}</strong>
+            <small>Database recommended bottles minus report recommended bottles</small>
           </article>
         </div>
         <div className="ordering-bridge-decision-lists">
@@ -792,7 +793,7 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
         <div>
           <span>Qty Delta</span>
           <strong>{summary.recommendedBottleDelta.toLocaleString("en-US")}</strong>
-          <small>{summary.recommendedQtyDeltaRows.toLocaleString("en-US")} matched rows changed</small>
+          <small>{summary.recommendedQtyDeltaRows.toLocaleString("en-US")} matched rows changed; database minus report recommended bottles</small>
         </div>
         <div>
           <span>FOB Delta</span>
