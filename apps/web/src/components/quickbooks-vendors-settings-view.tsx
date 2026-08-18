@@ -149,12 +149,19 @@ export function QuickBooksVendorsSettingsView({
             <p className="muted">Admin-only setup for accounting vendors, supplier matching, and future expense workflows.</p>
           </div>
           <button
-            className="button button-small"
+            aria-busy={isPending}
+            className={`button button-small vendor-save-button ${isPending ? "vendor-save-button-saving" : ""}`}
             disabled={isPending || !hasUnsavedChanges}
             onClick={saveChanges}
             type="button"
           >
-            {hasUnsavedChanges ? `Save ${changedMappings.length.toLocaleString()} Change${changedMappings.length === 1 ? "" : "s"}` : "Saved"}
+            <span>
+              {isPending
+                ? `Saving ${changedMappings.length.toLocaleString()}...`
+                : hasUnsavedChanges
+                  ? `Save ${changedMappings.length.toLocaleString()} Change${changedMappings.length === 1 ? "" : "s"}`
+                  : "Saved"}
+            </span>
           </button>
         </div>
 

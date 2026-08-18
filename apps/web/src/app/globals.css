@@ -2674,6 +2674,36 @@ th:nth-child(12) .table-sort-button {
   border-color: #f0cf88;
 }
 
+.vendor-save-button {
+  overflow: hidden;
+  position: relative;
+}
+
+.vendor-save-button span {
+  position: relative;
+  z-index: 2;
+}
+
+.vendor-save-button-saving::before {
+  animation: vendor-save-progress 1.15s ease-in-out infinite;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08));
+  content: "";
+  inset: 0;
+  position: absolute;
+  transform: translateX(-100%);
+  z-index: 1;
+}
+
+@keyframes vendor-save-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 .catalog-table-shell table,
 .request-table-shell table,
 .pending-table-shell table,
