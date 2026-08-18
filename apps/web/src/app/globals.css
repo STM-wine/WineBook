@@ -1456,6 +1456,14 @@ td {
   gap: 10px;
 }
 
+.product-workspace-cache-note {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 8px;
+}
+
 .product-workspace-controls {
   align-items: flex-end;
   display: grid;

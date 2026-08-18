@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { dateTimeLabel } from "@/lib/date-labels";
 import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
 import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
@@ -41,6 +41,14 @@ type OrderingMarker = ProductWorkspaceRow["orderingMarker"];
 
 type StatusFilter = "All" | "gaps" | "vs_status_unknown" | ProductWorkspaceStatusKey;
 
+type ProductWorkspaceCacheEntry = {
+  data: ProductWorkspaceResponse;
+  cachedAt: string;
+};
+
+const productWorkspaceCache = new Map<string, ProductWorkspaceCacheEntry>();
+const productWorkspaceRequests = new Map<string, Promise<ProductWorkspaceCacheEntry>>();
+
 const STATUS_FILTERS: Array<{ label: string; value: StatusFilter }> = [
   { label: "All", value: "All" },
   { label: "True status gaps", value: "gaps" },
@@ -58,44 +66,53 @@ export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostic
   const [includeInactive, setIncludeInactive] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ status: "loading", data: null, error: null });
+  const [cacheMeta, setCacheMeta] = useState<{ cachedAt: string; fromCache: boolean } | null>(null);
+  const [isReloading, setIsReloading] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadWorkspace() {
-      setState({ status: "loading", data: null, error: null });
-      try {
-        const params = new URLSearchParams();
-        if (includeInactive) params.set("includeInactive", "true");
-        const response = await fetch(`/api/products/workspace${params.size ? `?${params}` : ""}`, { cache: "no-store" });
-        const body = await response.json().catch(() => null) as ProductWorkspaceResponse | { error?: string } | null;
-
-        if (!response.ok) {
-          throw new Error(body && "error" in body && body.error ? body.error : "Could not load Product Workspace.");
-        }
-        if (!body || !("rows" in body)) {
-          throw new Error("Product Workspace response was incomplete.");
-        }
-        if (!cancelled) {
-          setState({ status: "loaded", data: body, error: null });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setState({
-            status: "error",
-            data: null,
-            error: error instanceof Error ? error.message : "Could not load Product Workspace."
-          });
-        }
-      }
+  const loadWorkspace = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    const cacheKey = productWorkspaceCacheKey(includeInactive);
+    const cached = productWorkspaceCache.get(cacheKey);
+    if (!force && cached) {
+      setState({ status: "loaded", data: cached.data, error: null });
+      setCacheMeta({ cachedAt: cached.cachedAt, fromCache: true });
+      return;
     }
 
-    loadWorkspace();
+    setIsReloading(force);
+    setCacheMeta((current) => force ? current : null);
+    setState((current) => force && current.status === "loaded" ? current : { status: "loading", data: null, error: null });
 
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const request = force ? fetchAndCacheProductWorkspace(includeInactive, force) : productWorkspaceRequests.get(cacheKey) || fetchAndCacheProductWorkspace(includeInactive, force);
+      if (!force && !productWorkspaceRequests.has(cacheKey)) {
+        productWorkspaceRequests.set(cacheKey, request);
+      }
+      const entry = await request;
+      setState({ status: "loaded", data: entry.data, error: null });
+      setCacheMeta({ cachedAt: entry.cachedAt, fromCache: false });
+    } catch (error) {
+      setState((current) => {
+        if (force && current.status === "loaded") return current;
+        return {
+          status: "error",
+          data: null,
+          error: error instanceof Error ? error.message : "Could not load Product Workspace."
+        };
+      });
+      if (!force) {
+        setCacheMeta(null);
+      }
+    } finally {
+      if (!force) {
+        productWorkspaceRequests.delete(cacheKey);
+      }
+      setIsReloading(false);
+    }
   }, [includeInactive]);
+
+  useEffect(() => {
+    void loadWorkspace();
+  }, [loadWorkspace]);
 
   if (diagnosticsOpen && canViewDiagnostics) {
     return (
@@ -147,6 +164,7 @@ export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostic
 
   function handleMarkerUpdated(itemCode: string, marker: OrderingMarker) {
     const normalizedItemCode = normalizeCode(itemCode);
+    const cacheKey = productWorkspaceCacheKey(includeInactive);
     setState((current) => {
       if (current.status !== "loaded") return current;
       const rows = current.data.rows.map((row) => {
@@ -158,18 +176,23 @@ export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostic
         };
       });
 
+      const nextData = {
+        ...current.data,
+        rows,
+        summary: {
+          ...current.data.summary,
+          btgMarkers: rows.filter((row) => row.orderingMarker.isBtg).length,
+          coreMarkers: rows.filter((row) => row.orderingMarker.isCore).length
+        }
+      };
+      const cached = productWorkspaceCache.get(cacheKey);
+      if (cached) {
+        productWorkspaceCache.set(cacheKey, { ...cached, data: nextData });
+      }
       return {
         status: "loaded",
         error: null,
-        data: {
-          ...current.data,
-          rows,
-          summary: {
-            ...current.data.summary,
-            btgMarkers: rows.filter((row) => row.orderingMarker.isBtg).length,
-            coreMarkers: rows.filter((row) => row.orderingMarker.isCore).length
-          }
-        }
+        data: nextData
       };
     });
   }
@@ -180,11 +203,38 @@ export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostic
       canManageMarkers={canViewDiagnostics}
       data={state.data}
       includeInactive={includeInactive}
+      isReloading={isReloading}
+      cacheMeta={cacheMeta}
       onOpenDiagnostics={() => setDiagnosticsOpen(true)}
       onMarkerUpdated={handleMarkerUpdated}
+      onReload={() => loadWorkspace({ force: true })}
       onSetIncludeInactive={setIncludeInactive}
     />
   );
+}
+
+function productWorkspaceCacheKey(includeInactive: boolean) {
+  return includeInactive ? "include-inactive" : "active";
+}
+
+async function fetchAndCacheProductWorkspace(includeInactive: boolean, force: boolean): Promise<ProductWorkspaceCacheEntry> {
+  const cacheKey = productWorkspaceCacheKey(includeInactive);
+  const params = new URLSearchParams();
+  if (includeInactive) params.set("includeInactive", "true");
+  if (force) params.set("reload", Date.now().toString());
+  const response = await fetch(`/api/products/workspace${params.size ? `?${params}` : ""}`, { cache: "no-store" });
+  const body = await response.json().catch(() => null) as ProductWorkspaceResponse | { error?: string } | null;
+
+  if (!response.ok) {
+    throw new Error(body && "error" in body && body.error ? body.error : "Could not load Product Workspace.");
+  }
+  if (!body || !("rows" in body)) {
+    throw new Error("Product Workspace response was incomplete.");
+  }
+
+  const entry = { data: body, cachedAt: new Date().toISOString() };
+  productWorkspaceCache.set(cacheKey, entry);
+  return entry;
 }
 
 function ProductWorkspaceTable({
@@ -192,16 +242,22 @@ function ProductWorkspaceTable({
   canViewDiagnostics,
   data,
   includeInactive,
+  isReloading,
+  cacheMeta,
   onMarkerUpdated,
   onOpenDiagnostics,
+  onReload,
   onSetIncludeInactive
 }: {
   canManageMarkers?: boolean;
   canViewDiagnostics?: boolean;
   data: ProductWorkspaceResponse;
   includeInactive: boolean;
+  isReloading: boolean;
+  cacheMeta: { cachedAt: string; fromCache: boolean } | null;
   onMarkerUpdated: (itemCode: string, marker: OrderingMarker) => void;
   onOpenDiagnostics: () => void;
+  onReload: () => void;
   onSetIncludeInactive: (value: boolean) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -329,8 +385,16 @@ function ProductWorkspaceTable({
             <p className="eyebrow">Products / Items</p>
             <h1>Product Workspace</h1>
             <p>QuickBooks and source proof table with app-owned Core/BTG ordering markers. Live Order Review is unchanged.</p>
+            <small className="product-workspace-cache-note">
+              {cacheMeta
+                ? `${cacheMeta.fromCache ? "Cached" : "Loaded"} ${dateTimeLabel(cacheMeta.cachedAt)}`
+                : `Loaded ${dateTimeLabel(data.generatedAt)}`}
+            </small>
           </div>
           <div className="product-workspace-actions">
+            <button className="button button-outline button-small" disabled={isReloading} onClick={onReload} type="button">
+              {isReloading ? "Reloading..." : "Reload"}
+            </button>
             {canViewDiagnostics ? (
               <button className="button button-outline button-small" onClick={onOpenDiagnostics} type="button">
                 QB Diagnostics
