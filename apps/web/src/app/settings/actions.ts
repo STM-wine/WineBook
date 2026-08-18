@@ -292,3 +292,36 @@ export async function updateVinosmithPlumbingIssueWorkflow(formData: FormData) {
   if (error) throw new Error(error.message);
   revalidatePath("/settings/data-sync");
 }
+
+export async function queueQuickBooksItemMirrorRefresh() {
+  const context = await requireSettingsContext();
+  requirePermission(context, "view_settings");
+
+  const now = new Date().toISOString();
+  const supabase = serviceSettingsClient();
+  const { error } = await supabase.from("source_sync_checkpoints").upsert(
+    {
+      source_system: "quickbooks_desktop",
+      resource_name: "quickbooks_items",
+      checkpoint_key: "all",
+      status: "pending",
+      requested_start_date: null,
+      requested_end_date: null,
+      completed_through: null,
+      cursor_data: {},
+      last_source_sync_run_id: null,
+      diagnostics: {
+        recovery: true,
+        manualPriority: "data_health",
+        requestedAt: now,
+        requestedBy: context.user.id
+      },
+      last_synced_at: null,
+      updated_at: now
+    },
+    { onConflict: "source_system,resource_name,checkpoint_key" }
+  );
+
+  if (error) throw new Error(error.message);
+  revalidatePath("/settings/data-sync");
+}

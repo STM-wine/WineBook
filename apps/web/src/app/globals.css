@@ -4066,6 +4066,10 @@ tr.has-recommendation .sticky-name {
   font-weight: 850;
 }
 
+.data-health-proof-grid form {
+  margin-top: 6px;
+}
+
 .data-health-refresh-guide {
   display: grid;
   gap: 10px;

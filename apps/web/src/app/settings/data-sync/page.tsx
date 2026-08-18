@@ -5,6 +5,7 @@ import type { VinosmithProductHealth, VinosmithProductHealthIssue } from "@/lib/
 import { VinosmithResyncButton } from "@/components/vinosmith-resync-button";
 import { VinosmithPlumbingWorkflowQueue, type VinosmithPlumbingWorkflowRow } from "@/components/vinosmith-plumbing-workflow-queue";
 import { DataHealthSourceLookup } from "@/components/data-health-source-lookup";
+import { queueQuickBooksItemMirrorRefresh } from "@/app/settings/actions";
 
 type SyncRunRow = {
   id: string;
@@ -270,6 +271,9 @@ export default async function DataSyncSettingsPage() {
                 <strong>QuickBooks item fixes</strong>
                 <span>Rows like AST000024 and ARI000016 clear only after the QuickBooks item mirror updates.</span>
                 <b>Current proof: {dateTimeLabel(data.quickBooksItemCheckpoint?.last_synced_at)}</b>
+                <form action={queueQuickBooksItemMirrorRefresh}>
+                  <button className="button button-small button-outline" type="submit">Queue QB item refresh</button>
+                </form>
               </article>
               <article>
                 <strong>Vinosmith wine fixes</strong>

@@ -386,6 +386,12 @@ async function claimNextRecoveryJob(supabase: SupabaseClient): Promise<QuickBook
     if (job) return job;
   }
 
+  const priorityItemRow = await readFirstManualPriorityItemJob(supabase);
+  if (priorityItemRow) {
+    const job = await claimPendingRecoveryRow(supabase, priorityItemRow);
+    if (job) return job;
+  }
+
   const ytdSalesTruthRow = await readFirstPendingYtdSalesTruthJob(supabase);
   if (ytdSalesTruthRow) {
     const job = await claimPendingRecoveryRow(supabase, ytdSalesTruthRow);
@@ -453,6 +459,9 @@ async function readNextPendingJobs(supabase: SupabaseClient, limit: number) {
   jobs.push(...toNextJobs(await readPendingYtdSalesTruthJobs(supabase, limit - jobs.length)));
   if (jobs.length >= limit) return jobs;
 
+  jobs.push(...toNextJobs(await readManualPriorityItemJobs(supabase, limit - jobs.length)));
+  if (jobs.length >= limit) return jobs;
+
   for (const resourceName of itemRecoveryResources()) {
     jobs.push(...toNextJobs(await readPendingJobsForResource(supabase, resourceName, limit - jobs.length)));
     if (jobs.length >= limit) return jobs;
@@ -480,6 +489,28 @@ function toNextJobs(rows: SourceSyncCheckpointRow[]): QuickBooksRecoveryQueueSta
 
 async function readFirstPendingJobForResource(supabase: SupabaseClient, resourceName: QuickBooksRecoveryResource) {
   return (await readPendingJobsForResource(supabase, resourceName, 1))[0] || null;
+}
+
+async function readFirstManualPriorityItemJob(supabase: SupabaseClient) {
+  return (await readManualPriorityItemJobs(supabase, 1))[0] || null;
+}
+
+async function readManualPriorityItemJobs(supabase: SupabaseClient, limit: number) {
+  if (limit <= 0) return [];
+
+  const { data, error } = await supabase
+    .from("source_sync_checkpoints")
+    .select("id,resource_name,checkpoint_key,status,requested_start_date,requested_end_date,cursor_data,diagnostics,last_synced_at,updated_at,created_at")
+    .eq("source_system", SOURCE_SYSTEM)
+    .eq("resource_name", "quickbooks_items")
+    .eq("status", "pending")
+    .contains("diagnostics", { manualPriority: "data_health" })
+    .order("updated_at", { ascending: true })
+    .limit(limit)
+    .returns<SourceSyncCheckpointRow[]>();
+
+  if (error) throw new Error(error.message);
+  return data || [];
 }
 
 async function readFirstPendingYtdSalesTruthJob(supabase: SupabaseClient) {
