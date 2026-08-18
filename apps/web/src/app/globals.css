@@ -4335,6 +4335,73 @@ tr.has-recommendation .sticky-name {
   padding-left: 18px;
 }
 
+.ordering-bridge-examples {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.ordering-bridge-examples h3 {
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.ordering-bridge-examples p {
+  color: #3c3934;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  margin: 4px 0 0;
+}
+
+.ordering-bridge-examples-note {
+  background: #fff8e8;
+  border: 1px solid #efd29c;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.ordering-bridge-example-table {
+  min-width: 1180px;
+}
+
+.ordering-bridge-example-table th:first-child,
+.ordering-bridge-example-table td:first-child {
+  min-width: 250px;
+}
+
+.ordering-bridge-example-table td:first-child {
+  max-width: 340px;
+  white-space: normal;
+}
+
+.ordering-bridge-example-table td:nth-child(3) {
+  color: #765112;
+  font-weight: 850;
+}
+
+.ordering-bridge-example-table td:nth-child(n + 4) strong,
+.ordering-bridge-example-table td:nth-child(n + 4) small {
+  display: block;
+}
+
+.ordering-bridge-example-table td:nth-child(n + 4) strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.ordering-bridge-example-table td:nth-child(n + 4) small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
 .ordering-bridge-details {
   display: grid;
   gap: 16px;

@@ -734,6 +734,51 @@ function OrderingLogicBridgePanel({ bridge }: { bridge: OrderingLogicBridgeData 
         <b>{decision.nextStep}</b>
       </div>
 
+      {bridge.deltaRows.length > 0 ? (
+        <div className="ordering-bridge-examples">
+          <div>
+            <h3>Specific Examples To Trace First</h3>
+            <p>Start with these matched item codes. Each value shows current report output compared to proposed database output.</p>
+          </div>
+          <div className="settings-table-wrap ordering-bridge-table-wrap">
+            <table className="settings-table data-sync-table ordering-bridge-example-table">
+              <thead>
+                <tr>
+                  <th>Matched Item</th>
+                  <th>Supplier</th>
+                  <th>Trace Focus</th>
+                  <th>Recommended Qty</th>
+                  <th>Sales 30</th>
+                  <th>On Hand</th>
+                  <th>On Order</th>
+                  <th>FOB</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bridge.deltaRows.slice(0, 6).map((row) => (
+                  <tr key={row.itemCode}>
+                    <td>
+                      <strong>{row.itemCode}</strong>
+                      <small>{row.productName}</small>
+                    </td>
+                    <td>{row.supplierName}</td>
+                    <td>{row.largestDeltaLabel}</td>
+                    <td>{tracePair(row.currentRecommendedQty, row.proposedRecommendedQty)}</td>
+                    <td>{tracePair(row.currentSales30, row.proposedSales30)}</td>
+                    <td>{tracePair(row.currentOnHand, row.proposedOnHand)}</td>
+                    <td>{tracePair(row.currentOnOrder, row.proposedOnOrder)}</td>
+                    <td>{tracePair(row.currentFob, row.proposedFob, "money")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="ordering-bridge-examples-note">
+            Matched Rec Qty Delta is the sum of database recommended bottles minus report recommended bottles for matched rows only. It is not on hand or available inventory.
+          </p>
+        </div>
+      ) : null}
+
       <details className="ordering-bridge-details">
         <summary>Show diagnostic evidence</summary>
 
@@ -1239,4 +1284,43 @@ function deltaPair(
       <small>{proposedLabel}</small>
     </>
   );
+}
+
+function tracePair(
+  current: number,
+  proposed: number | null,
+  format: "number" | "money" = "number"
+) {
+  const currentLabel = format === "money" ? moneyLabel(current) : current.toLocaleString("en-US");
+  const proposedLabel = proposed === null
+    ? "N/A"
+    : format === "money"
+      ? moneyLabel(proposed)
+      : proposed.toLocaleString("en-US");
+  const deltaLabel = proposed === null
+    ? "Delta N/A"
+    : format === "money"
+      ? `Delta ${signedMoneyLabel(proposed - current)}`
+      : `Delta ${signedNumberLabel(proposed - current)}`;
+
+  return (
+    <>
+      <strong>{currentLabel} to {proposedLabel}</strong>
+      <small>Report to DB</small>
+      <small>{deltaLabel}</small>
+    </>
+  );
+}
+
+function signedNumberLabel(value: number) {
+  const label = Math.abs(value).toLocaleString("en-US");
+  if (value > 0) return `+${label}`;
+  if (value < 0) return `-${label}`;
+  return label;
+}
+
+function signedMoneyLabel(value: number) {
+  if (value > 0) return `+${moneyLabel(value)}`;
+  if (value < 0) return `-${moneyLabel(Math.abs(value))}`;
+  return moneyLabel(0);
 }
