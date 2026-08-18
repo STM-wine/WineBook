@@ -1,7 +1,7 @@
 import { OrderDashboard } from "@/components/order-dashboard";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { fetchCompanyDashboardData, unavailableCompanyDashboardData } from "@/lib/company-dashboard-data";
-import { fetchVinosmithExplorerData, unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
+import { unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import type {
   PriceChangeEvent,
@@ -87,22 +87,11 @@ export default async function HomePage() {
     }
   })();
 
-  const vinosmithExplorerPromise = (() => {
-    try {
-      return fetchVinosmithExplorerData(serviceRoleSupabase);
-    } catch (error) {
-      return Promise.resolve(
-        unavailableVinosmithExplorerData(error instanceof Error ? error.message : "Vinosmith Plumbing is not configured.")
-      );
-    }
-  })();
-
   const [
     { data: reportRuns },
     { data: supplierCatalogWines },
     { data: wineRequests },
     { data: priceChangeEvents },
-    vinosmithExplorer,
     companyDashboard,
     quickBooksLastSyncAt
   ] = await Promise.all([
@@ -110,10 +99,10 @@ export default async function HomePage() {
     supplierCatalogPromise,
     wineRequestsPromise,
     priceChangeEventsPromise,
-    vinosmithExplorerPromise,
     companyDashboardPromise,
     quickBooksLastSyncPromise
   ]);
+  const vinosmithExplorer = unavailableVinosmithExplorerData("Open Settings > Data Health for Vinosmith diagnostics.");
 
   const latestRun = reportRuns?.[0] || null;
 
