@@ -4,6 +4,7 @@ import { fetchVinosmithProductHealthData } from "@/lib/supabase/vinosmith-explor
 import type { VinosmithProductHealth, VinosmithProductHealthIssue } from "@/lib/types";
 import { VinosmithResyncButton } from "@/components/vinosmith-resync-button";
 import { VinosmithPlumbingWorkflowQueue, type VinosmithPlumbingWorkflowRow } from "@/components/vinosmith-plumbing-workflow-queue";
+import { DataHealthSourceLookup } from "@/components/data-health-source-lookup";
 
 type SyncRunRow = {
   id: string;
@@ -94,9 +95,10 @@ async function loadVinosmithSyncData() {
   const checkpoints = checkpointsResult.data || [];
   const latestCompleted = runs.find((run) => run.status === "completed") || null;
   const latestRun = runs[0] || null;
-  const latestCheckpoint = checkpoints
-    .filter((checkpoint) => checkpoint.last_synced_at)
-    .sort((a, b) => new Date(b.last_synced_at || "").getTime() - new Date(a.last_synced_at || "").getTime())[0] || null;
+  const [quickBooksItemCheckpoint, latestVinosmithCheckpoint] = await Promise.all([
+    fetchLatestSourceCheckpoint("quickbooks_desktop", "quickbooks_items"),
+    fetchLatestSourceCheckpoint("vinosmith", "wines")
+  ]);
   const workflowState = await fetchVinosmithPlumbingWorkflows(supabase, productHealth);
 
   return {
@@ -104,7 +106,8 @@ async function loadVinosmithSyncData() {
     checkpoints,
     latestRun,
     latestCompleted,
-    latestCheckpoint,
+    latestVinosmithCheckpoint,
+    quickBooksItemCheckpoint,
     productHealth,
     workflowState,
     counts: {
@@ -114,6 +117,21 @@ async function loadVinosmithSyncData() {
       orderLines: lineCount
     }
   };
+}
+
+async function fetchLatestSourceCheckpoint(sourceSystem: string, resourceName: string) {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("source_sync_checkpoints")
+    .select("resource_name,checkpoint_key,status,last_synced_at,requested_start_date,requested_end_date")
+    .eq("source_system", sourceSystem)
+    .eq("resource_name", resourceName)
+    .order("last_synced_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle<CheckpointRow>();
+
+  if (error) throw new Error(error.message);
+  return data || null;
 }
 
 async function fetchVinosmithPlumbingWorkflows(
@@ -199,9 +217,14 @@ export default async function DataSyncSettingsPage() {
         <>
           <div className="settings-metrics data-sync-metrics">
             <div>
-              <span>Vinosmith Health Updated</span>
-              <strong>{dateTimeLabel(data.latestCheckpoint?.last_synced_at)}</strong>
-              <small>{data.latestCheckpoint?.resource_name || "Latest checkpoint"}</small>
+              <span>QB Items Updated</span>
+              <strong>{dateTimeLabel(data.quickBooksItemCheckpoint?.last_synced_at)}</strong>
+              <small>{data.quickBooksItemCheckpoint?.status || "QuickBooks item mirror"}</small>
+            </div>
+            <div>
+              <span>VS Wines Updated</span>
+              <strong>{dateTimeLabel(data.latestVinosmithCheckpoint?.last_synced_at)}</strong>
+              <small>{data.latestVinosmithCheckpoint?.resource_name || "Vinosmith wine mirror"}</small>
             </div>
             <div>
               <span>Latest Run</span>
@@ -235,7 +258,30 @@ export default async function DataSyncSettingsPage() {
             </div>
           </section>
 
+          <section className="settings-panel data-health-refresh-proof-panel">
+            <div className="settings-panel-header">
+              <div>
+                <h2>Refresh Proof</h2>
+                <p className="muted">Use these times to confirm Stem has imported the source-system changes before expecting rows to clear.</p>
+              </div>
+            </div>
+            <div className="data-health-proof-grid">
+              <article>
+                <strong>QuickBooks item fixes</strong>
+                <span>Rows like AST000024 and ARI000016 clear only after the QuickBooks item mirror updates.</span>
+                <b>Current proof: {dateTimeLabel(data.quickBooksItemCheckpoint?.last_synced_at)}</b>
+              </article>
+              <article>
+                <strong>Vinosmith wine fixes</strong>
+                <span>Rows like MW000542 clear only after the Vinosmith wines mirror updates.</span>
+                <b>Current proof: {dateTimeLabel(data.latestVinosmithCheckpoint?.last_synced_at)}</b>
+              </article>
+            </div>
+          </section>
+
           <VinosmithPlumbingPanel productHealth={data.productHealth} workflowState={data.workflowState} />
+
+          <DataHealthSourceLookup />
 
           <section className="settings-panel">
             <div className="settings-panel-header">

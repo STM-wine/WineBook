@@ -3982,7 +3982,7 @@ tr.has-recommendation .sticky-name {
 }
 
 .data-sync-metrics {
-  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
 }
 
 .sync-action-block {
@@ -4017,6 +4017,224 @@ tr.has-recommendation .sticky-name {
 
 .data-sync-table {
   min-width: 960px;
+}
+
+.data-health-lookup-panel {
+  gap: 16px;
+}
+
+.data-health-refresh-proof-panel {
+  gap: 14px;
+}
+
+.data-health-proof-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.data-health-proof-grid article {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.data-health-proof-grid strong,
+.data-health-proof-grid span,
+.data-health-proof-grid b {
+  display: block;
+}
+
+.data-health-proof-grid strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.data-health-proof-grid span {
+  color: #3c3934;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.data-health-proof-grid b {
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.data-health-refresh-guide {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.data-health-refresh-guide article {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+}
+
+.data-health-refresh-guide strong,
+.data-health-refresh-guide span {
+  display: block;
+}
+
+.data-health-refresh-guide strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.data-health-refresh-guide span {
+  color: #3c3934;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.data-health-lookup-form {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(260px, 1fr) auto;
+}
+
+.data-health-lookup-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 850;
+  gap: 6px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.data-health-lookup-form input {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  height: 40px;
+  letter-spacing: 0;
+  padding: 8px 10px;
+  text-transform: none;
+  width: 100%;
+}
+
+.data-health-lookup-results {
+  display: grid;
+  gap: 12px;
+}
+
+.data-health-lookup-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.data-health-lookup-freshness span {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #3c3934;
+  font-size: 12px;
+  font-weight: 850;
+  padding: 6px 10px;
+}
+
+.data-health-lookup-group {
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.data-health-lookup-group.tone-good {
+  background: #f7fbf7;
+  border-color: #d7e5d6;
+}
+
+.data-health-lookup-group.tone-warning {
+  background: #fffaf0;
+  border-color: #ead7aa;
+}
+
+.data-health-lookup-group.tone-danger {
+  background: #fff6f4;
+  border-color: #efc6bf;
+}
+
+.data-health-lookup-group > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.data-health-lookup-group > div:first-child strong,
+.data-health-lookup-group > div:first-child span {
+  display: block;
+}
+
+.data-health-lookup-group > div:first-child strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.data-health-lookup-group > div:first-child span {
+  color: #3c3934;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.data-health-lookup-source-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.data-health-lookup-source-list > div {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.data-health-lookup-source-list b,
+.data-health-lookup-source-list strong,
+.data-health-lookup-source-list span,
+.data-health-lookup-source-list small {
+  display: block;
+}
+
+.data-health-lookup-source-list b {
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.data-health-lookup-source-list strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.data-health-lookup-source-list span,
+.data-health-lookup-source-list small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.3;
 }
 
 .vinosmith-plumbing-panel {
@@ -4400,7 +4618,10 @@ tr.has-recommendation .sticky-name {
 
 @media (max-width: 1180px) {
   .plumbing-status-rollups,
-  .plumbing-filters {
+  .plumbing-filters,
+  .data-health-proof-grid,
+  .data-health-refresh-guide,
+  .data-health-lookup-source-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -4411,7 +4632,11 @@ tr.has-recommendation .sticky-name {
 
 @media (max-width: 720px) {
   .plumbing-status-rollups,
-  .plumbing-filters {
+  .plumbing-filters,
+  .data-health-proof-grid,
+  .data-health-refresh-guide,
+  .data-health-lookup-form,
+  .data-health-lookup-source-list {
     grid-template-columns: minmax(0, 1fr);
   }
 }
