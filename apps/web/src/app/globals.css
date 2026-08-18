@@ -5344,7 +5344,7 @@ tr.has-recommendation .sticky-name {
 .company-kpi-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(7, minmax(125px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(152px, 1fr));
 }
 
 .company-kpi,
@@ -5356,17 +5356,18 @@ tr.has-recommendation .sticky-name {
 
 .company-kpi {
   display: grid;
-  gap: 5px;
-  grid-template-rows: minmax(24px, auto) 30px minmax(18px, auto) minmax(16px, auto);
-  min-height: 122px;
-  padding: 12px;
+  align-content: start;
+  gap: 7px;
+  grid-template-rows: auto auto auto auto;
+  min-height: 140px;
+  padding: 11px 12px;
 }
 
 .company-kpi span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 850;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   line-height: 1.15;
   text-transform: uppercase;
 }
@@ -5436,11 +5437,11 @@ tr.has-recommendation .sticky-name {
 }
 
 .company-kpi strong {
-  align-self: end;
+  align-self: start;
   color: var(--ink);
-  font-size: 22px;
+  font-size: clamp(18px, 1.3vw, 22px);
   line-height: 1.05;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .company-kpi small,
@@ -5450,12 +5451,13 @@ tr.has-recommendation .sticky-name {
 }
 
 .company-kpi small {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
+  line-height: 1.25;
 }
 
 .company-kpi em {
-  font-size: 11px;
+  font-size: 10px;
   font-style: normal;
   line-height: 1.3;
 }
