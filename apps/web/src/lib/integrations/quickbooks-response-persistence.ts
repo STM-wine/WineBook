@@ -166,14 +166,15 @@ async function persistVendors(supabase: SupabaseClient, response: string, rawRes
   const vendorBlocks = extractBlocks(response, "VendorRet");
   for (const vendorBlock of vendorBlocks) {
     const listId = directText(vendorBlock, "ListID");
-    const fullName = directText(vendorBlock, "FullName");
-    if (!listId || !fullName) continue;
+    const name = directText(vendorBlock, "Name");
+    const fullName = directText(vendorBlock, "FullName") || name;
+    if (!listId || !name || !fullName) continue;
 
     const { error } = await supabase.from("quickbooks_vendors").upsert(
       {
         list_id: listId,
         edit_sequence: directText(vendorBlock, "EditSequence"),
-        name: directText(vendorBlock, "Name"),
+        name,
         full_name: fullName,
         is_active: boolText(vendorBlock, "IsActive", "direct"),
         account_number: directText(vendorBlock, "AccountNumber"),
