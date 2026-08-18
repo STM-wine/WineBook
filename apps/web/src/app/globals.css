@@ -4545,10 +4545,6 @@ tr.has-recommendation .sticky-name {
   gap: 10px;
 }
 
-.plumbing-mark-done-form {
-  display: grid;
-}
-
 .plumbing-source-updated-stamp {
   align-items: start;
   background: #e8f1e7;

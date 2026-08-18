@@ -258,7 +258,6 @@ export async function updateVinosmithPlumbingIssueWorkflow(formData: FormData) {
   const issueTitle = getString(formData, "issue_title");
   const sourceOfTruth = getString(formData, "source_of_truth");
   const status = getString(formData, "status");
-  const assignedTo = getString(formData, "assigned_to");
   const adminNote = getString(formData, "admin_note");
   const itemCode = getString(formData, "item_code");
   const productName = getString(formData, "product_name");
@@ -271,6 +270,7 @@ export async function updateVinosmithPlumbingIssueWorkflow(formData: FormData) {
   }
 
   const now = new Date().toISOString();
+  const reviewerName = context.profile.full_name || context.user.email || "Stem user";
   const supabase = serviceSettingsClient();
   const { data: existingWorkflow, error: existingWorkflowError } = await supabase
     .from("source_health_issue_workflows")
@@ -289,7 +289,7 @@ export async function updateVinosmithPlumbingIssueWorkflow(formData: FormData) {
     product_name: productName || null,
     source_of_truth: sourceOfTruth,
     status,
-    assigned_to: assignedTo || null,
+    assigned_to: reviewerName,
     admin_note: adminNote || null,
     last_reviewed_by: context.user.id,
     last_reviewed_at: now,
@@ -314,6 +314,7 @@ export async function markVinosmithPlumbingIssueSourceUpdated(formData: FormData
   const sourceOfTruth = getString(formData, "source_of_truth");
   const itemCode = getString(formData, "item_code");
   const productName = getString(formData, "product_name");
+  const adminNote = getString(formData, "admin_note");
 
   if (!issueKey || !issueType || !issueTitle || !sourceOfTruth) {
     throw new Error("Issue metadata is required.");
@@ -332,6 +333,7 @@ export async function markVinosmithPlumbingIssueSourceUpdated(formData: FormData
     source_of_truth: sourceOfTruth,
     status: "fixed_needs_resync",
     assigned_to: reviewerName,
+    admin_note: adminNote || null,
     last_reviewed_by: context.user.id,
     last_reviewed_at: now,
     source_updated_by: context.user.id,

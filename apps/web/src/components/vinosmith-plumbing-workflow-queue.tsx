@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { markVinosmithPlumbingIssueSourceUpdated, updateVinosmithPlumbingIssueWorkflow } from "@/app/settings/actions";
+import { markVinosmithPlumbingIssueSourceUpdated } from "@/app/settings/actions";
 import { dateTimeLabel } from "@/lib/date-labels";
 import type { VinosmithProductHealth, VinosmithProductHealthIssue } from "@/lib/types";
 
@@ -232,46 +232,24 @@ function IssueSection({
                           <strong>Source updated</strong>
                           <small>{initialsForName(workflow?.source_updated_by_name || workflow?.assigned_to)} · {workflow?.source_updated_by_name || workflow?.assigned_to || "Stem user"}</small>
                           <small>{dateTimeLabel(workflow?.source_updated_at || workflow?.last_reviewed_at)}</small>
+                          {workflow?.admin_note ? <small>{workflow.admin_note}</small> : null}
                         </div>
                       </div>
                     ) : (
-                      <form action={markVinosmithPlumbingIssueSourceUpdated} className="plumbing-mark-done-form">
+                      <form action={markVinosmithPlumbingIssueSourceUpdated} className="plumbing-workflow-form">
                         <IssueWorkflowHiddenFields
                           group={group}
                           issueKey={issueKey}
                           row={row}
                           sourceOfTruth={sourceOfTruth}
                         />
+                        <label>
+                          <span>Note</span>
+                          <textarea name="admin_note" defaultValue={workflow?.admin_note || ""} placeholder="Optional context for this source update" rows={2} />
+                        </label>
                         <button className="button button-small" type="submit">Mark source updated</button>
                       </form>
                     )}
-
-                    <form action={updateVinosmithPlumbingIssueWorkflow} className="plumbing-workflow-form">
-                      <IssueWorkflowHiddenFields
-                        group={group}
-                        issueKey={issueKey}
-                        row={row}
-                        sourceOfTruth={sourceOfTruth}
-                      />
-                      <label>
-                        <span>Status</span>
-                        <select name="status" defaultValue={workflow?.status || "needs_review"}>
-                          {PLUMBING_STATUS_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        <span>Owner</span>
-                        <input name="assigned_to" defaultValue={workflow?.assigned_to || ""} placeholder="Name or team" />
-                      </label>
-                      <label>
-                        <span>Note</span>
-                        <textarea name="admin_note" defaultValue={workflow?.admin_note || ""} placeholder="What changed or what is blocking this?" rows={2} />
-                      </label>
-                      <button className="button button-small button-outline" type="submit">Save note</button>
-                      {workflow?.last_reviewed_at ? <small>Reviewed {dateTimeLabel(workflow.last_reviewed_at)}</small> : null}
-                    </form>
                   </div>
                 ) : (
                   <span className="data-pill is-warning">Migration needed</span>
