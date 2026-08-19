@@ -230,6 +230,7 @@ async function persistItems(supabase: SupabaseClient, response: string, rawRespo
           raw_response_id: rawResponseId,
           raw_data: {
             parent_ref: ref(itemBlock, "ParentRef"),
+            preferred_vendor_ref: ref(itemBlock, "PrefVendorRef"),
             custom_field_count: customFieldCount(itemBlock)
           },
           last_seen_at: new Date().toISOString()

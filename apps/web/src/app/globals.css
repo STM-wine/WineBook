@@ -6246,6 +6246,116 @@ th.numeric .company-sort-button {
   white-space: normal;
 }
 
+.database-preview-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.diagnostic-pill {
+  align-self: start;
+  background: #fff3d8;
+  border-radius: 999px;
+  color: #72500f;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  padding: 12px 18px;
+  text-transform: uppercase;
+}
+
+.preview-source-strip {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.preview-source-strip div {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.preview-source-strip span,
+.muted-cell {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.preview-source-strip strong {
+  display: block;
+  font-size: 18px;
+  margin-top: 4px;
+}
+
+.preview-warning-list {
+  background: #fff8e8;
+  border: 1px solid #f1c981;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.preview-warning-list p {
+  margin: 0;
+}
+
+.text-link-button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0;
+  text-align: left;
+}
+
+.text-link-button:hover {
+  color: var(--brand-red);
+}
+
+.database-preview-stack {
+  gap: 14px;
+}
+
+.database-preview-section summary {
+  cursor: pointer;
+}
+
+.database-preview-lines-shell {
+  margin-top: 16px;
+  max-height: 620px;
+  overflow: auto;
+}
+
+.database-preview-lines th,
+.database-preview-lines td {
+  min-width: 120px;
+  vertical-align: top;
+}
+
+.database-preview-lines th:first-child,
+.database-preview-lines td:first-child {
+  min-width: 320px;
+}
+
+.database-preview-lines th:last-child,
+.database-preview-lines td:last-child {
+  min-width: 320px;
+}
+
+.blocker-list {
+  color: #7a520b;
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 6px;
+}
+
 @media (max-width: 1100px) {
   .company-dashboard-heading,
   .sales-report-heading,

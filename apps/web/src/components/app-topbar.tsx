@@ -24,7 +24,15 @@ function viewHref(view: ActiveView) {
 }
 
 const HOME_VIEW: ActiveView = "company-dashboard";
-const ORDERING_VIEWS: ActiveView[] = ["product-workspace", "order-review", "po-drafts", "supplier-hub", "freight", "quickbooks-items"];
+const ORDERING_VIEWS: ActiveView[] = [
+  "product-workspace",
+  "order-review",
+  "database-order-preview",
+  "po-drafts",
+  "supplier-hub",
+  "freight",
+  "quickbooks-items"
+];
 
 export function AppTopbar({
   activeModule,

@@ -2,6 +2,7 @@ export type ActiveView =
   | "company-dashboard"
   | "product-workspace"
   | "order-review"
+  | "database-order-preview"
   | "supplier-hub"
   | "vinosmith-rescue"
   | "supplier-board"
@@ -15,6 +16,7 @@ export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolea
   { id: "company-dashboard", label: "Home" },
   { id: "product-workspace", label: "Items" },
   { id: "order-review", label: "Order Review" },
+  { id: "database-order-preview", label: "DB Order Preview" },
   { id: "supplier-hub", label: "Supplier Hub" },
   { id: "vinosmith-rescue", label: "Vinosmith Plumbing", hidden: true },
   { id: "supplier-board", label: "Supplier Board", hidden: true },
