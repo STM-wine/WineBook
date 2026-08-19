@@ -52,10 +52,9 @@ def _choose_live_rb6_rows(rb6_data: pd.DataFrame) -> pd.DataFrame:
         return pd.to_numeric(rb6_inventory[column], errors="coerce").fillna(0)
 
     available = numeric_series("available_inventory")
-    unconfirmed = numeric_series("unconfirmed_line_item_qty")
     on_order = numeric_series("on_order")
     prearrival = numeric_series("pre_arrival_total_quantity")
-    rb6_inventory["_stock_position"] = np.maximum(0, available - unconfirmed) + on_order + prearrival
+    rb6_inventory["_stock_position"] = np.maximum(0, available) + on_order + prearrival
     rb6_inventory["_has_stock_position"] = rb6_inventory["_stock_position"] > 0
 
     velocity_columns = [
@@ -256,19 +255,12 @@ def calculate_reorder_recommendations(rb6_data, sales_data, settings=None):
     recommendations['next_60_days_ly_sales'] = recommendations['next_60_day_forecast']
     
     # --- STEP 6: CALCULATE INVENTORY FIELDS ---
-    # True Available = Available Inventory - Unconfirmed Line Item Qty
+    # For current report-driven ordering, trust Vinosmith Available directly.
+    # Unconfirmed line item quantity is noisy/anomalous and is no longer
+    # subtracted from ordering availability.
     recommendations['true_available'] = pd.to_numeric(
         recommendations['available_inventory'], errors='coerce'
     ).fillna(0)
-    
-    # Handle unconfirmed_qty if present
-    if 'unconfirmed_line_item_qty' in recommendations.columns:
-        recommendations['true_available'] = np.maximum(
-            0, 
-            recommendations['true_available'] - pd.to_numeric(
-                recommendations['unconfirmed_line_item_qty'], errors='coerce'
-            ).fillna(0)
-        )
     
     # DEFENSIVE: Find on_order column (may have _x or _y suffix after merge)
     possible_on_order_cols = [

@@ -407,7 +407,7 @@ class CalculatorTests(unittest.TestCase):
         self.assertLess(btg_result["recommended_qty_raw"], btg_result["pack_size"])
         self.assertEqual(btg_result["recommended_qty_rounded"], 12)
 
-    def test_true_available_subtracts_unconfirmed_line_item_quantity(self):
+    def test_true_available_uses_available_inventory_without_unconfirmed_adjustment(self):
         rb6 = pd.DataFrame(
             [
                 {
@@ -437,8 +437,8 @@ class CalculatorTests(unittest.TestCase):
 
         result = calculate_reorder_recommendations(rb6, sales).set_index("Name")
 
-        self.assertEqual(result.loc["Allocated Wine 2025 12/750ml", "true_available"], 7)
-        self.assertEqual(result.loc["Oversold Wine 2025 12/750ml", "true_available"], 0)
+        self.assertEqual(result.loc["Allocated Wine 2025 12/750ml", "true_available"], 10)
+        self.assertEqual(result.loc["Oversold Wine 2025 12/750ml", "true_available"], 2)
 
     def test_live_rb6_row_prefers_stocked_current_vintage_for_non_vintage_sku(self):
         rb6 = pd.DataFrame(
