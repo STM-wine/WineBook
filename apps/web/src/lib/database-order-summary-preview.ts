@@ -70,6 +70,13 @@ type QuickBooksVendorMappingRow = {
   vendor_classification: string | null;
 };
 
+type QuickBooksVendorRow = {
+  list_id: string;
+  name: string | null;
+  full_name: string | null;
+  is_active: boolean | null;
+};
+
 type ReportRunRow = {
   id: string;
   report_date: string | null;
@@ -110,6 +117,8 @@ export type DatabaseOrderSummaryPreviewRow = {
   productName: string;
   supplierName: string;
   supplierSource: string;
+  quickBooksPreferredVendorName: string | null;
+  quickBooksPreferredVendorMapped: boolean;
   sourceStatus: "ready" | "needs_review";
   blockers: string[];
   quickBooksOnHand: number;
@@ -179,9 +188,14 @@ export type DatabaseOrderSummaryPreviewData = {
     missingAppMarkers: number;
     missingPackSize: number;
     missingFob: number;
+    quickBooksPreferredVendorRows: number;
+    quickBooksPreferredVendorMappedRows: number;
+    unmappedQuickBooksPreferredVendorRows: number;
+    vinosmithSupplierFallbackRows: number;
   };
   suppliers: DatabaseOrderSummaryPreviewSupplier[];
   topChangedRows: DatabaseOrderSummaryPreviewRow[];
+  topUnmappedPreferredVendorRows: DatabaseOrderSummaryPreviewRow[];
   warnings: string[];
 };
 
@@ -202,6 +216,7 @@ export async function fetchDatabaseOrderSummaryPreview(
     vinosmithWines,
     inventoryProof,
     suppliers,
+    quickBooksVendors,
     vendorMappings,
     markers,
     reportRecommendations
@@ -218,6 +233,12 @@ export async function fetchDatabaseOrderSummaryPreview(
       supabase,
       "suppliers",
       "id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,active",
+      "name"
+    ),
+    fetchAll<QuickBooksVendorRow>(
+      supabase,
+      "quickbooks_vendors",
+      "list_id,name,full_name,is_active",
       "name"
     ),
     fetchAll<QuickBooksVendorMappingRow>(
@@ -241,11 +262,8 @@ export async function fetchDatabaseOrderSummaryPreview(
   const winesByCode = firstByCode(vinosmithWines);
   const suppliersByName = new Map(suppliers.map((supplier) => [normalizeName(supplier.name), supplier]));
   const suppliersById = new Map(suppliers.map((supplier) => [supplier.id, supplier]));
-  const vendorMappingByVendorId = new Map(
-    vendorMappings
-      .filter((mapping) => mapping.vendor_classification === "inventory_wine" && mapping.supplier_id)
-      .map((mapping) => [mapping.quickbooks_vendor_list_id, mapping])
-  );
+  const quickBooksVendorById = new Map(quickBooksVendors.map((vendor) => [vendor.list_id, vendor]));
+  const vendorMappingByVendorId = new Map(vendorMappings.map((mapping) => [mapping.quickbooks_vendor_list_id, mapping]));
   const markersByCode = new Map(markers.map((marker) => [normalizeCode(marker.item_code), marker]));
   const reportQtyByCode = new Map(
     reportRecommendations
@@ -259,19 +277,22 @@ export async function fetchDatabaseOrderSummaryPreview(
     const wine = winesByCode.get(itemCode) || null;
     const inventory = wine ? inventoryProof.byWineId.get(wine.wine_id) || null : null;
     const preferredVendorListId = preferredVendorListIdFromItem(item);
+    const preferredVendor = preferredVendorListId ? quickBooksVendorById.get(preferredVendorListId) || null : null;
+    const preferredVendorName = preferredVendorNameFor(preferredVendor) || preferredVendorNameFromItem(item);
     const vendorMapping = preferredVendorListId ? vendorMappingByVendorId.get(preferredVendorListId) || null : null;
-    const supplierFromQuickBooksVendor = vendorMapping?.supplier_id ? suppliersById.get(vendorMapping.supplier_id) || null : null;
+    const supplierFromQuickBooksVendor =
+      vendorMapping?.vendor_classification === "inventory_wine" && vendorMapping.supplier_id
+        ? suppliersById.get(vendorMapping.supplier_id) || null
+        : null;
     const supplierFromVinosmith = wine?.importer_name ? suppliersByName.get(normalizeName(wine.importer_name)) || null : null;
-    const supplier = supplierFromQuickBooksVendor || supplierFromVinosmith;
-    const supplierSource = supplierFromQuickBooksVendor
-      ? "QuickBooks preferred vendor matched to Supplier Logistics"
-      : supplierFromVinosmith
-        ? "Vinosmith importer matched to Supplier Logistics"
-        : wine?.importer_name
-          ? "Vinosmith importer only"
-          : preferredVendorListId
-            ? "QuickBooks preferred vendor has no Supplier Logistics match"
-            : "Missing";
+    const supplier = supplierFromQuickBooksVendor || (!preferredVendorListId ? supplierFromVinosmith : null);
+    const supplierSource = supplierSourceForRow({
+      preferredVendorListId,
+      supplierFromQuickBooksVendor,
+      vendorMapping,
+      supplierFromVinosmith,
+      vinosmithImporterName: wine?.importer_name || null
+    });
     const marker = markersByCode.get(itemCode) || null;
     const sales = salesByCode.get(itemCode) || emptySalesWindows();
     return buildPreviewRow({
@@ -281,6 +302,8 @@ export async function fetchDatabaseOrderSummaryPreview(
       inventory,
       supplier,
       preferredVendorListId,
+      preferredVendorName,
+      hasMappedQuickBooksPreferredVendor: Boolean(supplierFromQuickBooksVendor),
       supplierSource,
       marker,
       sales,
@@ -295,6 +318,12 @@ export async function fetchDatabaseOrderSummaryPreview(
   const recommendedBottles = sum(rows, (row) => row.recommendedQty);
   const suggestedValue = sum(rows, (row) => row.landedCost);
   const currentReportRecommendedBottles = sum(rows, (row) => row.currentReportRecommendedQty ?? 0);
+  const quickBooksPreferredVendorRows = rows.filter((row) => row.quickBooksPreferredVendorName).length;
+  const quickBooksPreferredVendorMappedRows = rows.filter((row) => row.quickBooksPreferredVendorMapped).length;
+  const topUnmappedPreferredVendorRows = rows
+    .filter((row) => row.quickBooksPreferredVendorName && !row.quickBooksPreferredVendorMapped)
+    .sort((a, b) => b.sales30 - a.sales30 || b.recommendedQty - a.recommendedQty || a.quickBooksPreferredVendorName!.localeCompare(b.quickBooksPreferredVendorName!))
+    .slice(0, 30);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -316,17 +345,22 @@ export async function fetchDatabaseOrderSummaryPreview(
       missingSupplierLogistics: rows.filter((row) => row.blockers.includes("Missing Supplier Logistics")).length,
       missingAppMarkers: rows.filter((row) => row.blockers.includes("Missing app Core/BTG marker")).length,
       missingPackSize: rows.filter((row) => row.blockers.includes("Missing QuickBooks PACK SIZE")).length,
-      missingFob: rows.filter((row) => row.blockers.includes("Missing QuickBooks FOB/cost")).length
+      missingFob: rows.filter((row) => row.blockers.includes("Missing QuickBooks FOB/cost")).length,
+      quickBooksPreferredVendorRows,
+      quickBooksPreferredVendorMappedRows,
+      unmappedQuickBooksPreferredVendorRows: quickBooksPreferredVendorRows - quickBooksPreferredVendorMappedRows,
+      vinosmithSupplierFallbackRows: rows.filter((row) => row.supplierSource.startsWith("Vinosmith")).length
     },
     suppliers: suppliersPreview,
     topChangedRows: rows
       .filter((row) => row.recommendedQtyDelta !== null && row.recommendedQtyDelta !== 0)
       .sort((a, b) => Math.abs(b.recommendedQtyDelta || 0) - Math.abs(a.recommendedQtyDelta || 0))
       .slice(0, 12),
+    topUnmappedPreferredVendorRows,
     warnings: [
       "Diagnostic only: live Order Review still uses the current report-created recommendations.",
       "Preview inventory uses Vinosmith Available only. Hold, Future, and Pending Sync are shown as context but are not subtracted.",
-      "Supplier grouping uses QuickBooks item preferred vendor when the latest item pull includes PrefVendorRef; otherwise it falls back to Vinosmith importer for testing.",
+      "Supplier grouping uses QuickBooks item preferred vendor first. Rows with unmapped preferred vendors are shown as cleanup instead of being hidden by Vinosmith importer fallback.",
       "Old report anomalies should be ignored here unless the same item fails with current QB/Vinosmith/app-owned source fields."
     ]
   };
@@ -339,6 +373,8 @@ function buildPreviewRow({
   inventory,
   supplier,
   preferredVendorListId,
+  preferredVendorName,
+  hasMappedQuickBooksPreferredVendor,
   supplierSource,
   marker,
   sales,
@@ -352,6 +388,8 @@ function buildPreviewRow({
   inventory: VinosmithInventoryProof | null;
   supplier: SupplierRow | null;
   preferredVendorListId: string | null;
+  preferredVendorName: string | null;
+  hasMappedQuickBooksPreferredVendor: boolean;
   supplierSource: string;
   marker: OrderingItemMarkerRow | null;
   sales: SalesWindows;
@@ -363,9 +401,8 @@ function buildPreviewRow({
   if (!wine) blockers.push("Missing exact Vinosmith code");
   if (!inventory) blockers.push("Missing Vinosmith Available");
   if (!supplier) blockers.push("Missing Supplier Logistics");
-  if (preferredVendorListId && !supplierSource.startsWith("QuickBooks preferred vendor")) {
-    blockers.push("Preferred QB vendor is not mapped to Supplier Logistics");
-  }
+  if (!preferredVendorListId) blockers.push("Missing QuickBooks preferred vendor");
+  if (preferredVendorListId && !hasMappedQuickBooksPreferredVendor) blockers.push("Preferred QB vendor is not mapped to Supplier Logistics");
   if (!marker) blockers.push("Missing app Core/BTG marker");
 
   const packSizeProof = packSizeFromQuickBooks(item, settings);
@@ -396,8 +433,10 @@ function buildPreviewRow({
   return {
     itemCode,
     productName: wine?.name || item.full_name || item.name || itemCode,
-    supplierName: supplier?.name || wine?.importer_name || "Unknown Supplier",
+    supplierName: supplier?.name || (preferredVendorName ? `Unmapped QB Vendor: ${preferredVendorName}` : wine?.importer_name || "Unknown Supplier"),
     supplierSource,
+    quickBooksPreferredVendorName: preferredVendorName,
+    quickBooksPreferredVendorMapped: hasMappedQuickBooksPreferredVendor,
     sourceStatus: blockers.length === 0 ? "ready" : "needs_review",
     blockers,
     quickBooksOnHand: asNumber(item.quantity_on_hand),
@@ -758,6 +797,54 @@ function preferredVendorListIdFromItem(item: QuickBooksItemRow) {
   const refRecord = refValue as Record<string, unknown>;
   const listId = refRecord.ListID ?? refRecord.list_id ?? refRecord.value;
   return typeof listId === "string" && listId.trim() ? listId.trim() : null;
+}
+
+function preferredVendorNameFromItem(item: QuickBooksItemRow) {
+  const rawData = item.raw_data;
+  if (!rawData || typeof rawData !== "object" || Array.isArray(rawData)) return null;
+  const refValue = rawData.preferred_vendor_ref ?? rawData.pref_vendor_ref ?? rawData.PrefVendorRef;
+  if (!refValue || typeof refValue !== "object" || Array.isArray(refValue)) return null;
+  const refRecord = refValue as Record<string, unknown>;
+  const fullName = refRecord.FullName ?? refRecord.full_name ?? refRecord.name;
+  return typeof fullName === "string" && fullName.trim() ? fullName.trim() : null;
+}
+
+function preferredVendorNameFor(vendor: QuickBooksVendorRow | null) {
+  return vendor?.name?.trim() || vendor?.full_name?.trim() || null;
+}
+
+function supplierSourceForRow({
+  preferredVendorListId,
+  supplierFromQuickBooksVendor,
+  vendorMapping,
+  supplierFromVinosmith,
+  vinosmithImporterName
+}: {
+  preferredVendorListId: string | null;
+  supplierFromQuickBooksVendor: SupplierRow | null;
+  vendorMapping: QuickBooksVendorMappingRow | null;
+  supplierFromVinosmith: SupplierRow | null;
+  vinosmithImporterName: string | null;
+}) {
+  if (supplierFromQuickBooksVendor) return "QuickBooks preferred vendor matched to Supplier Logistics";
+  if (preferredVendorListId && vendorMapping?.vendor_classification && vendorMapping.vendor_classification !== "inventory_wine") {
+    return `QuickBooks preferred vendor classified as ${humanizeVendorClassification(vendorMapping.vendor_classification)}`;
+  }
+  if (preferredVendorListId && vendorMapping && !vendorMapping.supplier_id) {
+    return "QuickBooks preferred vendor needs Supplier Logistics match";
+  }
+  if (preferredVendorListId) return "QuickBooks preferred vendor needs classification/match";
+  if (supplierFromVinosmith) return "Vinosmith importer matched to Supplier Logistics";
+  if (vinosmithImporterName) return "Vinosmith importer only";
+  return "Missing";
+}
+
+function humanizeVendorClassification(value: string) {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function textFromCustomFields(value: unknown, keys: string[]) {

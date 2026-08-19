@@ -62,6 +62,7 @@ export function DatabaseOrderSummaryPreviewView() {
             row.itemCode,
             row.productName,
             row.supplierName,
+            row.quickBooksPreferredVendorName || "",
             row.supplierSource,
             row.blockers.join(" ")
           ]
@@ -105,6 +106,18 @@ export function DatabaseOrderSummaryPreviewView() {
         <MetricCard label="Suggested" value={formatInteger(data.summary.recommendedBottles)} detail="Database bottles" tone="blue" />
         <MetricCard label="Delta vs Report" value={formatSignedInteger(data.summary.recommendedBottleDelta)} detail="Bottles" tone="plum" />
         <MetricCard label="Value" value={formatCurrency(data.summary.suggestedValue)} detail="Landed estimate" tone="green" />
+        <MetricCard
+          label="QB Vendor Map"
+          value={`${formatInteger(data.summary.quickBooksPreferredVendorMappedRows)} / ${formatInteger(data.summary.quickBooksPreferredVendorRows)}`}
+          detail="Preferred vendor rows"
+          tone="green"
+        />
+        <MetricCard
+          label="Unmapped Vendors"
+          value={formatInteger(data.summary.unmappedQuickBooksPreferredVendorRows)}
+          detail="Need supplier match"
+          tone={data.summary.unmappedQuickBooksPreferredVendorRows ? "gold" : "green"}
+        />
       </section>
 
       <section className="panel database-preview-panel">
@@ -140,6 +153,8 @@ export function DatabaseOrderSummaryPreviewView() {
           ))}
         </div>
 
+        <PreferredVendorCleanupTable rows={data.topUnmappedPreferredVendorRows} count={data.summary.unmappedQuickBooksPreferredVendorRows} />
+
         <div className="filter-bar">
           <label>
             Supplier
@@ -174,6 +189,62 @@ export function DatabaseOrderSummaryPreviewView() {
         ))}
       </section>
     </>
+  );
+}
+
+function PreferredVendorCleanupTable({
+  rows,
+  count
+}: {
+  rows: DatabaseOrderSummaryPreviewRow[];
+  count: number;
+}) {
+  if (count === 0) {
+    return (
+      <div className="preferred-vendor-cleanup preferred-vendor-cleanup-ready">
+        <div>
+          <p className="eyebrow">QB Preferred Vendor Cleanup</p>
+          <h2>All active QB inventory rows have mapped supplier proof.</h2>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="preferred-vendor-cleanup">
+      <div className="section-heading compact-heading">
+        <div>
+          <p className="eyebrow">QB Preferred Vendor Cleanup</p>
+          <h2>{formatInteger(count)} active rows still need vendor-to-supplier mapping</h2>
+          <p>These rows have a QB preferred vendor, but that vendor is not yet matched to Supplier Logistics.</p>
+        </div>
+      </div>
+      <div className="table-shell preferred-vendor-cleanup-table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>QB Preferred Vendor</th>
+              <th>Current Preview Group</th>
+              <th>What To Fix</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.itemCode}>
+                <td>
+                  <strong>{row.itemCode}</strong>
+                  <span className="muted-cell">{row.productName}</span>
+                </td>
+                <td>{row.quickBooksPreferredVendorName || "-"}</td>
+                <td>{row.supplierName}</td>
+                <td>{row.supplierSource}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -300,6 +371,7 @@ function PreviewLineRow({ row }: { row: DatabaseOrderSummaryPreviewRow }) {
       <td>{[row.isCore ? "Core" : "", row.isBtg ? "BTG" : ""].filter(Boolean).join(" / ") || "-"}</td>
       <td>
         <span>{row.supplierSource}</span>
+        {row.quickBooksPreferredVendorName ? <span className="muted-cell">QB vendor: {row.quickBooksPreferredVendorName}</span> : null}
         {row.blockers.length ? <span className="blocker-list">{row.blockers.join("; ")}</span> : null}
       </td>
     </tr>

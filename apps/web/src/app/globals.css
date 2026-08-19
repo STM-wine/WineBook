@@ -6302,6 +6302,53 @@ th.numeric .company-sort-button {
   margin: 0;
 }
 
+.preferred-vendor-cleanup {
+  border: 1px solid #f1c981;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.preferred-vendor-cleanup-ready {
+  border-color: #bdd6c0;
+}
+
+.preferred-vendor-cleanup h2 {
+  font-size: 24px;
+  margin: 0;
+}
+
+.preferred-vendor-cleanup p {
+  margin: 4px 0 0;
+}
+
+.compact-heading {
+  align-items: flex-start;
+}
+
+.preferred-vendor-cleanup-table-shell {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.preferred-vendor-cleanup-table-shell th:first-child,
+.preferred-vendor-cleanup-table-shell td:first-child {
+  min-width: 280px;
+}
+
+.preferred-vendor-cleanup-table-shell th:nth-child(2),
+.preferred-vendor-cleanup-table-shell td:nth-child(2),
+.preferred-vendor-cleanup-table-shell th:nth-child(3),
+.preferred-vendor-cleanup-table-shell td:nth-child(3) {
+  min-width: 240px;
+}
+
+.preferred-vendor-cleanup-table-shell th:last-child,
+.preferred-vendor-cleanup-table-shell td:last-child {
+  min-width: 320px;
+}
+
 .text-link-button {
   appearance: none;
   background: transparent;
