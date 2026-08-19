@@ -9,7 +9,7 @@ function permissionLabel(permission: AppPermission) {
 export default async function SettingsAccessPage() {
   const context = await getAppContext();
   if ("pendingEmail" in context) return <AccountPending email={context.pendingEmail} />;
-  const data = await fetchSettingsOverview(context);
+  const data = await fetchSettingsOverview(context, { includeProfiles: true });
   const canManage = hasPermission(context.permissions, "manage_user_access");
 
   return (

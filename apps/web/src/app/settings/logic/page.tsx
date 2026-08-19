@@ -98,7 +98,7 @@ function ProposalPreview({ version, rows }: { version: ConfigurationVersion; row
 export default async function LogicSettingsPage() {
   const context = await getAppContext();
   if ("pendingEmail" in context) return <AccountPending email={context.pendingEmail} />;
-  const data = await fetchSettingsOverview(context);
+  const data = await fetchSettingsOverview(context, { includeLatestRecommendations: true });
   const canDraft = hasPermission(context.permissions, "draft_logic_changes");
   const canPublish = hasPermission(context.permissions, "publish_logic_changes");
 

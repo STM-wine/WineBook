@@ -1,7 +1,9 @@
 import { QuickBooksVendorsSettingsView } from "@/components/quickbooks-vendors-settings-view";
 import { AccountPending, getAppContext } from "@/lib/auth";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import type { QuickBooksVendor, QuickBooksVendorMapping, SupplierLogistics } from "@/lib/types";
+import { unstable_cache } from "next/cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,11 +14,25 @@ export default async function QuickBooksVendorsSettingsPage() {
   const context = await getAppContext();
   if ("pendingEmail" in context) return <AccountPending email={context.pendingEmail} />;
 
+  const { vendors, mappings, suppliers, vinosmithImporters } = await cachedQuickBooksVendorSettingsData();
+
+  return (
+    <QuickBooksVendorsSettingsView
+      vendors={vendors}
+      mappings={mappings}
+      suppliers={suppliers}
+      vinosmithImporters={vinosmithImporters}
+    />
+  );
+}
+
+async function loadQuickBooksVendorSettingsData() {
   const supabase = createServiceRoleClient();
   const [
     vendors,
     mappings,
-    suppliers
+    suppliers,
+    vinosmithImporterRows
   ] = await Promise.all([
     fetchAll<QuickBooksVendor>((from, to) =>
       supabase
@@ -52,16 +68,51 @@ export default async function QuickBooksVendorsSettingsPage() {
         .order("name", { ascending: true })
         .range(from, to)
         .returns<SupplierLogistics[]>()
+    ),
+    fetchAll<{ importer_name: string | null }>((from, to) =>
+      supabase
+        .from("vinosmith_wines")
+        .select("importer_name")
+        .order("importer_name", { ascending: true })
+        .range(from, to)
+        .returns<Array<{ importer_name: string | null }>>()
     )
   ]);
 
   return (
-    <QuickBooksVendorsSettingsView
-      vendors={vendors || []}
-      mappings={mappings || []}
-      suppliers={suppliers || []}
-    />
+    {
+      vendors: (vendors || []).map(compactVendorForSettings),
+      mappings: mappings || [],
+      suppliers: suppliers || [],
+      vinosmithImporters: Array.from(
+        new Set((vinosmithImporterRows || []).map((row) => row.importer_name?.trim()).filter((name): name is string => Boolean(name)))
+      ).sort((a, b) => a.localeCompare(b))
+    }
   );
+}
+
+function compactVendorForSettings(vendor: QuickBooksVendor): QuickBooksVendor {
+  return {
+    ...vendor,
+    raw_data: compactVendorRawData(vendor.raw_data)
+  };
+}
+
+function compactVendorRawData(rawData: QuickBooksVendor["raw_data"]) {
+  const vendorTypeRef = rawData?.vendor_type_ref;
+  if (!vendorTypeRef || typeof vendorTypeRef !== "object" || Array.isArray(vendorTypeRef)) return null;
+  return { vendor_type_ref: vendorTypeRef };
+}
+
+async function cachedQuickBooksVendorSettingsData() {
+  return unstable_cache(
+    loadQuickBooksVendorSettingsData,
+    ["quickbooks-vendor-settings-data"],
+    {
+      revalidate: 60,
+      tags: [CACHE_TAGS.quickBooksVendors, CACHE_TAGS.quickBooksVendorMappings, CACHE_TAGS.suppliers]
+    }
+  )();
 }
 
 async function fetchAll<Row>(fetchPage: (from: number, to: number) => PromiseLike<{ data: Row[] | null; error: { message: string } | null }>) {

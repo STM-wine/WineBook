@@ -20,6 +20,12 @@ export type SettingsOverviewData = {
   profiles: Array<AppProfile & { permissions?: AppPermission[] }>;
 };
 
+type FetchSettingsOverviewOptions = {
+  includeLatestRecommendations?: boolean;
+  includeProfiles?: boolean;
+  changeRequestLimit?: number;
+};
+
 type RawConfigurationVersion = Omit<ConfigurationVersion, "values"> & {
   values: Partial<OrderingLogicSettings> | null;
 };
@@ -35,7 +41,10 @@ export function serviceSettingsClient() {
   return createServiceRoleClient();
 }
 
-export async function fetchSettingsOverview(context: AppContext): Promise<SettingsOverviewData> {
+export async function fetchSettingsOverview(
+  context: AppContext,
+  options: FetchSettingsOverviewOptions = {}
+): Promise<SettingsOverviewData> {
   if (!hasAnyPermission(context.permissions, ["view_settings", "view_logic_settings", "view_settings_history"])) {
     throw new Error("Settings access required.");
   }
@@ -51,10 +60,7 @@ export async function fetchSettingsOverview(context: AppContext): Promise<Settin
     proposalResult,
     requestsResult,
     versionsResult,
-    reportRunResult,
-    recommendationsResult,
-    profilesResult,
-    permissionsResult
+    reportRunResult
   ] = await Promise.all([
     supabase
       .from("configuration_versions")
@@ -74,7 +80,7 @@ export async function fetchSettingsOverview(context: AppContext): Promise<Settin
       .select("*")
       .eq("domain", "ordering_logic")
       .order("created_at", { ascending: false })
-      .limit(50)
+      .limit(options.changeRequestLimit ?? 50)
       .returns<SettingsChangeRequest[]>(),
     supabase
       .from("configuration_versions")
@@ -89,38 +95,7 @@ export async function fetchSettingsOverview(context: AppContext): Promise<Settin
       .eq("status", "completed")
       .order("completed_at", { ascending: false })
       .limit(1)
-      .maybeSingle<ReportRun>(),
-    supabase
-      .from("reorder_recommendations")
-      .select(`
-        id,
-        report_run_id,
-        planning_sku,
-        product_name,
-        product_code,
-        supplier_name,
-        brand_manager,
-        is_btg,
-        is_core,
-        weekly_velocity,
-        true_available,
-        on_order,
-        recommended_qty_rounded,
-        fob,
-        pack_size
-      `)
-      .order("created_at", { ascending: false })
-      .limit(5000)
-      .returns<Recommendation[]>(),
-    supabase
-      .from("app_profiles")
-      .select("id,email,full_name,role")
-      .order("email", { ascending: true })
-      .returns<AppProfile[]>(),
-    supabase
-      .from("app_profile_permissions")
-      .select("profile_id,permission")
-      .returns<{ profile_id: string; permission: AppPermission }[]>()
+      .maybeSingle<ReportRun>()
   ]);
 
   const error =
@@ -128,11 +103,51 @@ export async function fetchSettingsOverview(context: AppContext): Promise<Settin
     proposalResult.error ||
     requestsResult.error ||
     versionsResult.error ||
-    reportRunResult.error ||
-    recommendationsResult.error ||
-    profilesResult.error ||
-    permissionsResult.error;
+    reportRunResult.error;
   if (error) throw new Error(error.message);
+
+  const latestReportRun = reportRunResult.data || null;
+  const [recommendationsResult, profilesResult, permissionsResult] = await Promise.all([
+    options.includeLatestRecommendations && latestReportRun
+      ? supabase
+          .from("reorder_recommendations")
+          .select(`
+            id,
+            report_run_id,
+            planning_sku,
+            product_name,
+            product_code,
+            supplier_name,
+            brand_manager,
+            is_btg,
+            is_core,
+            weekly_velocity,
+            true_available,
+            on_order,
+            recommended_qty_rounded,
+            fob,
+            pack_size
+          `)
+          .eq("report_run_id", latestReportRun.id)
+          .returns<Recommendation[]>()
+      : Promise.resolve({ data: [] as Recommendation[], error: null }),
+    options.includeProfiles
+      ? supabase
+          .from("app_profiles")
+          .select("id,email,full_name,role")
+          .order("email", { ascending: true })
+          .returns<AppProfile[]>()
+      : Promise.resolve({ data: [] as AppProfile[], error: null }),
+    options.includeProfiles
+      ? supabase
+          .from("app_profile_permissions")
+          .select("profile_id,permission")
+          .returns<{ profile_id: string; permission: AppPermission }[]>()
+      : Promise.resolve({ data: [] as { profile_id: string; permission: AppPermission }[], error: null })
+  ]);
+
+  const optionalError = recommendationsResult.error || profilesResult.error || permissionsResult.error;
+  if (optionalError) throw new Error(optionalError.message);
 
   const publishedVersion = publishedResult.data
     ? normalizeVersion(publishedResult.data)
@@ -146,13 +161,11 @@ export async function fetchSettingsOverview(context: AppContext): Promise<Settin
 
   return {
     publishedVersion,
-    latestReportRun: reportRunResult.data || null,
+    latestReportRun,
     pendingProposals: (proposalResult.data || []).map(normalizeVersion),
     changeRequests: requestsResult.data || [],
     recentVersions: (versionsResult.data || []).map(normalizeVersion),
-    latestRecommendations: (recommendationsResult.data || []).filter(
-      (row) => !reportRunResult.data || row.report_run_id === reportRunResult.data.id
-    ),
+    latestRecommendations: recommendationsResult.data || [],
     profiles: (profilesResult.data || []).map((profile) => ({
       ...profile,
       permissions: permissionsByProfile.get(profile.id) || []

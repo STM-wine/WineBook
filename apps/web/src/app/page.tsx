@@ -1,6 +1,6 @@
 import { OrderDashboard } from "@/components/order-dashboard";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
-import { fetchCompanyDashboardData, unavailableCompanyDashboardData } from "@/lib/company-dashboard-data";
+import { fetchCompanyDashboardData, unavailableCompanyDashboardData, type CompanyDashboardData } from "@/lib/company-dashboard-data";
 import { unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
 import type {
@@ -25,9 +25,60 @@ export default async function HomePage() {
   if ("pendingEmail" in context) {
     return <AccountPending email={context.pendingEmail} />;
   }
-  const { supabase, permissions } = context;
+  const { permissions } = context;
 
-  const reportRunsPromise = supabase
+  const data = await loadHomePageData();
+  const latestRun = data.latestRun;
+
+  if (!latestRun) {
+    return (
+      <main className="empty-state">
+        <section>
+          <p className="eyebrow">Stem Intelligence</p>
+          <h1>No completed reports yet</h1>
+          <p className="muted">The app is connected, but Supabase does not have a completed report run to display.</p>
+        </section>
+      </main>
+    );
+  }
+
+  const vinosmithExplorer = unavailableVinosmithExplorerData("Open Settings > Data Health for Vinosmith diagnostics.");
+
+  return (
+    <OrderDashboard
+      reportRun={latestRun}
+      recommendations={data.recommendations}
+      poDrafts={data.poDraftRows}
+      suppliers={data.suppliers}
+      supplierCatalogWines={data.supplierCatalogWines}
+      vinosmithExplorer={vinosmithExplorer}
+      wineRequests={data.wineRequests}
+      priceChangeEvents={data.priceChangeEvents}
+      quickBooksSupplierMatches={data.quickBooksSupplierMatches}
+      companyDashboard={data.companyDashboard}
+      quickBooksLastSyncAt={data.quickBooksLastSyncAt}
+      canViewSettings={hasPermission(permissions, "view_settings")}
+    />
+  );
+}
+
+type HomePageData = {
+  reportRuns: ReportRun[];
+  latestRun: ReportRun | null;
+  recommendations: Recommendation[];
+  poDraftRows: PurchaseOrderDraftWithLines[];
+  suppliers: SupplierLogistics[];
+  supplierCatalogWines: SupplierCatalogWine[];
+  wineRequests: WineRequest[];
+  priceChangeEvents: PriceChangeEvent[];
+  quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
+  companyDashboard: CompanyDashboardData;
+  quickBooksLastSyncAt: string | null;
+};
+
+async function loadHomePageData(): Promise<HomePageData> {
+  const serviceRoleSupabase = createServiceRoleClient();
+  const reportRunsPromise = serviceRoleSupabase
     .from("report_runs")
     .select("id,report_date,completed_at,diagnostics")
     .eq("status", "completed")
@@ -35,7 +86,7 @@ export default async function HomePage() {
     .limit(10)
     .returns<ReportRun[]>();
 
-  const supplierCatalogPromise = supabase
+  const supplierCatalogPromise = serviceRoleSupabase
     .from("supplier_catalog_wines")
     .select(`
       *,
@@ -46,20 +97,18 @@ export default async function HomePage() {
     .order("updated_at", { ascending: false })
     .returns<SupplierCatalogWine[]>();
 
-  const wineRequestsPromise = supabase
+  const wineRequestsPromise = serviceRoleSupabase
     .from("wine_requests")
     .select("*")
     .order("created_at", { ascending: false })
     .returns<WineRequest[]>();
 
-  const priceChangeEventsPromise = supabase
+  const priceChangeEventsPromise = serviceRoleSupabase
     .from("price_change_events")
     .select("*")
     .order("created_at", { ascending: false })
     .limit(100)
     .returns<PriceChangeEvent[]>();
-
-  const serviceRoleSupabase = createServiceRoleClient();
 
   const quickBooksLastSyncPromise = (async () => {
     try {
@@ -102,98 +151,107 @@ export default async function HomePage() {
     companyDashboardPromise,
     quickBooksLastSyncPromise
   ]);
-  const vinosmithExplorer = unavailableVinosmithExplorerData("Open Settings > Data Health for Vinosmith diagnostics.");
-
   const latestRun = reportRuns?.[0] || null;
 
   if (!latestRun) {
-    return (
-      <main className="empty-state">
-        <section>
-          <p className="eyebrow">Stem Intelligence</p>
-          <h1>No completed reports yet</h1>
-          <p className="muted">The app is connected, but Supabase does not have a completed report run to display.</p>
-        </section>
-      </main>
-    );
+    return {
+      reportRuns: reportRuns || [],
+      latestRun: null,
+      recommendations: [],
+      poDraftRows: [],
+      suppliers: [],
+      supplierCatalogWines: supplierCatalogWines || [],
+      wineRequests: wineRequests || [],
+      priceChangeEvents: priceChangeEvents || [],
+      quickBooksSupplierMatches: [],
+      companyDashboard,
+      quickBooksLastSyncAt
+    };
   }
 
-  const recommendations = (await fetchAllRecommendationsForRun(supabase, latestRun.id)).sort(
-    (a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0)
+  const recommendationsPromise = fetchAllRecommendationsForRun(serviceRoleSupabase, latestRun.id).then((rows) =>
+    rows.sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0))
   );
 
-  const { data: poDraftRows } = await supabase
+  const poDraftRowsPromise = serviceRoleSupabase
     .from("purchase_order_drafts")
     .select(`
-      id,
-      report_run_id,
-      supplier_name,
-      status,
-      po_number,
-      notes,
-      created_at,
-      updated_at,
-      lines:purchase_order_lines (
         id,
-        purchase_order_draft_id,
-        recommendation_id,
-        supplier_catalog_wine_id,
-        producer_name,
-        product_name,
-        product_code,
-        planning_sku,
-        recommended_qty,
-        approved_qty,
-        fob,
-        line_cost,
-        trucking_cost_per_bottle,
-        wine_cost,
-        laid_in_cost,
-        landed_cost,
-        is_new_item,
-        new_item_warning
-      )
-    `)
+        report_run_id,
+        supplier_name,
+        status,
+        po_number,
+        notes,
+        created_at,
+        updated_at,
+        lines:purchase_order_lines (
+          id,
+          purchase_order_draft_id,
+          recommendation_id,
+          supplier_catalog_wine_id,
+          producer_name,
+          product_name,
+          product_code,
+          planning_sku,
+          recommended_qty,
+          approved_qty,
+          fob,
+          line_cost,
+          trucking_cost_per_bottle,
+          wine_cost,
+          laid_in_cost,
+          landed_cost,
+          is_new_item,
+          new_item_warning
+        )
+      `)
     .eq("report_run_id", latestRun.id)
     .order("created_at", { ascending: false })
     .returns<PurchaseOrderDraftWithLines[]>();
 
-  const { data: suppliers } = await supabase
+  const suppliersPromise = serviceRoleSupabase
     .from("suppliers")
     .select(`
-      id,
-      importer_id,
-      name,
-      eta_days,
-      pick_up_location,
-      freight_forwarder,
-      order_frequency,
-      tdm,
-      trucking_cost_per_bottle,
-      notes,
-      active
-    `)
+        id,
+        importer_id,
+        name,
+        eta_days,
+        pick_up_location,
+        freight_forwarder,
+        order_frequency,
+        tdm,
+        trucking_cost_per_bottle,
+        notes,
+        active
+      `)
     .order("name", { ascending: true })
     .returns<SupplierLogistics[]>();
 
-  const quickBooksSupplierMatches = await fetchQuickBooksSupplierMatches(serviceRoleSupabase);
+  const [
+    recommendations,
+    { data: poDraftRows },
+    { data: suppliers },
+    quickBooksSupplierMatches
+  ] = await Promise.all([
+    recommendationsPromise,
+    poDraftRowsPromise,
+    suppliersPromise,
+    fetchQuickBooksSupplierMatches(serviceRoleSupabase)
+  ]);
 
-  return (
-    <OrderDashboard
-      reportRun={latestRun}
-      recommendations={recommendations || []}
-      poDrafts={poDraftRows || []}
-      suppliers={suppliers || []}
-      supplierCatalogWines={supplierCatalogWines || []}
-      vinosmithExplorer={vinosmithExplorer}
-      wineRequests={wineRequests || []}
-      priceChangeEvents={priceChangeEvents || []}
-      quickBooksSupplierMatches={quickBooksSupplierMatches}
-      companyDashboard={companyDashboard}
-      quickBooksLastSyncAt={quickBooksLastSyncAt}
-      canViewSettings={hasPermission(permissions, "view_settings")}
-    />
-  );
+  return {
+    reportRuns: reportRuns || [],
+    latestRun,
+    recommendations: recommendations || [],
+    poDraftRows: poDraftRows || [],
+    suppliers: suppliers || [],
+    supplierCatalogWines: supplierCatalogWines || [],
+    wineRequests: wineRequests || [],
+    priceChangeEvents: priceChangeEvents || [],
+    quickBooksSupplierMatches,
+    companyDashboard,
+    quickBooksLastSyncAt
+  };
 }
 
 async function fetchQuickBooksSupplierMatches(supabase: ReturnType<typeof createServiceRoleClient>): Promise<SupplierQuickBooksVendorMatch[]> {

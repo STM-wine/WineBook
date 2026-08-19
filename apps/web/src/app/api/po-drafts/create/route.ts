@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from "@/lib/di-planning";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import { asNumber, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { formatInteger } from "@/lib/order-data";
 import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
@@ -364,5 +366,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: draftsError.message }, { status: 500 });
   }
 
+  revalidateTag(CACHE_TAGS.dashboard);
   return NextResponse.json({ created, updated, skipped, errors, drafts: drafts || [] });
 }

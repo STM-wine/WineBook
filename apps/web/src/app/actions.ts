@@ -1,6 +1,7 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import { asNumber } from "@/lib/order-data";
 import { isValidPoStatus } from "@/lib/po-status";
 import {
@@ -42,6 +43,26 @@ const DEFAULT_GITHUB_WORKFLOW_REPO = "STM-wine/WineBook";
 const DEFAULT_GITHUB_WORKFLOW_REF = "main";
 const DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID = "daily-vinosmith-ingest.yml";
 const REPORT_TIMEZONE = "America/Denver";
+
+function revalidateDashboardData() {
+  revalidateTag(CACHE_TAGS.dashboard);
+}
+
+function revalidateSupplierData() {
+  revalidateTag(CACHE_TAGS.suppliers);
+  revalidateTag(CACHE_TAGS.dashboard);
+}
+
+function revalidateSupplierCatalogData() {
+  revalidateTag(CACHE_TAGS.supplierCatalog);
+  revalidateTag(CACHE_TAGS.dashboard);
+}
+
+function revalidateQuickBooksVendorData() {
+  revalidateTag(CACHE_TAGS.quickBooksVendors);
+  revalidateTag(CACHE_TAGS.quickBooksVendorMappings);
+  revalidateTag(CACHE_TAGS.dashboard);
+}
 
 type RefreshVinosmithReportsResult =
   | {
@@ -182,6 +203,7 @@ export async function updateRecommendationApproval(input: {
     throw new Error(error.message);
   }
 
+  revalidateDashboardData();
   // Order Review keeps approval state optimistically in the client. Avoid a
   // full route revalidation here so rapid checkbox work does not freeze.
 }
@@ -225,6 +247,8 @@ export async function updateRecommendationApprovals(input: {
   if (failed?.error) {
     throw new Error(failed.error.message);
   }
+
+  revalidateDashboardData();
 }
 
 export async function updateRecommendationOrderPath(input: {
@@ -266,6 +290,7 @@ export async function updateRecommendationOrderPath(input: {
     throw new Error(error.message);
   }
 
+  revalidateDashboardData();
   revalidatePath("/");
 }
 
@@ -291,6 +316,7 @@ export async function updatePurchaseOrderDraftStatus(input: { id: string; status
     throw new Error(error.message);
   }
 
+  revalidateDashboardData();
   revalidatePath("/");
 }
 
@@ -317,6 +343,7 @@ export async function deletePurchaseOrderLine(input: { id: string; draftId: stri
     })
     .eq("id", input.draftId);
 
+  revalidateDashboardData();
   revalidatePath("/");
 }
 
@@ -350,6 +377,7 @@ export async function saveSupplierLogistics(input: {
     throw new Error(error.message);
   }
 
+  revalidateSupplierData();
   revalidatePath("/");
 }
 
@@ -424,6 +452,7 @@ export async function saveSupplierLogisticsBatch(input: {
     throw new Error(failed.error.message);
   }
 
+  revalidateSupplierData();
   revalidatePath("/");
   return { saved: suppliers.length };
 }
@@ -469,6 +498,8 @@ export async function saveQuickBooksVendorMappings(input: {
     throw new Error(error.message);
   }
 
+  revalidateQuickBooksVendorData();
+  revalidateTag(CACHE_TAGS.suppliers);
   revalidatePath("/");
   revalidatePath("/settings/qb-vendors");
   return { saved: mappings.length };
@@ -674,6 +705,7 @@ export async function saveSupplierCatalogWine(input: {
     }
   }
 
+  revalidateSupplierCatalogData();
   revalidatePath("/");
   return {
     mode: result.mode,
@@ -747,6 +779,7 @@ export async function deletePendingSupplierCatalogWine(input: { id: string }) {
     throw new Error(deleteError.message);
   }
 
+  revalidateSupplierCatalogData();
   revalidatePath("/");
   return { displayName: wine.display_name };
 }
@@ -800,6 +833,7 @@ export async function updateSupplierCatalogWorkbenchItems(input: {
     throw new Error(failed.error.message);
   }
 
+  revalidateSupplierCatalogData();
   revalidatePath("/");
 }
 
@@ -855,6 +889,7 @@ export async function createSupplierWineRequest(input: {
     throw new Error(error.message);
   }
 
+  revalidateSupplierCatalogData();
   revalidatePath("/");
   return { requestId };
 }
@@ -908,5 +943,6 @@ export async function updateSupplierWineRequestApproval(input: {
     throw new Error(error.message);
   }
 
+  revalidateSupplierCatalogData();
   revalidatePath("/");
 }

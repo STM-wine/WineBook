@@ -1756,6 +1756,7 @@ function SupplierLogisticsPanel({
       if (!showInactive && supplier.active === false && !isDraft) return false;
       if (pickupLocation !== "All" && (supplier.pick_up_location?.trim() || "") !== pickupLocation) return false;
       if (!needle) return true;
+      const quickBooksMatches = qbMatchesBySupplierId.get(supplier.id) || [];
 
       return [
         supplier.name,
@@ -1764,14 +1765,19 @@ function SupplierLogisticsPanel({
         supplier.pick_up_location,
         supplier.freight_forwarder,
         supplier.order_frequency,
-        supplier.notes
+        supplier.notes,
+        ...quickBooksMatches.flatMap((match) => [
+          match.vendor_name,
+          match.vendor_classification,
+          match.notes
+        ])
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(needle);
     });
-  }, [pickupLocation, rows, search, showInactive]);
+  }, [pickupLocation, qbMatchesBySupplierId, rows, search, showInactive]);
   const activeCount = suppliers.filter((supplier) => supplier.active !== false).length;
   const inactiveCount = suppliers.length - activeCount;
   const averageLaidIn =
@@ -1869,7 +1875,7 @@ function SupplierLogisticsPanel({
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Supplier, TDM, pickup, notes"
+            placeholder="Supplier, QB vendor, TDM, pickup, notes"
           />
         </label>
         <label>
