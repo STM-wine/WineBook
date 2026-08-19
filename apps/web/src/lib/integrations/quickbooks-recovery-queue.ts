@@ -648,7 +648,10 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
   if (job.resourceName === "quickbooks_sales_reps") return client.buildSalesRepQuery();
   if (job.resourceName === "quickbooks_customers") return client.buildCustomerQuery({ maxReturned, activeStatus: "All", iterator });
   if (job.resourceName === "quickbooks_vendors") return client.buildVendorQuery({ maxReturned, activeStatus: "All", iterator });
-  if (job.resourceName === "quickbooks_items") return client.buildItemQuery({ maxReturned, activeStatus: "All", iterator });
+  if (job.resourceName === "quickbooks_items") {
+    if (useInventoryOnlyItemQuery(job)) return client.buildItemInventoryQuery({ maxReturned, activeStatus: "All", iterator });
+    return client.buildItemQuery({ maxReturned, activeStatus: "All", iterator });
+  }
   if (job.resourceName === "quickbooks_invoices") {
     return client.buildInvoiceQuery({
       requestId: job.checkpointKey,
@@ -866,6 +869,10 @@ function iteratorFor(cursorData: Record<string, unknown>) {
 function dateRangeFor(job: QuickBooksRecoveryJob): QuickBooksDateRange | undefined {
   if (!job.requestedStartDate && !job.requestedEndDate) return undefined;
   return { from: job.requestedStartDate || undefined, to: job.requestedEndDate || undefined };
+}
+
+function useInventoryOnlyItemQuery(job: QuickBooksRecoveryJob) {
+  return job.diagnostics.itemQueryMode === "inventory_only" || job.diagnostics.requestType === "ItemInventoryQueryRq";
 }
 
 function toRecoveryJob(row: SourceSyncCheckpointRow): QuickBooksRecoveryJob {

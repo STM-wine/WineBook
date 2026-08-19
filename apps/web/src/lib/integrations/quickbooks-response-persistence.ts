@@ -57,7 +57,7 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
     await persistCustomers(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "VendorQueryRq") {
     await persistVendors(supabase, input.response, rawResponse.id);
-  } else if (input.request.requestType === "ItemQueryRq") {
+  } else if (input.request.requestType === "ItemQueryRq" || input.request.requestType === "ItemInventoryQueryRq") {
     await persistItems(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "InvoiceQueryRq") {
     await persistInvoices(supabase, input.response, rawResponse.id);
@@ -76,6 +76,7 @@ function shouldPersistRequest(requestType: string) {
     "CustomerQueryRq",
     "VendorQueryRq",
     "ItemQueryRq",
+    "ItemInventoryQueryRq",
     "InvoiceQueryRq",
     "CreditMemoQueryRq",
     "ReceivePaymentQueryRq",
@@ -529,6 +530,7 @@ function countReturnedRecords(requestType: string, response: string) {
   if (requestType === "CustomerQueryRq") return extractBlocks(response, "CustomerRet").length;
   if (requestType === "VendorQueryRq") return extractBlocks(response, "VendorRet").length;
   if (requestType === "ItemQueryRq") return itemRetTypes().reduce((sum, tagName) => sum + extractBlocks(response, tagName).length, 0);
+  if (requestType === "ItemInventoryQueryRq") return extractBlocks(response, "ItemInventoryRet").length;
   if (requestType === "InvoiceQueryRq") return extractBlocks(response, "InvoiceRet").length;
   if (requestType === "CreditMemoQueryRq") return extractBlocks(response, "CreditMemoRet").length;
   if (requestType === "ReceivePaymentQueryRq") return extractBlocks(response, "ReceivePaymentRet").length;

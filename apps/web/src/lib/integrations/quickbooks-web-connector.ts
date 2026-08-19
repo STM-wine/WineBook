@@ -286,6 +286,7 @@ function countReturnedRecords(requestType: string, response: string) {
   if (requestType === "CustomerQueryRq") return countXmlBlocks(response, "CustomerRet");
   if (requestType === "VendorQueryRq") return countXmlBlocks(response, "VendorRet");
   if (requestType === "ItemQueryRq") return countItemRecords(response);
+  if (requestType === "ItemInventoryQueryRq") return countXmlBlocks(response, "ItemInventoryRet");
   if (requestType === "SalesRepQueryRq") return countXmlBlocks(response, "SalesRepRet");
   if (requestType === "InvoiceQueryRq") return countXmlBlocks(response, "InvoiceRet");
   if (requestType === "CreditMemoQueryRq") return countXmlBlocks(response, "CreditMemoRet");
