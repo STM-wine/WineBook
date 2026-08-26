@@ -7,6 +7,7 @@ import {
   normalizeOrderingLogicSettings,
   type OrderingLogicSettings
 } from "@/lib/ordering-logic";
+import { fetchQuickBooksItemSalesWindows } from "@/lib/supabase/quickbooks-item-sales-windows";
 
 type PreviewClient = SupabaseClient<any, "public", any>;
 
@@ -86,20 +87,6 @@ type ReportRunRow = {
 type ReportRecommendationRow = {
   product_code: string | null;
   recommended_qty_rounded: number | string | null;
-};
-
-type QuickBooksTransactionRow = {
-  txn_id: string;
-  txn_date: string | null;
-  is_void?: boolean | null;
-  is_pending?: boolean | null;
-};
-
-type QuickBooksLineRow = {
-  txn_id: string;
-  item_list_id: string | null;
-  item_full_name: string | null;
-  quantity: number | string | null;
 };
 
 type SalesWindows = {
@@ -200,7 +187,6 @@ export type DatabaseOrderSummaryPreviewData = {
 };
 
 const PAGE_SIZE = 1000;
-const TXN_CHUNK_SIZE = 350;
 
 export async function fetchDatabaseOrderSummaryPreview(
   supabase: PreviewClient
@@ -604,92 +590,22 @@ async function fetchQuickBooksSalesWindowsByCode(
   quickBooksCodeByListId: Map<string, string>,
   referenceDate: string
 ) {
-  const minDate = minDateKey(addDays(referenceDate, -90), addDays(referenceDate, -365));
-  const maxDate = referenceDate;
-  const [invoices, creditMemos] = await Promise.all([
-    fetchTransactionsForRange(supabase, "quickbooks_invoices", "txn_id,txn_date,is_void,is_pending", minDate, maxDate),
-    fetchTransactionsForRange(supabase, "quickbooks_credit_memos", "txn_id,txn_date", minDate, maxDate)
-  ]);
-  const invoiceDateById = new Map(
-    invoices
-      .filter((row) => row.txn_date && row.is_void !== true && row.is_pending !== true)
-      .map((row) => [row.txn_id, row.txn_date as string])
-  );
-  const creditMemoDateById = new Map(
-    creditMemos
-      .filter((row) => row.txn_date)
-      .map((row) => [row.txn_id, row.txn_date as string])
-  );
-
-  const [invoiceLines, creditMemoLines] = await Promise.all([
-    fetchLinesForTransactions(supabase, "quickbooks_invoice_lines", Array.from(invoiceDateById.keys())),
-    fetchLinesForTransactions(supabase, "quickbooks_credit_memo_lines", Array.from(creditMemoDateById.keys()))
-  ]);
-
   const salesByCode = new Map<string, SalesWindows>();
-  applySalesLines(salesByCode, invoiceLines, invoiceDateById, quickBooksCodeByListId, referenceDate, 1);
-  applySalesLines(salesByCode, creditMemoLines, creditMemoDateById, quickBooksCodeByListId, referenceDate, -1);
-  return salesByCode;
-}
-
-function applySalesLines(
-  salesByCode: Map<string, SalesWindows>,
-  lines: QuickBooksLineRow[],
-  dateByTxnId: Map<string, string>,
-  quickBooksCodeByListId: Map<string, string>,
-  referenceDate: string,
-  sign: 1 | -1
-) {
-  for (const line of lines) {
-    const txnDate = dateByTxnId.get(line.txn_id);
-    if (!txnDate) continue;
-    const code = codeForSalesLine(line, quickBooksCodeByListId);
+  const rows = await fetchQuickBooksItemSalesWindows(supabase, referenceDate);
+  for (const row of rows) {
+    const code = normalizeCode(quickBooksCodeByListId.get(row.item_list_id || "") || row.item_full_name || "");
     if (!code) continue;
-    const qty = asNumber(line.quantity) * sign;
     const current = salesByCode.get(code) || emptySalesWindows();
-
-    if (isInRange(txnDate, addDays(referenceDate, -30), referenceDate, true)) current.last30 += qty;
-    if (isInRange(txnDate, addDays(referenceDate, -60), referenceDate, true)) current.last60 += qty;
-    if (isInRange(txnDate, addDays(referenceDate, -90), referenceDate, true)) current.last90 += qty;
-    if (isInRange(txnDate, addDays(referenceDate, -60), addDays(referenceDate, -30), false)) current.prior30 += qty;
-    if (isInRange(txnDate, addDays(referenceDate, -365), addDays(referenceDate, -335), true)) current.next30Ly += qty;
-    if (isInRange(txnDate, addDays(referenceDate, -365), addDays(referenceDate, -305), true)) current.next60Ly += qty;
-    if (isInRange(txnDate, addDays(referenceDate, -365), addDays(referenceDate, -275), true)) current.next90Ly += qty;
-
+    current.last30 += asNumber(row.last_30_quantity);
+    current.last60 += asNumber(row.last_60_quantity);
+    current.last90 += asNumber(row.last_90_quantity);
+    current.prior30 += asNumber(row.prior_30_quantity);
+    current.next30Ly += asNumber(row.last_year_next_30_quantity);
+    current.next60Ly += asNumber(row.last_year_next_60_quantity);
+    current.next90Ly += asNumber(row.last_year_next_90_quantity);
     salesByCode.set(code, current);
   }
-}
-
-async function fetchTransactionsForRange(
-  supabase: PreviewClient,
-  table: string,
-  columns: string,
-  from: string,
-  to: string
-) {
-  return fetchAll<QuickBooksTransactionRow>(
-    supabase,
-    table,
-    columns,
-    "txn_id",
-    (query) => query.gte("txn_date", from).lte("txn_date", to)
-  );
-}
-
-async function fetchLinesForTransactions(supabase: PreviewClient, table: string, txnIds: string[]) {
-  const rows: QuickBooksLineRow[] = [];
-  for (const chunk of chunks(unique(txnIds), TXN_CHUNK_SIZE)) {
-    rows.push(
-      ...(await fetchAll<QuickBooksLineRow>(
-        supabase,
-        table,
-        "txn_id,item_list_id,item_full_name,quantity",
-        "txn_id",
-        (query) => query.in("txn_id", chunk)
-      ))
-    );
-  }
-  return rows;
+  return salesByCode;
 }
 
 async function fetchAll<Row>(
@@ -904,13 +820,6 @@ function integerFromPackSizeText(value: unknown) {
   return Math.trunc(parsed);
 }
 
-function codeForSalesLine(line: QuickBooksLineRow, quickBooksCodeByListId: Map<string, string>) {
-  const byItemId = line.item_list_id ? quickBooksCodeByListId.get(line.item_list_id) : null;
-  if (byItemId) return byItemId;
-  const fromFullName = normalizeCode(line.item_full_name);
-  return isLikelyProductItemCode(fromFullName) ? fromFullName : "";
-}
-
 function emptySalesWindows(): SalesWindows {
   return {
     last30: 0,
@@ -921,20 +830,6 @@ function emptySalesWindows(): SalesWindows {
     next60Ly: 0,
     next90Ly: 0
   };
-}
-
-function isInRange(value: string, from: string, to: string, inclusiveEnd: boolean) {
-  return value >= from && (inclusiveEnd ? value <= to : value < to);
-}
-
-function minDateKey(...values: string[]) {
-  return values.sort()[0] || todayKey();
-}
-
-function addDays(dateKey: string, days: number) {
-  const date = new Date(`${dateKey}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
 }
 
 function todayKey() {
@@ -970,14 +865,4 @@ function roundNumber(value: number, digits: number) {
 
 function sum<Row>(rows: Row[], valueForRow: (row: Row) => number) {
   return rows.reduce((total, row) => total + valueForRow(row), 0);
-}
-
-function unique(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
-function chunks<T>(values: T[], size: number) {
-  const result: T[][] = [];
-  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
-  return result;
 }

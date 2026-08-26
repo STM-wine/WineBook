@@ -150,13 +150,60 @@ export function unavailableCompanyDashboardData(
   };
 }
 
+type PeriodDashboardData = {
+  byRep: QuickBooksSalesSummaryRow[];
+  byAccount: QuickBooksSalesSummaryRow[];
+  businessLineSummaries: CompanyDashboardBusinessLineSummary[];
+  unavailableReason: string | null;
+  summary: CompanyDashboardSummary;
+};
+
 async function fetchPeriodDashboardData(
   supabase: SupabaseClient,
   range: { from: string; to: string },
   rep?: string,
   options: { includeGrossProfit?: boolean; businessLine?: CompanyDashboardBusinessLine } = {}
-) {
+): Promise<PeriodDashboardData> {
   const businessLine = options.businessLine || "all";
+  if (options.includeGrossProfit !== false) {
+    const grossProfit = await fetchGrossProfitRollups(supabase, range, rep, businessLine);
+    if (!grossProfit.unavailableReason) {
+      return {
+        byRep: grossProfit.byRepRows,
+        byAccount: grossProfit.byAccountRows,
+        businessLineSummaries: grossProfit.businessLineSummaries,
+        unavailableReason: null,
+        summary: grossProfit.summary
+      };
+    }
+
+    const sales = await fetchQuickBooksSalesDashboardData(supabase, {
+      dateFrom: range.from,
+      dateTo: range.to,
+      rep: cleanFilter(rep),
+      includeTransactions: false,
+      includeItems: false
+    });
+    return {
+      byRep: mergeGrossProfitRows(sales.byRep, grossProfit.byRep),
+      byAccount: mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount),
+      businessLineSummaries: grossProfit.businessLineSummaries,
+      unavailableReason: sales.unavailableReason || null,
+      summary: {
+        grossSales: sales.invoiceSales,
+        credits: sales.creditMemos,
+        netSales: sales.netSales,
+        invoiceCount: sales.invoiceCount,
+        creditMemoCount: sales.creditMemoCount,
+        averageInvoice: sales.invoiceCount > 0 ? sales.invoiceSales / sales.invoiceCount : 0,
+        sampleCost: grossProfit.summary.sampleCost,
+        grossProfit: grossProfit.summary.grossProfit,
+        grossProfitPercent: grossProfit.summary.grossProfitPercent,
+        grossProfitUnavailableReason: grossProfit.unavailableReason
+      }
+    };
+  }
+
   const sales = await fetchQuickBooksSalesDashboardData(supabase, {
     dateFrom: range.from,
     dateTo: range.to,
@@ -164,20 +211,7 @@ async function fetchPeriodDashboardData(
     includeTransactions: false,
     includeItems: false
   });
-  const grossProfit = options.includeGrossProfit === false
-    ? emptyGrossProfitRollups()
-    : await fetchGrossProfitRollups(supabase, range, rep, businessLine);
-
-  if (options.includeGrossProfit !== false && !grossProfit.unavailableReason) {
-    return {
-      byRep: grossProfit.byRepRows,
-      byAccount: grossProfit.byAccountRows,
-      businessLineSummaries: grossProfit.businessLineSummaries,
-      unavailableReason: sales.unavailableReason || null,
-      summary: grossProfit.summary
-    };
-  }
-
+  const grossProfit = emptyGrossProfitRollups();
   return {
     byRep: mergeGrossProfitRows(sales.byRep, grossProfit.byRep),
     byAccount: mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount),
@@ -197,8 +231,6 @@ async function fetchPeriodDashboardData(
     }
   };
 }
-
-type PeriodDashboardData = Awaited<ReturnType<typeof fetchPeriodDashboardData>>;
 
 function mergeLastYearNetSales(current: PeriodDashboardData, comparison: PeriodDashboardData): PeriodDashboardData {
   return {

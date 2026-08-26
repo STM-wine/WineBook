@@ -29,6 +29,7 @@ type QuickBooksItemShadowRow = {
   list_id: string;
   name: string | null;
   full_name: string | null;
+  item_type: string | null;
   is_active: boolean | null;
   quantity_on_hand: number | string | null;
   quantity_on_order: number | string | null;
@@ -93,14 +94,17 @@ export async function GET() {
   }
 
   try {
-    const [statusCounts, fieldCoverage, itemTypes, inventorySnapshots, itemCheckpoint, salesCoverage, orderingShadow] = await Promise.all([
-      itemStatusCounts(supabase),
-      itemFieldCoverage(supabase),
-      itemTypeCounts(supabase),
+    const [quickbooksItems, inventorySnapshots, itemCheckpoint, salesCoverage] = await Promise.all([
+      fetchAllQuickBooksItemsForShadow(supabase),
       countRows(supabase, "quickbooks_inventory_snapshots"),
       latestItemCheckpoint(supabase),
-      quickBooksSalesCoverage(supabase),
-      orderingShadowComparison(supabase)
+      quickBooksSalesCoverage(supabase)
+    ]);
+    const [statusCounts, fieldCoverage, itemTypes, orderingShadow] = await Promise.all([
+      Promise.resolve(itemStatusCounts(quickbooksItems)),
+      Promise.resolve(itemFieldCoverage(quickbooksItems)),
+      Promise.resolve(itemTypeCounts(quickbooksItems)),
+      orderingShadowComparison(supabase, quickbooksItems)
     ]);
 
     return NextResponse.json({
@@ -118,45 +122,28 @@ export async function GET() {
   }
 }
 
-async function itemStatusCounts(supabase: QuickBooksSummaryClient) {
-  const [total, active, inactive, unknown] = await Promise.all([
-    countRows(supabase, "quickbooks_items"),
-    countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", true)),
-    countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", false)),
-    countRows(supabase, "quickbooks_items", (query) => query.is("is_active", null))
-  ]);
-
-  return { total, active, inactive, unknown };
+function itemStatusCounts(items: QuickBooksItemShadowRow[]) {
+  return {
+    total: items.length,
+    active: items.filter((item) => item.is_active === true).length,
+    inactive: items.filter((item) => item.is_active === false).length,
+    unknown: items.filter((item) => item.is_active === null).length
+  };
 }
 
-async function itemFieldCoverage(supabase: QuickBooksSummaryClient) {
-  const rows = await Promise.all(
-    ITEM_FIELDS.map(async (field) => {
-      const [present, activePresent] = await Promise.all([
-        countRows(supabase, "quickbooks_items", (query) => query.not(field, "is", null)),
-        countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", true).not(field, "is", null))
-      ]);
-
-      return {
-        field,
-        present,
-        activePresent
-      };
-    })
-  );
-
-  return rows;
+function itemFieldCoverage(items: QuickBooksItemShadowRow[]) {
+  return ITEM_FIELDS.map((field) => ({
+    field,
+    present: items.filter((item) => item[field] !== null).length,
+    activePresent: items.filter((item) => item.is_active === true && item[field] !== null).length
+  }));
 }
 
-async function itemTypeCounts(supabase: QuickBooksSummaryClient) {
-  const rows = await Promise.all(
-    ITEM_TYPES.map(async (itemType) => ({
-      itemType,
-      count: await countRows(supabase, "quickbooks_items", (query) => query.eq("item_type", itemType))
-    }))
-  );
-
-  return rows;
+function itemTypeCounts(items: QuickBooksItemShadowRow[]) {
+  return ITEM_TYPES.map((itemType) => ({
+    itemType,
+    count: items.filter((item) => item.item_type === itemType).length
+  }));
 }
 
 async function latestItemCheckpoint(supabase: QuickBooksSummaryClient) {
@@ -174,7 +161,7 @@ async function latestItemCheckpoint(supabase: QuickBooksSummaryClient) {
   return data || null;
 }
 
-async function orderingShadowComparison(supabase: QuickBooksSummaryClient) {
+async function orderingShadowComparison(supabase: QuickBooksSummaryClient, quickbooksItems: QuickBooksItemShadowRow[]) {
   const { data: latestRun, error: runError } = await supabase
     .from("report_runs")
     .select("id,report_date,completed_at")
@@ -203,10 +190,7 @@ async function orderingShadowComparison(supabase: QuickBooksSummaryClient) {
     };
   }
 
-  const [recommendations, quickbooksItems] = await Promise.all([
-    fetchAllRecommendationsForRun(supabase, latestRun.id),
-    fetchAllQuickBooksItemsForShadow(supabase)
-  ]);
+  const recommendations = await fetchAllRecommendationsForRun(supabase, latestRun.id);
   const itemLookup = buildQuickBooksLookup(quickbooksItems);
   const examples: ShadowIssue[] = [];
   const stats = {
@@ -359,6 +343,7 @@ async function fetchAllQuickBooksItemsForShadow(supabase: QuickBooksSummaryClien
         list_id,
         name,
         full_name,
+        item_type,
         is_active,
         quantity_on_hand,
         quantity_on_order,

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { asNumber } from "@/lib/order-data";
+import { fetchQuickBooksItemSalesWindows } from "@/lib/supabase/quickbooks-item-sales-windows";
 import type { Recommendation, ReportRun } from "@/lib/types";
 
 type BridgeClient = SupabaseClient<any, "public", any>;
@@ -34,20 +35,6 @@ type VinosmithInventorySnapshotRow = {
   on_hold: number | string | null;
   on_future: number | string | null;
   on_pending_sync: number | string | null;
-};
-
-type QuickBooksTransactionRow = {
-  txn_id: string;
-  txn_date: string | null;
-  is_void?: boolean | null;
-  is_pending?: boolean | null;
-};
-
-type QuickBooksLineRow = {
-  txn_id: string;
-  item_list_id: string | null;
-  item_full_name: string | null;
-  quantity: number | string | null;
 };
 
 type VinosmithInventoryProof = {
@@ -107,7 +94,6 @@ export type OrderingLogicBridgeData = {
 };
 
 const PAGE_SIZE = 1000;
-const TXN_CHUNK_SIZE = 400;
 const SALES_HISTORY_FROM = "2025-01-01";
 
 export async function fetchOrderingLogicBridgeData(supabase: BridgeClient): Promise<OrderingLogicBridgeData> {
@@ -281,45 +267,13 @@ async function fetchQuickBooksSalesByCode(
   referenceDate: string
 ) {
   const salesByCode = new Map<string, number>();
-  const [invoices, creditMemos] = await Promise.all([
-    fetchTransactionsForRange(supabase, "quickbooks_invoices", "txn_id,txn_date,is_void,is_pending", addDays(referenceDate, -30), referenceDate),
-    fetchTransactionsForRange(supabase, "quickbooks_credit_memos", "txn_id,txn_date", addDays(referenceDate, -30), referenceDate)
-  ]);
-  const invoiceDateById = new Map(
-    invoices
-      .filter((row) => row.txn_date && row.is_void !== true && row.is_pending !== true)
-      .map((row) => [row.txn_id, row.txn_date as string])
-  );
-  const creditMemoDateById = new Map(
-    creditMemos
-      .filter((row) => row.txn_date)
-      .map((row) => [row.txn_id, row.txn_date as string])
-  );
-
-  const [invoiceLines, creditMemoLines] = await Promise.all([
-    fetchLinesForTransactions(supabase, "quickbooks_invoice_lines", Array.from(invoiceDateById.keys())),
-    fetchLinesForTransactions(supabase, "quickbooks_credit_memo_lines", Array.from(creditMemoDateById.keys()))
-  ]);
-
-  applySalesLines(salesByCode, invoiceLines, quickBooksCodeByListId, 1);
-  applySalesLines(salesByCode, creditMemoLines, quickBooksCodeByListId, -1);
+  const rows = await fetchQuickBooksItemSalesWindows(supabase, referenceDate);
+  for (const row of rows) {
+    const code = normalizeCode(quickBooksCodeByListId.get(row.item_list_id || "") || row.item_full_name || "");
+    if (!code) continue;
+    salesByCode.set(code, (salesByCode.get(code) || 0) + asNumber(row.last_30_quantity));
+  }
   return salesByCode;
-}
-
-async function fetchTransactionsForRange(
-  supabase: BridgeClient,
-  table: string,
-  columns: string,
-  from: string,
-  to: string
-) {
-  return fetchAll<QuickBooksTransactionRow>(
-    supabase,
-    table,
-    columns,
-    "txn_id",
-    (query) => query.gte("txn_date", from).lte("txn_date", to)
-  );
 }
 
 async function fetchLatestVinosmithInventorySnapshots(supabase: BridgeClient) {
@@ -343,34 +297,6 @@ async function fetchLatestVinosmithInventorySnapshots(supabase: BridgeClient) {
   );
 }
 
-async function fetchLinesForTransactions(supabase: BridgeClient, table: string, txnIds: string[]) {
-  const rows: QuickBooksLineRow[] = [];
-  for (const chunk of chunks(unique(txnIds), TXN_CHUNK_SIZE)) {
-    rows.push(
-      ...(await fetchAll<QuickBooksLineRow>(
-        supabase,
-        table,
-        "txn_id,item_list_id,item_full_name,quantity",
-        "txn_id",
-        (query) => query.in("txn_id", chunk)
-      ))
-    );
-  }
-  return rows;
-}
-
-function applySalesLines(
-  salesByCode: Map<string, number>,
-  lines: QuickBooksLineRow[],
-  quickBooksCodeByListId: Map<string, string>,
-  sign: 1 | -1
-) {
-  for (const line of lines) {
-    const code = codeForSalesLine(line, quickBooksCodeByListId);
-    if (!code) continue;
-    salesByCode.set(code, (salesByCode.get(code) || 0) + asNumber(line.quantity) * sign);
-  }
-}
 
 function aggregateLatestInventoryByWine(rows: VinosmithInventorySnapshotRow[]) {
   const byWine = new Map<string, VinosmithInventorySnapshotRow[]>();
@@ -421,13 +347,6 @@ async function fetchAll<Row>(
     if (page.length < PAGE_SIZE) break;
   }
   return rows;
-}
-
-function codeForSalesLine(line: QuickBooksLineRow, quickBooksCodeByListId: Map<string, string>) {
-  const byItemId = line.item_list_id ? quickBooksCodeByListId.get(line.item_list_id) : null;
-  if (byItemId) return byItemId;
-  const fromFullName = normalizeCode(line.item_full_name);
-  return isLikelyProductItemCode(fromFullName) ? fromFullName : "";
 }
 
 function firstByCode(rows: VinosmithWineRow[]) {
@@ -520,12 +439,6 @@ function statusSort(status: OrderingLineItemTestRow["status"]) {
   return 2;
 }
 
-function addDays(dateKey: string, days: number) {
-  const date = new Date(`${dateKey}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -546,14 +459,4 @@ function numberOrNull(value: unknown) {
 
 function sum<Row>(rows: Row[], valueForRow: (row: Row) => number) {
   return rows.reduce((total, row) => total + valueForRow(row), 0);
-}
-
-function unique(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
-function chunks<T>(values: T[], size: number) {
-  const result: T[][] = [];
-  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
-  return result;
 }

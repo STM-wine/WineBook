@@ -12,6 +12,8 @@ import {
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 const SOURCE_SYSTEM = "quickbooks_desktop";
+const RECOVERY_SEED_RESOURCE = "quickbooks_recovery_seed";
+const RECOVERY_SEED_KEY = "v1";
 const DEFAULT_BACKFILL_START = "2018-08-14";
 const DEFAULT_MAX_RETURNED = 200;
 const STALE_RUNNING_MINUTES = 30;
@@ -104,7 +106,6 @@ export async function buildQuickBooksRecoveryQueueStatus(): Promise<QuickBooksRe
   }
 
   try {
-    if (isAutoSeedEnabled()) await ensureQuickBooksRecoveryQueue(supabase);
     const [pending, running, completed, failed, nextJobs] = await Promise.all([
       countJobsByStatus(supabase, ["pending"]),
       countJobsByStatus(supabase, ["running"]),
@@ -154,11 +155,7 @@ export async function buildNextQuickBooksRecoveryRequests(): Promise<QuickBooksR
   if (!job) return buildQuickBooksSalesDashboardDiscoveryRequests() as QuickBooksRecoveryRequest[];
 
   const request = buildRequestForJob(job);
-  const recoveryRequest = { ...request, recoveryJob: job };
-  if (job.resourceName === "quickbooks_invoices" || job.resourceName === "quickbooks_credit_memos") {
-    return [createQuickBooksDesktopReadOnlyClient().buildSalesRepQuery(), recoveryRequest];
-  }
-  return [recoveryRequest];
+  return [{ ...request, recoveryJob: job }];
 }
 
 export async function completeQuickBooksRecoveryJob(
@@ -231,7 +228,12 @@ export async function failQuickBooksRecoveryJob(job: QuickBooksRecoveryJob, erro
 async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
   if (!isAutoSeedEnabled()) return;
 
-  const rows = buildSeedRows();
+  const backfillEnd = getBackfillEnd();
+  const seed = await readRecoverySeed(supabase);
+  const lastSeededEnd = stringValue(seed?.diagnostics.backfillEnd);
+  if (lastSeededEnd && lastSeededEnd >= backfillEnd) return;
+
+  const rows = lastSeededEnd ? buildIncrementalSeedRows(dayAfter(lastSeededEnd), backfillEnd) : buildSeedRows();
   for (let index = 0; index < rows.length; index += 500) {
     const chunk = rows.slice(index, index + 500);
     const { error } = await supabase.from("source_sync_checkpoints").upsert(chunk, {
@@ -240,9 +242,12 @@ async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
     });
     if (error) throw new Error(error.message);
   }
-  await completeSupersededSalesTruthRows(supabase);
-  await completeSupersededPriorityYearWeeklyRows(supabase);
-  await consolidatePendingSalesTruthWeeklyRows(supabase);
+  if (!lastSeededEnd) {
+    await completeSupersededSalesTruthRows(supabase);
+    await completeSupersededPriorityYearWeeklyRows(supabase);
+    await consolidatePendingSalesTruthWeeklyRows(supabase);
+  }
+  await writeRecoverySeed(supabase, backfillEnd);
 }
 
 async function completeSupersededSalesTruthRows(supabase: SupabaseClient) {
@@ -732,6 +737,21 @@ function buildSeedRows() {
   return rows;
 }
 
+function buildIncrementalSeedRows(start: string, end: string) {
+  if (start > end) return [];
+  const rows = [];
+  for (const date of eachDate(start, end)) {
+    rows.push(checkpointRow("quickbooks_credit_memos", date, date, date));
+    rows.push(checkpointRow("quickbooks_invoices", date, date, date));
+  }
+  for (const month of eachMonth(start, end)) {
+    rows.push(checkpointRow("quickbooks_receive_payments", month.key, month.start, month.end));
+    rows.push(checkpointRow("quickbooks_purchase_orders", month.key, month.start, month.end));
+    rows.push(checkpointRow("quickbooks_txn_deleted", month.key, month.start, month.end));
+  }
+  return rows;
+}
+
 function checkpointRow(resourceName: QuickBooksRecoveryResource, checkpointKey: string, startDate: string | null, endDate: string | null) {
   return {
     source_system: SOURCE_SYSTEM,
@@ -860,6 +880,12 @@ function dayBefore(value: string) {
   return date.toISOString().slice(0, 10);
 }
 
+function dayAfter(value: string) {
+  const date = new Date(value + "T00:00:00.000Z");
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 function iteratorFor(cursorData: Record<string, unknown>) {
   const iteratorId = stringValue(cursorData.iteratorId);
   if (!iteratorId) return { mode: "Start" as QuickBooksIteratorMode };
@@ -889,6 +915,36 @@ function toRecoveryJob(row: SourceSyncCheckpointRow): QuickBooksRecoveryJob {
 
 async function updateJob(supabase: SupabaseClient, id: string, values: Record<string, unknown>) {
   const { error } = await supabase.from("source_sync_checkpoints").update({ ...values, updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+async function readRecoverySeed(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("source_sync_checkpoints")
+    .select("diagnostics")
+    .eq("source_system", SOURCE_SYSTEM)
+    .eq("resource_name", RECOVERY_SEED_RESOURCE)
+    .eq("checkpoint_key", RECOVERY_SEED_KEY)
+    .maybeSingle<{ diagnostics: Record<string, unknown> }>();
+  if (error) throw new Error(error.message);
+  return data || null;
+}
+
+async function writeRecoverySeed(supabase: SupabaseClient, backfillEnd: string) {
+  const seededAt = new Date().toISOString();
+  const { error } = await supabase.from("source_sync_checkpoints").upsert(
+    {
+      source_system: SOURCE_SYSTEM,
+      resource_name: RECOVERY_SEED_RESOURCE,
+      checkpoint_key: RECOVERY_SEED_KEY,
+      status: "completed",
+      cursor_data: {},
+      diagnostics: { backfillStart: getBackfillStart(), backfillEnd, seedVersion: RECOVERY_SEED_KEY },
+      last_synced_at: seededAt,
+      updated_at: seededAt
+    },
+    { onConflict: "source_system,resource_name,checkpoint_key" }
+  );
   if (error) throw new Error(error.message);
 }
 

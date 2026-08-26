@@ -26,6 +26,7 @@ type SalesRepLookup = {
 
 const salesRepLookupByInitial = new Map<string, SalesRepLookup>();
 const salesRepLookupByListId = new Map<string, SalesRepLookup>();
+let salesRepLookupHydrated = false;
 
 type ParsedLine = {
   txn_line_id: string | null;
@@ -52,7 +53,7 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
 
   const rawResponse = await recordRawResponse(supabase, input);
   if (input.request.requestType === "SalesRepQueryRq") {
-    persistSalesRepLookup(input.response);
+    await persistSalesRepLookup(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "CustomerQueryRq") {
     await persistCustomers(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "VendorQueryRq") {
@@ -117,7 +118,31 @@ async function recordRawResponse(supabase: SupabaseClient, input: PersistQuickBo
   return data;
 }
 
-function persistSalesRepLookup(response: string) {
+async function persistSalesRepLookup(supabase: SupabaseClient, response: string, rawResponseId: string) {
+  const now = new Date().toISOString();
+  const rows: Record<string, unknown>[] = [];
+  for (const salesRepBlock of extractBlocks(response, "SalesRepRet")) {
+    const listId = text(salesRepBlock, "ListID");
+    if (!listId) continue;
+    const entityRef = ref(salesRepBlock, "SalesRepEntityRef");
+    rows.push({
+      list_id: listId,
+      initial: text(salesRepBlock, "Initial"),
+      full_name: entityRef.FullName || text(salesRepBlock, "Initial"),
+      entity_list_id: entityRef.ListID || null,
+      entity_full_name: entityRef.FullName || null,
+      raw_response_id: rawResponseId,
+      raw_data: { sales_rep_entity_ref: entityRef },
+      last_seen_at: now,
+      updated_at: now
+    });
+  }
+
+  if (rows.length > 0) {
+    const { error } = await supabase.from("quickbooks_sales_reps").upsert(rows, { onConflict: "list_id" });
+    if (error && !isMissingSalesRepTable(error)) throw new Error(error.message);
+  }
+
   for (const salesRepBlock of extractBlocks(response, "SalesRepRet")) {
     const initial = text(salesRepBlock, "Initial");
     const entityRef = ref(salesRepBlock, "SalesRepEntityRef");
@@ -129,17 +154,18 @@ function persistSalesRepLookup(response: string) {
     if (lookup.initial) salesRepLookupByInitial.set(lookup.initial.toLowerCase(), lookup);
     if (lookup.listId) salesRepLookupByListId.set(lookup.listId, lookup);
   }
+  salesRepLookupHydrated = true;
 }
 
 async function persistCustomers(supabase: SupabaseClient, response: string, rawResponseId: string) {
-  const customerBlocks = extractBlocks(response, "CustomerRet");
-  for (const customerBlock of customerBlocks) {
-    const listId = text(customerBlock, "ListID");
-    const fullName = text(customerBlock, "FullName");
-    if (!listId || !fullName) continue;
-
-    const { error } = await supabase.from("quickbooks_customers").upsert(
-      {
+  await hydrateSalesRepLookup(supabase);
+  const now = new Date().toISOString();
+  const rows = extractBlocks(response, "CustomerRet")
+    .map((customerBlock) => {
+      const listId = text(customerBlock, "ListID");
+      const fullName = text(customerBlock, "FullName");
+      if (!listId || !fullName) return null;
+      return {
         list_id: listId,
         edit_sequence: text(customerBlock, "EditSequence"),
         name: text(customerBlock, "Name"),
@@ -155,24 +181,22 @@ async function persistCustomers(supabase: SupabaseClient, response: string, rawR
           parent_ref: ref(customerBlock, "ParentRef"),
           sales_rep_ref: enrichSalesRepRef(ref(customerBlock, "SalesRepRef"))
         },
-        last_seen_at: new Date().toISOString()
-      },
-      { onConflict: "list_id" }
-    );
-    if (error) throw new Error(error.message);
-  }
+        last_seen_at: now
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+  await upsertRows(supabase, "quickbooks_customers", rows, "list_id");
 }
 
 async function persistVendors(supabase: SupabaseClient, response: string, rawResponseId: string) {
-  const vendorBlocks = extractBlocks(response, "VendorRet");
-  for (const vendorBlock of vendorBlocks) {
-    const listId = directText(vendorBlock, "ListID");
-    const name = directText(vendorBlock, "Name");
-    const fullName = directText(vendorBlock, "FullName") || name;
-    if (!listId || !name || !fullName) continue;
-
-    const { error } = await supabase.from("quickbooks_vendors").upsert(
-      {
+  const now = new Date().toISOString();
+  const rows = extractBlocks(response, "VendorRet")
+    .map((vendorBlock) => {
+      const listId = directText(vendorBlock, "ListID");
+      const name = directText(vendorBlock, "Name");
+      const fullName = directText(vendorBlock, "FullName") || name;
+      if (!listId || !name || !fullName) return null;
+      return {
         list_id: listId,
         edit_sequence: directText(vendorBlock, "EditSequence"),
         name,
@@ -189,65 +213,62 @@ async function persistVendors(supabase: SupabaseClient, response: string, rawRes
           vendor_address: address(vendorBlock, "VendorAddress"),
           vendor_address_block: addressBlock(vendorBlock, "VendorAddressBlock")
         },
-        last_seen_at: new Date().toISOString()
-      },
-      { onConflict: "list_id" }
-    );
-    if (error) throw new Error(error.message);
-  }
+        last_seen_at: now
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+  await upsertRows(supabase, "quickbooks_vendors", rows, "list_id");
 }
 
 async function persistItems(supabase: SupabaseClient, response: string, rawResponseId: string) {
+  const now = new Date().toISOString();
+  const rows: Record<string, unknown>[] = [];
   for (const itemType of itemRetTypes()) {
-    const itemBlocks = extractBlocks(response, itemType);
-    for (const itemBlock of itemBlocks) {
+    for (const itemBlock of extractBlocks(response, itemType)) {
       const listId = text(itemBlock, "ListID");
       const fullName = text(itemBlock, "FullName");
       if (!listId || !fullName) continue;
       const itemCustomFields = customFields(itemBlock);
-
-      const { error } = await supabase.from("quickbooks_items").upsert(
-        {
-          list_id: listId,
-          edit_sequence: text(itemBlock, "EditSequence"),
-          item_type: itemType.replace(/^Item/, "").replace(/Ret$/, ""),
-          name: text(itemBlock, "Name"),
-          full_name: fullName,
-          is_active: boolText(itemBlock, "IsActive"),
-          sales_desc: text(itemBlock, "SalesDesc") || text(itemBlock, "Desc"),
-          purchase_desc: text(itemBlock, "PurchaseDesc"),
-          sales_price: numberText(itemBlock, "SalesPrice") || numberText(itemBlock, "Price"),
-          purchase_cost: numberText(itemBlock, "PurchaseCost"),
-          average_cost: numberText(itemBlock, "AverageCost"),
-          quantity_on_hand: numberText(itemBlock, "QuantityOnHand"),
-          quantity_on_order: numberText(itemBlock, "QuantityOnOrder"),
-          quantity_on_sales_order: numberText(itemBlock, "QuantityOnSalesOrder"),
-          income_account_ref: ref(itemBlock, "IncomeAccountRef"),
-          cogs_account_ref: ref(itemBlock, "COGSAccountRef"),
-          asset_account_ref: ref(itemBlock, "AssetAccountRef"),
-          custom_fields: itemCustomFields,
-          time_created: dateTimeText(itemBlock, "TimeCreated"),
-          time_modified: dateTimeText(itemBlock, "TimeModified"),
-          raw_response_id: rawResponseId,
-          raw_data: {
-            parent_ref: ref(itemBlock, "ParentRef"),
-            preferred_vendor_ref: ref(itemBlock, "PrefVendorRef"),
-            custom_field_count: customFieldCount(itemBlock)
-          },
-          last_seen_at: new Date().toISOString()
+      rows.push({
+        list_id: listId,
+        edit_sequence: text(itemBlock, "EditSequence"),
+        item_type: itemType.replace(/^Item/, "").replace(/Ret$/, ""),
+        name: text(itemBlock, "Name"),
+        full_name: fullName,
+        is_active: boolText(itemBlock, "IsActive"),
+        sales_desc: text(itemBlock, "SalesDesc") || text(itemBlock, "Desc"),
+        purchase_desc: text(itemBlock, "PurchaseDesc"),
+        sales_price: numberText(itemBlock, "SalesPrice") || numberText(itemBlock, "Price"),
+        purchase_cost: numberText(itemBlock, "PurchaseCost"),
+        average_cost: numberText(itemBlock, "AverageCost"),
+        quantity_on_hand: numberText(itemBlock, "QuantityOnHand"),
+        quantity_on_order: numberText(itemBlock, "QuantityOnOrder"),
+        quantity_on_sales_order: numberText(itemBlock, "QuantityOnSalesOrder"),
+        income_account_ref: ref(itemBlock, "IncomeAccountRef"),
+        cogs_account_ref: ref(itemBlock, "COGSAccountRef"),
+        asset_account_ref: ref(itemBlock, "AssetAccountRef"),
+        custom_fields: itemCustomFields,
+        time_created: dateTimeText(itemBlock, "TimeCreated"),
+        time_modified: dateTimeText(itemBlock, "TimeModified"),
+        raw_response_id: rawResponseId,
+        raw_data: {
+          parent_ref: ref(itemBlock, "ParentRef"),
+          preferred_vendor_ref: ref(itemBlock, "PrefVendorRef"),
+          custom_field_count: customFieldCount(itemBlock)
         },
-        { onConflict: "list_id" }
-      );
-      if (error) throw new Error(error.message);
+        last_seen_at: now
+      });
     }
   }
+  await upsertRows(supabase, "quickbooks_items", rows, "list_id");
 }
 
 async function persistInvoices(supabase: SupabaseClient, response: string, rawResponseId: string) {
-  const invoiceBlocks = extractBlocks(response, "InvoiceRet");
-  for (const invoiceBlock of invoiceBlocks) {
+  await hydrateSalesRepLookup(supabase);
+  const now = new Date().toISOString();
+  const documents = extractBlocks(response, "InvoiceRet").flatMap((invoiceBlock) => {
     const txnId = text(invoiceBlock, "TxnID");
-    if (!txnId) continue;
+    if (!txnId) return [];
 
     const invoiceCustomFields = customFields(invoiceBlock);
     const customerRef = ref(invoiceBlock, "CustomerRef");
@@ -256,8 +277,11 @@ async function persistInvoices(supabase: SupabaseClient, response: string, rawRe
     const linkedTxns = extractBlocks(invoiceBlock, "LinkedTxn").map((block) => rawLinkedTxn(block));
     const lines = parseLines(invoiceBlock, "InvoiceLineRet");
 
-    const { error } = await supabase.from("quickbooks_invoices").upsert(
-      {
+    return [{
+      txnId,
+      editSequence: text(invoiceBlock, "EditSequence"),
+      lines,
+      header: {
         txn_id: txnId,
         edit_sequence: text(invoiceBlock, "EditSequence"),
         ref_number: text(invoiceBlock, "RefNumber"),
@@ -284,21 +308,21 @@ async function persistInvoices(supabase: SupabaseClient, response: string, rawRe
           line_count: lines.length,
           custom_field_count: customFieldCount(invoiceBlock)
         },
-        last_seen_at: new Date().toISOString()
-      },
-      { onConflict: "txn_id" }
-    );
-    if (error) throw new Error(error.message);
-
-    await replaceLines(supabase, "quickbooks_invoice_lines", txnId, lines);
-  }
+        last_seen_at: now
+      }
+    }];
+  });
+  const changed = await changedTransactions(supabase, "quickbooks_invoices", documents);
+  await upsertRows(supabase, "quickbooks_invoices", changed.map((document) => document.header), "txn_id");
+  await replaceLinesForTransactions(supabase, "quickbooks_invoice_lines", changed);
 }
 
 async function persistCreditMemos(supabase: SupabaseClient, response: string, rawResponseId: string) {
-  const creditMemoBlocks = extractBlocks(response, "CreditMemoRet");
-  for (const creditMemoBlock of creditMemoBlocks) {
+  await hydrateSalesRepLookup(supabase);
+  const now = new Date().toISOString();
+  const documents = extractBlocks(response, "CreditMemoRet").flatMap((creditMemoBlock) => {
     const txnId = text(creditMemoBlock, "TxnID");
-    if (!txnId) continue;
+    if (!txnId) return [];
 
     const creditMemoCustomFields = customFields(creditMemoBlock);
     const customerRef = ref(creditMemoBlock, "CustomerRef");
@@ -306,8 +330,11 @@ async function persistCreditMemos(supabase: SupabaseClient, response: string, ra
     const linkedTxns = extractBlocks(creditMemoBlock, "LinkedTxn").map((block) => rawLinkedTxn(block));
     const lines = parseLines(creditMemoBlock, "CreditMemoLineRet");
 
-    const { error } = await supabase.from("quickbooks_credit_memos").upsert(
-      {
+    return [{
+      txnId,
+      editSequence: text(creditMemoBlock, "EditSequence"),
+      lines,
+      header: {
         txn_id: txnId,
         edit_sequence: text(creditMemoBlock, "EditSequence"),
         ref_number: text(creditMemoBlock, "RefNumber"),
@@ -327,25 +354,22 @@ async function persistCreditMemos(supabase: SupabaseClient, response: string, ra
           line_count: lines.length,
           custom_field_count: customFieldCount(creditMemoBlock)
         },
-        last_seen_at: new Date().toISOString()
-      },
-      { onConflict: "txn_id" }
-    );
-    if (error) throw new Error(error.message);
-
-    await replaceLines(supabase, "quickbooks_credit_memo_lines", txnId, lines);
-  }
+        last_seen_at: now
+      }
+    }];
+  });
+  const changed = await changedTransactions(supabase, "quickbooks_credit_memos", documents);
+  await upsertRows(supabase, "quickbooks_credit_memos", changed.map((document) => document.header), "txn_id");
+  await replaceLinesForTransactions(supabase, "quickbooks_credit_memo_lines", changed);
 }
 
 async function persistReceivePayments(supabase: SupabaseClient, response: string, rawResponseId: string) {
-  const paymentBlocks = extractBlocks(response, "ReceivePaymentRet");
-  for (const paymentBlock of paymentBlocks) {
+  const now = new Date().toISOString();
+  const rows = extractBlocks(response, "ReceivePaymentRet").flatMap((paymentBlock) => {
     const txnId = text(paymentBlock, "TxnID");
-    if (!txnId) continue;
-
+    if (!txnId) return [];
     const customerRef = ref(paymentBlock, "CustomerRef");
-    const { error } = await supabase.from("quickbooks_receive_payments").upsert(
-      {
+    return [{
         txn_id: txnId,
         edit_sequence: text(paymentBlock, "EditSequence"),
         ref_number: text(paymentBlock, "RefNumber"),
@@ -364,27 +388,28 @@ async function persistReceivePayments(supabase: SupabaseClient, response: string
         time_modified: dateTimeText(paymentBlock, "TimeModified"),
         raw_response_id: rawResponseId,
         raw_data: { customer_ref: customerRef },
-        last_seen_at: new Date().toISOString()
-      },
-      { onConflict: "txn_id" }
-    );
-    if (error) throw new Error(error.message);
-  }
+        last_seen_at: now
+    }];
+  });
+  await upsertRows(supabase, "quickbooks_receive_payments", rows, "txn_id");
 }
 
 async function persistPurchaseOrders(supabase: SupabaseClient, response: string, rawResponseId: string) {
-  const purchaseOrderBlocks = extractBlocks(response, "PurchaseOrderRet");
-  for (const purchaseOrderBlock of purchaseOrderBlocks) {
+  const now = new Date().toISOString();
+  const documents = extractBlocks(response, "PurchaseOrderRet").flatMap((purchaseOrderBlock) => {
     const txnId = text(purchaseOrderBlock, "TxnID");
-    if (!txnId) continue;
+    if (!txnId) return [];
 
     const purchaseOrderCustomFields = customFields(purchaseOrderBlock);
     const vendorRef = ref(purchaseOrderBlock, "VendorRef");
     const linkedTxns = extractBlocks(purchaseOrderBlock, "LinkedTxn").map((block) => rawLinkedTxn(block));
     const lines = parsePurchaseOrderLines(purchaseOrderBlock);
 
-    const { error } = await supabase.from("quickbooks_purchase_orders").upsert(
-      {
+    return [{
+      txnId,
+      editSequence: text(purchaseOrderBlock, "EditSequence"),
+      lines,
+      header: {
         txn_id: txnId,
         edit_sequence: text(purchaseOrderBlock, "EditSequence"),
         ref_number: text(purchaseOrderBlock, "RefNumber"),
@@ -406,37 +431,40 @@ async function persistPurchaseOrders(supabase: SupabaseClient, response: string,
           line_count: lines.length,
           custom_field_count: customFieldCount(purchaseOrderBlock)
         },
-        last_seen_at: new Date().toISOString()
-      },
-      { onConflict: "txn_id" }
-    );
-    if (error) throw new Error(error.message);
-
-    await replacePurchaseOrderLines(supabase, txnId, lines);
-  }
+        last_seen_at: now
+      }
+    }];
+  });
+  const changed = await changedTransactions(supabase, "quickbooks_purchase_orders", documents);
+  await upsertRows(supabase, "quickbooks_purchase_orders", changed.map((document) => document.header), "txn_id");
+  await replacePurchaseOrderLinesForTransactions(supabase, changed);
 }
 
-async function replaceLines(supabase: SupabaseClient, table: string, txnId: string, lines: ParsedLine[]) {
-  const { error: deleteError } = await supabase.from(table).delete().eq("txn_id", txnId);
+async function replaceLinesForTransactions(
+  supabase: SupabaseClient,
+  table: string,
+  documents: Array<{ txnId: string; lines: ParsedLine[] }>
+) {
+  if (documents.length === 0) return;
+  const { error: deleteError } = await supabase.from(table).delete().in("txn_id", documents.map((document) => document.txnId));
   if (deleteError) throw new Error(deleteError.message);
-  if (lines.length === 0) return;
+  const rows = documents.flatMap((document) => document.lines.map((line) => ({
+    txn_id: document.txnId,
+    txn_line_id: line.txn_line_id,
+    line_sequence: line.line_sequence,
+    item_list_id: line.item_list_id,
+    item_full_name: line.item_full_name,
+    description: line.description,
+    quantity: line.quantity,
+    unit_of_measure: line.unit_of_measure,
+    rate: line.rate,
+    amount: line.amount,
+    class_ref: line.class_ref,
+    raw_data: line.raw_data
+  })));
+  if (rows.length === 0) return;
 
-  const { error: insertError } = await supabase.from(table).insert(
-    lines.map((line) => ({
-      txn_id: txnId,
-      txn_line_id: line.txn_line_id,
-      line_sequence: line.line_sequence,
-      item_list_id: line.item_list_id,
-      item_full_name: line.item_full_name,
-      description: line.description,
-      quantity: line.quantity,
-      unit_of_measure: line.unit_of_measure,
-      rate: line.rate,
-      amount: line.amount,
-      class_ref: line.class_ref,
-      raw_data: line.raw_data
-    }))
-  );
+  const { error: insertError } = await supabase.from(table).insert(rows);
   if (insertError) throw new Error(insertError.message);
 }
 
@@ -472,29 +500,83 @@ function parseLine(lineBlock: string, index: number): ParsedLine {
   };
 }
 
-async function replacePurchaseOrderLines(supabase: SupabaseClient, txnId: string, lines: ParsedPurchaseOrderLine[]) {
-  const { error: deleteError } = await supabase.from("quickbooks_purchase_order_lines").delete().eq("txn_id", txnId);
+async function replacePurchaseOrderLinesForTransactions(
+  supabase: SupabaseClient,
+  documents: Array<{ txnId: string; lines: ParsedPurchaseOrderLine[] }>
+) {
+  if (documents.length === 0) return;
+  const { error: deleteError } = await supabase
+    .from("quickbooks_purchase_order_lines")
+    .delete()
+    .in("txn_id", documents.map((document) => document.txnId));
   if (deleteError) throw new Error(deleteError.message);
-  if (lines.length === 0) return;
+  const rows = documents.flatMap((document) => document.lines.map((line) => ({
+    txn_id: document.txnId,
+    txn_line_id: line.txn_line_id,
+    line_sequence: line.line_sequence,
+    item_list_id: line.item_list_id,
+    item_full_name: line.item_full_name,
+    description: line.description,
+    quantity: line.quantity,
+    received_quantity: line.received_quantity,
+    unit_of_measure: line.unit_of_measure,
+    rate: line.rate,
+    amount: line.amount,
+    class_ref: line.class_ref,
+    raw_data: line.raw_data
+  })));
+  if (rows.length === 0) return;
 
-  const { error: insertError } = await supabase.from("quickbooks_purchase_order_lines").insert(
-    lines.map((line) => ({
-      txn_id: txnId,
-      txn_line_id: line.txn_line_id,
-      line_sequence: line.line_sequence,
-      item_list_id: line.item_list_id,
-      item_full_name: line.item_full_name,
-      description: line.description,
-      quantity: line.quantity,
-      received_quantity: line.received_quantity,
-      unit_of_measure: line.unit_of_measure,
-      rate: line.rate,
-      amount: line.amount,
-      class_ref: line.class_ref,
-      raw_data: line.raw_data
-    }))
-  );
+  const { error: insertError } = await supabase.from("quickbooks_purchase_order_lines").insert(rows);
   if (insertError) throw new Error(insertError.message);
+}
+
+async function changedTransactions<T extends { txnId: string; editSequence: string | null }>(
+  supabase: SupabaseClient,
+  table: string,
+  documents: T[]
+) {
+  if (documents.length === 0) return documents;
+  const { data, error } = await supabase
+    .from(table)
+    .select("txn_id,edit_sequence")
+    .in("txn_id", documents.map((document) => document.txnId))
+    .returns<Array<{ txn_id: string; edit_sequence: string | null }>>();
+  if (error) throw new Error(error.message);
+
+  const existingEditSequenceByTxnId = new Map((data || []).map((row) => [row.txn_id, row.edit_sequence]));
+  return documents.filter(
+    (document) => !existingEditSequenceByTxnId.has(document.txnId) || existingEditSequenceByTxnId.get(document.txnId) !== document.editSequence
+  );
+}
+
+async function upsertRows(supabase: SupabaseClient, table: string, rows: Record<string, unknown>[], onConflict: string) {
+  if (rows.length === 0) return;
+  const { error } = await supabase.from(table).upsert(rows, { onConflict });
+  if (error) throw new Error(error.message);
+}
+
+async function hydrateSalesRepLookup(supabase: SupabaseClient) {
+  if (salesRepLookupHydrated) return;
+  const { data, error } = await supabase
+    .from("quickbooks_sales_reps")
+    .select("list_id,initial,full_name")
+    .returns<Array<{ list_id: string; initial: string | null; full_name: string | null }>>();
+  if (error) {
+    if (isMissingSalesRepTable(error)) return;
+    throw new Error(error.message);
+  }
+
+  for (const row of data || []) {
+    const lookup: SalesRepLookup = { listId: row.list_id, initial: row.initial, fullName: row.full_name };
+    if (lookup.initial) salesRepLookupByInitial.set(lookup.initial.toLowerCase(), lookup);
+    salesRepLookupByListId.set(row.list_id, lookup);
+  }
+  salesRepLookupHydrated = true;
+}
+
+function isMissingSalesRepTable(error: { code?: string; message: string }) {
+  return error.code === "42P01" || /quickbooks_sales_reps/i.test(error.message) && /does not exist|schema cache/i.test(error.message);
 }
 
 function enrichSalesRepRef(salesRepRef: QbRef) {
