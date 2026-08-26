@@ -10,6 +10,7 @@
     "postinstall": "python3 -m pip install -r requirements-grw.txt",
     "build": "next build",
     "start": "next start",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "gross-profit-center:proof": "node scripts/run-gross-profit-center-proof.mjs",
     "gross-profit-center:test": "node scripts/test-gross-profit-center.mjs"
@@ -20,7 +21,7 @@
     "ag-grid-community": "^35.3.0",
     "ag-grid-react": "^35.3.0",
     "exceljs": "^4.4.0",
-    "next": "^15.0.4",
+    "next": "^15.5.21",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -28,9 +29,10 @@
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11"
   },
   "overrides": {
-    "postcss": "^8.5.10"
+    "postcss": "^8.5.26"
   }
 }

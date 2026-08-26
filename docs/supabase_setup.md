@@ -29,9 +29,13 @@ Allowed redirect URLs:
 
 ```text
 https://stmhq.com/auth/callback
+https://stmhq.com/auth/accept-invite
 https://www.stmhq.com/auth/callback
+https://www.stmhq.com/auth/accept-invite
 https://winebook.onrender.com/auth/callback
+https://winebook.onrender.com/auth/accept-invite
 http://localhost:3000/auth/callback
+http://localhost:3000/auth/accept-invite
 ```
 
 The hosted Next.js app uses Supabase Auth and requires matching rows in `public.app_profiles` before a user can access the app.

@@ -94,8 +94,9 @@ npm ci
 npm run dev
 ```
 
-For local development, set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-in `apps/web/.env.local`. Do not add the service-role key to the web app.
+For local development, set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and the
+server-only `SUPABASE_SERVICE_ROLE_KEY` in `apps/web/.env.local`. Never expose the service-role key
+through a `NEXT_PUBLIC_` variable or browser code.
 
 Ordering Dashboard and Supplier Hub:
 
@@ -291,9 +292,13 @@ Render deployment notes:
 Supabase Auth redirects currently required:
 
 - `https://stmhq.com/auth/callback`
+- `https://stmhq.com/auth/accept-invite`
 - `https://www.stmhq.com/auth/callback`
+- `https://www.stmhq.com/auth/accept-invite`
 - `https://winebook.onrender.com/auth/callback`
+- `https://winebook.onrender.com/auth/accept-invite`
 - `http://localhost:3000/auth/callback`
+- `http://localhost:3000/auth/accept-invite`
 
 Deferred until after hosted V1 rollout:
 

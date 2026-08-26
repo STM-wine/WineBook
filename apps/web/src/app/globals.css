@@ -3878,6 +3878,11 @@ tr.has-recommendation .sticky-name {
   color: var(--green);
 }
 
+.invite-login-link {
+  text-align: center;
+  text-decoration: none;
+}
+
 .settings-shell {
   padding-top: 112px;
 }
@@ -5317,6 +5322,68 @@ tr.has-recommendation .sticky-name {
   background: #e5eee4;
   border-color: #a8bda8;
   color: var(--green);
+}
+
+.permission-chip.role-default {
+  cursor: default;
+}
+
+.user-access-form-grid {
+  align-items: end;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr) minmax(130px, 0.55fr) auto;
+}
+
+.user-access-submit {
+  min-height: var(--compact-control-height);
+}
+
+.user-access-table {
+  min-width: 760px;
+}
+
+.user-profile-form {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 1fr) 120px auto;
+}
+
+.user-profile-form input,
+.user-profile-form select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: var(--compact-control-height);
+  padding: 8px 10px;
+}
+
+.user-role-badge {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  padding: 6px 9px;
+  text-transform: uppercase;
+}
+
+.user-role-badge.role-admin {
+  background: #e5eee4;
+  border-color: #a8bda8;
+  color: var(--green);
+}
+
+.user-role-badge.role-buyer {
+  background: #f7f0de;
+  border-color: #dac68f;
+  color: #765c18;
+}
+
+@media (max-width: 900px) {
+  .user-access-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 1100px) {

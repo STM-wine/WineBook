@@ -39,9 +39,11 @@ NODE_VERSION=20
 NEXT_PUBLIC_SITE_URL=https://stmhq.com
 NEXT_PUBLIC_SUPABASE_URL=https://hpnvlxvnzpojpfepcerl.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<Supabase anon key>
+SUPABASE_SERVICE_ROLE_KEY=<Supabase service-role key>
 ```
 
-Do not add `SUPABASE_SERVICE_ROLE_KEY` to the web service.
+`SUPABASE_SERVICE_ROLE_KEY` is required by trusted server actions for settings and user administration.
+Keep it private in Render and never expose it through a `NEXT_PUBLIC_` variable or browser code.
 
 ## 3. Render Custom Domain
 
@@ -98,12 +100,17 @@ https://stmhq.com
 
 ```text
 https://stmhq.com/auth/callback
+https://stmhq.com/auth/accept-invite
 https://www.stmhq.com/auth/callback
+https://www.stmhq.com/auth/accept-invite
 https://winebook.onrender.com/auth/callback
+https://winebook.onrender.com/auth/accept-invite
 http://localhost:3000/auth/callback
+http://localhost:3000/auth/accept-invite
 ```
 
-The app sends Google OAuth users to `/auth/callback`, so these exact callback URLs must be allowed.
+The app sends Google OAuth users to `/auth/callback` and invited users to `/auth/accept-invite`, so
+these exact URLs must be allowed.
 
 ## 6. Supabase Google Provider
 

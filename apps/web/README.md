@@ -23,14 +23,17 @@ Required environment variables:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_SITE_URL`
 - `GITHUB_WORKFLOW_DISPATCH_TOKEN` with Actions write access for the ingest workflow dispatch
+- `SUPABASE_SERVICE_ROLE_KEY` for trusted server-side settings and user administration
 
-Never put `SUPABASE_SERVICE_ROLE_KEY` in this app. Service-role access belongs only in trusted
-Python workers, migrations, and server-side maintenance scripts.
+Never expose `SUPABASE_SERVICE_ROLE_KEY` through a `NEXT_PUBLIC_` variable or browser code. It is
+used only by trusted server actions and other server-side processes.
 
 ## Auth Model
 
-Supabase Auth is the login provider. For the first release, add each allowed employee in Supabase
-Auth and create a matching `public.app_profiles` row:
+Supabase Auth is the login provider. Admins with the `manage_user_access` capability can invite
+employees and manage roles from **Settings → User Access**. The server action creates the Auth user
+and matching `public.app_profiles` row together. Existing Supabase Auth users can also be enabled
+from that screen.
 
 ```sql
 insert into public.app_profiles (id, email, full_name, role)
@@ -65,6 +68,7 @@ Production environment variables:
 - `NEXT_PUBLIC_SITE_URL=https://stmhq.com`
 - `NEXT_PUBLIC_SUPABASE_URL=https://hpnvlxvnzpojpfepcerl.supabase.co`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY=<Supabase anon key>`
+- `SUPABASE_SERVICE_ROLE_KEY=<Supabase service-role key>`
 - `GITHUB_WORKFLOW_DISPATCH_TOKEN=<GitHub fine-grained token with Actions write access>`
 - `GITHUB_WORKFLOW_REPO=STM-wine/WineBook`
 - `GITHUB_WORKFLOW_REF=main`
@@ -73,6 +77,10 @@ Production environment variables:
 Required Supabase Auth redirect URLs:
 
 - `https://stmhq.com/auth/callback`
+- `https://stmhq.com/auth/accept-invite`
 - `https://www.stmhq.com/auth/callback`
+- `https://www.stmhq.com/auth/accept-invite`
 - `https://winebook.onrender.com/auth/callback`
+- `https://winebook.onrender.com/auth/accept-invite`
 - `http://localhost:3000/auth/callback`
+- `http://localhost:3000/auth/accept-invite`

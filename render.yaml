@@ -16,6 +16,8 @@ services:
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
         sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: GITHUB_WORKFLOW_DISPATCH_TOKEN
         sync: false
       - key: GITHUB_WORKFLOW_REPO

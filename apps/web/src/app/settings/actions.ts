@@ -9,6 +9,12 @@ import {
   type OrderingLogicSettings
 } from "@/lib/ordering-logic";
 import { serviceSettingsClient } from "@/lib/settings-data";
+import {
+  canChangeProfileRole,
+  canSetPermission,
+  validateInviteInput,
+  validateProfileUpdate
+} from "@/lib/user-access-rules";
 
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) || "").trim();
@@ -235,6 +241,9 @@ export async function setProfilePermission(formData: FormData) {
   const enabled = formData.get("enabled") === "true";
   if (!profileId || !permission) throw new Error("Profile and permission are required.");
   if (!APP_PERMISSIONS.includes(permission)) throw new Error("Unsupported permission.");
+  if (!canSetPermission({ actorId: context.user.id, profileId, permission, enabled })) {
+    throw new Error("You cannot remove your own user-access capability.");
+  }
 
   const supabase = serviceSettingsClient();
   const result = enabled
@@ -247,6 +256,141 @@ export async function setProfilePermission(formData: FormData) {
 
   if (result.error) throw new Error(result.error.message);
   revalidatePath("/settings/access");
+}
+
+export type UserAccessActionResult = {
+  ok: boolean;
+  message: string;
+};
+
+function userAccessError(error: unknown, fallback: string): UserAccessActionResult {
+  console.error(fallback, error);
+  return {
+    ok: false,
+    message: error instanceof Error ? error.message : fallback
+  };
+}
+
+async function findAuthUserByEmail(
+  supabase: ReturnType<typeof serviceSettingsClient>,
+  email: string
+) {
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) throw error;
+    const match = data.users.find((user) => user.email?.toLowerCase() === email);
+    if (match) return match;
+    if (data.users.length < 100) return null;
+  }
+  throw new Error("Could not finish checking existing authentication accounts.");
+}
+
+export async function inviteAppUser(formData: FormData): Promise<UserAccessActionResult> {
+  try {
+    const context = await requireSettingsContext();
+    requirePermission(context, "manage_user_access");
+
+    const email = getString(formData, "email").toLowerCase();
+    const fullName = getString(formData, "full_name");
+    const role = getString(formData, "role");
+    const validationError = validateInviteInput({ email, fullName, role });
+    if (validationError) return { ok: false, message: validationError };
+
+    const supabase = serviceSettingsClient();
+    const { data: existingProfile, error: profileLookupError } = await supabase
+      .from("app_profiles")
+      .select("id")
+      .ilike("email", email)
+      .maybeSingle<{ id: string }>();
+    if (profileLookupError) throw profileLookupError;
+    if (existingProfile) return { ok: false, message: "That email already has Stem Intelligence access." };
+
+    const existingAuthUser = await findAuthUserByEmail(supabase, email);
+    let userId = existingAuthUser?.id || null;
+    let invited = false;
+
+    if (!userId) {
+      const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "");
+      const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
+        data: { full_name: fullName },
+        ...(siteUrl ? { redirectTo: `${siteUrl}/auth/accept-invite` } : {})
+      });
+      if (error) throw error;
+      userId = data.user?.id || null;
+      invited = true;
+    }
+
+    if (!userId) throw new Error("Supabase did not return a user id.");
+    const { error: insertError } = await supabase.from("app_profiles").insert({
+      id: userId,
+      email,
+      full_name: fullName,
+      role
+    });
+    if (insertError) {
+      if (invited) await supabase.auth.admin.deleteUser(userId);
+      throw insertError;
+    }
+
+    await supabase.from("audit_events").insert({
+      actor_id: context.user.id,
+      event_type: invited ? "app_user_invited" : "app_user_enabled",
+      entity_type: "app_profile",
+      entity_id: userId,
+      details: { email, full_name: fullName, role }
+    });
+    revalidatePath("/settings/access");
+    return {
+      ok: true,
+      message: invited
+        ? `Invitation sent to ${email}.`
+        : `${email} already had a Supabase login and now has app access.`
+    };
+  } catch (error) {
+    return userAccessError(error, "Could not add the user.");
+  }
+}
+
+export async function updateAppUser(formData: FormData): Promise<UserAccessActionResult> {
+  try {
+    const context = await requireSettingsContext();
+    requirePermission(context, "manage_user_access");
+    const profileId = getString(formData, "profile_id");
+    const fullName = getString(formData, "full_name");
+    const role = getString(formData, "role");
+    const validationError = validateProfileUpdate({ profileId, fullName, role });
+    if (validationError) return { ok: false, message: validationError };
+    if (!canChangeProfileRole({
+      actorId: context.user.id,
+      actorRole: context.profile.role,
+      profileId,
+      requestedRole: role
+    })) {
+      return { ok: false, message: "You cannot change your own role." };
+    }
+
+    const supabase = serviceSettingsClient();
+    const { data: updatedProfile, error } = await supabase
+      .from("app_profiles")
+      .update({ full_name: fullName, role, updated_at: new Date().toISOString() })
+      .eq("id", profileId)
+      .select("id")
+      .maybeSingle<{ id: string }>();
+    if (error) throw error;
+    if (!updatedProfile) return { ok: false, message: "User was not found." };
+
+    await supabase.from("audit_events").insert({
+      actor_id: context.user.id,
+      event_type: "app_user_updated",
+      entity_type: "app_profile",
+      entity_id: profileId,
+      details: { full_name: fullName, role }
+    });
+    revalidatePath("/settings/access");
+    return { ok: true, message: "User details updated." };
+  } catch (error) {
+    return userAccessError(error, "Could not update the user.");
+  }
 }
 
 export async function updateVinosmithPlumbingIssueWorkflow(formData: FormData) {
