@@ -15,7 +15,9 @@ import {
 import {
   assertQuickBooksReadOnlyQbxml,
   buildQuickBooksSalesDashboardDiscoveryRequests,
+  createQuickBooksDesktopReadOnlyClient,
   parseQbxmlResponseStatuses,
+  type QuickBooksDateRange,
   type QuickBooksQbxmlResponseStatus
 } from "@/lib/integrations/quickbooks-desktop";
 
@@ -25,6 +27,9 @@ const DEFAULT_USERNAME = "stem-qbwc";
 const DEFAULT_CAPTURE_RAW_RESPONSES = true;
 const DEFAULT_SALES_DELIVERY_FROM = "2026-08-13";
 const DEFAULT_SALES_DELIVERY_TO = "2026-08-13";
+const DEFAULT_OPERATIONAL_TXN_LOOKBACK_DAYS = 45;
+const DEFAULT_OPERATIONAL_TXN_WINDOW_DAYS = 7;
+const DEFAULT_OPERATIONAL_LIST_MODIFIED_LOOKBACK_DAYS = 45;
 const RECENT_SESSION_LIMIT = 10;
 
 const SUPPORTED_METHODS = [
@@ -127,12 +132,14 @@ export async function handleQuickBooksWebConnectorSoapRequest(soapRequest: strin
 
 export async function buildQuickBooksWebConnectorStatus() {
   const recoveryQueue = await buildQuickBooksRecoveryQueueStatus();
-  const requestTypes = recoveryQueue.pending || recoveryQueue.running
-    ? recoveryQueue.nextJobs.slice(0, 1).map((job) => requestTypeForRecoveryResource(job.resourceName))
-    : buildSalesDashboardRequests().map((request) => request.requestType);
+  const operationalRequests = buildOperationalRefreshRequests();
+  const requestTypes = [
+    ...operationalRequests.map((request) => request.requestType),
+    ...recoveryQueue.nextJobs.slice(0, 1).map((job) => requestTypeForRecoveryResource(job.resourceName))
+  ];
   return {
     service: "Stem Intelligence QuickBooks Desktop Web Connector",
-    mode: recoveryQueue.pending || recoveryQueue.running ? "quickbooks-recovery-queue" : "read-only-sales-dashboard-daily-delivery",
+    mode: recoveryQueue.pending || recoveryQueue.running ? "operational-refresh-with-recovery-queue" : "operational-refresh",
     configuration: {
       appUrlConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_APP_URL),
       passwordConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_WEB_CONNECTOR_PASSWORD),
@@ -140,7 +147,9 @@ export async function buildQuickBooksWebConnectorStatus() {
       rawCaptureEnabled: process.env.QUICKBOOKS_DESKTOP_CAPTURE_RAW_RESPONSES !== "false" && DEFAULT_CAPTURE_RAW_RESPONSES,
       persistenceConfigured: Boolean((process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) && process.env.SUPABASE_SERVICE_ROLE_KEY),
       salesDeliveryDateRange: getSalesDashboardDeliveryDateRange(),
-      salesTxnDateRange: getSalesDashboardTxnDateRange()
+      salesTxnDateRange: getSalesDashboardTxnDateRange(),
+      operationalTxnDateRange: getOperationalTxnDateRange(),
+      operationalModifiedDateRange: getOperationalModifiedDateRange()
     },
     activeSessions: sessionStore.size,
     requestTypes,
@@ -343,10 +352,12 @@ function requestTypeForRecoveryResource(resourceName: string) {
 }
 
 async function buildQuickBooksSessionRequests() {
+  const operationalRequests = buildOperationalRefreshRequests();
   try {
-    return await buildNextQuickBooksRecoveryRequests();
+    const recoveryRequests = await buildNextQuickBooksRecoveryRequests({ fallbackToDiscovery: false });
+    return mergeSessionRequests(operationalRequests, recoveryRequests);
   } catch {
-    return buildSalesDashboardRequests();
+    return operationalRequests;
   }
 }
 
@@ -356,6 +367,164 @@ function buildSalesDashboardRequests() {
     maxReturned: Number.isFinite(maxReturned) && maxReturned > 0 ? maxReturned : 1000,
     txnDateRange: getSalesDashboardTxnDateRange()
   });
+}
+
+function buildOperationalRefreshRequests() {
+  const client = createQuickBooksDesktopReadOnlyClient();
+  const maxReturned = getDiscoveryMaxReturned();
+  const listMaxReturned = getListRefreshMaxReturned(maxReturned);
+  const txnDateWindows = getOperationalTxnDateWindows();
+  const modifiedDateRange = getOperationalModifiedDateRange();
+
+  const requests: QuickBooksRecoveryRequest[] = [
+    client.buildSalesRepQuery(),
+    client.buildCustomerQuery({
+      requestId: "operational-customers",
+      maxReturned: listMaxReturned,
+      activeStatus: "All",
+      modifiedDateRange
+    }),
+    client.buildVendorQuery({
+      requestId: "operational-vendors",
+      maxReturned: listMaxReturned,
+      activeStatus: "All",
+      modifiedDateRange
+    }),
+    client.buildItemQuery({
+      requestId: "operational-items",
+      maxReturned: listMaxReturned,
+      activeStatus: "All",
+      modifiedDateRange
+    })
+  ];
+
+  for (const window of txnDateWindows) {
+    const suffix = `${window.from || "open"}:${window.to || "open"}`;
+    requests.push(
+      client.buildInvoiceQuery({
+        requestId: `operational-invoices:${suffix}`,
+        maxReturned,
+        txnDateRange: window,
+        includeLineItems: true,
+        includeLinkedTxns: true
+      }),
+      client.buildCreditMemoQuery({
+        requestId: `operational-credit-memos:${suffix}`,
+        maxReturned,
+        txnDateRange: window,
+        includeLineItems: true,
+        includeLinkedTxns: true
+      }),
+      client.buildPurchaseOrderQuery({
+        requestId: `operational-purchase-orders:${suffix}`,
+        maxReturned,
+        txnDateRange: window,
+        includeLineItems: true,
+        includeLinkedTxns: true
+      })
+    );
+  }
+
+  return requests;
+}
+
+function mergeSessionRequests(
+  operationalRequests: QuickBooksRecoveryRequest[],
+  recoveryRequests: QuickBooksRecoveryRequest[]
+) {
+  const seenOperationalKeys = new Set(operationalRequests.map(requestDedupeKey));
+  const uniqueRecoveryRequests = recoveryRequests.filter((request) => !seenOperationalKeys.has(requestDedupeKey(request)));
+  return [...operationalRequests, ...uniqueRecoveryRequests];
+}
+
+function requestDedupeKey(request: QuickBooksRecoveryRequest) {
+  return `${request.requestType}:${request.requestId || ""}`;
+}
+
+function getOperationalTxnDateRange(): QuickBooksDateRange {
+  return {
+    from:
+      process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_TXN_FROM ||
+      process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_TXN_FROM ||
+      subtractDays(currentDateString(), getOperationalTxnLookbackDays()),
+    to:
+      process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_TXN_TO ||
+      process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_TXN_TO ||
+      currentDateString()
+  };
+}
+
+function getOperationalModifiedDateRange(): QuickBooksDateRange {
+  return {
+    from:
+      process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_MODIFIED_FROM ||
+      subtractDays(currentDateString(), getOperationalListModifiedLookbackDays()),
+    to: process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_MODIFIED_TO || currentDateString()
+  };
+}
+
+function getOperationalTxnDateWindows() {
+  return splitDateRangeIntoWindows(getOperationalTxnDateRange(), getOperationalTxnWindowDays());
+}
+
+function getDiscoveryMaxReturned() {
+  const maxReturned = Number(process.env.QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED || 1000);
+  return Number.isFinite(maxReturned) && maxReturned > 0 ? Math.trunc(maxReturned) : 1000;
+}
+
+function getListRefreshMaxReturned(defaultValue: number) {
+  const maxReturned = Number(process.env.QUICKBOOKS_DESKTOP_LIST_REFRESH_MAX_RETURNED || defaultValue);
+  return Number.isFinite(maxReturned) && maxReturned > 0 ? Math.trunc(maxReturned) : defaultValue;
+}
+
+function getOperationalTxnLookbackDays() {
+  const days = Number(process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_TXN_LOOKBACK_DAYS || DEFAULT_OPERATIONAL_TXN_LOOKBACK_DAYS);
+  return Number.isFinite(days) && days > 0 ? Math.trunc(days) : DEFAULT_OPERATIONAL_TXN_LOOKBACK_DAYS;
+}
+
+function getOperationalTxnWindowDays() {
+  const days = Number(process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_TXN_WINDOW_DAYS || DEFAULT_OPERATIONAL_TXN_WINDOW_DAYS);
+  return Number.isFinite(days) && days > 0 ? Math.trunc(days) : DEFAULT_OPERATIONAL_TXN_WINDOW_DAYS;
+}
+
+function getOperationalListModifiedLookbackDays() {
+  const days = Number(
+    process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_LIST_MODIFIED_LOOKBACK_DAYS ||
+      DEFAULT_OPERATIONAL_LIST_MODIFIED_LOOKBACK_DAYS
+  );
+  return Number.isFinite(days) && days > 0 ? Math.trunc(days) : DEFAULT_OPERATIONAL_LIST_MODIFIED_LOOKBACK_DAYS;
+}
+
+function subtractDays(value: string, days: number) {
+  const date = new Date(value + "T00:00:00.000Z");
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function addDateDays(value: string, days: number) {
+  const date = new Date(value + "T00:00:00.000Z");
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function splitDateRangeIntoWindows(range: QuickBooksDateRange, windowDays: number) {
+  if (!range.from || !range.to) return [range];
+  const windows: QuickBooksDateRange[] = [];
+  let from = range.from;
+  while (from <= range.to) {
+    const to = minDateString(addDateDays(from, windowDays - 1), range.to);
+    windows.push({ from, to });
+    from = addDateDays(to, 1);
+  }
+  return windows;
+}
+
+function minDateString(a: string, b: string) {
+  return a <= b ? a : b;
+}
+
+function currentDateString() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function isAuthorized(username: string, password: string) {

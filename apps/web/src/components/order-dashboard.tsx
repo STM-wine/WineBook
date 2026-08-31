@@ -68,6 +68,7 @@ type Props = {
   quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
+  vinosmithLastSyncAt: string | null;
   canViewSettings?: boolean;
 };
 
@@ -98,6 +99,7 @@ export function OrderDashboard({
   quickBooksSupplierMatches,
   companyDashboard,
   quickBooksLastSyncAt,
+  vinosmithLastSyncAt,
   canViewSettings
 }: Props) {
   const router = useRouter();
@@ -185,15 +187,17 @@ export function OrderDashboard({
     [supplierSort, visibleRecommendations]
   );
   const allSupplierGroups = useMemo(() => buildSupplierGroups(displayRows), [displayRows]);
-  const dataUpdatedAt = formatSourceUpdatedAt(reportRun.completed_at);
+  const dataUpdatedAt = formatSourceUpdatedAt(vinosmithLastSyncAt || reportRun.completed_at);
   const dataLabel = dataUpdatedAt ? `VS Updated ${dataUpdatedAt}` : `VS Date ${reportRun.report_date || "Latest run"}`;
-  const dataTitle = reportRun.report_date
-    ? `Report date ${reportRun.report_date}${dataUpdatedAt ? `, completed ${dataUpdatedAt}` : ""}`
-    : undefined;
+  const dataTitle = vinosmithLastSyncAt
+    ? `Last successful Vinosmith source mirror pull ${dataUpdatedAt}.`
+    : reportRun.report_date
+      ? `Report date ${reportRun.report_date}${dataUpdatedAt ? `, completed ${dataUpdatedAt}` : ""}`
+      : undefined;
   const qbUpdatedAt = formatSourceUpdatedAt(quickBooksLastSyncAt);
   const qbDataLabel = qbUpdatedAt ? `QB Updated ${qbUpdatedAt}` : null;
   const qbDataTitle = qbUpdatedAt
-    ? `Last QuickBooks Web Connector response received ${qbUpdatedAt}.`
+    ? `Last QuickBooks invoice or credit memo mirror response received ${qbUpdatedAt}.`
     : undefined;
 
   function selectView(view: ActiveView) {

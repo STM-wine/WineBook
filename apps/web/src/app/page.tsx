@@ -57,6 +57,7 @@ export default async function HomePage() {
       quickBooksSupplierMatches={data.quickBooksSupplierMatches}
       companyDashboard={data.companyDashboard}
       quickBooksLastSyncAt={data.quickBooksLastSyncAt}
+      vinosmithLastSyncAt={data.vinosmithLastSyncAt}
       canViewSettings={hasPermission(permissions, "view_settings")}
     />
   );
@@ -74,6 +75,7 @@ type HomePageData = {
   quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
+  vinosmithLastSyncAt: string | null;
 };
 
 async function loadHomePageData(): Promise<HomePageData> {
@@ -116,6 +118,7 @@ async function loadHomePageData(): Promise<HomePageData> {
         .from("source_api_responses")
         .select("fetched_at")
         .eq("source_system", "quickbooks_desktop")
+        .in("endpoint", ["InvoiceQueryRq", "CreditMemoQueryRq"])
         .order("fetched_at", { ascending: false })
         .limit(1)
         .maybeSingle<{ fetched_at: string | null }>();
@@ -125,6 +128,8 @@ async function loadHomePageData(): Promise<HomePageData> {
       return null;
     }
   })();
+
+  const vinosmithLastSyncPromise = fetchLatestVinosmithPullAt(serviceRoleSupabase);
 
   const companyDashboardPromise = (() => {
     try {
@@ -142,14 +147,16 @@ async function loadHomePageData(): Promise<HomePageData> {
     { data: wineRequests },
     { data: priceChangeEvents },
     companyDashboard,
-    quickBooksLastSyncAt
+    quickBooksLastSyncAt,
+    vinosmithLastSyncAt
   ] = await Promise.all([
     reportRunsPromise,
     supplierCatalogPromise,
     wineRequestsPromise,
     priceChangeEventsPromise,
     companyDashboardPromise,
-    quickBooksLastSyncPromise
+    quickBooksLastSyncPromise,
+    vinosmithLastSyncPromise
   ]);
   const latestRun = reportRuns?.[0] || null;
 
@@ -165,7 +172,8 @@ async function loadHomePageData(): Promise<HomePageData> {
       priceChangeEvents: priceChangeEvents || [],
       quickBooksSupplierMatches: [],
       companyDashboard,
-      quickBooksLastSyncAt
+      quickBooksLastSyncAt,
+      vinosmithLastSyncAt
     };
   }
 
@@ -178,6 +186,8 @@ async function loadHomePageData(): Promise<HomePageData> {
     .select(`
         id,
         report_run_id,
+        ordering_source,
+        source_snapshot,
         supplier_name,
         status,
         po_number,
@@ -202,7 +212,8 @@ async function loadHomePageData(): Promise<HomePageData> {
           laid_in_cost,
           landed_cost,
           is_new_item,
-          new_item_warning
+          new_item_warning,
+          source_snapshot
         )
       `)
     .eq("report_run_id", latestRun.id)
@@ -250,8 +261,37 @@ async function loadHomePageData(): Promise<HomePageData> {
     priceChangeEvents: priceChangeEvents || [],
     quickBooksSupplierMatches,
     companyDashboard,
-    quickBooksLastSyncAt
+    quickBooksLastSyncAt,
+    vinosmithLastSyncAt
   };
+}
+
+async function fetchLatestVinosmithPullAt(supabase: ReturnType<typeof createServiceRoleClient>) {
+  try {
+    const { data: latestRun, error: runError } = await supabase
+      .from("source_sync_runs")
+      .select("started_at,completed_at")
+      .eq("source_system", "vinosmith")
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle<{ started_at: string | null; completed_at: string | null }>();
+    if (!runError && (latestRun?.completed_at || latestRun?.started_at)) {
+      return latestRun.completed_at || latestRun.started_at;
+    }
+
+    const { data: latestCheckpoint, error: checkpointError } = await supabase
+      .from("source_sync_checkpoints")
+      .select("last_synced_at")
+      .eq("source_system", "vinosmith")
+      .order("last_synced_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle<{ last_synced_at: string | null }>();
+    if (checkpointError) return null;
+    return latestCheckpoint?.last_synced_at || null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchQuickBooksSupplierMatches(supabase: ReturnType<typeof createServiceRoleClient>): Promise<SupplierQuickBooksVendorMatch[]> {

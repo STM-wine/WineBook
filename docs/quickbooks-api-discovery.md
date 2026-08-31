@@ -572,9 +572,28 @@ Optional environment variables:
 - `QUICKBOOKS_DESKTOP_OWNER_ID`
 - `QUICKBOOKS_DESKTOP_FILE_ID`
 - `QUICKBOOKS_DESKTOP_QBXML_VERSION`, defaults to `16.0`
-- `QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED`, defaults to `10`
+- `QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED`, defaults to `1000`
+- `QUICKBOOKS_DESKTOP_LIST_REFRESH_MAX_RETURNED`, defaults to
+  `QUICKBOOKS_DESKTOP_DISCOVERY_MAX_RETURNED`
+- `QUICKBOOKS_DESKTOP_OPERATIONAL_TXN_LOOKBACK_DAYS`, defaults to `45`
+- `QUICKBOOKS_DESKTOP_OPERATIONAL_TXN_WINDOW_DAYS`, defaults to `7`
+- `QUICKBOOKS_DESKTOP_OPERATIONAL_LIST_MODIFIED_LOOKBACK_DAYS`, defaults to `45`
+- `QUICKBOOKS_DESKTOP_OPERATIONAL_TXN_FROM` / `QUICKBOOKS_DESKTOP_OPERATIONAL_TXN_TO`
+  override the rolling invoice, credit memo, and purchase order transaction-date
+  window.
+- `QUICKBOOKS_DESKTOP_OPERATIONAL_MODIFIED_FROM` /
+  `QUICKBOOKS_DESKTOP_OPERATIONAL_MODIFIED_TO` override the rolling modified-date
+  window for customers, vendors, and items.
 - `QUICKBOOKS_DESKTOP_CAPTURE_RAW_RESPONSES`, set to `false` to disable local raw
   response capture
+
+Every manual Web Connector run starts with the operational refresh: sales reps,
+recently modified customers, vendors, and items, plus rolling-window invoices,
+credit memos, and purchase orders with line detail. Transaction pulls are split
+into smaller date windows so a busy sales period is not hidden behind a single
+QuickBooks page limit. If the historical recovery queue still has pending work,
+the connector appends one recovery request after the operational refresh so
+backfill progress cannot replace the usual current data pull.
 
 Raw qbXML requests, responses, and status summaries are written under ignored
 `tmp/quickbooks-desktop/<session-ticket>/` for the POC. These files may contain

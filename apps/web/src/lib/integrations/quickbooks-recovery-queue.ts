@@ -86,6 +86,10 @@ export type QuickBooksRecoveryQueueStatus = {
   error?: string;
 };
 
+type BuildNextQuickBooksRecoveryRequestsOptions = {
+  fallbackToDiscovery?: boolean;
+};
+
 export async function buildQuickBooksRecoveryQueueStatus(): Promise<QuickBooksRecoveryQueueStatus> {
   let supabase: SupabaseClient;
   try {
@@ -141,18 +145,21 @@ export async function buildQuickBooksRecoveryQueueStatus(): Promise<QuickBooksRe
   }
 }
 
-export async function buildNextQuickBooksRecoveryRequests(): Promise<QuickBooksRecoveryRequest[]> {
+export async function buildNextQuickBooksRecoveryRequests(
+  options: BuildNextQuickBooksRecoveryRequestsOptions = {}
+): Promise<QuickBooksRecoveryRequest[]> {
+  const fallbackToDiscovery = options.fallbackToDiscovery ?? true;
   let supabase: SupabaseClient;
   try {
     supabase = createServiceRoleClient();
   } catch {
-    return buildQuickBooksSalesDashboardDiscoveryRequests() as QuickBooksRecoveryRequest[];
+    return fallbackToDiscovery ? buildQuickBooksSalesDashboardDiscoveryRequests() as QuickBooksRecoveryRequest[] : [];
   }
 
   await ensureQuickBooksRecoveryQueue(supabase);
   await resetStaleRunningJobs(supabase);
   const job = await claimNextRecoveryJob(supabase);
-  if (!job) return buildQuickBooksSalesDashboardDiscoveryRequests() as QuickBooksRecoveryRequest[];
+  if (!job) return fallbackToDiscovery ? buildQuickBooksSalesDashboardDiscoveryRequests() as QuickBooksRecoveryRequest[] : [];
 
   const request = buildRequestForJob(job);
   return [{ ...request, recoveryJob: job }];
@@ -242,128 +249,30 @@ async function ensureQuickBooksRecoveryQueue(supabase: SupabaseClient) {
     });
     if (error) throw new Error(error.message);
   }
-  if (!lastSeededEnd) {
-    await completeSupersededSalesTruthRows(supabase);
-    await completeSupersededPriorityYearWeeklyRows(supabase);
-    await consolidatePendingSalesTruthWeeklyRows(supabase);
-  }
+  await resetSyntheticCompletedSalesTruthRows(supabase);
   await writeRecoverySeed(supabase, backfillEnd);
 }
 
-async function completeSupersededSalesTruthRows(supabase: SupabaseClient) {
-  for (const window of salesTruthPriorityWindows()) {
-    for (const resourceName of salesTruthRecoveryResources()) {
-      const supersededAt = new Date().toISOString();
-      const { error } = await supabase
-        .from("source_sync_checkpoints")
-        .update({
-          status: "completed",
-          diagnostics: {
-            recovery: true,
-            supersededBy: "weekly_sales_truth_recovery",
-            supersededAt
-          },
-          last_synced_at: supersededAt,
-          updated_at: supersededAt
-        })
-        .eq("source_system", SOURCE_SYSTEM)
-        .eq("resource_name", resourceName)
-        .eq("status", "pending")
-        .not("checkpoint_key", "like", `${SALES_TRUTH_WEEKLY_KEY_PREFIX}:%`)
-        .not("checkpoint_key", "like", `${SALES_TRUTH_TWO_WEEK_KEY_PREFIX}:%`)
-        .not("checkpoint_key", "like", `${SALES_TRUTH_MONTHLY_KEY_PREFIX}:%`)
-        .gte("requested_start_date", window.from || "")
-        .lte("requested_start_date", window.to || "");
-      if (error) throw new Error(error.message);
-    }
-  }
-}
-
-async function completeSupersededPriorityYearWeeklyRows(supabase: SupabaseClient) {
-  for (const window of priorityYearSalesTruthWindows()) {
-    for (const resourceName of salesTruthRecoveryResources()) {
-      await completeSupersededPriorityYearRowsByPrefix(supabase, resourceName, window, SALES_TRUTH_WEEKLY_KEY_PREFIX);
-      await completeSupersededPriorityYearRowsByPrefix(supabase, resourceName, window, SALES_TRUTH_TWO_WEEK_KEY_PREFIX);
-    }
-  }
-}
-
-async function completeSupersededPriorityYearRowsByPrefix(
-  supabase: SupabaseClient,
-  resourceName: QuickBooksRecoveryResource,
-  window: QuickBooksDateRange,
-  checkpointPrefix: string
-) {
-  const supersededAt = new Date().toISOString();
-  const { error } = await supabase
-    .from("source_sync_checkpoints")
-    .update({
-      status: "completed",
-      diagnostics: {
-        recovery: true,
-        supersededBy: "monthly_sales_truth_recovery",
-        supersededAt
-      },
-      last_synced_at: supersededAt,
-      updated_at: supersededAt
-    })
-    .eq("source_system", SOURCE_SYSTEM)
-    .eq("resource_name", resourceName)
-    .eq("status", "pending")
-    .like("checkpoint_key", `${checkpointPrefix}:%`)
-    .gte("requested_start_date", window.from || "")
-    .lte("requested_start_date", window.to || "");
-  if (error) throw new Error(error.message);
-}
-
-async function consolidatePendingSalesTruthWeeklyRows(supabase: SupabaseClient) {
-  for (const priorityWindow of ytdSalesTruthWindows()) {
-    for (const resourceName of salesTruthRecoveryResources()) {
-      const pendingWeeklyRows = await readPendingWeeklySalesTruthRows(supabase, resourceName, priorityWindow);
-      const groups = groupPendingWeeklyRowsIntoTwoWeekSpans(pendingWeeklyRows);
-
-      for (const group of groups) {
-        if (!group.rows.length) continue;
-
-        const consolidatedAt = new Date().toISOString();
-        const checkpoint = checkpointRow(resourceName, salesTruthTwoWeekKey(group), group.start, group.end);
-        const { error: upsertError } = await supabase.from("source_sync_checkpoints").upsert(
-          {
-            ...checkpoint,
-            diagnostics: {
-              recovery: true,
-              consolidatedFrom: group.rows.map((row) => row.checkpoint_key),
-              consolidatedAt
-            }
-          },
-          {
-            onConflict: "source_system,resource_name,checkpoint_key",
-            ignoreDuplicates: true
-          }
-        );
-        if (upsertError) throw new Error(upsertError.message);
-
-        const { error: updateError } = await supabase
-          .from("source_sync_checkpoints")
-          .update({
-            status: "completed",
-            diagnostics: {
-              recovery: true,
-              supersededBy: "two_week_sales_truth_recovery",
-              supersededAt: consolidatedAt,
-              consolidatedInto: checkpoint.checkpoint_key
-            },
-            last_synced_at: consolidatedAt,
-            updated_at: consolidatedAt
-          })
-          .in(
-            "id",
-            group.rows.map((row) => row.id)
-          )
-          .eq("status", "pending");
-        if (updateError) throw new Error(updateError.message);
-      }
-    }
+async function resetSyntheticCompletedSalesTruthRows(supabase: SupabaseClient) {
+  const resetAt = new Date().toISOString();
+  for (const diagnosticsKey of ["supersededBy", "consolidatedInto"]) {
+    const { error } = await supabase
+      .from("source_sync_checkpoints")
+      .update({
+        status: "pending",
+        diagnostics: {
+          recovery: true,
+          resetReason: `synthetic_${diagnosticsKey}`,
+          resetAt
+        },
+        last_synced_at: null,
+        updated_at: resetAt
+      })
+      .eq("source_system", SOURCE_SYSTEM)
+      .in("resource_name", salesTruthRecoveryResources())
+      .eq("status", "completed")
+      .not(`diagnostics->>${diagnosticsKey}`, "is", null);
+    if (error) throw new Error(error.message);
   }
 }
 
