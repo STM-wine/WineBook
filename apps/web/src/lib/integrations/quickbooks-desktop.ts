@@ -312,12 +312,16 @@ function buildQbxmlEnvelope(qbxmlVersion: string, requestXml: string) {
 
 function buildRequestElement(requestType: QuickBooksReadOnlyRequestType, parts: QuickBooksRequestBuildParts) {
   const attrs = [
-    parts.requestId ? `requestID="${escapeXmlAttribute(parts.requestId)}"` : null,
+    parts.requestId ? `requestID="${escapeXmlAttribute(toQuickBooksRequestId(parts.requestId))}"` : null,
     parts.iterator?.mode ? `iterator="${escapeXmlAttribute(parts.iterator.mode)}"` : null,
     parts.iterator?.iteratorId ? `iteratorID="${escapeXmlAttribute(parts.iterator.iteratorId)}"` : null
   ].filter(Boolean);
   const openTag = attrs.length ? `<${requestType} ${attrs.join(" ")}>` : `<${requestType}>`;
   return [openTag, ...parts.body.map((part) => indentXml(part, 2)), `</${requestType}>`].join("\n");
+}
+
+function toQuickBooksRequestId(value: string) {
+  return value.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 64);
 }
 
 function buildListQueryBody(params: QuickBooksListQueryOptions) {
@@ -330,7 +334,7 @@ function buildListQueryBody(params: QuickBooksListQueryOptions) {
     body.push(...params.fullNames.map((value) => xmlElement("FullName", value)));
   } else {
     body.push(xmlElement("ActiveStatus", params.activeStatus || "All"));
-    pushModifiedDateRange(body, params.modifiedDateRange);
+    pushListModifiedDateRange(body, params.modifiedDateRange);
   }
 
   pushIncludeRetElements(body, params.includeRetElements);
@@ -401,6 +405,12 @@ function pushModifiedDateRange(body: string[], dateRange?: QuickBooksDateRange) 
   if (dateRange.from) range.push(xmlElement("FromModifiedDate", dateRange.from));
   if (dateRange.to) range.push(xmlElement("ToModifiedDate", dateRange.to));
   body.push(xmlAggregate("ModifiedDateRangeFilter", range));
+}
+
+function pushListModifiedDateRange(body: string[], dateRange?: QuickBooksDateRange) {
+  if (!dateRange?.from && !dateRange?.to) return;
+  if (dateRange.from) body.push(xmlElement("FromModifiedDate", dateRange.from));
+  if (dateRange.to) body.push(xmlElement("ToModifiedDate", dateRange.to));
 }
 
 function pushTxnDateRange(body: string[], dateRange?: QuickBooksDateRange) {

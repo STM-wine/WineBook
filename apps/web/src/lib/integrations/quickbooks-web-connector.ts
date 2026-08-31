@@ -456,10 +456,11 @@ function getOperationalTxnDateRange(): QuickBooksDateRange {
 
 function getOperationalModifiedDateRange(): QuickBooksDateRange {
   return {
-    from:
+    from: quickBooksStartOfDay(
       process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_MODIFIED_FROM ||
-      subtractDays(currentDateString(), getOperationalListModifiedLookbackDays()),
-    to: process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_MODIFIED_TO || currentDateString()
+        subtractDays(currentDateString(), getOperationalListModifiedLookbackDays())
+    ),
+    to: quickBooksEndOfDay(process.env.QUICKBOOKS_DESKTOP_OPERATIONAL_MODIFIED_TO || currentDateString())
   };
 }
 
@@ -521,6 +522,14 @@ function splitDateRangeIntoWindows(range: QuickBooksDateRange, windowDays: numbe
 
 function minDateString(a: string, b: string) {
   return a <= b ? a : b;
+}
+
+function quickBooksStartOfDay(value: string) {
+  return value.includes("T") ? value : `${value}T00:00:00`;
+}
+
+function quickBooksEndOfDay(value: string) {
+  return value.includes("T") ? value : `${value}T23:59:59`;
 }
 
 function currentDateString() {
