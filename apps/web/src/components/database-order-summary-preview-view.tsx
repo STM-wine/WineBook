@@ -20,6 +20,7 @@ export function DatabaseOrderSummaryPreviewView() {
   const [search, setSearch] = useState("");
   const [reviewOnly, setReviewOnly] = useState(false);
   const [expandedSupplier, setExpandedSupplier] = useState<string | null>(null);
+  const [compareSupplier, setCompareSupplier] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -34,6 +35,7 @@ export function DatabaseOrderSummaryPreviewView() {
         if (!active) return;
         setState({ status: "ready", data, error: "" });
         setExpandedSupplier(data.suppliers[0]?.supplierName || null);
+        setCompareSupplier(data.suppliers.find((supplier) => supplier.draftRowCount > 0)?.supplierName || data.suppliers[0]?.supplierName || null);
       })
       .catch((error) => {
         if (!active) return;
@@ -49,6 +51,10 @@ export function DatabaseOrderSummaryPreviewView() {
     () => ["All", ...(state.data?.suppliers.map((supplier) => supplier.supplierName) || [])],
     [state.data]
   );
+  const compareSupplierRow = useMemo(() => {
+    if (!state.data) return null;
+    return state.data.suppliers.find((supplier) => supplier.supplierName === compareSupplier) || state.data.suppliers[0] || null;
+  }, [compareSupplier, state.data]);
   const visibleSuppliers = useMemo(() => {
     if (!state.data) return [];
     const needle = search.trim().toLowerCase();
@@ -101,8 +107,8 @@ export function DatabaseOrderSummaryPreviewView() {
     <>
       <section className="metric-grid">
         <MetricCard label="Preview Rows" value={formatInteger(data.summary.previewRows)} detail="Active QB item codes" tone="ink" />
-        <MetricCard label="Ready" value={formatInteger(data.summary.readyRows)} detail="Rows with source proof" tone="green" />
-        <MetricCard label="Needs Review" value={formatInteger(data.summary.reviewRows)} detail="Missing source proof" tone="gold" />
+        <MetricCard label="API-Ready" value={formatInteger(data.summary.readyRows)} detail="Full source match" tone="green" />
+        <MetricCard label="Review Notes" value={formatInteger(data.summary.reviewRows)} detail="Cleanup visibility" tone="gold" />
         <MetricCard label="Suggested" value={formatInteger(data.summary.recommendedBottles)} detail="Database bottles" tone="blue" />
         <MetricCard label="Delta vs Report" value={formatSignedInteger(data.summary.recommendedBottleDelta)} detail="Bottles" tone="plum" />
         <MetricCard label="Value" value={formatCurrency(data.summary.suggestedValue)} detail="Landed estimate" tone="green" />
@@ -155,6 +161,16 @@ export function DatabaseOrderSummaryPreviewView() {
 
         <PreferredVendorCleanupTable rows={data.topUnmappedPreferredVendorRows} count={data.summary.unmappedQuickBooksPreferredVendorRows} />
 
+        <DraftComparePanel
+          supplier={compareSupplierRow}
+          suppliers={data.suppliers}
+          selectedSupplier={compareSupplier}
+          onSelectSupplier={(supplierName) => {
+            setCompareSupplier(supplierName);
+            setExpandedSupplier(supplierName);
+          }}
+        />
+
         <div className="filter-bar">
           <label>
             Supplier
@@ -166,16 +182,22 @@ export function DatabaseOrderSummaryPreviewView() {
           </label>
           <label className="search-field">
             Search
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Wine, item #, supplier, blocker" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Wine, item #, supplier, review note" />
           </label>
           <label className="check-control">
             <input type="checkbox" checked={reviewOnly} onChange={(event) => setReviewOnly(event.target.checked)} />
-            Needs review only
+            Review only
           </label>
           <span>{formatInteger(visibleSuppliers.length)} suppliers shown</span>
         </div>
 
-        <SupplierSummaryTable suppliers={visibleSuppliers} onSelectSupplier={setExpandedSupplier} />
+        <SupplierSummaryTable
+          suppliers={visibleSuppliers}
+          onSelectSupplier={(supplierName) => {
+            setExpandedSupplier(supplierName);
+            setCompareSupplier(supplierName);
+          }}
+        />
       </section>
 
       <section className="supplier-stack database-preview-stack">
@@ -278,7 +300,7 @@ function SupplierSummaryTable({
                 </button>
               </td>
               <td><StatusPill status={supplier.sourceStatus} /></td>
-              <td>{formatInteger(supplier.rowCount)} <span className="muted-cell">/ {formatInteger(supplier.reviewRows)} review</span></td>
+              <td>{formatInteger(supplier.rowCount)} <span className="muted-cell">/ {formatInteger(supplier.reviewRows)} noted</span></td>
               <td>{formatInteger(supplier.recommendedBottles)}</td>
               <td>{formatInteger(supplier.currentReportRecommendedBottles)}</td>
               <td>{formatSignedInteger(supplier.recommendedBottleDelta)}</td>
@@ -288,6 +310,120 @@ function SupplierSummaryTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function DraftComparePanel({
+  supplier,
+  suppliers,
+  selectedSupplier,
+  onSelectSupplier
+}: {
+  supplier: DatabaseOrderSummaryPreviewSupplier | null;
+  suppliers: DatabaseOrderSummaryPreviewSupplier[];
+  selectedSupplier: string | null;
+  onSelectSupplier: (supplier: string) => void;
+}) {
+  if (!supplier) return null;
+  const databaseValue = supplier.suggestedValue;
+  const reportValue = supplier.draftRows.reduce(
+    (sum, row) => sum + (row.currentReportRecommendedQty ?? 0) * row.landedBottleCost,
+    0
+  );
+
+  return (
+    <div className="draft-compare-panel">
+      <div className="section-heading compact-heading">
+        <div>
+          <p className="eyebrow">Draft Compare</p>
+          <h2>Side-by-side suggested draft output</h2>
+          <p>Pick a supplier and compare the database recommendation against the current report recommendation.</p>
+        </div>
+        <div className="draft-compare-actions">
+          <select value={selectedSupplier || supplier.supplierName} onChange={(event) => onSelectSupplier(event.target.value)}>
+            {suppliers.map((option) => (
+              <option key={option.supplierName} value={option.supplierName}>
+                {option.supplierName}
+              </option>
+            ))}
+          </select>
+          <button className="button button-small button-outline" type="button" onClick={() => downloadDraftCompareCsv(supplier)}>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div className="draft-compare-metrics">
+        <div>
+          <span>DB Suggested</span>
+          <strong>{formatInteger(supplier.recommendedBottles)}</strong>
+          <small>{formatInteger(supplier.databaseDraftLines)} lines / {formatCurrency(databaseValue)}</small>
+        </div>
+        <div>
+          <span>Report Suggested</span>
+          <strong>{formatInteger(supplier.currentReportRecommendedBottles)}</strong>
+          <small>{formatInteger(supplier.reportDraftLines)} lines / {formatCurrency(reportValue)}</small>
+        </div>
+        <div>
+          <span>Difference</span>
+          <strong>{formatSignedInteger(supplier.recommendedBottleDelta)}</strong>
+          <small>{formatSignedCurrency(supplier.suggestedValueDelta)}</small>
+        </div>
+      </div>
+
+      <div className="table-shell draft-compare-table-shell">
+        <table className="draft-compare-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>DB Draft</th>
+              <th>Report Draft</th>
+              <th>Delta</th>
+              <th>DB Est.</th>
+              <th>Available / On Order</th>
+              <th>Sales 30/60/90</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {supplier.draftRows.length ? (
+              supplier.draftRows.map((row) => <DraftCompareLine key={row.itemCode} row={row} />)
+            ) : (
+              <tr>
+                <td colSpan={8}>No suggested lines for this supplier in either source.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DraftCompareLine({ row }: { row: DatabaseOrderSummaryPreviewRow }) {
+  const reportQty = row.currentReportRecommendedQty ?? 0;
+  return (
+    <tr>
+      <td>
+        <strong>{row.itemCode}</strong>
+        <span className="muted-cell">{row.productName}</span>
+      </td>
+      <td><strong>{formatInteger(row.recommendedQty)}</strong></td>
+      <td>{formatInteger(reportQty)}</td>
+      <td className={row.recommendedQtyDelta && row.recommendedQtyDelta !== 0 ? "delta-cell" : ""}>
+        {formatSignedInteger(row.recommendedQtyDelta ?? row.recommendedQty - reportQty)}
+      </td>
+      <td>{formatCurrency(row.landedCost)}</td>
+      <td>
+        {formatInteger(row.vinosmithAvailable)} / {formatInteger(row.quickBooksOnOrder)}
+        <span className="muted-cell">VS Available / QB PO</span>
+      </td>
+      <td>{formatInteger(row.sales30)} / {formatInteger(row.sales60)} / {formatInteger(row.sales90)}</td>
+      <td>
+        {[row.isCore ? "Core" : "", row.isBtg ? "BTG" : ""].filter(Boolean).join(" / ") || row.supplierSource}
+        {row.blockers.length ? <span className="blocker-list">{row.blockers.join("; ")}</span> : null}
+      </td>
+    </tr>
   );
 }
 
@@ -381,7 +517,7 @@ function PreviewLineRow({ row }: { row: DatabaseOrderSummaryPreviewRow }) {
 function StatusPill({ status }: { status: "ready" | "needs_review" }) {
   return (
     <span className={status === "ready" ? "status-pill status-good" : "status-pill status-progress"}>
-      {status === "ready" ? "Ready" : "Needs Review"}
+      {status === "ready" ? "API-ready" : "Review"}
     </span>
   );
 }
@@ -389,6 +525,61 @@ function StatusPill({ status }: { status: "ready" | "needs_review" }) {
 function formatSignedInteger(value: number) {
   if (value === 0) return "0";
   return `${value > 0 ? "+" : ""}${formatInteger(value)}`;
+}
+
+function formatSignedCurrency(value: number) {
+  if (value === 0) return formatCurrency(0);
+  return `${value > 0 ? "+" : ""}${formatCurrency(value)}`;
+}
+
+function csvEscape(value: string | number) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
+  return text;
+}
+
+function downloadDraftCompareCsv(supplier: DatabaseOrderSummaryPreviewSupplier) {
+  const headers = [
+    "Supplier",
+    "Item Code",
+    "Product",
+    "DB Suggested Qty",
+    "Report Suggested Qty",
+    "Delta",
+    "DB Estimated Cost",
+    "Vinosmith Available",
+    "QB On Order",
+    "Sales 30",
+    "Sales 60",
+    "Sales 90",
+    "Notes"
+  ];
+  const rows = supplier.draftRows.map((row) => [
+    supplier.supplierName,
+    row.itemCode,
+    row.productName,
+    row.recommendedQty,
+    row.currentReportRecommendedQty ?? 0,
+    row.recommendedQtyDelta ?? row.recommendedQty - (row.currentReportRecommendedQty ?? 0),
+    row.landedCost.toFixed(2),
+    row.vinosmithAvailable,
+    row.quickBooksOnOrder,
+    row.sales30,
+    row.sales60,
+    row.sales90,
+    [row.isCore ? "Core" : "", row.isBtg ? "BTG" : "", ...row.blockers].filter(Boolean).join("; ")
+  ]);
+  const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const supplierSlug = supplier.supplierName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  link.href = url;
+  link.download = `DB draft compare ${supplierSlug || "supplier"}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function formatDateTime(value: string | null) {

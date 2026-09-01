@@ -41,6 +41,7 @@ export type CompanyDashboardData = {
   businessLine: CompanyDashboardBusinessLine;
   dateFrom: string;
   dateTo: string;
+  salesThroughDate: string | null;
   summary: CompanyDashboardSummary;
   comparison: CompanyDashboardComparison | null;
   businessLineSummaries: CompanyDashboardBusinessLineSummary[];
@@ -68,14 +69,15 @@ export async function fetchCompanyDashboardData(
   const comparisonRange = businessLine === "all" ? comparableLastYearRange(range) : null;
   const includeComparisonGrossProfit = includeGrossProfit && canAutoLoadGrossProfitRange(range);
 
-  const [current, comparison] = await Promise.all([
+  const [current, comparison, salesThroughDate] = await Promise.all([
     fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit, businessLine }),
     comparisonRange
       ? fetchPeriodDashboardData(supabase, comparisonRange, filters.rep, {
           includeGrossProfit: includeComparisonGrossProfit,
           businessLine: "all"
         })
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    fetchQuickBooksSalesThroughDate(supabase, range)
   ]);
   const currentRows = comparison ? mergeLastYearNetSales(current, comparison) : current;
 
@@ -86,6 +88,7 @@ export async function fetchCompanyDashboardData(
     businessLine,
     dateFrom: range.from,
     dateTo: range.to,
+    salesThroughDate,
     summary: current.summary,
     comparison: comparison
       ? {
@@ -133,6 +136,7 @@ export function unavailableCompanyDashboardData(
     businessLine: parseCompanyDashboardBusinessLine(filters.businessLine),
     dateFrom: range.from,
     dateTo: range.to,
+    salesThroughDate: null,
     summary: emptySummary,
     comparison: comparisonRange
       ? {
@@ -230,6 +234,41 @@ async function fetchPeriodDashboardData(
       grossProfitUnavailableReason: grossProfit.unavailableReason
     }
   };
+}
+
+async function fetchQuickBooksSalesThroughDate(supabase: SupabaseClient, range: { from: string; to: string }) {
+  const [latestInvoice, latestCreditMemo] = await Promise.all([
+    fetchLatestTransactionDate(supabase, "quickbooks_invoices", range),
+    fetchLatestTransactionDate(supabase, "quickbooks_credit_memos", range)
+  ]);
+  return latestDate(latestInvoice, latestCreditMemo);
+}
+
+async function fetchLatestTransactionDate(
+  supabase: SupabaseClient,
+  table: "quickbooks_invoices" | "quickbooks_credit_memos",
+  range: { from: string; to: string }
+) {
+  const { data, error } = await supabase
+    .from(table)
+    .select("txn_date")
+    .gte("txn_date", range.from)
+    .lte("txn_date", range.to)
+    .order("txn_date", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle<{ txn_date: string | null }>();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data?.txn_date || null;
+}
+
+function latestDate(...values: Array<string | null>) {
+  return values
+    .filter((value): value is string => Boolean(value))
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
 }
 
 function mergeLastYearNetSales(current: PeriodDashboardData, comparison: PeriodDashboardData): PeriodDashboardData {

@@ -178,6 +178,20 @@ where jobname = 'daily-vinosmith-github-dispatch';
 
 The GitHub workflow intentionally has no native `schedule` block now. It should be triggered by Supabase Cron or manually from GitHub Actions.
 
+## Vinosmith Source Mirror Automation
+
+The live Vinosmith API mirror is refreshed separately from the daily emailed RB6/RADs ingest. Supabase Cron dispatches `vinosmith-source-mirror-refresh.yml` every 15 minutes, and that workflow runs `scripts/sync_vinosmith_rescue.py` for Vinosmith wines, prices, and inventory.
+
+Apply `supabase/migrations/20260821100000_schedule_vinosmith_source_mirror_refresh.sql` after the `github_actions_dispatch_token` Vault secret exists, then verify the job:
+
+```sql
+select jobid, jobname, schedule, active
+from cron.job
+where jobname = 'vinosmith-source-mirror-refresh';
+```
+
+The expected schedule is `*/15 * * * *`.
+
 The workflow uses the tracked repo `importers.csv` by default. To temporarily override it with a GitHub secret, create `IMPORTERS_CSV_BASE64` locally:
 
 ```bash

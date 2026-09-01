@@ -68,6 +68,8 @@ export async function GET(request: NextRequest) {
     .select(`
       id,
       report_run_id,
+      ordering_source,
+      source_snapshot,
       supplier_name,
       status,
       po_number,
@@ -92,7 +94,8 @@ export async function GET(request: NextRequest) {
         laid_in_cost,
         landed_cost,
         is_new_item,
-        new_item_warning
+        new_item_warning,
+        source_snapshot
       )
     `)
     .eq("report_run_id", reportRunId)

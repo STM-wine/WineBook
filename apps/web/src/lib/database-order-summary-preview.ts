@@ -147,11 +147,16 @@ export type DatabaseOrderSummaryPreviewSupplier = {
   rowCount: number;
   readyRows: number;
   reviewRows: number;
+  draftRowCount: number;
+  databaseDraftLines: number;
+  reportDraftLines: number;
   recommendedBottles: number;
   suggestedValue: number;
   currentReportRecommendedBottles: number;
   recommendedBottleDelta: number;
+  suggestedValueDelta: number;
   rows: DatabaseOrderSummaryPreviewRow[];
+  draftRows: DatabaseOrderSummaryPreviewRow[];
 };
 
 export type DatabaseOrderSummaryPreviewData = {
@@ -172,7 +177,7 @@ export type DatabaseOrderSummaryPreviewData = {
     recommendedBottleDelta: number;
     missingVinosmithAvailable: number;
     missingSupplierLogistics: number;
-    missingAppMarkers: number;
+    appCoreBtgTaggedRows: number;
     missingPackSize: number;
     missingFob: number;
     quickBooksPreferredVendorRows: number;
@@ -187,6 +192,11 @@ export type DatabaseOrderSummaryPreviewData = {
 };
 
 const PAGE_SIZE = 1000;
+const TXN_CHUNK_SIZE = 350;
+const REVIEW_MISSING_VINOSMITH_AVAILABLE = "Review: no latest Vinosmith Available";
+const REVIEW_MISSING_SUPPLIER_LOGISTICS = "Review: no Supplier Logistics match";
+const REVIEW_MISSING_PACK_SIZE = "Review: no QuickBooks PACK SIZE";
+const REVIEW_MISSING_FOB = "Review: no QuickBooks FOB/cost";
 
 export async function fetchDatabaseOrderSummaryPreview(
   supabase: PreviewClient
@@ -327,11 +337,11 @@ export async function fetchDatabaseOrderSummaryPreview(
       suggestedValue,
       currentReportRecommendedBottles,
       recommendedBottleDelta: recommendedBottles - currentReportRecommendedBottles,
-      missingVinosmithAvailable: rows.filter((row) => row.blockers.includes("Missing Vinosmith Available")).length,
-      missingSupplierLogistics: rows.filter((row) => row.blockers.includes("Missing Supplier Logistics")).length,
-      missingAppMarkers: rows.filter((row) => row.blockers.includes("Missing app Core/BTG marker")).length,
-      missingPackSize: rows.filter((row) => row.blockers.includes("Missing QuickBooks PACK SIZE")).length,
-      missingFob: rows.filter((row) => row.blockers.includes("Missing QuickBooks FOB/cost")).length,
+      missingVinosmithAvailable: rows.filter((row) => row.blockers.includes(REVIEW_MISSING_VINOSMITH_AVAILABLE)).length,
+      missingSupplierLogistics: rows.filter((row) => row.blockers.includes(REVIEW_MISSING_SUPPLIER_LOGISTICS)).length,
+      appCoreBtgTaggedRows: rows.filter((row) => row.isBtg || row.isCore).length,
+      missingPackSize: rows.filter((row) => row.blockers.includes(REVIEW_MISSING_PACK_SIZE)).length,
+      missingFob: rows.filter((row) => row.blockers.includes(REVIEW_MISSING_FOB)).length,
       quickBooksPreferredVendorRows,
       quickBooksPreferredVendorMappedRows,
       unmappedQuickBooksPreferredVendorRows: quickBooksPreferredVendorRows - quickBooksPreferredVendorMappedRows,
@@ -347,7 +357,9 @@ export async function fetchDatabaseOrderSummaryPreview(
       "Diagnostic only: live Order Review still uses the current report-created recommendations.",
       "Preview inventory uses Vinosmith Available only. Hold, Future, and Pending Sync are shown as context but are not subtracted.",
       "Supplier grouping uses QuickBooks item preferred vendor first. Rows with unmapped preferred vendors are shown as cleanup instead of being hidden by Vinosmith importer fallback.",
-      "Old report anomalies should be ignored here unless the same item fails with current QB/Vinosmith/app-owned source fields."
+      "Review notes highlight source gaps for cleanup. Old, inactive, or direct-import suppliers do not have to block moving the new ordering path forward.",
+      "Old report anomalies should be ignored here unless the same item fails with current QB/Vinosmith/app-owned source fields.",
+      "Core/BTG comes from app-owned product markers. Items without a marker row are treated as not Core/BTG."
     ]
   };
 }
@@ -384,17 +396,15 @@ function buildPreviewRow({
   referenceDate: string;
 }): DatabaseOrderSummaryPreviewRow {
   const blockers: string[] = [];
-  if (!wine) blockers.push("Missing exact Vinosmith code");
-  if (!inventory) blockers.push("Missing Vinosmith Available");
-  if (!supplier) blockers.push("Missing Supplier Logistics");
-  if (!preferredVendorListId) blockers.push("Missing QuickBooks preferred vendor");
-  if (preferredVendorListId && !hasMappedQuickBooksPreferredVendor) blockers.push("Preferred QB vendor is not mapped to Supplier Logistics");
-  if (!marker) blockers.push("Missing app Core/BTG marker");
-
+  if (!wine) blockers.push("Review: no exact Vinosmith code");
+  if (!inventory) blockers.push(REVIEW_MISSING_VINOSMITH_AVAILABLE);
+  if (!supplier) blockers.push(REVIEW_MISSING_SUPPLIER_LOGISTICS);
+  if (!preferredVendorListId) blockers.push("Review: no QuickBooks preferred vendor");
+  if (preferredVendorListId && !hasMappedQuickBooksPreferredVendor) blockers.push("Review: QB preferred vendor is not mapped to Supplier Logistics");
   const packSizeProof = packSizeFromQuickBooks(item, settings);
-  if (!packSizeProof.fromCustomField) blockers.push("Missing QuickBooks PACK SIZE");
+  if (!packSizeProof.fromCustomField) blockers.push(REVIEW_MISSING_PACK_SIZE);
   const fob = numberOrNull(item.purchase_cost) ?? numberOrNull(item.average_cost) ?? 0;
-  if (fob <= 0) blockers.push("Missing QuickBooks FOB/cost");
+  if (fob <= 0) blockers.push(REVIEW_MISSING_FOB);
 
   const quickBooksOnOrder = Math.max(0, asNumber(item.quantity_on_order));
   const vinosmithAvailable = Math.max(0, inventory?.available ?? 0);
@@ -472,6 +482,20 @@ function buildSupplierPreview(rows: DatabaseOrderSummaryPreviewRow[]): DatabaseO
       const recommendedBottles = sum(supplierRows, (row) => row.recommendedQty);
       const currentReportRecommendedBottles = sum(supplierRows, (row) => row.currentReportRecommendedQty ?? 0);
       const readyRows = supplierRows.filter((row) => row.sourceStatus === "ready").length;
+      const draftRows = supplierRows
+        .filter((row) => row.recommendedQty > 0 || (row.currentReportRecommendedQty ?? 0) > 0)
+        .sort(
+          (a, b) =>
+            Math.max(b.recommendedQty, b.currentReportRecommendedQty ?? 0) -
+              Math.max(a.recommendedQty, a.currentReportRecommendedQty ?? 0) ||
+            Math.abs(b.recommendedQtyDelta ?? 0) - Math.abs(a.recommendedQtyDelta ?? 0) ||
+            a.productName.localeCompare(b.productName)
+        );
+      const suggestedValue = sum(supplierRows, (row) => row.landedCost);
+      const currentReportSuggestedValue = sum(
+        supplierRows,
+        (row) => (row.currentReportRecommendedQty ?? 0) * row.landedBottleCost
+      );
       const sourceStatus: DatabaseOrderSummaryPreviewSupplier["sourceStatus"] =
         readyRows === supplierRows.length ? "ready" : "needs_review";
       return {
@@ -480,13 +504,18 @@ function buildSupplierPreview(rows: DatabaseOrderSummaryPreviewRow[]): DatabaseO
         rowCount: supplierRows.length,
         readyRows,
         reviewRows: supplierRows.length - readyRows,
+        draftRowCount: draftRows.length,
+        databaseDraftLines: supplierRows.filter((row) => row.recommendedQty > 0).length,
+        reportDraftLines: supplierRows.filter((row) => (row.currentReportRecommendedQty ?? 0) > 0).length,
         recommendedBottles,
-        suggestedValue: sum(supplierRows, (row) => row.landedCost),
+        suggestedValue,
         currentReportRecommendedBottles,
         recommendedBottleDelta: recommendedBottles - currentReportRecommendedBottles,
+        suggestedValueDelta: suggestedValue - currentReportSuggestedValue,
         rows: supplierRows
           .sort((a, b) => b.recommendedQty - a.recommendedQty || b.sales30 - a.sales30 || a.productName.localeCompare(b.productName))
-          .slice(0, 40)
+          .slice(0, 40),
+        draftRows
       };
     })
     .sort((a, b) => b.suggestedValue - a.suggestedValue || a.supplierName.localeCompare(b.supplierName));

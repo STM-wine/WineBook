@@ -3180,7 +3180,7 @@ th:nth-child(12) .table-sort-button {
 }
 
 .supplier-section {
-  padding: 20px;
+  padding: 14px;
 }
 
 .supplier-section summary {
@@ -3198,13 +3198,13 @@ th:nth-child(12) .table-sort-button {
 .supplier-section summary div {
   align-items: center;
   display: flex;
-  gap: 14px;
+  gap: 10px;
 }
 
 .supplier-summary-actions {
   align-items: center;
   display: flex;
-  gap: 28px;
+  gap: 18px;
   margin-left: auto;
 }
 
@@ -3294,16 +3294,37 @@ th:nth-child(12) .table-sort-button {
 }
 
 .supplier-metrics {
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
-  margin: 22px 0;
+  gap: 14px;
+  grid-template-columns: repeat(6, minmax(132px, 1fr));
+  margin: 14px 0 16px;
+}
+
+.supplier-metrics .metric-card {
+  min-height: 132px;
+  padding: 18px;
+}
+
+.supplier-metrics .metric-card span {
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.supplier-metrics .metric-card strong {
+  font-size: clamp(28px, 3vw, 40px);
+}
+
+.supplier-metrics .metric-card p {
+  font-size: 15px;
+  line-height: 1.15;
+  margin: 12px 0 0;
 }
 
 .supplier-workbench-options {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 18px;
-  margin: 0 0 12px;
+  gap: 14px;
+  margin: 0 0 10px;
 }
 
 .target-weeks-control {
@@ -3313,7 +3334,7 @@ th:nth-child(12) .table-sort-button {
   font-weight: 850;
   gap: 6px;
   letter-spacing: 0.08em;
-  min-width: 160px;
+  min-width: 140px;
   text-transform: uppercase;
 }
 
@@ -3322,8 +3343,8 @@ th:nth-child(12) .table-sort-button {
   border: 1px solid var(--line);
   border-radius: 10px;
   color: var(--ink);
-  height: 44px;
-  padding: 10px 12px;
+  height: 40px;
+  padding: 8px 10px;
 }
 
 .clear-approvals-button {
@@ -3341,7 +3362,7 @@ th:nth-child(12) .table-sort-button {
 
 .workbench-grid {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
   --ag-background-color: #ffffff;
   --ag-foreground-color: #2d3340;
@@ -3352,10 +3373,10 @@ th:nth-child(12) .table-sort-button {
   --ag-row-hover-color: #f7f4ed;
   --ag-selected-row-background-color: #eef5ed;
   --ag-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --ag-font-size: 14px;
-  --ag-header-height: 64px;
-  --ag-row-height: 42px;
-  --ag-cell-horizontal-padding: 12px;
+  --ag-font-size: 13px;
+  --ag-header-height: 50px;
+  --ag-row-height: 36px;
+  --ag-cell-horizontal-padding: 8px;
 }
 
 .workbench-grid .ag-header-cell-label {
@@ -3375,7 +3396,7 @@ th:nth-child(12) .table-sort-button {
 
 .workbench-grid .ag-header-cell {
   align-items: stretch;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   line-height: 1.15;
 }
@@ -3408,7 +3429,7 @@ th:nth-child(12) .table-sort-button {
   align-items: center;
   display: flex;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.15;
   min-height: 100%;
 }
 
@@ -3430,9 +3451,9 @@ th:nth-child(12) .table-sort-button {
   align-items: center;
   border-left: 4px solid transparent;
   font-weight: 700;
-  line-height: 1.25;
-  padding-bottom: 6px;
-  padding-top: 6px;
+  line-height: 1.18;
+  padding-bottom: 4px;
+  padding-top: 4px;
   white-space: normal;
 }
 
@@ -3456,7 +3477,7 @@ th:nth-child(12) .table-sort-button {
   align-items: flex-start;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   overflow: visible;
   white-space: normal;
   width: 100%;
@@ -3486,10 +3507,10 @@ th:nth-child(12) .table-sort-button {
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 850;
-  height: 34px;
-  padding: 6px 10px;
+  height: 28px;
+  padding: 5px 7px;
   text-transform: uppercase;
   width: 100%;
 }
@@ -3543,10 +3564,10 @@ th:nth-child(12) .table-sort-button {
 }
 
 .workbench-grid .approval-cell .ag-checkbox-input-wrapper {
-  font-size: 23px;
-  height: 23px;
-  line-height: 23px;
-  width: 23px;
+  font-size: 20px;
+  height: 20px;
+  line-height: 20px;
+  width: 20px;
 }
 
 .workbench-grid .approval-cell .ag-checkbox-input-wrapper.ag-checked::after {
@@ -5874,6 +5895,28 @@ tr.has-recommendation .sticky-name {
   gap: 8px;
 }
 
+.company-table-title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.company-table-title-row span {
+  background: #eef5ed;
+  border: 1px solid #bfd4bb;
+  border-radius: 999px;
+  color: var(--green);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 6px 9px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .company-rep-table,
 .company-account-table {
   min-width: 1120px;
@@ -6414,6 +6457,85 @@ th.numeric .company-sort-button {
 .preferred-vendor-cleanup-table-shell th:last-child,
 .preferred-vendor-cleanup-table-shell td:last-child {
   min-width: 320px;
+}
+
+.draft-compare-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.draft-compare-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.draft-compare-actions select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  min-width: min(360px, 100%);
+  padding: 10px 12px;
+}
+
+.draft-compare-metrics {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.draft-compare-metrics div {
+  background: #f8faf7;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.draft-compare-metrics span,
+.draft-compare-metrics small {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.draft-compare-metrics strong {
+  display: block;
+  font-size: 26px;
+  margin: 4px 0;
+}
+
+.draft-compare-table-shell {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.draft-compare-table th,
+.draft-compare-table td {
+  min-width: 120px;
+  vertical-align: top;
+}
+
+.draft-compare-table th:first-child,
+.draft-compare-table td:first-child {
+  min-width: 320px;
+}
+
+.draft-compare-table th:last-child,
+.draft-compare-table td:last-child {
+  min-width: 340px;
+}
+
+.delta-cell {
+  color: var(--brand-red);
+  font-weight: 800;
 }
 
 .text-link-button {

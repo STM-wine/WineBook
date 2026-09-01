@@ -264,6 +264,8 @@ export type DashboardMetrics = {
 export type PurchaseOrderDraft = {
   id: string;
   report_run_id: string | null;
+  ordering_source?: "report" | "database" | string | null;
+  source_snapshot?: Record<string, unknown> | null;
   supplier_name: string | null;
   status: string;
   po_number: string | null;
@@ -291,6 +293,7 @@ export type PurchaseOrderLine = {
   landed_cost: number | string | null;
   is_new_item?: boolean | null;
   new_item_warning?: string | null;
+  source_snapshot?: Record<string, unknown> | null;
 };
 
 export type PurchaseOrderDraftWithLines = PurchaseOrderDraft & {

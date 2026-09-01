@@ -17,11 +17,7 @@ export default async function LoginPage() {
       <section className="login-panel">
         <div>
           <img className="login-logo" src="/brand/stem-intelligence-logo-cropped.png" alt="Stem Intelligence" />
-          <h1>Sign in to Stem ordering</h1>
-          <p className="muted">
-            Use a Stem-approved account to review supplier recommendations, approve order quantities,
-            and draft purchase orders.
-          </p>
+          <h1>Sign in</h1>
         </div>
         <LoginForm />
       </section>

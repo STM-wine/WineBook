@@ -32,6 +32,81 @@ function orderPathLabel(path: "stateside" | "di") {
   return path === "di" ? "Direct Import" : "Stateside";
 }
 
+function buildLineSourceSnapshot(input: {
+  row: Recommendation;
+  reportRunId: string;
+  approvedQty: number;
+  recommendedQty: number;
+  trucking: number;
+}) {
+  const { row, reportRunId, approvedQty, recommendedQty, trucking } = input;
+  return {
+    ordering_source: "report",
+    report_run_id: reportRunId,
+    recommendation_id: row.supplier_catalog_wine_id ? null : row.id,
+    supplier_catalog_wine_id: row.supplier_catalog_wine_id || null,
+    recommendation_status: row.recommendation_status || null,
+    approved_qty: approvedQty,
+    recommended_qty: recommendedQty,
+    product_code: row.product_code,
+    planning_sku: row.planning_sku,
+    true_available: asNumber(row.true_available),
+    on_order: asNumber(row.on_order),
+    last_30_day_sales: asNumber(row.last_30_day_sales),
+    last_60_day_sales: asNumber(row.last_60_day_sales),
+    last_90_day_sales: asNumber(row.last_90_day_sales),
+    next_30_day_forecast: asNumber(row.next_30_day_forecast),
+    next_60_day_forecast: asNumber(row.next_60_day_forecast),
+    next_90_day_forecast: asNumber(row.next_90_day_forecast),
+    weekly_velocity: asNumber(row.weekly_velocity),
+    weeks_on_hand: asNumber(row.weeks_on_hand),
+    weeks_on_hand_with_on_order: asNumber(row.weeks_on_hand_with_on_order),
+    fob: asNumber(row.fob),
+    pack_size: asNumber(row.pack_size),
+    trucking_cost_per_bottle: trucking,
+    is_core: Boolean(row.is_core),
+    is_btg: Boolean(row.is_btg),
+    order_path: row.order_path || "stateside"
+  };
+}
+
+function buildDraftSourceSnapshot(input: {
+  supplier: string;
+  reportRunId: string;
+  path: "stateside" | "di";
+  metadata: SupplierLogistics | undefined;
+  lines: Array<{
+    recommended_qty: number;
+    approved_qty: number;
+    wine_cost: number;
+    laid_in_cost: number;
+    landed_cost: number;
+  }>;
+}) {
+  const { supplier, reportRunId, path, metadata, lines } = input;
+  return {
+    ordering_source: "report",
+    report_run_id: reportRunId,
+    supplier_name: supplier,
+    order_path: path,
+    supplier_logistics: {
+      trucking_cost_per_bottle: asNumber(metadata?.trucking_cost_per_bottle),
+      pick_up_location: metadata?.pick_up_location || null,
+      eta_days: metadata?.eta_days || null,
+      freight_forwarder: metadata?.freight_forwarder || null,
+      tdm: metadata?.tdm || null
+    },
+    totals: {
+      lines: lines.length,
+      recommended_qty: lines.reduce((sum, line) => sum + line.recommended_qty, 0),
+      approved_qty: lines.reduce((sum, line) => sum + line.approved_qty, 0),
+      wine_cost: lines.reduce((sum, line) => sum + line.wine_cost, 0),
+      laid_in_cost: lines.reduce((sum, line) => sum + line.laid_in_cost, 0),
+      landed_cost: lines.reduce((sum, line) => sum + line.landed_cost, 0)
+    }
+  };
+}
+
 async function requireWriteAccess() {
   const supabase = await createClient();
   const {
@@ -203,6 +278,7 @@ export async function POST(request: Request) {
         .insert({
           supplier_name: supplier,
           report_run_id: reportRunId,
+          ordering_source: "report",
           status: "draft",
           notes: [
             "Created from global PO Drafts action.",
@@ -289,7 +365,14 @@ export async function POST(request: Request) {
         landed_cost: wineCost + laidInCost,
         line_cost: wineCost,
         is_new_item: Boolean(row.is_new_item),
-        new_item_warning: row.new_item_warning || null
+        new_item_warning: row.new_item_warning || null,
+        source_snapshot: buildLineSourceSnapshot({
+          row,
+          reportRunId,
+          approvedQty,
+          recommendedQty,
+          trucking
+        })
       };
     });
 
@@ -314,6 +397,26 @@ export async function POST(request: Request) {
       continue;
     }
 
+    const draftSnapshot = buildDraftSourceSnapshot({
+      supplier,
+      reportRunId,
+      path,
+      metadata,
+      lines: linePayloads
+    });
+    const { error: draftSnapshotError } = await supabase
+      .from("purchase_order_drafts")
+      .update({
+        ordering_source: "report",
+        source_snapshot: draftSnapshot
+      })
+      .eq("id", draft.id);
+
+    if (draftSnapshotError) {
+      errors.push(`${supplier}: ${draftSnapshotError.message}`);
+      continue;
+    }
+
     if (insertPayloads.length || updatePayloads.length || staleLineIds.length) {
       const summary = `${supplier} (${orderPathLabel(path)})`;
       if (activeDraftsBySupplierPath.has(groupKey)) {
@@ -331,6 +434,8 @@ export async function POST(request: Request) {
     .select(`
       id,
       report_run_id,
+      ordering_source,
+      source_snapshot,
       supplier_name,
       status,
       po_number,
@@ -355,7 +460,8 @@ export async function POST(request: Request) {
         laid_in_cost,
         landed_cost,
         is_new_item,
-        new_item_warning
+        new_item_warning,
+        source_snapshot
       )
     `)
     .eq("report_run_id", reportRunId)

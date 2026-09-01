@@ -194,7 +194,7 @@ function buildLineItemTestRow({
   if (!wine) notes.push("No Vinosmith wine by exact item code");
   if (wine && !inventory) notes.push("No latest Vinosmith inventory snapshot");
   if (quickBooksItem && !packSizeProof) notes.push("No QuickBooks PACK SIZE custom field");
-  notes.push("Core/BTG marker currently comes from report until app-owned markers exist");
+  notes.push("DB Order Summary Preview uses app-owned Core/BTG markers; this legacy line-item bridge keeps report context for comparison.");
 
   return {
     itemCode: normalizeCode(reportRow.product_code),

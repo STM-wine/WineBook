@@ -86,9 +86,13 @@ const OrderPathRenderer = (params: ICellRendererParams<WorkbenchRow>) => {
     </select>
   );
 };
-const rowHeightForWineName = (name: string) => {
-  const lines = Math.max(1, Math.ceil(name.length / 42));
-  return Math.max(42, Math.min(112, 22 + lines * 18));
+const hasWineBadges = (row?: Recommendation | null) =>
+  Boolean(row?.is_new_item || (row && activeFreeGoodsForRow(row).length > 0) || (row && isDiOpportunity(row)));
+const rowHeightForWine = (row?: WorkbenchRow | null) => {
+  const name = row?.wine_display ?? "";
+  const lines = Math.max(1, Math.ceil(name.length / 52));
+  const badgeSpace = hasWineBadges(row) ? 18 : 0;
+  return Math.max(badgeSpace ? 48 : 36, Math.min(96, 18 + lines * 16 + badgeSpace));
 };
 const roundUpToPack = (qty: number, packSize: number) => {
   const pack = Math.max(1, Math.round(packSize || 1));
@@ -164,8 +168,8 @@ export function WorkbenchGrid({
         field: "wine_display",
         pinned: "left",
         lockPinned: true,
-        width: 360,
-        minWidth: 300,
+        width: 340,
+        minWidth: 280,
         cellClass: (params: CellClassParams<WorkbenchRow>) =>
           asNumber(params.data?.recommended_qty_rounded) > 0
             ? "wine-cell text-cell has-recommendation"
@@ -181,7 +185,7 @@ export function WorkbenchGrid({
         field: "approved",
         pinned: "left",
         lockPinned: true,
-        width: 92,
+        width: 78,
         editable: true,
         headerTooltip: "Check to include this wine in the next PO draft. The approved quantity is saved automatically.",
         headerClass: "center-header",
@@ -195,7 +199,7 @@ export function WorkbenchGrid({
         field: "order_path",
         pinned: "left",
         lockPinned: true,
-        width: 118,
+        width: 100,
         headerTooltip: "Buyer-controlled procurement path. DI is available only for seeded eligible brands and is never selected automatically.",
         headerClass: "center-header",
         cellClass: "editable-cell center-cell",
@@ -207,7 +211,7 @@ export function WorkbenchGrid({
         field: "weeks_on_hand_with_on_order",
         pinned: "left",
         lockPinned: true,
-        width: 128,
+        width: 112,
         headerTooltip: "Formula: (True Available + On Order) / Weekly Velocity.",
         headerClass: "number-header",
         cellClass: "center-cell",
@@ -220,7 +224,7 @@ export function WorkbenchGrid({
         field: "working_weeks",
         pinned: "left",
         lockPinned: true,
-        width: 138,
+        width: 112,
         editable: true,
         headerTooltip: "Formula: (True Available + On Order + New PO Qty) / Weekly Velocity. Editing this recalculates New PO Qty.",
         headerClass: "number-header",
@@ -238,7 +242,7 @@ export function WorkbenchGrid({
         field: "working_qty",
         pinned: "left",
         lockPinned: true,
-        width: 118,
+        width: 96,
         editable: true,
         headerTooltip: "Suggested bottles needed to reach target coverage after available inventory and open orders.",
         headerClass: "number-header",
@@ -256,7 +260,7 @@ export function WorkbenchGrid({
         field: "estimated_cost",
         pinned: "left",
         lockPinned: true,
-        width: 112,
+        width: 104,
         headerTooltip: "Formula: Recommended Qty x bottle cost, including available landed-cost data where present.",
         headerClass: "number-header",
         cellClass: "center-cell",
@@ -267,7 +271,7 @@ export function WorkbenchGrid({
       {
         headerName: "Free Goods",
         field: "free_goods_summary",
-        width: 210,
+        width: 180,
         headerTooltip: "Active catalog free-goods programs. Informational only; PO quantities and financials are unchanged.",
         cellClass: "text-cell free-goods-grid-cell",
         cellStyle: LEFT_CELL_STYLE,
@@ -277,7 +281,7 @@ export function WorkbenchGrid({
       {
         headerName: "True Available",
         field: "true_available",
-        width: 126,
+        width: 108,
         headerTooltip:
           "Current report value. The new ordering source path will use Vinosmith Available inventory.",
         headerClass: "number-header",
@@ -288,7 +292,7 @@ export function WorkbenchGrid({
       {
         headerName: "On Order",
         field: "on_order",
-        width: 104,
+        width: 92,
         headerTooltip: "From RB6 On Order. Bottles already ordered but not yet received.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -298,7 +302,7 @@ export function WorkbenchGrid({
       {
         headerName: "30d Sales",
         field: "last_30_day_sales",
-        width: 108,
+        width: 96,
         headerTooltip: "Trailing 30-day bottle sales anchored to the latest RADs sales date.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -310,7 +314,7 @@ export function WorkbenchGrid({
             {
               headerName: "60d Sales",
               field: "last_60_day_sales" as const,
-              width: 108,
+              width: 96,
               headerTooltip: "Trailing 60-day bottle sales anchored to the latest RADs sales date.",
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
@@ -320,7 +324,7 @@ export function WorkbenchGrid({
             {
               headerName: "90d Sales",
               field: "last_90_day_sales" as const,
-              width: 108,
+              width: 96,
               headerTooltip: "Trailing 90-day bottle sales anchored to the latest RADs sales date.",
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
@@ -332,7 +336,7 @@ export function WorkbenchGrid({
       {
         headerName: "Next 30d Forecast",
         field: "next_30_day_forecast",
-        width: 138,
+        width: 122,
         headerTooltip: "Same upcoming 30-day calendar window last year. This is a seasonal reference, not a predictive model.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -344,7 +348,7 @@ export function WorkbenchGrid({
             {
               headerName: "LY Next 60d Forecast",
               field: "next_60_day_forecast" as const,
-              width: 150,
+              width: 132,
               headerTooltip: "Same upcoming 60-day calendar window last year.",
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
@@ -354,7 +358,7 @@ export function WorkbenchGrid({
             {
               headerName: "LY Next 90d Forecast",
               field: "next_90_day_forecast" as const,
-              width: 150,
+              width: 132,
               headerTooltip: "Same upcoming 90-day calendar window last year.",
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
@@ -366,7 +370,7 @@ export function WorkbenchGrid({
       {
         headerName: "Weekly Velocity",
         field: "weekly_velocity",
-        width: 128,
+        width: 114,
         headerTooltip: "Formula: 30d Sales / 4.345. Converts recent monthly bottle sales into weekly pace.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -377,7 +381,7 @@ export function WorkbenchGrid({
         headerName: "Velocity Trend",
         valueGetter: (params) =>
           params.data?.velocity_trend_label || `${formatDecimal(asNumber(params.data?.velocity_trend_pct), 0)}%`,
-        width: 130,
+        width: 112,
         headerTooltip: "Formula: ((Last 30d Sales - Prior 30d Sales) / Prior 30d Sales) x 100.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
@@ -386,7 +390,7 @@ export function WorkbenchGrid({
       {
         headerName: "Item #",
         field: "product_code",
-        width: 110,
+        width: 98,
         cellClass: "center-cell",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: (params: ICellRendererParams<WorkbenchRow>) =>
@@ -402,7 +406,7 @@ export function WorkbenchGrid({
       {
         headerName: "Rank",
         field: "importer_rank",
-        width: 82,
+        width: 70,
         headerTooltip: "Supplier-level velocity rank using 12-month sales when available, otherwise 90/60/30-day sales.",
         cellClass: "center-cell",
         cellStyle: CENTER_CELL_STYLE,
@@ -458,8 +462,8 @@ export function WorkbenchGrid({
     }
   }
 
-  const totalRowHeight = rowData.reduce((sum, row) => sum + rowHeightForWineName(row.wine_display), 0);
-  const gridHeight = Math.min(620, Math.max(240, 96 + totalRowHeight));
+  const totalRowHeight = rowData.reduce((sum, row) => sum + rowHeightForWine(row), 0);
+  const gridHeight = Math.min(620, Math.max(220, 76 + totalRowHeight));
 
   if (!isMounted) {
     return (
@@ -478,9 +482,9 @@ export function WorkbenchGrid({
         theme="legacy"
         getRowId={(params) => params.data.id}
         getRowClass={(params) => (params.data?.is_new_item ? "new-item-row" : undefined)}
-        getRowHeight={(params) => rowHeightForWineName(params.data?.wine_display ?? "")}
+        getRowHeight={(params) => rowHeightForWine(params.data)}
         onCellValueChanged={onCellValueChanged}
-        headerHeight={64}
+        headerHeight={50}
         singleClickEdit
         stopEditingWhenCellsLoseFocus
         suppressClipboardApi

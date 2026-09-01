@@ -1,0 +1,46 @@
+name: Vinosmith Source Mirror Refresh
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: vinosmith-source-mirror-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-source-mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      VINOSMITH_API_TOKEN: ${{ secrets.VINOSMITH_API_TOKEN }}
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-source-sync.txt
+
+      - name: Refresh Vinosmith source mirror
+        run: |
+          DELIVERY_END_DATE="$(TZ=America/Phoenix date +%F)"
+          DELIVERY_START_DATE="$(TZ=America/Phoenix date -d '14 days ago' +%F)"
+          python scripts/sync_vinosmith_rescue.py \
+            --resource supplier_orders \
+            --resource wines \
+            --resource prices \
+            --resource inventory \
+            --delivery-start-date "$DELIVERY_START_DATE" \
+            --delivery-end-date "$DELIVERY_END_DATE" \
+            --sync-type daily_refresh \
+            --require-supabase

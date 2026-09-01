@@ -137,6 +137,8 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     : selectedRangeLabel;
   const scopedPeriodLabel = data.businessLine === "all" ? displayPeriodLabel : `${displayPeriodLabel} ${businessLineLabel(data.businessLine)}`;
   const compactScopedPeriodLabel = compactDashboardPeriodLabel(scopedPeriodLabel);
+  const throughLabel = formatThroughDate(data.salesThroughDate);
+  const tableRangeLabel = formatDateRange(data.dateFrom, data.dateTo);
   const comparison = data.comparison;
   const netSalesDelta = comparison ? data.summary.netSales - comparison.summary.netSales : null;
   const netSalesDeltaRate = comparison ? changeRate(data.summary.netSales, comparison.summary.netSales) : null;
@@ -560,8 +562,11 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       <section className="company-dashboard-panel">
         <div className="panel-heading-row">
           <div>
-            <h2>{scopedPeriodLabel} Sales by Rep</h2>
-            <p>Click a rep to drill into account sales.</p>
+            <div className="company-table-title-row">
+              <h2>{scopedPeriodLabel} Sales by Rep</h2>
+              <span>{throughLabel}</span>
+            </div>
+            <p>Selected range {tableRangeLabel} · Click a rep to drill into account sales.</p>
           </div>
           {isLoading ? <span className="data-pill">Loading</span> : null}
         </div>
@@ -632,8 +637,11 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       <section className="company-dashboard-panel">
         <div className="panel-heading-row">
           <div>
-            <h2>{selectedRep ? `${selectedRep} Account Summary` : `${scopedPeriodLabel} Account Summary`}</h2>
-            <p>{selectedRep ? "Filtered from the selected rep." : "Company account sales, descending by net sales."}</p>
+            <div className="company-table-title-row">
+              <h2>{selectedRep ? `${selectedRep} Account Summary` : `${scopedPeriodLabel} Account Summary`}</h2>
+              <span>{throughLabel}</span>
+            </div>
+            <p>Selected range {tableRangeLabel} · {selectedRep ? "Filtered from the selected rep." : "Company account sales, descending by net sales."}</p>
           </div>
           <div className="company-panel-actions">
             {isDrilldownLoading ? <span className="data-pill">Loading</span> : null}
@@ -1497,6 +1505,11 @@ function formatDateRange(from: string | null, to: string | null) {
   if (!from && !to) return "-";
   if (from === to) return formatDate(from);
   return `${formatDate(from)} - ${formatDate(to)}`;
+}
+
+function formatThroughDate(value: string | null) {
+  const formatted = formatDate(value);
+  return formatted === "-" ? "No QB sales mirrored" : `QB through ${formatted}`;
 }
 
 function formatDateTime(value: string) {

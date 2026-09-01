@@ -58,9 +58,14 @@ jobs:
 
       - name: Refresh Vinosmith source mirror
         run: |
+          DELIVERY_END_DATE="$(TZ=America/Phoenix date +%F)"
+          DELIVERY_START_DATE="$(TZ=America/Phoenix date -d '14 days ago' +%F)"
           python scripts/sync_vinosmith_rescue.py \
+            --resource supplier_orders \
             --resource wines \
             --resource prices \
             --resource inventory \
+            --delivery-start-date "$DELIVERY_START_DATE" \
+            --delivery-end-date "$DELIVERY_END_DATE" \
             --sync-type daily_refresh \
             --require-supabase
