@@ -1,0 +1,65 @@
+name: Gross Profit Rollup Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "Comma-separated years to refresh in order"
+        required: false
+        default: "2025,2026"
+      from:
+        description: "Optional start date in YYYY-MM-DD"
+        required: false
+      to:
+        description: "Optional end date in YYYY-MM-DD; still capped to the stable cutoff"
+        required: false
+      force:
+        description: "Rebuild days even if the current formula version is already stored"
+        required: false
+        default: "false"
+  schedule:
+    - cron: "20 8 * * *"
+
+concurrency:
+  group: gross-profit-rollup-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-gross-profit-rollups:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci --ignore-scripts
+
+      - name: Refresh gross profit rollups
+        working-directory: apps/web
+        run: |
+          ARGS="--years ${{ github.event.inputs.years || '2025,2026' }}"
+          if [ -n "${{ github.event.inputs.from }}" ]; then
+            ARGS="$ARGS --from ${{ github.event.inputs.from }}"
+          fi
+          if [ -n "${{ github.event.inputs.to }}" ]; then
+            ARGS="$ARGS --to ${{ github.event.inputs.to }}"
+          fi
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force true"
+          fi
+          npm run gross-profit:rollups -- $ARGS

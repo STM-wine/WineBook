@@ -13,7 +13,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "gross-profit-center:proof": "node scripts/run-gross-profit-center-proof.mjs",
-    "gross-profit-center:test": "node scripts/test-gross-profit-center.mjs"
+    "gross-profit-center:test": "node scripts/test-gross-profit-center.mjs",
+    "gross-profit:rollups": "node scripts/refresh-gross-profit-rollups.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

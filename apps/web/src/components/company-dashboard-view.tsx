@@ -41,7 +41,7 @@ const number = new Intl.NumberFormat("en-US");
 
 const RANGE_PLACEHOLDER = "- Choose -";
 const CUSTOM_RANGE_LABEL = "Custom";
-const MAX_AUTO_GROSS_PROFIT_DAYS = 124;
+const MAX_AUTO_GROSS_PROFIT_DAYS = 366;
 const COMPANY_SAMPLE_BILLBACK_ACCRUAL_RATE = 0.011;
 
 const DATE_RANGE_LABELS = [
@@ -316,7 +316,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   async function selectBusinessLine(nextBusinessLine: CompanyDashboardBusinessLine) {
     if (nextBusinessLine === selectedBusinessLine) return;
     if (nextBusinessLine !== "all" && !canAutoLoadGrossProfit(dateFrom, dateTo)) {
-      setErrorMessage("Stem/GRW filtering needs a trimester-or-less range for now.");
+      setErrorMessage("Stem/GRW filtering needs a year-or-less range for now.");
       return;
     }
     setSelectedBusinessLine(nextBusinessLine);
@@ -508,7 +508,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
             isProfitLoading && data.summary.grossProfit === null
               ? "Calculating GP from QB + VS"
               : !canAutoLoadGrossProfitForVisibleRange && data.summary.grossProfit === null
-              ? "Use a trimester or less for GP"
+              ? "Stored GP is still backfilling"
               : data.summary.grossProfit === null
                 ? "Gross profit unavailable"
                 : companyKpiGrossProfit.sampleBillbackAccrual > 0

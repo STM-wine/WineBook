@@ -119,6 +119,22 @@ New recommendation rows default to an opt-in approval model:
 
 The app now includes row-level approval/edit controls in the importer workbench. Buyers can adjust either `Weeks w/ Recommended` or `Recommended Qty`; those two values stay synchronized in the Streamlit editor. When a row is approved, the current working `Recommended Qty` is persisted as `approved_qty` for PO draft generation.
 
+## Gross Profit Rollups
+
+Apply `supabase/migrations/20260901120000_gross_profit_daily_rollups.sql` before enabling the scheduled gross-profit worker. It creates:
+
+- `gross_profit_rollup_runs` for audit/status history.
+- `gross_profit_daily_rollups` for durable daily company, rep, account, and rep-account GP rollups.
+
+The GitHub Actions workflow `.github/workflows/gross-profit-rollup-refresh.yml` runs daily and calls `npm run gross-profit:rollups` from `apps/web`. The worker processes 2025 first, then 2026, skips days already stored with the current formula version, and only stores days older than the 124-day stability window. The next newly stable day is picked up on the next daily run.
+
+To rebuild after a formula change, run the workflow manually with `force=true`, or run locally with service-role credentials:
+
+```bash
+cd apps/web
+npm run gross-profit:rollups -- --years 2025,2026 --force true
+```
+
 ## Daily Email Automation
 
 Supabase is the reliable scheduler for the daily Vinosmith ingest. The scheduled database job calls GitHub's `workflow_dispatch` API through the morning ingestion window. GitHub Actions remains the worker, but GitHub is no longer trusted as the clock.

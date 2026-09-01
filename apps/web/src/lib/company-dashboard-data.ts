@@ -2,6 +2,11 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildGrossProfitCenter, type GrossProfitCenterLine } from "@/lib/supabase/gross-profit-center";
+import {
+  fetchStoredGrossProfitRollups,
+  STABLE_GROSS_PROFIT_LAG_DAYS,
+  type StoredGrossProfitBusinessLine
+} from "@/lib/supabase/gross-profit-stored-rollups";
 import { fetchQuickBooksSalesDashboardData } from "@/lib/supabase/quickbooks-sales-dashboard";
 import type { QuickBooksSalesSummaryRow } from "@/lib/quickbooks-sales-types";
 
@@ -53,7 +58,7 @@ export type CompanyDashboardData = {
 
 const DASHBOARD_TIME_ZONE = "America/Phoenix";
 const QUICKBOOKS_SALES_HISTORY_FROM = process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_HISTORY_FROM || "2025-01-01";
-const MAX_AUTO_GROSS_PROFIT_DAYS = 124;
+const MAX_AUTO_GROSS_PROFIT_DAYS = 366;
 
 export async function fetchCompanyDashboardData(
   supabase: SupabaseClient,
@@ -329,6 +334,18 @@ async function fetchGrossProfitRollups(
   rep?: string,
   businessLine: CompanyDashboardBusinessLine = "all"
 ): Promise<GrossProfitRollups> {
+  if (shouldUseStoredGrossProfit(range)) {
+    return fetchStoredOrHybridGrossProfitRollups(supabase, range, rep, businessLine);
+  }
+  return fetchLiveGrossProfitRollups(supabase, range, rep, businessLine);
+}
+
+async function fetchLiveGrossProfitRollups(
+  supabase: SupabaseClient,
+  range: { from: string; to: string },
+  rep?: string,
+  businessLine: CompanyDashboardBusinessLine = "all"
+): Promise<GrossProfitRollups> {
   try {
     const grossProfitCenter = await buildGrossProfitCenterWithRetry(supabase, range);
     const repFilteredLines = filterGrossProfitLines(grossProfitCenter.lines, rep);
@@ -350,6 +367,48 @@ async function fetchGrossProfitRollups(
   }
 }
 
+async function fetchStoredOrHybridGrossProfitRollups(
+  supabase: SupabaseClient,
+  range: { from: string; to: string },
+  rep?: string,
+  businessLine: CompanyDashboardBusinessLine = "all"
+): Promise<GrossProfitRollups> {
+  const stableCutoff = stableGrossProfitCutoff();
+  const storedRange = {
+    from: range.from,
+    to: range.to < stableCutoff ? range.to : stableCutoff
+  };
+  const liveRange =
+    range.to > stableCutoff
+      ? {
+          from: addDays(stableCutoff, 1) > range.from ? addDays(stableCutoff, 1) : range.from,
+          to: range.to
+        }
+      : null;
+
+  try {
+    const stored = storedRange.from <= storedRange.to
+      ? await fetchStoredGrossProfitRollups(supabase, storedRange, {
+          rep: cleanFilter(rep),
+          businessLine: businessLine as StoredGrossProfitBusinessLine
+        })
+      : null;
+    if (stored?.unavailableReason) throw new Error(stored.unavailableReason);
+
+    const live = liveRange && liveRange.from <= liveRange.to
+      ? await fetchLiveGrossProfitRollups(supabase, liveRange, rep, businessLine)
+      : null;
+    if (live?.unavailableReason) throw new Error(live.unavailableReason);
+
+    return mergeGrossProfitRollupResults(stored ? grossProfitRollupsFromStored(stored) : null, live);
+  } catch (error) {
+    return {
+      ...emptyGrossProfitRollups(),
+      unavailableReason: error instanceof Error ? error.message : "Stored gross profit is not available."
+    };
+  }
+}
+
 function emptyGrossProfitRollups(): GrossProfitRollups {
   return {
     summary: emptySummary(null),
@@ -360,6 +419,114 @@ function emptyGrossProfitRollups(): GrossProfitRollups {
     businessLineSummaries: emptyBusinessLineSummaries(),
     unavailableReason: null
   };
+}
+
+function grossProfitRollupsFromStored(stored: Awaited<ReturnType<typeof fetchStoredGrossProfitRollups>>): GrossProfitRollups {
+  return {
+    summary: stored.summary,
+    byRep: new Map(),
+    byAccount: new Map(),
+    byRepRows: stored.byRepRows,
+    byAccountRows: stored.byAccountRows,
+    businessLineSummaries: stored.businessLineSummaries,
+    unavailableReason: stored.unavailableReason
+  };
+}
+
+function mergeGrossProfitRollupResults(left: GrossProfitRollups | null, right: GrossProfitRollups | null): GrossProfitRollups {
+  if (!left && !right) return emptyGrossProfitRollups();
+  if (!left) return right as GrossProfitRollups;
+  if (!right) return left;
+
+  const summary = mergeSummaries(left.summary, right.summary);
+  return {
+    summary,
+    byRep: new Map(),
+    byAccount: new Map(),
+    byRepRows: mergeSalesSummaryRows(left.byRepRows, right.byRepRows),
+    byAccountRows: mergeSalesSummaryRows(left.byAccountRows, right.byAccountRows),
+    businessLineSummaries: mergeBusinessLineSummaries(left.businessLineSummaries, right.businessLineSummaries, summary.netSales),
+    unavailableReason: left.unavailableReason || right.unavailableReason
+  };
+}
+
+function mergeSalesSummaryRows(left: QuickBooksSalesSummaryRow[], right: QuickBooksSalesSummaryRow[]) {
+  const rows = new Map<string, QuickBooksSalesSummaryRow>();
+  [...left, ...right].forEach((row) => {
+    const key = row.key || rowKey(row.label);
+    const current = rows.get(key);
+    rows.set(key, current ? mergeSalesSummaryRow(current, row) : { ...row, key });
+  });
+  return Array.from(rows.values()).sort((a, b) => Math.abs(b.netSales) - Math.abs(a.netSales));
+}
+
+function mergeSalesSummaryRow(left: QuickBooksSalesSummaryRow, right: QuickBooksSalesSummaryRow): QuickBooksSalesSummaryRow {
+  const grossProfit = money(left.grossProfit) + money(right.grossProfit);
+  const netSales = left.netSales + right.netSales;
+  const invoiceSales = left.invoiceSales + right.invoiceSales;
+  const creditMemos = left.creditMemos + right.creditMemos;
+  return {
+    ...left,
+    invoiceSales,
+    creditMemos,
+    netSales,
+    invoiceCount: left.invoiceCount + right.invoiceCount,
+    creditMemoCount: left.creditMemoCount + right.creditMemoCount,
+    creditMemoRate: invoiceSales > 0 ? creditMemos / invoiceSales : 0,
+    grossProfit,
+    grossProfitPercent: marginPct(grossProfit, netSales),
+    sampleCost: money(left.sampleCost) + money(right.sampleCost)
+  };
+}
+
+function mergeBusinessLineSummaries(
+  left: CompanyDashboardBusinessLineSummary[],
+  right: CompanyDashboardBusinessLineSummary[],
+  totalNetSales: number
+) {
+  return (["stem", "grw"] as const).map((key) => {
+    const leftRow = left.find((row) => row.key === key) || { key, label: businessLineLabel(key), salesShare: 0, ...emptySummary(null) };
+    const rightRow = right.find((row) => row.key === key) || { key, label: businessLineLabel(key), salesShare: 0, ...emptySummary(null) };
+    const merged = mergeSummaries(leftRow, rightRow);
+    return {
+      key,
+      label: businessLineLabel(key),
+      ...merged,
+      salesShare: totalNetSales === 0 ? 0 : merged.netSales / totalNetSales
+    };
+  });
+}
+
+function businessLineLabel(key: Exclude<CompanyDashboardBusinessLine, "all">) {
+  return key === "grw" ? "GRW Broker" : "Stem Core";
+}
+
+function mergeSummaries(left: CompanyDashboardSummary, right: CompanyDashboardSummary): CompanyDashboardSummary {
+  const grossProfit = money(left.grossProfit) + money(right.grossProfit);
+  const grossSales = left.grossSales + right.grossSales;
+  const credits = left.credits + right.credits;
+  const netSales = left.netSales + right.netSales;
+  const invoiceCount = left.invoiceCount + right.invoiceCount;
+  return {
+    grossSales,
+    credits,
+    netSales,
+    invoiceCount,
+    creditMemoCount: left.creditMemoCount + right.creditMemoCount,
+    averageInvoice: invoiceCount > 0 ? grossSales / invoiceCount : 0,
+    sampleCost: left.sampleCost + right.sampleCost,
+    grossProfit,
+    grossProfitPercent: marginPct(grossProfit, netSales),
+    grossProfitUnavailableReason: left.grossProfitUnavailableReason || right.grossProfitUnavailableReason
+  };
+}
+
+function shouldUseStoredGrossProfit(range: { from: string; to: string }) {
+  return range.from <= stableGrossProfitCutoff();
+}
+
+function stableGrossProfitCutoff() {
+  return addDays(todayInTimeZone(), -STABLE_GROSS_PROFIT_LAG_DAYS);
 }
 
 async function buildGrossProfitCenterWithRetry(supabase: SupabaseClient, range: { from: string; to: string }) {
