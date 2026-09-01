@@ -66,6 +66,8 @@ type MutableStoredRollup = {
   grossProfit: number;
 };
 
+const PAGE_SIZE = 1000;
+
 const BUSINESS_LINE_LABELS: Record<Exclude<StoredGrossProfitBusinessLine, "all">, string> = {
   stem: "Stem Core",
   grw: "GRW Broker"
@@ -124,18 +126,20 @@ export async function fetchStoredGrossProfitRollups(
 }
 
 function fetchBusinessLineSummaryRows(supabase: SupabaseClient, range: { from: string; to: string }, repKey: string) {
-  const query = supabase
-    .from("gross_profit_daily_rollups")
-    .select(STORED_SELECT)
-    .gte("period_date", range.from)
-    .lte("period_date", range.to)
-    .in("business_line", ["stem", "grw"])
-    .eq("scope_type", repKey ? "rep" : "company")
-    .eq("scope_key", repKey || "all")
-    .eq("formula_version", GROSS_PROFIT_FORMULA_VERSION)
-    .order("period_date", { ascending: true })
-    .returns<StoredRollupRow[]>();
-  return resolveRows(query);
+  return fetchAllRows((from, to) =>
+    supabase
+      .from("gross_profit_daily_rollups")
+      .select(STORED_SELECT)
+      .gte("period_date", range.from)
+      .lte("period_date", range.to)
+      .in("business_line", ["stem", "grw"])
+      .eq("scope_type", repKey ? "rep" : "company")
+      .eq("scope_key", repKey || "all")
+      .eq("formula_version", GROSS_PROFIT_FORMULA_VERSION)
+      .order("period_date", { ascending: true })
+      .range(from, to)
+      .returns<StoredRollupRow[]>()
+  );
 }
 
 function fetchStoredRows(
@@ -149,25 +153,36 @@ function fetchStoredRows(
     parentScopeKey?: string;
   }
 ) {
-  let query = supabase
-    .from("gross_profit_daily_rollups")
-    .select(STORED_SELECT)
-    .gte("period_date", range.from)
-    .lte("period_date", range.to)
-    .eq("business_line", filters.businessLine)
-    .eq("scope_type", filters.scopeType)
-    .eq("formula_version", GROSS_PROFIT_FORMULA_VERSION);
+  return fetchAllRows((from, to) => {
+    let query = supabase
+      .from("gross_profit_daily_rollups")
+      .select(STORED_SELECT)
+      .gte("period_date", range.from)
+      .lte("period_date", range.to)
+      .eq("business_line", filters.businessLine)
+      .eq("scope_type", filters.scopeType)
+      .eq("formula_version", GROSS_PROFIT_FORMULA_VERSION);
 
-  if (filters.scopeKey) query = query.eq("scope_key", filters.scopeKey);
-  if (filters.parentScopeType) query = query.eq("parent_scope_type", filters.parentScopeType);
-  if (filters.parentScopeKey) query = query.eq("parent_scope_key", filters.parentScopeKey);
-  return resolveRows(query.order("period_date", { ascending: true }).returns<StoredRollupRow[]>());
+    if (filters.scopeKey) query = query.eq("scope_key", filters.scopeKey);
+    if (filters.parentScopeType) query = query.eq("parent_scope_type", filters.parentScopeType);
+    if (filters.parentScopeKey) query = query.eq("parent_scope_key", filters.parentScopeKey);
+    return query.order("period_date", { ascending: true }).range(from, to).returns<StoredRollupRow[]>();
+  });
 }
 
-async function resolveRows(query: PromiseLike<{ data: StoredRollupRow[] | null; error: { message: string } | null }>) {
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data || [];
+async function fetchAllRows(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: StoredRollupRow[] | null; error: { message: string } | null }>
+) {
+  const rows: StoredRollupRow[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await fetchPage(from, to);
+    if (error) throw new Error(error.message);
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return rows;
 }
 
 function rowsByScope(rows: StoredRollupRow[]): QuickBooksSalesSummaryRow[] {
