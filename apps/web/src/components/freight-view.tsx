@@ -8,9 +8,20 @@ import {
   isApproved
 } from "@/lib/order-data";
 import { buildDiContainerPlans, formatDiPlanRange } from "@/lib/di-planning";
+import { producerFromDescription } from "@/lib/po-utils";
 import { MetricCard } from "./metric-card";
 
 type FreightMode = "suggested" | "approved";
+
+type FreightProducerRollup = {
+  producer: string;
+  skuCount: number;
+  quantity: number;
+  cases: number;
+  wineCost: number;
+  laidInCost: number;
+  estimatedCost: number;
+};
 
 type FreightSupplierRollup = {
   supplier: string;
@@ -22,6 +33,7 @@ type FreightSupplierRollup = {
   wineCost: number;
   laidInCost: number;
   estimatedCost: number;
+  producers: FreightProducerRollup[];
 };
 
 type FreightLocationRollup = {
@@ -74,7 +86,12 @@ export function FreightView({
   }, [suppliers]);
 
   const freightRows = useMemo(() => {
-    const locations = new Map<string, Map<string, FreightSupplierRollup>>();
+    // Build the hierarchy bottom-up: location -> supplier -> producer.
+    // Producers are tracked in a Map while aggregating, then sorted into an array at the end.
+    type SupplierAccumulator = Omit<FreightSupplierRollup, "producers"> & {
+      producers: Map<string, FreightProducerRollup>;
+    };
+    const locations = new Map<string, Map<string, SupplierAccumulator>>();
 
     rows.forEach((row) => {
       const quantity = lineQuantity(row, mode);
@@ -82,9 +99,10 @@ export function FreightView({
 
       const location = row.pickup_location?.trim() || "Unassigned";
       const supplier = row.supplier_name?.trim() || "Unknown Supplier";
+      const producer = producerFromDescription(row.product_name) || "Unknown Producer";
       const logistics = supplierLookup.get(supplier.toLowerCase());
       const { wineCost, laidInCost, estimatedCost } = lineCosts(row, quantity);
-      const locationGroup = locations.get(location) || new Map<string, FreightSupplierRollup>();
+      const locationGroup = locations.get(location) || new Map<string, SupplierAccumulator>();
       const supplierGroup =
         locationGroup.get(supplier) || {
           supplier,
@@ -95,7 +113,8 @@ export function FreightView({
           cases: 0,
           wineCost: 0,
           laidInCost: 0,
-          estimatedCost: 0
+          estimatedCost: 0,
+          producers: new Map<string, FreightProducerRollup>()
         };
 
       supplierGroup.skuCount += 1;
@@ -104,15 +123,39 @@ export function FreightView({
       supplierGroup.wineCost += wineCost;
       supplierGroup.laidInCost += laidInCost;
       supplierGroup.estimatedCost += estimatedCost;
+
+      const producerGroup =
+        supplierGroup.producers.get(producer) || {
+          producer,
+          skuCount: 0,
+          quantity: 0,
+          cases: 0,
+          wineCost: 0,
+          laidInCost: 0,
+          estimatedCost: 0
+        };
+      producerGroup.skuCount += 1;
+      producerGroup.quantity += quantity;
+      producerGroup.cases += quantity / 12;
+      producerGroup.wineCost += wineCost;
+      producerGroup.laidInCost += laidInCost;
+      producerGroup.estimatedCost += estimatedCost;
+      supplierGroup.producers.set(producer, producerGroup);
+
       locationGroup.set(supplier, supplierGroup);
       locations.set(location, locationGroup);
     });
 
     return Array.from(locations.entries())
       .map(([location, suppliersMap]) => {
-        const supplierRows = Array.from(suppliersMap.values()).sort(
-          (a, b) => b.estimatedCost - a.estimatedCost || a.supplier.localeCompare(b.supplier)
-        );
+        const supplierRows: FreightSupplierRollup[] = Array.from(suppliersMap.values())
+          .map((supplier) => ({
+            ...supplier,
+            producers: Array.from(supplier.producers.values()).sort(
+              (a, b) => b.estimatedCost - a.estimatedCost || a.producer.localeCompare(b.producer)
+            )
+          }))
+          .sort((a, b) => b.estimatedCost - a.estimatedCost || a.supplier.localeCompare(b.supplier));
         return {
           location,
           supplierCount: supplierRows.length,
@@ -235,37 +278,49 @@ export function FreightView({
               </div>
               <span>{formatInteger(location.supplierCount)} suppliers</span>
             </summary>
-            <div className="table-shell freight-supplier-shell">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Supplier</th>
-                    <th>Forwarder</th>
-                    <th>Frequency</th>
-                    <th>SKUs</th>
-                    <th>Bottles</th>
-                    <th>Cases</th>
-                    <th>Total Wine Cost</th>
-                    <th>Total Laid In Cost</th>
-                    <th>Estimated Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {location.suppliers.map((supplier) => (
-                    <tr key={supplier.supplier}>
-                      <td>{supplier.supplier}</td>
-                      <td>{supplier.freightForwarder || "—"}</td>
-                      <td>{supplier.orderFrequency || "—"}</td>
-                      <td>{formatInteger(supplier.skuCount)}</td>
-                      <td>{formatInteger(supplier.quantity)}</td>
-                      <td>{formatDecimal(supplier.cases, 1)}</td>
-                      <td>{formatCurrency(supplier.wineCost)}</td>
-                      <td>{formatCurrency(supplier.laidInCost)}</td>
-                      <td>{formatCurrency(supplier.estimatedCost)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="freight-supplier-stack">
+              {location.suppliers.map((supplier) => (
+                <details className="freight-supplier-card" key={supplier.supplier}>
+                  <summary>
+                    <div>
+                      <span className="supplier-chip">{supplier.supplier}</span>
+                      <strong>{formatInteger(supplier.quantity)} bottles</strong>
+                      <span>{formatCurrency(supplier.estimatedCost)} estimated</span>
+                    </div>
+                    <span>
+                      {supplier.freightForwarder || "No forwarder"} · {formatInteger(supplier.producers.length)} producers
+                    </span>
+                  </summary>
+                  <div className="table-shell freight-supplier-shell">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Producer</th>
+                          <th>SKUs</th>
+                          <th>Bottles</th>
+                          <th>Cases</th>
+                          <th>Total Wine Cost</th>
+                          <th>Total Laid In Cost</th>
+                          <th>Estimated Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {supplier.producers.map((producer) => (
+                          <tr key={producer.producer}>
+                            <td>{producer.producer}</td>
+                            <td>{formatInteger(producer.skuCount)}</td>
+                            <td>{formatInteger(producer.quantity)}</td>
+                            <td>{formatDecimal(producer.cases, 1)}</td>
+                            <td>{formatCurrency(producer.wineCost)}</td>
+                            <td>{formatCurrency(producer.laidInCost)}</td>
+                            <td>{formatCurrency(producer.estimatedCost)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              ))}
             </div>
           </details>
         ))}
