@@ -5,7 +5,7 @@ import { AppUserMenu } from "./app-user-menu";
 import { ActiveView, DEFAULT_VIEW, VIEW_LABELS } from "./dashboard-types";
 
 type AppTopbarProps = {
-  activeModule?: "grw-converter" | "supplier-offer-compiler" | "settings";
+  activeModule?: "grw-converter" | "lead-intelligence" | "supplier-offer-compiler" | "settings";
   activeView?: ActiveView;
   canViewSettings?: boolean;
   dataLabel?: string;
@@ -108,13 +108,16 @@ export function AppTopbar({
         </div>
         <div className="nav-dropdown">
           <button
-            className={activeModule === "grw-converter" ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"}
+            className={activeModule === "grw-converter" || activeModule === "lead-intelligence" ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"}
             type="button"
             aria-haspopup="menu"
           >
             Modules
           </button>
           <div className="nav-dropdown-menu" role="menu">
+            <Link className={activeModule === "lead-intelligence" ? "active" : ""} href="/modules/lead-intelligence" role="menuitem">
+              Lead Intelligence
+            </Link>
             <Link href="/modules/grw-converter" role="menuitem">
               GRW Converter
             </Link>
