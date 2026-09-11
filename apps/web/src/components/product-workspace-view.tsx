@@ -268,6 +268,8 @@ function ProductWorkspaceTable({
   const [selectedId, setSelectedId] = useState<string | null>(data.rows[0]?.id || null);
   const [updatingMarkerCode, setUpdatingMarkerCode] = useState<string | null>(null);
   const [markerError, setMarkerError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const supplierOptions = useMemo(
     () => ["All", ...Array.from(new Set(data.rows.map((row) => row.supplierName || "Unknown").sort((a, b) => a.localeCompare(b))))],
     [data.rows]
@@ -317,6 +319,28 @@ function ProductWorkspaceTable({
     [data.rows]
   );
   const selectedRow = visibleRows.find((row) => row.id === selectedId) || visibleRows[0] || null;
+
+  async function exportPricingModel() {
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const { buildProductWorkspaceWorkbook } = await import("@/lib/product-workspace-export");
+      const workbook = buildProductWorkspaceWorkbook(visibleRows, data.generatedAt);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const url = URL.createObjectURL(new Blob([new Uint8Array(buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `stem-pricing-model-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Could not export the pricing model.");
+    } finally {
+      setIsExporting(false);
+    }
+  }
 
   useEffect(() => {
     if (selectedRow && selectedRow.id !== selectedId) {
@@ -392,6 +416,9 @@ function ProductWorkspaceTable({
             </small>
           </div>
           <div className="product-workspace-actions">
+            <button className="button button-outline button-small" disabled={isExporting || isReloading || visibleRows.length === 0} onClick={exportPricingModel} type="button" title="Export the currently filtered products with editable prices and GP formulas">
+              {isExporting ? "Exporting..." : "Export pricing model"}
+            </button>
             <button className="button button-outline button-small" disabled={isReloading} onClick={onReload} type="button">
               {isReloading ? "Reloading..." : "Reload"}
             </button>
@@ -443,6 +470,7 @@ function ProductWorkspaceTable({
           </label>
         </div>
         {markerError ? <p className="form-error">{markerError}</p> : null}
+        {exportError ? <p className="form-error" role="alert">{exportError}</p> : null}
 
         <div className="product-workspace-layout">
           <div className="table-shell product-workspace-table">
