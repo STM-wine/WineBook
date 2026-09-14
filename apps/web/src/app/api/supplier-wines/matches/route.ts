@@ -22,6 +22,12 @@ export async function GET(request: Request) {
   const vintage = url.searchParams.get("vintage") || null;
   const packSize = Number(url.searchParams.get("packSize") || 0) || null;
   const bottleSize = url.searchParams.get("bottleSize") || null;
+  const quickBooksSearchPattern = `%${query
+    .replace(/[%_*,()'"\\]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .join("%")}%`;
 
   if (query.length < 3) {
     return NextResponse.json({ matches: [] });
@@ -125,7 +131,12 @@ export async function GET(request: Request) {
     searchSupabase
       .from("quickbooks_items")
       .select("list_id,name,full_name,is_active,sales_desc,purchase_desc,sales_price,purchase_cost,custom_fields,time_modified,last_seen_at")
-      .or("is_active.is.null,is_active.eq.true")
+      .or([
+        `name.ilike.${quickBooksSearchPattern}`,
+        `full_name.ilike.${quickBooksSearchPattern}`,
+        `sales_desc.ilike.${quickBooksSearchPattern}`,
+        `purchase_desc.ilike.${quickBooksSearchPattern}`
+      ].join(","))
       .limit(MAX_SOURCE_ROWS)
   ]);
 
@@ -201,7 +212,11 @@ function dedupeCandidates(candidates: ProductIdentityCandidate[]) {
   for (const candidate of candidates) {
     const key = candidate.planningSku || `${candidate.source}:${candidate.sourceId}`;
     const existing = byKey.get(key);
-    if (!existing || sourceRank(candidate.source) < sourceRank(existing.source)) {
+    if (
+      !existing ||
+      (candidate.active && !existing.active) ||
+      (candidate.active === existing.active && sourceRank(candidate.source) < sourceRank(existing.source))
+    ) {
       byKey.set(key, candidate);
     }
   }
@@ -209,5 +224,5 @@ function dedupeCandidates(candidates: ProductIdentityCandidate[]) {
 }
 
 function sourceRank(source: ProductIdentityCandidate["source"]) {
-  return ["supplier_catalog", "product", "recommendation", "vinosmith"].indexOf(source);
+  return ["quickbooks_item", "supplier_catalog", "product", "recommendation", "vinosmith"].indexOf(source);
 }

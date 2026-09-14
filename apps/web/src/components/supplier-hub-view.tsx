@@ -348,7 +348,11 @@ function AddWinePanel({
     }
   }
 
-  function applyWineTemplate(wine: SupplierCatalogWine, catalogWineId: string | null = null, options: { followPricing?: boolean } = {}) {
+  function applyWineTemplate(
+    wine: SupplierCatalogWine,
+    catalogWineId: string | null = null,
+    options: { followPricing?: boolean; linkQuickBooks?: boolean; preserveSupplier?: boolean } = {}
+  ) {
     const nextProducer = wine.producer;
     const nextWineName = wine.wine_name;
     const nextVintage = wine.vintage || "NV";
@@ -360,9 +364,11 @@ function AddWinePanel({
     setWineNameMatches([]);
     setWineMatchError("");
     setSearchItem(wine.display_name);
-    const supplier = (wine.supplier_id ? suppliers.find((row) => row.id === wine.supplier_id) : null) || supplierByName(wine.supplier_name);
-    const nextSupplierId = supplier?.id || wine.supplier_id || "";
-    const nextSupplierName = supplier?.name || wine.supplier_name || "";
+    const supplier = options.preserveSupplier
+      ? null
+      : (wine.supplier_id ? suppliers.find((row) => row.id === wine.supplier_id) : null) || supplierByName(wine.supplier_name);
+    const nextSupplierId = options.preserveSupplier ? supplierId : supplier?.id || wine.supplier_id || "";
+    const nextSupplierName = options.preserveSupplier ? supplierName : supplier?.name || wine.supplier_name || "";
 
     setSupplierId(nextSupplierId);
     setSupplierName(nextSupplierName);
@@ -379,9 +385,10 @@ function AddWinePanel({
     setFobSourceDate(wine.fob_source_date || "");
     setLaidInSourceDate(wine.laid_in_source_date || "");
     setSystemTags(wine.system_tags || []);
-    setQuickbooksItemId(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_id || wine.quickbooks_item_number || "" : "");
-    setQuickbooksItemName(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_name || "" : "");
-    setQuickbooksItemNumber(wine.source_system === "quickbooks_item" ? wine.quickbooks_item_number || wine.quickbooks_item_id || "" : "");
+    const shouldLinkQuickBooks = options.linkQuickBooks ?? wine.source_system === "quickbooks_item";
+    setQuickbooksItemId(shouldLinkQuickBooks ? wine.quickbooks_item_id || wine.quickbooks_item_number || "" : "");
+    setQuickbooksItemName(shouldLinkQuickBooks ? wine.quickbooks_item_name || "" : "");
+    setQuickbooksItemNumber(shouldLinkQuickBooks ? wine.quickbooks_item_number || wine.quickbooks_item_id || "" : "");
     setPriceLevels(options.followPricing ? defaultPriceLevelDrafts() : priceLevelDraftsFromWine(wine));
     setPriceLevelsFollowPricing(Boolean(options.followPricing));
     setFreeGoods(freeGoodDraftsFromWine(wine, { expirePastPrograms: Boolean(options.followPricing) }));
@@ -653,7 +660,7 @@ function AddWinePanel({
             list="supplier-catalog-clone-options"
             value={searchItem}
             onChange={(event) => setSearchItem(event.target.value)}
-            placeholder="Search existing item or SKU"
+            placeholder="Search active or inactive item / SKU"
           />
           <datalist id="supplier-catalog-clone-options">
             {sortedCloneOptions.map((wine) => (
@@ -686,14 +693,18 @@ function AddWinePanel({
                       applyWineTemplate(
                         productIdentityMatchToTemplateWine(match, searchItem),
                         match.source === "supplier_catalog" ? match.sourceId : null,
-                        { followPricing: match.source === "supplier_catalog" }
+                        {
+                          followPricing: match.source === "supplier_catalog",
+                          linkQuickBooks: match.source === "quickbooks_item" && match.active,
+                          preserveSupplier: match.source === "quickbooks_item"
+                        }
                       )
                     }
                     type="button"
                   >
                     Start From
                   </button>
-                  {match.quickbooksItemNumber || match.source === "quickbooks_item" ? (
+                  {match.active && (match.quickbooksItemNumber || match.source === "quickbooks_item") ? (
                     <button className="ghost-button button-small" onClick={() => linkQuickbooksItem(match)} type="button">
                       Link QB
                     </button>

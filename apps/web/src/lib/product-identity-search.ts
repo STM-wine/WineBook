@@ -1,11 +1,19 @@
-import { asNumber } from "@/lib/order-data";
+import { asNumber } from "./order-data";
+import {
+  quickBooksItemCode,
+  quickBooksItemDisplayName,
+  quickBooksPackFormat,
+  quickBooksProducer,
+  quickBooksVintage,
+  type QuickBooksItemIdentityRow
+} from "./quickbooks-item-fields";
 import {
   buildDisplayName,
   buildPlanningSku,
   calculatePricing,
   normalizeSpaces,
   normalizeVintage
-} from "@/lib/supplier-catalog";
+} from "./supplier-catalog";
 
 export type ProductIdentitySource = "supplier_catalog" | "product" | "recommendation" | "vinosmith" | "quickbooks_item";
 
@@ -103,7 +111,11 @@ export function searchProductIdentityCandidates(
       const supplierScore = supplierBonus(candidate, input);
       const activeScore = candidate.active ? 0.02 : 0;
       const score = Math.min(1, baseScore + attributeScore + supplierScore + SOURCE_WEIGHT[candidate.source] + activeScore);
-      return { ...candidate, score, sourceLabel: SOURCE_LABEL[candidate.source] };
+      return {
+        ...candidate,
+        score,
+        sourceLabel: `${SOURCE_LABEL[candidate.source]}${candidate.active ? "" : " · Inactive"}`
+      };
     })
     .filter((match) => match.score >= minimumScore(queryTokens.length));
 
@@ -113,14 +125,30 @@ export function searchProductIdentityCandidates(
 }
 
 export function quickbooksItemRowToCandidate(row: Record<string, unknown>): ProductIdentityCandidate {
-  const name = normalizeSpaces(textValue(row.full_name) || textValue(row.name));
+  const item = {
+    list_id: String(row.list_id || row.name || ""),
+    name: stringOrNull(row.name),
+    full_name: stringOrNull(row.full_name),
+    sales_desc: stringOrNull(row.sales_desc),
+    purchase_desc: stringOrNull(row.purchase_desc),
+    custom_fields: row.custom_fields && typeof row.custom_fields === "object" && !Array.isArray(row.custom_fields)
+      ? row.custom_fields as Record<string, unknown>
+      : null
+  } satisfies QuickBooksItemIdentityRow;
+  const name = normalizeSpaces(quickBooksItemDisplayName(item));
   const parsed = parseDisplayName(name);
-  const packSize = parsed.packSize || numberFromCustomFields(row.custom_fields, ["pack_size", "pack", "unit_set"]) || 12;
-  const bottleSize = parsed.bottleSize || textFromCustomFields(row.custom_fields, ["bottle_size", "size"]) || "750ml";
+  const producer = normalizeSpaces(quickBooksProducer(item)) || parsed.producer;
+  const nameWithoutProducer = searchKey(name).startsWith(searchKey(producer))
+    ? normalizeSpaces(name.slice(producer.length).replace(PACK_RE, " ").replace(VINTAGE_RE, " "))
+    : parsed.wineName;
+  const pack = quickBooksPackFormat(item);
+  const packSize = pack.packSize || parsed.packSize || 12;
+  const bottleSize = pack.bottleSize || parsed.bottleSize || "750ml";
+  const vintage = normalizeVintage(quickBooksVintage(item) || parsed.vintage);
   const displayName = buildDisplayName({
-    producer: parsed.producer,
-    wineName: parsed.wineName,
-    vintage: parsed.vintage,
+    producer,
+    wineName: nameWithoutProducer || parsed.wineName,
+    vintage,
     packSize,
     bottleSize
   });
@@ -132,12 +160,12 @@ export function quickbooksItemRowToCandidate(row: Record<string, unknown>): Prod
 
   return {
     source: "quickbooks_item",
-    sourceId: String(row.list_id || name),
+    sourceId: item.list_id || name,
     supplierId: null,
     supplierName: "QuickBooks Desktop",
-    producer: parsed.producer,
-    wineName: parsed.wineName,
-    vintage: normalizeVintage(parsed.vintage),
+    producer,
+    wineName: nameWithoutProducer || parsed.wineName,
+    vintage,
     packSize,
     bottleSize,
     fobBottle: pricing.fobBottle,
@@ -150,7 +178,7 @@ export function quickbooksItemRowToCandidate(row: Record<string, unknown>): Prod
     planningSku: buildPlanningSku(displayName),
     planningSkuWithoutVintage: buildPlanningSku(displayName, true),
     quickbooksItemId: stringOrNull(row.list_id),
-    quickbooksItemNumber: quickbooksItemNumberFromRow(row),
+    quickbooksItemNumber: quickBooksItemCode(item),
     quickbooksItemName: name || null,
     systemTags: [],
     active: row.is_active !== false,
@@ -449,36 +477,6 @@ function textValue(value: unknown) {
 
 function numberValue(value: unknown) {
   return asNumber(textValue(value));
-}
-
-function textFromCustomFields(value: unknown, keys: string[]) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
-  const fields = value as Record<string, unknown>;
-  for (const key of keys) {
-    const match = Object.entries(fields).find(([fieldKey]) => searchKey(fieldKey) === searchKey(key));
-    if (match) return normalizeSpaces(textValue(match[1]));
-  }
-  return "";
-}
-
-function numberFromCustomFields(value: unknown, keys: string[]) {
-  const text = textFromCustomFields(value, keys);
-  return text ? numberValue(text) : 0;
-}
-
-function quickbooksItemNumberFromRow(row: Record<string, unknown>) {
-  return stringOrNull(
-    textFromCustomFields(row.custom_fields, [
-      "item_number",
-      "itemNumber",
-      "ItemNumber",
-      "sku",
-      "SKU",
-      "product_code",
-      "productCode",
-      "ProductCode"
-    ])
-  );
 }
 
 function normalizePackFormatBottle(value: unknown) {
