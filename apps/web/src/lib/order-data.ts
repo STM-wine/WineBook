@@ -265,14 +265,24 @@ export function recommendationMatchesCatalogWine(
   if (rowSku && wineSku && rowSku === wineSku) return true;
 
   const rowName = normalizeIdentityText(row.product_name);
-  const catalogNames = [wine.display_name, wine.quickbooks_item_name]
-    .map(normalizeIdentityText)
-    .filter(Boolean);
-  if (!rowName || !catalogNames.includes(rowName)) return false;
+  const matchingCatalogName = [wine.display_name, wine.quickbooks_item_name]
+    .find((name) => normalizeIdentityText(name) === rowName);
+  if (!rowName || !matchingCatalogName) return false;
+
+  const rowEmbeddedPack = packSizeFromDisplayName(row.product_name);
+  const wineEmbeddedPack = packSizeFromDisplayName(matchingCatalogName);
+  if (rowEmbeddedPack && wineEmbeddedPack) return rowEmbeddedPack === wineEmbeddedPack;
 
   const rowPack = Math.round(asNumber(row.pack_size));
   const winePack = Math.round(asNumber(wine.pack_size));
   return rowPack <= 0 || winePack <= 0 || rowPack === winePack;
+}
+
+function packSizeFromDisplayName(value: string | null | undefined): number | null {
+  const match = (value || "").match(/(?:^|\D)(\d{1,3})\s*\/\s*\d+(?:\.\d+)?\s*(?:ml|l)\b/i);
+  if (!match) return null;
+  const packSize = Number(match[1]);
+  return Number.isInteger(packSize) && packSize > 0 && packSize <= 120 ? packSize : null;
 }
 
 function normalizeIdentityText(value: string | null | undefined): string {

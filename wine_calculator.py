@@ -41,6 +41,17 @@ def normalize_planning_sku(name: str) -> str:
     return name.strip()
 
 
+def pack_size_from_description(value) -> int | None:
+    """Return the bottle count from a wine format such as 6/750ml."""
+    if pd.isna(value):
+        return None
+    match = re.search(r"(?<!\d)(\d{1,3})\s*/\s*\d+(?:\.\d+)?\s*(?:ml|l)\b", str(value), re.IGNORECASE)
+    if not match:
+        return None
+    pack_size = int(match.group(1))
+    return pack_size if 0 < pack_size <= 120 else None
+
+
 def _choose_live_rb6_rows(rb6_data: pd.DataFrame) -> pd.DataFrame:
     """Pick the current inventory row for each non-vintage planning SKU."""
     rb6_inventory = rb6_data.copy()
@@ -283,11 +294,28 @@ def calculate_reorder_recommendations(rb6_data, sales_data, settings=None):
     
     recommendations['on_order'] = on_order
     
-    # Get Pack Size for rounding (default to 12)
-    pack_size = recommendations.get('pack_size', recommendations.get('Pack Size', 12))
-    if not isinstance(pack_size, pd.Series):
-        pack_size = recommendations['Pack Size'] if 'Pack Size' in recommendations.columns else 12
-    recommendations['pack_size'] = pack_size.fillna(logic_settings.default_pack_size) if isinstance(pack_size, pd.Series) else logic_settings.default_pack_size
+    # Use the format embedded in the product description when present. RB6 can
+    # omit a structured pack column, and defaulting those rows to 12 causes both
+    # incorrect case rounding and false duplicate formats in Order Review.
+    raw_pack_size = recommendations.get('pack_size', recommendations.get('Pack Size'))
+    if isinstance(raw_pack_size, pd.Series):
+        structured_pack_size = pd.to_numeric(raw_pack_size, errors='coerce')
+        formatted_pack_size = raw_pack_size.apply(pack_size_from_description)
+        resolved_pack_size = structured_pack_size.where(formatted_pack_size.isna(), formatted_pack_size)
+    else:
+        resolved_pack_size = pd.Series(logic_settings.default_pack_size, index=recommendations.index, dtype='float64')
+
+    description_column = next((column for column in ['name', 'Name'] if column in recommendations.columns), None)
+    if description_column:
+        embedded_pack_size = recommendations[description_column].apply(pack_size_from_description)
+        resolved_pack_size = resolved_pack_size.where(embedded_pack_size.isna(), embedded_pack_size)
+
+    recommendations['pack_size'] = (
+        pd.to_numeric(resolved_pack_size, errors='coerce')
+        .where(lambda values: values > 0)
+        .fillna(logic_settings.default_pack_size)
+        .astype(int)
+    )
     
     # DEFENSIVE: Find FOB/cost column (may have various names)
     possible_fob_cols = [

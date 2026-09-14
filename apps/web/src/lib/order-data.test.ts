@@ -83,9 +83,23 @@ describe("supplier catalog recommendation merge", () => {
     expect(mergeSupplierCatalogRows([recommendation()], [catalogWine()], "run-1")).toHaveLength(1);
   });
 
+  it("trusts the matching embedded format when a recommendation retained the default pack size", () => {
+    expect(recommendationMatchesCatalogWine(
+      recommendation({ pack_size: 12 }),
+      catalogWine({ pack_size: 6 })
+    )).toBe(true);
+  });
+
   it("does not hide a same-named wine from another supplier or pack", () => {
     expect(recommendationMatchesCatalogWine(recommendation(), catalogWine({ supplier_name: "Another Supplier" }))).toBe(false);
-    expect(recommendationMatchesCatalogWine(recommendation(), catalogWine({ pack_size: 12 }))).toBe(false);
+    expect(recommendationMatchesCatalogWine(
+      recommendation(),
+      catalogWine({
+        pack_size: 12,
+        display_name: "Domaine Vacheron Sancerre Blanc 2025 12/750ml",
+        quickbooks_item_name: "Domaine Vacheron Sancerre Blanc 2025 12/750ml"
+      })
+    )).toBe(false);
   });
 
   it("still matches a linked catalog wine by item number", () => {

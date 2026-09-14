@@ -15,6 +15,7 @@ from scripts.process_daily_vinosmith_email import (
     storage_path,
 )
 from stem_order.core import OrderingLogicSettings, calculate_reorder_recommendations, normalize_planning_sku
+from wine_calculator import pack_size_from_description
 from stem_order.ingest import (
     clean_importer_name,
     load_importers_csv,
@@ -248,6 +249,37 @@ class CalculatorTests(unittest.TestCase):
             normalize_planning_sku("Pavette Sauvignon Blanc 2025 12/750ml"),
             "pavette sauvignon blanc 12/750ml",
         )
+
+    def test_pack_size_from_description_reads_wine_format(self):
+        self.assertEqual(pack_size_from_description("Domaine Vacheron Sancerre Blanc 2025 6/750ml"), 6)
+        self.assertIsNone(pack_size_from_description("Wine without a format"))
+
+    def test_embedded_pack_size_overrides_missing_or_stale_default(self):
+        rb6 = pd.DataFrame(
+            [
+                {
+                    "name": "Domaine Vacheron Sancerre Blanc 2025 6/750ml",
+                    "available_inventory": 0,
+                    "on_order": 0,
+                    "fob": 10,
+                    "pack_size": 12,
+                }
+            ]
+        )
+        sales = pd.DataFrame(
+            [
+                {
+                    "wine_name": "Domaine Vacheron Sancerre Blanc 2024 6/750ml",
+                    "quantity": 30,
+                    "date": "2026-09-01",
+                }
+            ]
+        )
+
+        result = calculate_reorder_recommendations(rb6, sales).iloc[0]
+
+        self.assertEqual(result["pack_size"], 6)
+        self.assertEqual(result["recommended_qty_rounded"] % 6, 0)
 
     def test_btg_and_core_flags_drive_target_days(self):
         rb6 = pd.DataFrame(
