@@ -196,9 +196,9 @@ The GitHub workflow intentionally has no native `schedule` block now. It should 
 
 ## Vinosmith Source Mirror Automation
 
-The live Vinosmith API mirror is refreshed separately from the daily emailed RB6/RADs ingest. Supabase Cron dispatches `vinosmith-source-mirror-refresh.yml` every 15 minutes, and that workflow runs `scripts/sync_vinosmith_rescue.py` for Vinosmith wines, prices, and inventory.
+The live Vinosmith API mirror is refreshed separately from the daily emailed RB6/RADs ingest. GitHub Actions schedules `vinosmith-source-mirror-refresh.yml` every 15 minutes, and that workflow runs `scripts/sync_vinosmith_rescue.py` for Vinosmith supplier orders, wines, prices, and inventory. Supabase Cron no longer needs a GitHub dispatch token for this refresh.
 
-Apply `supabase/migrations/20260821100000_schedule_vinosmith_source_mirror_refresh.sql` after the `github_actions_dispatch_token` Vault secret exists, then verify the job:
+The older `supabase/migrations/20260821100000_schedule_vinosmith_source_mirror_refresh.sql` created a Supabase-to-GitHub dispatch job. Apply the follow-up migration `20260903160000_remove_vinosmith_source_mirror_supabase_dispatch.sql` to remove that duplicate scheduler, then verify that no job remains:
 
 ```sql
 select jobid, jobname, schedule, active
@@ -206,7 +206,7 @@ from cron.job
 where jobname = 'vinosmith-source-mirror-refresh';
 ```
 
-The expected schedule is `*/15 * * * *`.
+The expected native GitHub Actions schedule is `*/15 * * * *`.
 
 The workflow uses the tracked repo `importers.csv` by default. To temporarily override it with a GitHub secret, create `IMPORTERS_CSV_BASE64` locally:
 

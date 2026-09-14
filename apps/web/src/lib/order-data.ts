@@ -240,13 +240,48 @@ export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, r
 }
 
 export function mergeSupplierCatalogRows(recommendations: Recommendation[], catalogWines: SupplierCatalogWine[], reportRunId: string): Recommendation[] {
-  const recommendationSkus = new Set(recommendations.map((row) => row.planning_sku).filter(Boolean));
   const manualRows = catalogWines
     .filter((wine) => wine.product_lifecycle_status !== "inactive")
-    .filter((wine) => !recommendationSkus.has(wine.planning_sku))
+    .filter((wine) => !recommendations.some((row) => recommendationMatchesCatalogWine(row, wine)))
     .map((wine) => supplierCatalogWineToRecommendation(wine, reportRunId));
 
   return [...recommendations, ...manualRows];
+}
+
+export function recommendationMatchesCatalogWine(
+  row: Recommendation,
+  wine: SupplierCatalogWine
+): boolean {
+  const rowSupplier = normalizeIdentityText(row.supplier_name);
+  const wineSupplier = normalizeIdentityText(wine.supplier_name);
+  if (!rowSupplier || !wineSupplier || rowSupplier !== wineSupplier) return false;
+
+  const rowItemNumber = normalizeIdentityText(row.product_code);
+  const wineItemNumber = normalizeIdentityText(wine.quickbooks_item_number);
+  if (rowItemNumber && wineItemNumber && rowItemNumber === wineItemNumber) return true;
+
+  const rowSku = normalizeIdentityText(row.planning_sku);
+  const wineSku = normalizeIdentityText(wine.planning_sku);
+  if (rowSku && wineSku && rowSku === wineSku) return true;
+
+  const rowName = normalizeIdentityText(row.product_name);
+  const catalogNames = [wine.display_name, wine.quickbooks_item_name]
+    .map(normalizeIdentityText)
+    .filter(Boolean);
+  if (!rowName || !catalogNames.includes(rowName)) return false;
+
+  const rowPack = Math.round(asNumber(row.pack_size));
+  const winePack = Math.round(asNumber(wine.pack_size));
+  return rowPack <= 0 || winePack <= 0 || rowPack === winePack;
+}
+
+function normalizeIdentityText(value: string | null | undefined): string {
+  return (value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 export function enrichRecommendationsWithSupplierCatalogPrograms(rows: Recommendation[], catalogWines: SupplierCatalogWine[]): Recommendation[] {

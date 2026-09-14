@@ -3591,6 +3591,109 @@ th:nth-child(12) .table-sort-button {
   margin: 0 0 10px;
 }
 
+.inactive-wine-search {
+  background: #f8f6f1;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+}
+
+.inactive-wine-search-panel {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.inactive-wine-search-panel > label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 850;
+  gap: 7px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.inactive-wine-search-panel > label input {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  height: 42px;
+  padding: 9px 11px;
+  text-transform: none;
+  width: min(100%, 520px);
+}
+
+.inactive-wine-results {
+  display: grid;
+  gap: 7px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.inactive-wine-result {
+  align-items: center;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.inactive-wine-result strong,
+.inactive-wine-result span {
+  display: block;
+}
+
+.inactive-wine-result strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.inactive-wine-result span,
+.inactive-wine-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin: 3px 0 0;
+}
+
+.inactive-wine-result-meta {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.inactive-wine-result-meta > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.inactive-wine-result-meta .status-pill {
+  background: #ece9e2;
+  color: #68645c;
+  margin-top: 0;
+}
+
+.inactive-wine-restore-button {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.inactive-wine-restore-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .target-weeks-control {
   color: var(--muted);
   display: grid;

@@ -11,6 +11,7 @@ import {
   CONVERSION_STATUSES,
   PLACEMENT_TYPES,
   SYSTEM_TAGS,
+  buildPlanningSku,
   buildOrderingWorkflowPayload,
   buildSupplierCatalogWine,
   decisionToRequestStatus,
@@ -21,7 +22,7 @@ import {
   type ConversionStatus
 } from "@/lib/supplier-catalog";
 import { createClient } from "@/lib/supabase/server";
-import type { QuickBooksVendorClassification, SupplierCatalogWine, WineRequest } from "@/lib/types";
+import type { QuickBooksVendorClassification, SupplierCatalogWine, VinosmithExplorerWine, WineRequest } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 const VALID_STATUSES = new Set(["rejected", "approved", "edited", "deferred"]);
@@ -909,6 +910,156 @@ export async function updateSupplierCatalogWorkbenchItems(input: {
 
   revalidateSupplierCatalogData();
   revalidatePath("/");
+}
+
+export async function restoreInactiveSupplierWineToWorkbench(input: {
+  wineId: string;
+  reportRunId: string;
+}) {
+  if (!input.wineId || !input.reportRunId) {
+    throw new Error("Inactive wine and report run are required.");
+  }
+
+  const { supabase, user } = await requireWriteAccess();
+  const { data: sourceWine, error: sourceError } = await supabase
+    .from("vinosmith_wines")
+    .select("wine_id,code,name,vintage,importer_name,producer_name,product_family,unit_set,bottle_size,bottle_size_label,fob_price,category,country,region,appellation,active,orderable,core,inventory_item,last_seen_at")
+    .eq("wine_id", input.wineId)
+    .maybeSingle<VinosmithExplorerWine>();
+
+  if (sourceError || !sourceWine) {
+    throw new Error(sourceError?.message || "Inactive wine was not found.");
+  }
+  if (sourceWine.active !== false && sourceWine.orderable !== false) {
+    throw new Error("This wine is no longer inactive. Refresh Order Review to see the current item.");
+  }
+
+  const supplierName = sourceWine.importer_name?.trim();
+  const displayName = sourceWine.name?.trim() || sourceWine.product_family?.trim();
+  if (!supplierName || !displayName) {
+    throw new Error("This inactive wine is missing the supplier or display name needed for the workbench.");
+  }
+
+  const planningSku = buildPlanningSku(displayName);
+  const itemNumber = sourceWine.code?.trim() || null;
+  let existing: SupplierCatalogWine | null = null;
+
+  const { data: sourceMatch, error: sourceMatchError } = await supabase
+    .from("supplier_catalog_wines")
+    .select("*")
+    .eq("source_system", "vinosmith")
+    .eq("source_id", sourceWine.wine_id)
+    .limit(1)
+    .maybeSingle<SupplierCatalogWine>();
+  if (sourceMatchError) throw new Error(sourceMatchError.message);
+  existing = sourceMatch || null;
+
+  if (!existing && itemNumber) {
+    const { data: itemMatch, error: itemMatchError } = await supabase
+      .from("supplier_catalog_wines")
+      .select("*")
+      .eq("supplier_name", supplierName)
+      .ilike("quickbooks_item_number", itemNumber)
+      .limit(1)
+      .maybeSingle<SupplierCatalogWine>();
+    if (itemMatchError) throw new Error(itemMatchError.message);
+    existing = itemMatch || null;
+  }
+
+  if (!existing) {
+    const { data: skuMatch, error: skuMatchError } = await supabase
+      .from("supplier_catalog_wines")
+      .select("*")
+      .eq("supplier_name", supplierName)
+      .eq("planning_sku", planningSku)
+      .limit(1)
+      .maybeSingle<SupplierCatalogWine>();
+    if (skuMatchError) throw new Error(skuMatchError.message);
+    existing = skuMatch || null;
+  }
+
+  let catalogWineId = existing?.id || null;
+  const now = new Date().toISOString();
+  if (existing) {
+    const { error: updateError } = await supabase
+      .from("supplier_catalog_wines")
+      .update({
+        availability_status: "available",
+        conversion_status: "exact_existing_product",
+        product_lifecycle_status: "active_product",
+        quickbooks_item_number: existing.quickbooks_item_number || itemNumber,
+        quickbooks_sync_status: existing.quickbooks_item_number || itemNumber ? "linked" : existing.quickbooks_sync_status,
+        source_system: "vinosmith",
+        source_id: sourceWine.wine_id,
+        updated_at: now
+      })
+      .eq("id", existing.id);
+    if (updateError) throw new Error(updateError.message);
+  } else {
+    const packSize = Math.max(1, Math.round(asNumber(sourceWine.unit_set) || 1));
+    const fobBottle = Math.max(0, asNumber(sourceWine.fob_price));
+    const bottleSize = sourceWine.bottle_size_label?.trim() || sourceWine.bottle_size?.trim() || "750ml";
+    const producer = sourceWine.producer_name?.trim() || "Unknown producer";
+    const { data: inserted, error: insertError } = await supabase
+      .from("supplier_catalog_wines")
+      .insert({
+        supplier_name: supplierName,
+        producer,
+        wine_name: sourceWine.product_family?.trim() || displayName,
+        vintage: sourceWine.vintage?.trim() || "NV",
+        pack_size: packSize,
+        bottle_size: bottleSize,
+        pricing_basis: "bottle",
+        fob_bottle: fobBottle,
+        fob_case: fobBottle * packSize,
+        laid_in_per_bottle: 0,
+        landed_bottle_cost: fobBottle,
+        frontline_bottle_price: 0,
+        gross_profit_margin: 0,
+        availability_status: "available",
+        conversion_status: "exact_existing_product",
+        display_name: displayName,
+        planning_sku: planningSku,
+        planning_sku_without_vintage: buildPlanningSku(displayName, true),
+        diagnostics: { restored_from_inactive_vinosmith_wine: sourceWine.wine_id },
+        quickbooks_item_name: displayName,
+        quickbooks_item_number: itemNumber,
+        quickbooks_sync_status: itemNumber ? "linked" : "not_created",
+        product_lifecycle_status: "active_product",
+        accounting_create_payload: {},
+        system_tags: sourceWine.core ? ["Core"] : [],
+        source_system: "vinosmith",
+        source_id: sourceWine.wine_id,
+        updated_at: now
+      })
+      .select("id")
+      .single<{ id: string }>();
+    if (insertError || !inserted) throw new Error(insertError?.message || "Could not restore the inactive wine.");
+    catalogWineId = inserted.id;
+  }
+
+  if (!catalogWineId) throw new Error("Could not identify the restored supplier wine.");
+
+  const recommendedQty = Math.max(1, Math.round(asNumber(sourceWine.unit_set) || asNumber(existing?.pack_size) || 1));
+  const { error: workbenchError } = await supabase
+    .from("supplier_catalog_workbench_items")
+    .upsert({
+      report_run_id: input.reportRunId,
+      supplier_catalog_wine_id: catalogWineId,
+      recommendation_status: "rejected",
+      recommended_qty: recommendedQty,
+      approved_qty: 0,
+      order_path: "stateside",
+      active: true,
+      notes: "Restored from inactive Vinosmith item search.",
+      created_by: user.id,
+      updated_at: now
+    }, { onConflict: "report_run_id,supplier_catalog_wine_id" });
+  if (workbenchError) throw new Error(workbenchError.message);
+
+  revalidateSupplierCatalogData();
+  revalidatePath("/");
+  return { displayName, catalogWineId };
 }
 
 export async function createSupplierWineRequest(input: {
