@@ -241,7 +241,9 @@ export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, r
 
 export function mergeSupplierCatalogRows(recommendations: Recommendation[], catalogWines: SupplierCatalogWine[], reportRunId: string): Recommendation[] {
   const manualRows = catalogWines
-    .filter((wine) => wine.product_lifecycle_status !== "inactive")
+    .filter((wine) =>
+      wine.product_lifecycle_status !== "inactive" || Boolean(workbenchItemForRun(wine, reportRunId))
+    )
     .filter((wine) => !recommendations.some((row) => recommendationMatchesCatalogWine(row, wine)))
     .map((wine) => supplierCatalogWineToRecommendation(wine, reportRunId));
 

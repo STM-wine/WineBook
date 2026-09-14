@@ -14,7 +14,6 @@ import type {
   ReportRun,
   SupplierCatalogWine,
   SupplierQuickBooksVendorMatch,
-  VinosmithExplorerWine,
   WineRequest,
   SupplierLogistics,
   QuickBooksVendor,
@@ -64,7 +63,6 @@ export default async function HomePage() {
       companyDashboard={data.companyDashboard}
       quickBooksLastSyncAt={data.quickBooksLastSyncAt}
       vinosmithLastSyncAt={data.vinosmithLastSyncAt}
-      inactiveSupplierWines={data.inactiveSupplierWines}
       canViewSettings={hasPermission(permissions, "view_settings")}
     />
   );
@@ -83,7 +81,6 @@ type HomePageData = {
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
-  inactiveSupplierWines: VinosmithExplorerWine[];
 };
 
 async function loadHomePageData(): Promise<HomePageData> {
@@ -138,7 +135,6 @@ async function loadHomePageData(): Promise<HomePageData> {
   })();
 
   const vinosmithLastSyncPromise = fetchLatestVinosmithPullAt(serviceRoleSupabase);
-  const inactiveSupplierWinesPromise = fetchInactiveSupplierWines(serviceRoleSupabase);
 
   const companyDashboardPromise = (() => {
     try {
@@ -157,8 +153,7 @@ async function loadHomePageData(): Promise<HomePageData> {
     { data: priceChangeEvents },
     companyDashboard,
     quickBooksLastSyncAt,
-    vinosmithLastSyncAt,
-    inactiveSupplierWines
+    vinosmithLastSyncAt
   ] = await Promise.all([
     reportRunsPromise,
     supplierCatalogPromise,
@@ -166,8 +161,7 @@ async function loadHomePageData(): Promise<HomePageData> {
     priceChangeEventsPromise,
     companyDashboardPromise,
     quickBooksLastSyncPromise,
-    vinosmithLastSyncPromise,
-    inactiveSupplierWinesPromise
+    vinosmithLastSyncPromise
   ]);
   const latestRun = reportRuns?.[0] || null;
 
@@ -184,8 +178,7 @@ async function loadHomePageData(): Promise<HomePageData> {
       quickBooksSupplierMatches: [],
       companyDashboard,
       quickBooksLastSyncAt,
-      vinosmithLastSyncAt,
-      inactiveSupplierWines
+      vinosmithLastSyncAt
     };
   }
 
@@ -280,39 +273,8 @@ async function loadHomePageData(): Promise<HomePageData> {
     quickBooksSupplierMatches,
     companyDashboard,
     quickBooksLastSyncAt,
-    vinosmithLastSyncAt,
-    inactiveSupplierWines
+    vinosmithLastSyncAt
   };
-}
-
-async function fetchInactiveSupplierWines(
-  supabase: ReturnType<typeof createServiceRoleClient>
-): Promise<VinosmithExplorerWine[]> {
-  const rows: VinosmithExplorerWine[] = [];
-  const pageSize = 1000;
-  let from = 0;
-
-  try {
-    while (true) {
-      const { data, error } = await supabase
-        .from("vinosmith_wines")
-        .select("wine_id,code,name,vintage,importer_name,producer_name,product_family,unit_set,bottle_size,bottle_size_label,fob_price,category,country,region,appellation,active,orderable,core,inventory_item,last_seen_at")
-        .or("active.eq.false,orderable.eq.false")
-        .order("wine_id", { ascending: true })
-        .range(from, from + pageSize - 1)
-        .returns<VinosmithExplorerWine[]>();
-
-      if (error) return [];
-      const page = data || [];
-      rows.push(...page);
-      if (page.length < pageSize) break;
-      from += pageSize;
-    }
-  } catch {
-    return [];
-  }
-
-  return rows;
 }
 
 async function fetchLatestVinosmithPullAt(supabase: ReturnType<typeof createServiceRoleClient>) {

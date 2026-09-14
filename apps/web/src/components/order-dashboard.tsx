@@ -7,7 +7,7 @@ import {
   deletePendingSupplierCatalogWine,
   deletePurchaseOrderLine,
   refreshVinosmithReports,
-  restoreInactiveSupplierWineToWorkbench,
+  restoreInactiveQuickBooksItemToWorkbench,
   saveSupplierCatalogWine,
   saveSupplierLogisticsBatch,
   updateSupplierCatalogWorkbenchItems,
@@ -24,7 +24,6 @@ import type {
   ReportRun,
   SupplierCatalogWine,
   SupplierQuickBooksVendorMatch,
-  VinosmithExplorerWine,
   VinosmithExplorerData,
   WineRequest,
   SupplierLogistics
@@ -71,7 +70,6 @@ type Props = {
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
-  inactiveSupplierWines: VinosmithExplorerWine[];
   canViewSettings?: boolean;
 };
 
@@ -103,7 +101,6 @@ export function OrderDashboard({
   companyDashboard,
   quickBooksLastSyncAt,
   vinosmithLastSyncAt,
-  inactiveSupplierWines,
   canViewSettings
 }: Props) {
   const router = useRouter();
@@ -283,13 +280,13 @@ export function OrderDashboard({
     });
   }
 
-  function restoreInactiveWine(wineId: string) {
+  function restoreInactiveWine(listId: string) {
     setPendingMessage("Re-adding inactive item to the workbench...");
     setErrorMessage("");
 
     startTransition(async () => {
       try {
-        const result = await restoreInactiveSupplierWineToWorkbench({ wineId, reportRunId: reportRun.id });
+        const result = await restoreInactiveQuickBooksItemToWorkbench({ listId, reportRunId: reportRun.id });
         setPendingMessage(`Added to workbench: ${result.displayName}`);
         router.refresh();
       } catch (error) {
@@ -730,7 +727,6 @@ export function OrderDashboard({
           suggestedOnly={suggestedOnly}
           supplier={supplier}
           supplierGroups={supplierGroups}
-          inactiveSupplierWines={inactiveSupplierWines}
           supplierSort={supplierSort}
           supplierOptions={supplierOptions}
           supplierTargetWeeks={supplierTargetWeeks}

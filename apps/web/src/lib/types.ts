@@ -120,6 +120,19 @@ export type SupplierQuickBooksVendorMatch = {
   notes: string | null;
 };
 
+export type InactiveQuickBooksItem = {
+  listId: string;
+  itemNumber: string;
+  displayName: string;
+  supplierName: string;
+  producer: string | null;
+  vintage: string;
+  packSize: number;
+  bottleSize: string;
+  packLabel: string;
+  purchaseCost: number | null;
+};
+
 export type SupplierCatalogWine = {
   id: string;
   supplier_id: string | null;

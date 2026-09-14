@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { DashboardMetrics, Recommendation, SupplierGroup, VinosmithExplorerWine } from "@/lib/types";
+import type { DashboardMetrics, InactiveQuickBooksItem, Recommendation, SupplierGroup } from "@/lib/types";
 import {
   activeFreeGoodsForRow,
   formatCurrency,
@@ -25,7 +25,6 @@ export function OrderReviewView({
   suggestedOnly,
   supplier,
   supplierGroups,
-  inactiveSupplierWines,
   supplierSort,
   supplierOptions,
   supplierTargetWeeks,
@@ -53,7 +52,6 @@ export function OrderReviewView({
   suggestedOnly: boolean;
   supplier: string;
   supplierGroups: SupplierGroup[];
-  inactiveSupplierWines: VinosmithExplorerWine[];
   supplierSort: SupplierGroupSortMode;
   supplierOptions: string[];
   supplierTargetWeeks: Record<string, string>;
@@ -64,7 +62,7 @@ export function OrderReviewView({
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSetSupplierTargetWeeks: (supplierName: string, value: string) => void;
-  onRestoreInactiveWine: (wineId: string) => void;
+  onRestoreInactiveWine: (listId: string) => void;
   isPending: boolean;
 }) {
   return (
@@ -145,7 +143,6 @@ export function OrderReviewView({
           <SupplierSection
             key={group.supplier}
             group={group}
-            inactiveWines={inactiveSupplierWines.filter((wine) => supplierNamesMatch(wine.importer_name, group.supplier))}
             expandAll={expandAll || supplier !== "All"}
             onSaveApproval={onSaveApproval}
             onClearSupplierApprovals={onClearSupplierApprovals}
@@ -225,7 +222,6 @@ function SummaryTable({ groups }: { groups: SupplierGroup[] }) {
 
 function SupplierSection({
   group,
-  inactiveWines,
   expandAll,
   onSaveApproval,
   onClearSupplierApprovals,
@@ -238,7 +234,6 @@ function SupplierSection({
   isPending
 }: {
   group: SupplierGroup;
-  inactiveWines: VinosmithExplorerWine[];
   expandAll: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
   onClearSupplierApprovals: (supplierName: string) => void;
@@ -247,7 +242,7 @@ function SupplierSection({
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
   targetWeeks: string;
   onSetTargetWeeks: (value: string) => void;
-  onRestoreInactiveWine: (wineId: string) => void;
+  onRestoreInactiveWine: (listId: string) => void;
   isPending: boolean;
 }) {
   const [showHistory, setShowHistory] = useState(false);
@@ -343,7 +338,7 @@ function SupplierSection({
             </label>
           </div>
           <InactiveWineSearch
-            wines={inactiveWines}
+            supplierName={group.supplier}
             isOpen={showInactive}
             search={inactiveSearch}
             onOpenChange={setShowInactive}
@@ -368,7 +363,7 @@ function SupplierSection({
 }
 
 function InactiveWineSearch({
-  wines,
+  supplierName,
   isOpen,
   search,
   onOpenChange,
@@ -377,30 +372,55 @@ function InactiveWineSearch({
   onRestore,
   isPending
 }: {
-  wines: VinosmithExplorerWine[];
+  supplierName: string;
   isOpen: boolean;
   search: string;
   onOpenChange: (value: boolean) => void;
   onSearchChange: (value: string) => void;
   workbenchRows: Recommendation[];
-  onRestore: (wineId: string) => void;
+  onRestore: (listId: string) => void;
   isPending: boolean;
 }) {
-  const query = normalizeInactiveSearch(search);
-  const matches = query
-    ? wines.filter((wine) => normalizeInactiveSearch([
-        wine.name,
-        wine.code,
-        wine.producer_name,
-        wine.product_family,
-        wine.vintage,
-        wine.bottle_size_label,
-        wine.bottle_size
-      ].filter(Boolean).join(" ")).includes(query))
-    : [];
+  const query = search.trim();
+  const [matches, setMatches] = useState<InactiveQuickBooksItem[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const workbenchItemNumbers = new Set(
-    workbenchRows.map((row) => normalizeInactiveSearch(row.product_code || "")).filter(Boolean)
+    workbenchRows.map((row) => row.product_code?.trim().toUpperCase() || "").filter(Boolean)
   );
+
+  useEffect(() => {
+    if (!isOpen || query.length < 2) {
+      setMatches([]);
+      setIsSearching(false);
+      setSearchError("");
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsSearching(true);
+      setSearchError("");
+      try {
+        const params = new URLSearchParams({ supplier: supplierName, q: query });
+        const response = await fetch(`/api/order-review/inactive-items?${params}`, { signal: controller.signal });
+        const result = await response.json() as { items?: InactiveQuickBooksItem[]; error?: string };
+        if (!response.ok) throw new Error(result.error || "Could not search inactive QuickBooks items.");
+        setMatches(result.items || []);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setMatches([]);
+        setSearchError(error instanceof Error ? error.message : "Could not search inactive QuickBooks items.");
+      } finally {
+        if (!controller.signal.aborted) setIsSearching(false);
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isOpen, query, supplierName]);
 
   return (
     <div className="inactive-wine-search">
@@ -419,26 +439,30 @@ function InactiveWineSearch({
               placeholder="Wine name, producer, or item #"
             />
           </label>
-          {!query ? (
-            <p className="inactive-wine-empty">Start typing to search this supplier&apos;s inactive items.</p>
+          {query.length < 2 ? (
+            <p className="inactive-wine-empty">Enter at least two characters to search this supplier&apos;s inactive QuickBooks items.</p>
+          ) : isSearching ? (
+            <p className="inactive-wine-empty">Searching QuickBooks items...</p>
+          ) : searchError ? (
+            <p className="inactive-wine-empty status-danger" role="alert">{searchError}</p>
           ) : matches.length > 0 ? (
             <div className="inactive-wine-results" role="list">
-              {matches.map((wine) => {
-                const isOnWorkbench = Boolean(wine.code) && workbenchItemNumbers.has(normalizeInactiveSearch(wine.code || ""));
+              {matches.map((item) => {
+                const isOnWorkbench = workbenchItemNumbers.has(item.itemNumber.trim().toUpperCase());
                 return (
-                  <div className="inactive-wine-result" key={wine.wine_id} role="listitem">
+                  <div className="inactive-wine-result" key={item.listId} role="listitem">
                     <div>
-                      <strong>{wine.name || wine.product_family || "Unnamed wine"}</strong>
-                      <span>{[wine.producer_name, wine.vintage, wine.bottle_size_label || wine.bottle_size].filter(Boolean).join(" · ")}</span>
+                      <strong>{item.displayName}</strong>
+                      <span>{[item.producer, item.vintage, item.packLabel, item.purchaseCost === null ? null : `${formatCurrency(item.purchaseCost)} cost`].filter(Boolean).join(" · ")}</span>
                     </div>
                     <div className="inactive-wine-result-meta">
-                      {wine.code ? <span>Item #{wine.code}</span> : null}
+                      <span>Item #{item.itemNumber}</span>
                       <div>
-                        <span className="status-pill">Inactive</span>
+                        <span className="status-pill">QB Inactive</span>
                         <button
                           className="ghost-button inactive-wine-restore-button"
                           disabled={isPending || isOnWorkbench}
-                          onClick={() => onRestore(wine.wine_id)}
+                          onClick={() => onRestore(item.listId)}
                           type="button"
                         >
                           {isOnWorkbench ? "On Workbench" : "Re-add to Workbench"}
@@ -450,27 +474,12 @@ function InactiveWineSearch({
               })}
             </div>
           ) : (
-            <p className="inactive-wine-empty">
-              {wines.length === 0 ? "No inactive items found for this supplier." : "No inactive items match that search."}
-            </p>
+            <p className="inactive-wine-empty">No inactive QuickBooks items match that search for this supplier.</p>
           )}
         </div>
       ) : null}
     </div>
   );
-}
-
-function normalizeInactiveSearch(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function supplierNamesMatch(value: string | null, supplier: string) {
-  return normalizeInactiveSearch(value || "") === normalizeInactiveSearch(supplier);
 }
 
 function approvedValueComparison(approvedValue: number, suggestedValue: number) {

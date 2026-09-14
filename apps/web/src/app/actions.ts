@@ -22,7 +22,16 @@ import {
   type ConversionStatus
 } from "@/lib/supplier-catalog";
 import { createClient } from "@/lib/supabase/server";
-import type { QuickBooksVendorClassification, SupplierCatalogWine, VinosmithExplorerWine, WineRequest } from "@/lib/types";
+import {
+  quickBooksItemCode,
+  quickBooksItemDisplayName,
+  quickBooksPackFormat,
+  quickBooksPreferredVendorListId,
+  quickBooksProducer,
+  quickBooksVintage,
+  type QuickBooksItemIdentityRow
+} from "@/lib/quickbooks-item-fields";
+import type { QuickBooksVendorClassification, SupplierCatalogWine, WineRequest } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 const VALID_STATUSES = new Set(["rejected", "approved", "edited", "deferred"]);
@@ -912,53 +921,69 @@ export async function updateSupplierCatalogWorkbenchItems(input: {
   revalidatePath("/");
 }
 
-export async function restoreInactiveSupplierWineToWorkbench(input: {
-  wineId: string;
+export async function restoreInactiveQuickBooksItemToWorkbench(input: {
+  listId: string;
   reportRunId: string;
 }) {
-  if (!input.wineId || !input.reportRunId) {
-    throw new Error("Inactive wine and report run are required.");
+  if (!input.listId || !input.reportRunId) {
+    throw new Error("Inactive QuickBooks item and report run are required.");
   }
 
   const { supabase, user } = await requireWriteAccess();
-  const { data: sourceWine, error: sourceError } = await supabase
-    .from("vinosmith_wines")
-    .select("wine_id,code,name,vintage,importer_name,producer_name,product_family,unit_set,bottle_size,bottle_size_label,fob_price,category,country,region,appellation,active,orderable,core,inventory_item,last_seen_at")
-    .eq("wine_id", input.wineId)
-    .maybeSingle<VinosmithExplorerWine>();
+  type SourceItem = QuickBooksItemIdentityRow & {
+    is_active: boolean | null;
+    item_type: string | null;
+    sales_price: number | string | null;
+    purchase_cost: number | string | null;
+    average_cost: number | string | null;
+  };
+  const { data: sourceItem, error: sourceError } = await supabase
+    .from("quickbooks_items")
+    .select("list_id,name,full_name,is_active,item_type,sales_desc,purchase_desc,sales_price,purchase_cost,average_cost,custom_fields,raw_data")
+    .eq("list_id", input.listId)
+    .maybeSingle<SourceItem>();
 
-  if (sourceError || !sourceWine) {
-    throw new Error(sourceError?.message || "Inactive wine was not found.");
-  }
-  if (sourceWine.active !== false && sourceWine.orderable !== false) {
-    throw new Error("This wine is no longer inactive. Refresh Order Review to see the current item.");
-  }
+  if (sourceError || !sourceItem) throw new Error(sourceError?.message || "Inactive QuickBooks item was not found.");
+  if (sourceItem.is_active !== false) throw new Error("This QuickBooks item is active again. Refresh Order Review to see it normally.");
+  if (sourceItem.item_type !== "Inventory") throw new Error("Only inactive QuickBooks inventory items can be restored to the workbench.");
 
-  const supplierName = sourceWine.importer_name?.trim();
-  const displayName = sourceWine.name?.trim() || sourceWine.product_family?.trim();
-  if (!supplierName || !displayName) {
-    throw new Error("This inactive wine is missing the supplier or display name needed for the workbench.");
-  }
+  const preferredVendorListId = quickBooksPreferredVendorListId(sourceItem);
+  if (!preferredVendorListId) throw new Error("This QuickBooks item has no preferred vendor, so it cannot be assigned to a supplier workbench.");
+  const { data: vendorMapping, error: mappingError } = await supabase
+    .from("quickbooks_vendor_mappings")
+    .select("supplier_id")
+    .eq("quickbooks_vendor_list_id", preferredVendorListId)
+    .maybeSingle<{ supplier_id: string | null }>();
+  if (mappingError) throw new Error(mappingError.message);
+  if (!vendorMapping?.supplier_id) throw new Error("Map this QuickBooks preferred vendor to Supplier Logistics before restoring the item.");
 
+  const { data: supplier, error: supplierError } = await supabase
+    .from("suppliers")
+    .select("id,name,trucking_cost_per_bottle")
+    .eq("id", vendorMapping.supplier_id)
+    .single<{ id: string; name: string; trucking_cost_per_bottle: number | string | null }>();
+  if (supplierError || !supplier) throw new Error(supplierError?.message || "Mapped supplier was not found.");
+
+  const supplierName = supplier.name.trim();
+  const displayName = quickBooksItemDisplayName(sourceItem);
+  const itemNumber = quickBooksItemCode(sourceItem);
   const planningSku = buildPlanningSku(displayName);
-  const itemNumber = sourceWine.code?.trim() || null;
+  const format = quickBooksPackFormat(sourceItem);
   let existing: SupplierCatalogWine | null = null;
 
   const { data: sourceMatch, error: sourceMatchError } = await supabase
     .from("supplier_catalog_wines")
     .select("*")
-    .eq("source_system", "vinosmith")
-    .eq("source_id", sourceWine.wine_id)
+    .eq("quickbooks_item_id", sourceItem.list_id)
     .limit(1)
     .maybeSingle<SupplierCatalogWine>();
   if (sourceMatchError) throw new Error(sourceMatchError.message);
   existing = sourceMatch || null;
 
-  if (!existing && itemNumber) {
+  if (!existing) {
     const { data: itemMatch, error: itemMatchError } = await supabase
       .from("supplier_catalog_wines")
       .select("*")
-      .eq("supplier_name", supplierName)
       .ilike("quickbooks_item_number", itemNumber)
       .limit(1)
       .maybeSingle<SupplierCatalogWine>();
@@ -970,7 +995,7 @@ export async function restoreInactiveSupplierWineToWorkbench(input: {
     const { data: skuMatch, error: skuMatchError } = await supabase
       .from("supplier_catalog_wines")
       .select("*")
-      .eq("supplier_name", supplierName)
+      .eq("supplier_id", supplier.id)
       .eq("planning_sku", planningSku)
       .limit(1)
       .maybeSingle<SupplierCatalogWine>();
@@ -980,56 +1005,81 @@ export async function restoreInactiveSupplierWineToWorkbench(input: {
 
   let catalogWineId = existing?.id || null;
   const now = new Date().toISOString();
+  const packSize = format.packSize;
+  const fobBottle = Math.max(0, asNumber(sourceItem.purchase_cost) || asNumber(sourceItem.average_cost));
+  const trucking = Math.max(0, asNumber(supplier.trucking_cost_per_bottle));
+  const landedCost = fobBottle + trucking;
+  const frontlinePrice = Math.max(0, asNumber(sourceItem.sales_price));
+  const grossProfitMargin = frontlinePrice > 0 ? (frontlinePrice - landedCost) / frontlinePrice : 0;
+  const producer = quickBooksProducer(sourceItem) || "Unknown producer";
+  const vintage = quickBooksVintage(sourceItem);
   if (existing) {
     const { error: updateError } = await supabase
       .from("supplier_catalog_wines")
       .update({
-        availability_status: "available",
+        availability_status: "sold_out",
         conversion_status: "exact_existing_product",
-        product_lifecycle_status: "active_product",
-        quickbooks_item_number: existing.quickbooks_item_number || itemNumber,
-        quickbooks_sync_status: existing.quickbooks_item_number || itemNumber ? "linked" : existing.quickbooks_sync_status,
-        source_system: "vinosmith",
-        source_id: sourceWine.wine_id,
+        product_lifecycle_status: "inactive",
+        supplier_id: supplier.id,
+        supplier_name: supplierName,
+        producer,
+        wine_name: displayName,
+        vintage,
+        pack_size: packSize,
+        bottle_size: format.bottleSize,
+        pricing_basis: "bottle",
+        fob_bottle: fobBottle,
+        fob_case: fobBottle * packSize,
+        laid_in_per_bottle: trucking,
+        landed_bottle_cost: landedCost,
+        frontline_bottle_price: frontlinePrice,
+        gross_profit_margin: grossProfitMargin,
+        display_name: displayName,
+        planning_sku: planningSku,
+        planning_sku_without_vintage: buildPlanningSku(displayName, true),
+        quickbooks_item_id: sourceItem.list_id,
+        quickbooks_item_name: displayName,
+        quickbooks_item_number: itemNumber,
+        quickbooks_sync_status: "linked",
+        source_system: "quickbooks_desktop",
+        source_id: sourceItem.list_id,
         updated_at: now
       })
       .eq("id", existing.id);
     if (updateError) throw new Error(updateError.message);
   } else {
-    const packSize = Math.max(1, Math.round(asNumber(sourceWine.unit_set) || 1));
-    const fobBottle = Math.max(0, asNumber(sourceWine.fob_price));
-    const bottleSize = sourceWine.bottle_size_label?.trim() || sourceWine.bottle_size?.trim() || "750ml";
-    const producer = sourceWine.producer_name?.trim() || "Unknown producer";
     const { data: inserted, error: insertError } = await supabase
       .from("supplier_catalog_wines")
       .insert({
+        supplier_id: supplier.id,
         supplier_name: supplierName,
         producer,
-        wine_name: sourceWine.product_family?.trim() || displayName,
-        vintage: sourceWine.vintage?.trim() || "NV",
+        wine_name: displayName,
+        vintage,
         pack_size: packSize,
-        bottle_size: bottleSize,
+        bottle_size: format.bottleSize,
         pricing_basis: "bottle",
         fob_bottle: fobBottle,
         fob_case: fobBottle * packSize,
-        laid_in_per_bottle: 0,
-        landed_bottle_cost: fobBottle,
-        frontline_bottle_price: 0,
-        gross_profit_margin: 0,
-        availability_status: "available",
+        laid_in_per_bottle: trucking,
+        landed_bottle_cost: landedCost,
+        frontline_bottle_price: frontlinePrice,
+        gross_profit_margin: grossProfitMargin,
+        availability_status: "sold_out",
         conversion_status: "exact_existing_product",
         display_name: displayName,
         planning_sku: planningSku,
         planning_sku_without_vintage: buildPlanningSku(displayName, true),
-        diagnostics: { restored_from_inactive_vinosmith_wine: sourceWine.wine_id },
+        diagnostics: { restored_from_inactive_quickbooks_item: sourceItem.list_id },
+        quickbooks_item_id: sourceItem.list_id,
         quickbooks_item_name: displayName,
         quickbooks_item_number: itemNumber,
-        quickbooks_sync_status: itemNumber ? "linked" : "not_created",
-        product_lifecycle_status: "active_product",
+        quickbooks_sync_status: "linked",
+        product_lifecycle_status: "inactive",
         accounting_create_payload: {},
-        system_tags: sourceWine.core ? ["Core"] : [],
-        source_system: "vinosmith",
-        source_id: sourceWine.wine_id,
+        system_tags: [],
+        source_system: "quickbooks_desktop",
+        source_id: sourceItem.list_id,
         updated_at: now
       })
       .select("id")
@@ -1040,7 +1090,7 @@ export async function restoreInactiveSupplierWineToWorkbench(input: {
 
   if (!catalogWineId) throw new Error("Could not identify the restored supplier wine.");
 
-  const recommendedQty = Math.max(1, Math.round(asNumber(sourceWine.unit_set) || asNumber(existing?.pack_size) || 1));
+  const recommendedQty = Math.max(1, Math.round(format.packSize || asNumber(existing?.pack_size) || 1));
   const { error: workbenchError } = await supabase
     .from("supplier_catalog_workbench_items")
     .upsert({
@@ -1051,7 +1101,7 @@ export async function restoreInactiveSupplierWineToWorkbench(input: {
       approved_qty: 0,
       order_path: "stateside",
       active: true,
-      notes: "Restored from inactive Vinosmith item search.",
+      notes: "Restored from inactive QuickBooks item search.",
       created_by: user.id,
       updated_at: now
     }, { onConflict: "report_run_id,supplier_catalog_wine_id" });

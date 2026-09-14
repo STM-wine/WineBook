@@ -108,4 +108,27 @@ describe("supplier catalog recommendation merge", () => {
       catalogWine({ quickbooks_item_number: "vc25001" })
     )).toBe(true);
   });
+
+  it("only surfaces an inactive catalog item when it was explicitly restored for this report", () => {
+    const inactive = catalogWine({
+      product_lifecycle_status: "inactive",
+      workbench_items: [{
+        id: "workbench-1",
+        report_run_id: "run-1",
+        supplier_catalog_wine_id: "catalog-1",
+        recommendation_status: "rejected",
+        recommended_qty: 6,
+        approved_qty: 0,
+        order_path: "stateside",
+        active: true,
+        notes: null,
+        created_by: null,
+        created_at: "2026-09-13T00:00:00Z",
+        updated_at: "2026-09-13T00:00:00Z"
+      }]
+    });
+
+    expect(mergeSupplierCatalogRows([], [inactive], "another-run")).toHaveLength(0);
+    expect(mergeSupplierCatalogRows([], [inactive], "run-1")).toHaveLength(1);
+  });
 });
