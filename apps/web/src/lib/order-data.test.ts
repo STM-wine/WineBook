@@ -3,6 +3,7 @@ import {
   applySupplierTargetWeeks,
   applyVinosmithAvailability,
   DEFAULT_SUPPLIER_TARGET_WEEKS,
+  filterRecommendations,
   mergeSupplierCatalogRows,
   recommendationMatchesCatalogWine
 } from "./order-data";
@@ -174,5 +175,25 @@ describe("live Order Review inventory and target weeks", () => {
     expect(applySupplierTargetWeeks([row], {})[0].recommended_qty_rounded).toBe(36);
     expect(applySupplierTargetWeeks([row], { Stateside: 6 })[0].recommended_qty_rounded).toBe(48);
     expect(applySupplierTargetWeeks([row], { Stateside: 0 })[0].recommended_qty_rounded).toBe(0);
+  });
+
+  it("preserves the saved one-case quantity for a new workbench wine without sales velocity", () => {
+    const newWine = recommendation({
+      supplier_catalog_wine_id: "catalog-1",
+      supplier_catalog_workbench_item_id: "workbench-1",
+      is_new_item: true,
+      weekly_velocity: 0,
+      pack_size: 6,
+      recommended_qty_rounded: 6
+    });
+
+    const updated = applySupplierTargetWeeks([newWine], {});
+    expect(updated[0].recommended_qty_rounded).toBe(6);
+    expect(filterRecommendations(updated, {
+      supplier: "All",
+      brandManager: "All",
+      search: "",
+      suggestedOnly: true
+    })).toHaveLength(1);
   });
 });

@@ -90,6 +90,7 @@ export function applySupplierTargetWeeks(
     const supplier = row.supplier_name?.trim() || "Unknown Supplier";
     const targetWeeks = supplierTargetWeeks[supplier] ?? defaultTargetWeeks;
     if (!targetWeeks || targetWeeks <= 0 || row.order_path === "di") return row;
+    if (row.supplier_catalog_workbench_item_id && asNumber(row.weekly_velocity) <= 0) return row;
 
     const qty = recommendationForTargetWeeks(row, targetWeeks);
     const fob = asNumber(row.fob);
