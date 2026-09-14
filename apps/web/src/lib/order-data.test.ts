@@ -5,6 +5,8 @@ import {
   DEFAULT_SUPPLIER_TARGET_WEEKS,
   filterRecommendations,
   mergeSupplierCatalogRows,
+  removeSupplierCatalogWineFromWorkbench,
+  replaceSupplierCatalogWineInWorkbench,
   recommendationMatchesCatalogWine
 } from "./order-data";
 import type { Recommendation, SupplierCatalogWine } from "./types";
@@ -137,6 +139,42 @@ describe("supplier catalog recommendation merge", () => {
 
     expect(mergeSupplierCatalogRows([], [inactive], "another-run")).toHaveLength(0);
     expect(mergeSupplierCatalogRows([], [inactive], "run-1")).toHaveLength(1);
+  });
+
+  it("replaces an edited catalog wine in the visible workbench without losing its order state", () => {
+    const original = recommendation({
+      id: "workbench-1",
+      supplier_catalog_wine_id: "catalog-1",
+      supplier_catalog_workbench_item_id: "workbench-1",
+      recommended_qty_rounded: 12,
+      approved_qty: 6,
+      recommendation_status: "edited",
+      order_path: "di"
+    });
+    const editedWine = catalogWine({
+      display_name: "Domaine Vacheron Sancerre Blanc Les Garennes 2022 6/750ml",
+      planning_sku: "domaine vacheron sancerre blanc les garennes 2022 6/750ml",
+      vintage: "2022",
+      fob_bottle: 10,
+      laid_in_per_bottle: 2
+    });
+
+    const [updated] = replaceSupplierCatalogWineInWorkbench([original], editedWine, "run-1");
+
+    expect(updated.product_name).toBe(editedWine.display_name);
+    expect(updated.id).toBe("workbench-1");
+    expect(updated.approved_qty).toBe(6);
+    expect(updated.recommendation_status).toBe("edited");
+    expect(updated.order_path).toBe("di");
+    expect(updated.order_cost).toBe(120);
+    expect(updated.landed_cost).toBe(144);
+  });
+
+  it("removes a deleted catalog wine from the visible workbench", () => {
+    const deleted = recommendation({ supplier_catalog_wine_id: "catalog-1" });
+    const retained = recommendation({ id: "rec-2", supplier_catalog_wine_id: "catalog-2" });
+
+    expect(removeSupplierCatalogWineFromWorkbench([deleted, retained], "catalog-1")).toEqual([retained]);
   });
 });
 

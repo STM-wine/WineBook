@@ -797,6 +797,7 @@ export async function saveSupplierCatalogWine(input: {
   revalidatePath("/");
   return {
     mode: result.mode,
+    saved,
     displayName: saved.display_name,
     planningSku: saved.planning_sku,
     priceChangeCreated: Boolean(event)

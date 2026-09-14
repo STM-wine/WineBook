@@ -38,6 +38,8 @@ import {
   enrichRecommendationsWithSupplierCatalogPrograms,
   filterRecommendations,
   mergeSupplierCatalogRows,
+  removeSupplierCatalogWineFromWorkbench,
+  replaceSupplierCatalogWineInWorkbench,
   sortSupplierGroups,
   type SupplierGroupSortMode,
   rowRecommendedQty,
@@ -617,6 +619,11 @@ export function OrderDashboard({
         setPendingMessage(
           `${result.mode === "updated" ? "Updated" : "Created"} supplier wine: ${result.displayName}.${changeText}`
         );
+        if (input.existingCatalogWineId) {
+          setRows((currentRows) =>
+            replaceSupplierCatalogWineInWorkbench(currentRows, result.saved, reportRun.id)
+          );
+        }
         router.refresh();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save supplier wine.");
@@ -632,6 +639,7 @@ export function OrderDashboard({
     startTransition(async () => {
       try {
         const result = await deletePendingSupplierCatalogWine(input);
+        setRows((currentRows) => removeSupplierCatalogWineFromWorkbench(currentRows, input.id));
         setPendingMessage(`Deleted pending product: ${result.displayName}`);
         router.refresh();
       } catch (error) {

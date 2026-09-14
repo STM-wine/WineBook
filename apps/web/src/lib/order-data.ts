@@ -265,6 +265,42 @@ export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, r
   };
 }
 
+export function replaceSupplierCatalogWineInWorkbench(
+  rows: Recommendation[],
+  wine: SupplierCatalogWine,
+  reportRunId: string
+): Recommendation[] {
+  const catalogRow = supplierCatalogWineToRecommendation(wine, reportRunId);
+
+  return rows.map((row) => {
+    if (row.supplier_catalog_wine_id !== wine.id) return row;
+
+    const recommendedQty = Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)));
+    const fob = asNumber(catalogRow.fob);
+    const trucking = asNumber(catalogRow.trucking_cost_per_bottle);
+
+    return {
+      ...catalogRow,
+      id: row.id,
+      report_run_id: row.report_run_id,
+      supplier_catalog_workbench_item_id: row.supplier_catalog_workbench_item_id,
+      recommended_qty_rounded: row.recommended_qty_rounded,
+      approved_qty: row.approved_qty,
+      recommendation_status: row.recommendation_status,
+      order_path: row.order_path,
+      order_cost: fob * recommendedQty,
+      landed_cost: (fob + trucking) * recommendedQty
+    };
+  });
+}
+
+export function removeSupplierCatalogWineFromWorkbench(
+  rows: Recommendation[],
+  supplierCatalogWineId: string
+): Recommendation[] {
+  return rows.filter((row) => row.supplier_catalog_wine_id !== supplierCatalogWineId);
+}
+
 export function mergeSupplierCatalogRows(recommendations: Recommendation[], catalogWines: SupplierCatalogWine[], reportRunId: string): Recommendation[] {
   const manualRows = catalogWines
     .filter((wine) =>
