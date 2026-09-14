@@ -6023,6 +6023,35 @@ tr.has-recommendation .sticky-name {
   grid-template-columns: repeat(auto-fit, minmax(152px, 1fr));
 }
 
+.company-kpi-section {
+  display: grid;
+  gap: 8px;
+}
+
+.company-kpi-section-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+}
+
+.company-kpi-section-heading h2 {
+  font-size: 18px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.company-kpi-section-heading span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.company-kpi-grid-compact {
+  grid-template-columns: repeat(4, minmax(152px, 1fr));
+}
+
 .company-kpi,
 .company-dashboard-panel {
   background: var(--surface);

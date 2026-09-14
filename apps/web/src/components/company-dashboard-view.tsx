@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { WineLoadingProgress } from "@/components/wine-loading-progress";
 import type {
   CompanyDashboardBusinessLine,
+  CompanyDashboardBusinessLineSummary,
   CompanyDashboardData,
   CompanyDashboardPeriod,
   CompanyDashboardSummary
@@ -136,21 +137,8 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     ? data.periodLabel
     : selectedRangeLabel;
   const scopedPeriodLabel = data.businessLine === "all" ? displayPeriodLabel : `${displayPeriodLabel} ${businessLineLabel(data.businessLine)}`;
-  const compactScopedPeriodLabel = compactDashboardPeriodLabel(scopedPeriodLabel);
   const throughLabel = formatThroughDate(data.salesThroughDate);
   const tableRangeLabel = formatDateRange(data.dateFrom, data.dateTo);
-  const comparison = data.comparison;
-  const netSalesDelta = comparison ? data.summary.netSales - comparison.summary.netSales : null;
-  const netSalesDeltaRate = comparison ? changeRate(data.summary.netSales, comparison.summary.netSales) : null;
-  const companyKpiGrossProfit = companyKpiGrossProfitWithSampleAccrual(data.summary, data.businessLine);
-  const comparisonCompanyKpiGrossProfit = comparison
-    ? companyKpiGrossProfitWithSampleAccrual(comparison.summary, data.businessLine)
-    : null;
-  const gpDelta = comparisonCompanyKpiGrossProfit && companyKpiGrossProfit.grossProfitPercent !== null && comparisonCompanyKpiGrossProfit.grossProfitPercent !== null
-    ? companyKpiGrossProfit.grossProfitPercent - comparisonCompanyKpiGrossProfit.grossProfitPercent
-    : null;
-  const hasGpComparison = comparisonCompanyKpiGrossProfit?.grossProfitPercent !== null && comparisonCompanyKpiGrossProfit?.grossProfitPercent !== undefined;
-  const sampleCostRate = data.summary.netSales === 0 ? null : data.summary.sampleCost / data.summary.netSales;
   const deliveryDays = mtdDeliveryDayComparison(data.generatedAt);
   const canAutoLoadGrossProfitForVisibleRange = canAutoLoadGrossProfit(data.dateFrom, data.dateTo);
   const loadingStatus = dashboardLoadingStatus({ isDrilldownLoading, isLoading, isProfitLoading });
@@ -478,79 +466,27 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       {data.unavailableReason ? <div className="status-card error">Sales data is not available yet.</div> : null}
       {errorMessage ? <div className="status-card error">{errorMessage}</div> : null}
 
-      <div className="company-kpi-grid">
-        <DashboardMetric
-          label={`${compactScopedPeriodLabel} Sales`}
-          value={currency.format(data.summary.netSales)}
-          detail={`Gross ${currency.format(data.summary.grossSales)} / Net ${currency.format(data.summary.netSales)}`}
-          meta={`${number.format(data.summary.invoiceCount)} invoices, ${number.format(data.summary.creditMemoCount)} credits`}
-          helpText="QuickBooks invoice subtotals create gross sales. QuickBooks credit memo subtotals are subtracted to create net sales for the selected date range."
-        />
-        <DashboardMetric
-          label={comparison ? salesComparisonLabel(data.period) : "Sales Trend"}
-          value={comparison ? formatSignedCurrency(netSalesDelta) : "-"}
-          detail={comparison ? `${formatSignedPercent(netSalesDeltaRate)} vs ${comparison.label}` : "Comparison unavailable"}
-          tone={toneFor(netSalesDelta)}
-          helpText="Compares current QuickBooks net sales against the same date range last year."
-        />
-        <DashboardMetric
-          label="MTD Delivery Days"
-          value={formatDeliveryDayDelta(deliveryDays.delta)}
-          detail={`${deliveryDays.currentDays} this year / ${deliveryDays.lastYearDays} LY`}
-          meta="Tuesday-Friday delivery calendar"
-          tone={toneFor(deliveryDays.delta)}
-          helpText="Delivery days are Tuesday-Friday from the first day of this month through today, compared with the first day of the same month through the same calendar day last year. This card is always current MTD, even when the dashboard date filter changes."
-        />
-        <DashboardMetric
-          label={`${compactScopedPeriodLabel} GP %`}
-          value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : formatPercent(companyKpiGrossProfit.grossProfitPercent)}
-          detail={
-            isProfitLoading && data.summary.grossProfit === null
-              ? "Calculating GP from QB + VS"
-              : !canAutoLoadGrossProfitForVisibleRange && data.summary.grossProfit === null
-              ? "Stored GP is still backfilling"
-              : data.summary.grossProfit === null
-                ? "Gross profit unavailable"
-                : companyKpiGrossProfit.sampleBillbackAccrual > 0
-                  ? `${currency.format(companyKpiGrossProfit.grossProfit ?? 0)} GP incl. ${currency.format(companyKpiGrossProfit.sampleBillbackAccrual)} sample accrual`
-                  : `${currency.format(companyKpiGrossProfit.grossProfit ?? 0)} gross profit`
-          }
-          meta={
-            isProfitLoading && data.summary.grossProfitPercent === null
-              ? "Background calculation running"
-              : !canAutoLoadGrossProfitForVisibleRange && data.summary.grossProfit === null
-                ? "Long-range GP disabled for now"
-                : data.summary.grossProfitUnavailableReason || "Includes 1.1% sample accrual"
-          }
-          helpText="Company KPI GP starts with QuickBooks sales lines, current QuickBooks item FOB cost, and Stem laid-in per bottle from Supplier Logistics. When Vinosmith order and price data can be matched, Vinosmith billbacks reduce effective cost. This KPI then adds an estimated sample bill-back accrual equal to 1.1% of net sales. Rep and account GP tables do not include this company-level accrual."
-        />
-        <DashboardMetric
-          label={comparison ? gpComparisonLabel(data.period) : "GP Trend"}
-          value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : hasGpComparison ? formatSignedPoints(gpDelta) : "-"}
-          detail={
-            isProfitLoading && data.summary.grossProfitPercent === null
-                ? "Calculating current GP"
-                : hasGpComparison
-                ? `${formatPercent(comparisonCompanyKpiGrossProfit?.grossProfitPercent ?? null)} last year`
-                : "Current period only"
-          }
-          tone={toneFor(gpDelta)}
-          helpText="Company KPI GP comparison uses the same company-level GP display basis, including the estimated 1.1% of net sales sample bill-back accrual. Rep and account GP tables remain unadjusted."
-        />
-        <DashboardMetric
-          label={`${compactScopedPeriodLabel} Samples`}
-          value={isProfitLoading && data.summary.grossProfitPercent === null ? "Calculating..." : currency.format(data.summary.sampleCost)}
-          detail={`${formatPercentOneDecimal(sampleCostRate)} of net sales`}
-          meta="Landed sample cost"
-          helpText="Samples as a percent of net sales is landed sample cost divided by QuickBooks net sales for the selected date range. Landed sample cost is quantity pulled multiplied by QuickBooks FOB plus Supplier Logistics laid-in cost."
-        />
-        <DashboardMetric
-          label={`${compactScopedPeriodLabel} Avg Invoice`}
-          value={currency.format(data.summary.averageInvoice)}
-          detail={`${number.format(data.summary.invoiceCount)} invoice basis`}
-          helpText="Average invoice is QuickBooks gross invoice sales divided by the number of QuickBooks invoices in the selected range. Credit memos are not included in this average."
-        />
-      </div>
+      <BusinessLineKpis
+        businessLine="stem"
+        comparison={data.comparison?.businessLineSummaries.find((row) => row.key === "stem") || null}
+        current={data.businessLineSummaries.find((row) => row.key === "stem") || null}
+        deliveryDays={deliveryDays}
+        isProfitLoading={isProfitLoading}
+        period={data.period}
+        periodLabel={compactDashboardPeriodLabel(displayPeriodLabel)}
+        canLoadProfit={canAutoLoadGrossProfitForVisibleRange}
+      />
+
+      <BusinessLineKpis
+        businessLine="grw"
+        comparison={data.comparison?.businessLineSummaries.find((row) => row.key === "grw") || null}
+        current={data.businessLineSummaries.find((row) => row.key === "grw") || null}
+        deliveryDays={deliveryDays}
+        isProfitLoading={isProfitLoading}
+        period={data.period}
+        periodLabel={compactDashboardPeriodLabel(displayPeriodLabel)}
+        canLoadProfit={canAutoLoadGrossProfitForVisibleRange}
+      />
 
       <BusinessLineSplit
         activeBusinessLine={selectedBusinessLine}
@@ -832,6 +768,142 @@ function BusinessLineSplit({
       </div>
     </section>
   );
+}
+
+function BusinessLineKpis({
+  businessLine,
+  canLoadProfit,
+  comparison,
+  current,
+  deliveryDays,
+  isProfitLoading,
+  period,
+  periodLabel
+}: {
+  businessLine: Exclude<CompanyDashboardBusinessLine, "all">;
+  canLoadProfit: boolean;
+  comparison: CompanyDashboardBusinessLineSummary | null;
+  current: CompanyDashboardBusinessLineSummary | null;
+  deliveryDays: ReturnType<typeof mtdDeliveryDayComparison>;
+  isProfitLoading: boolean;
+  period: CompanyDashboardPeriod;
+  periodLabel: string;
+}) {
+  const summary = current || emptyBusinessLineSummary(businessLine);
+  const netSalesDelta = comparison ? summary.netSales - comparison.netSales : null;
+  const netSalesDeltaRate = comparison ? changeRate(summary.netSales, comparison.netSales) : null;
+  const currentGrossProfit = companyKpiGrossProfitWithSampleAccrual(summary, businessLine);
+  const comparisonGrossProfit = comparison
+    ? companyKpiGrossProfitWithSampleAccrual(comparison, businessLine)
+    : null;
+  const gpDelta = currentGrossProfit.grossProfitPercent !== null && comparisonGrossProfit?.grossProfitPercent != null
+    ? currentGrossProfit.grossProfitPercent - comparisonGrossProfit.grossProfitPercent
+    : null;
+  const sampleCostRate = summary.netSales === 0 ? null : summary.sampleCost / summary.netSales;
+  const profitIsLoading = isProfitLoading && summary.grossProfitPercent === null;
+  const includesSampleAccrual = businessLine === "stem";
+
+  return (
+    <section className="company-kpi-section" aria-label={`${businessLineLabel(businessLine)} performance`}>
+      <div className="company-kpi-section-heading">
+        <h2>{businessLineLabel(businessLine)}</h2>
+        <span>{periodLabel}</span>
+      </div>
+      <div className={businessLine === "grw" ? "company-kpi-grid company-kpi-grid-compact" : "company-kpi-grid"}>
+        <DashboardMetric
+          label={`${periodLabel} Sales`}
+          value={currency.format(summary.netSales)}
+          detail={`Gross ${currency.format(summary.grossSales)} / Net ${currency.format(summary.netSales)}`}
+          meta={`${number.format(summary.invoiceCount)} invoices, ${number.format(summary.creditMemoCount)} credits`}
+          helpText={`QuickBooks invoice and credit memo subtotals assigned to ${businessLineLabel(businessLine)} create net sales for the selected date range.`}
+        />
+        <DashboardMetric
+          label={comparison ? salesComparisonLabel(period) : "Sales Trend"}
+          value={comparison ? formatSignedCurrency(netSalesDelta) : "-"}
+          detail={comparison ? `${formatSignedPercent(netSalesDeltaRate)} vs last year` : "Comparison unavailable"}
+          tone={toneFor(netSalesDelta)}
+          helpText={`Compares ${businessLineLabel(businessLine)} net sales against the same date range last year, without mixing in the other business line.`}
+        />
+        <DashboardMetric
+          label="MTD Delivery Days"
+          value={formatDeliveryDayDelta(deliveryDays.delta)}
+          detail={`${deliveryDays.currentDays} this year / ${deliveryDays.lastYearDays} LY`}
+          meta="Tuesday-Friday delivery calendar"
+          tone={toneFor(deliveryDays.delta)}
+          helpText="Delivery days are Tuesday-Friday from the first day of this month through today, compared with the first day of the same month through the same calendar day last year. This card is always current MTD, even when the dashboard date filter changes."
+        />
+        <DashboardMetric
+          label={`${periodLabel} GP %`}
+          value={profitIsLoading ? "Calculating..." : formatPercent(currentGrossProfit.grossProfitPercent)}
+          detail={
+            profitIsLoading
+              ? "Calculating GP from QB + VS"
+              : !canLoadProfit && summary.grossProfit === null
+                ? "Stored GP is still backfilling"
+                : summary.grossProfit === null
+                  ? "Gross profit unavailable"
+                  : includesSampleAccrual && currentGrossProfit.sampleBillbackAccrual > 0
+                    ? `${currency.format(currentGrossProfit.grossProfit ?? 0)} GP incl. ${currency.format(currentGrossProfit.sampleBillbackAccrual)} sample accrual`
+                    : `${currency.format(currentGrossProfit.grossProfit ?? 0)} gross profit`
+          }
+          meta={
+            profitIsLoading
+              ? "Background calculation running"
+              : !canLoadProfit && summary.grossProfit === null
+                ? "Long-range GP disabled for now"
+                : summary.grossProfitUnavailableReason || (includesSampleAccrual ? "Includes 1.1% sample accrual" : "No sample accrual")
+          }
+          helpText={includesSampleAccrual
+            ? "Stem Core GP uses QuickBooks sales and cost, Supplier Logistics laid-in cost, matched Vinosmith billbacks, and the estimated 1.1% sample bill-back accrual."
+            : "GRW GP uses QuickBooks sales and cost plus matched cost adjustments. It does not include sample cost or a sample bill-back accrual."}
+        />
+        {businessLine === "stem" ? (
+          <>
+            <DashboardMetric
+              label={comparison ? gpComparisonLabel(period) : "GP Trend"}
+              value={profitIsLoading ? "Calculating..." : comparisonGrossProfit?.grossProfitPercent != null ? formatSignedPoints(gpDelta) : "-"}
+              detail={comparisonGrossProfit?.grossProfitPercent != null ? `${formatPercent(comparisonGrossProfit.grossProfitPercent)} last year` : "Current period only"}
+              tone={toneFor(gpDelta)}
+              helpText="Stem Core GP comparison uses the same GP basis for both years, including the estimated 1.1% sample bill-back accrual."
+            />
+            <DashboardMetric
+              label={`${periodLabel} Samples`}
+              value={profitIsLoading ? "Calculating..." : currency.format(summary.sampleCost)}
+              detail={`${formatPercentOneDecimal(sampleCostRate)} of net sales`}
+              meta="Landed sample cost"
+              helpText="Stem Core samples as a percent of net sales is landed sample cost divided by Stem Core net sales for the selected date range."
+            />
+            <DashboardMetric
+              label={`${periodLabel} Avg Invoice`}
+              value={currency.format(summary.averageInvoice)}
+              detail={`${number.format(summary.invoiceCount)} invoice basis`}
+              helpText="Average invoice is Stem Core gross invoice sales divided by its QuickBooks invoice count. Credit memos are excluded from the average."
+            />
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function emptyBusinessLineSummary(
+  key: Exclude<CompanyDashboardBusinessLine, "all">
+): CompanyDashboardBusinessLineSummary {
+  return {
+    key,
+    label: businessLineLabel(key),
+    grossSales: 0,
+    credits: 0,
+    netSales: 0,
+    invoiceCount: 0,
+    creditMemoCount: 0,
+    averageInvoice: 0,
+    sampleCost: 0,
+    grossProfit: null,
+    grossProfitPercent: null,
+    grossProfitUnavailableReason: null,
+    salesShare: 0
+  };
 }
 
 function DashboardMetric({

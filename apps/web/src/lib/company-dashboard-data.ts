@@ -31,6 +31,7 @@ export type CompanyDashboardComparison = {
   dateFrom: string;
   dateTo: string;
   summary: CompanyDashboardSummary;
+  businessLineSummaries: CompanyDashboardBusinessLineSummary[];
 };
 
 export type CompanyDashboardBusinessLineSummary = CompanyDashboardSummary & {
@@ -71,7 +72,7 @@ export async function fetchCompanyDashboardData(
       : rangeForPeriod(period);
   const includeGrossProfit = filters.includeGrossProfit !== false;
   const businessLine = parseCompanyDashboardBusinessLine(filters.businessLine);
-  const comparisonRange = businessLine === "all" ? comparableLastYearRange(range) : null;
+  const comparisonRange = comparableLastYearRange(range);
   const includeComparisonGrossProfit = includeGrossProfit && canAutoLoadGrossProfitRange(range);
 
   const [current, comparison, salesThroughDate] = await Promise.all([
@@ -79,7 +80,7 @@ export async function fetchCompanyDashboardData(
     comparisonRange
       ? fetchPeriodDashboardData(supabase, comparisonRange, filters.rep, {
           includeGrossProfit: includeComparisonGrossProfit,
-          businessLine: "all"
+          businessLine
         })
       : Promise.resolve(null),
     fetchQuickBooksSalesThroughDate(supabase, range)
@@ -100,7 +101,8 @@ export async function fetchCompanyDashboardData(
           label: comparisonLabel(period),
           dateFrom: comparisonRange?.from || "",
           dateTo: comparisonRange?.to || "",
-          summary: comparison.summary
+          summary: comparison.summary,
+          businessLineSummaries: comparison.businessLineSummaries
         }
       : null,
     businessLineSummaries: currentRows.businessLineSummaries,
@@ -148,7 +150,8 @@ export function unavailableCompanyDashboardData(
           label: comparisonLabel(period),
           dateFrom: comparisonRange.from,
           dateTo: comparisonRange.to,
-          summary: emptySummary
+          summary: emptySummary,
+          businessLineSummaries: emptyBusinessLineSummaries()
       }
       : null,
     businessLineSummaries: emptyBusinessLineSummaries(),
