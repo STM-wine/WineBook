@@ -3,6 +3,7 @@ import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { fetchCompanyDashboardData, unavailableCompanyDashboardData, type CompanyDashboardData } from "@/lib/company-dashboard-data";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
 import { unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
+import { fetchLatestVinosmithAvailability } from "@/lib/supabase/vinosmith-availability";
 import {
   fetchAllRecommendationsForRun,
   fetchQuickBooksOnOrderItems
@@ -19,7 +20,7 @@ import type {
   QuickBooksVendor,
   QuickBooksVendorMapping
 } from "@/lib/types";
-import { mergeSupplierCatalogRows } from "@/lib/order-data";
+import { applyVinosmithAvailability, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -135,6 +136,7 @@ async function loadHomePageData(): Promise<HomePageData> {
   })();
 
   const vinosmithLastSyncPromise = fetchLatestVinosmithPullAt(serviceRoleSupabase);
+  const vinosmithAvailabilityPromise = fetchLatestVinosmithAvailability(serviceRoleSupabase).catch(() => null);
 
   const companyDashboardPromise = (() => {
     try {
@@ -247,17 +249,25 @@ async function loadHomePageData(): Promise<HomePageData> {
     { data: poDraftRows },
     { data: suppliers },
     quickBooksSupplierMatches,
-    quickBooksOnOrderItems
+    quickBooksOnOrderItems,
+    vinosmithAvailability
   ] = await Promise.all([
     reportRecommendationsPromise,
     poDraftRowsPromise,
     suppliersPromise,
     fetchQuickBooksSupplierMatches(serviceRoleSupabase),
-    quickBooksOnOrderItemsPromise
+    quickBooksOnOrderItemsPromise,
+    vinosmithAvailabilityPromise
   ]);
 
   const recommendations = applyQuickBooksOnOrderToRecommendations(
-    mergeSupplierCatalogRows(reportRecommendations || [], supplierCatalogWines || [], latestRun.id),
+    mergeSupplierCatalogRows(
+      vinosmithAvailability
+        ? applyVinosmithAvailability(reportRecommendations || [], vinosmithAvailability.byProductCode)
+        : reportRecommendations || [],
+      supplierCatalogWines || [],
+      latestRun.id
+    ),
     quickBooksOnOrderItems
   ).sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0));
 
@@ -273,7 +283,7 @@ async function loadHomePageData(): Promise<HomePageData> {
     quickBooksSupplierMatches,
     companyDashboard,
     quickBooksLastSyncAt,
-    vinosmithLastSyncAt
+    vinosmithLastSyncAt: vinosmithAvailability?.snapshotAt || vinosmithLastSyncAt
   };
 }
 

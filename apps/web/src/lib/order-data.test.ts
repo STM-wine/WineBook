@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { mergeSupplierCatalogRows, recommendationMatchesCatalogWine } from "./order-data";
+import {
+  applySupplierTargetWeeks,
+  applyVinosmithAvailability,
+  DEFAULT_SUPPLIER_TARGET_WEEKS,
+  mergeSupplierCatalogRows,
+  recommendationMatchesCatalogWine
+} from "./order-data";
 import type { Recommendation, SupplierCatalogWine } from "./types";
 
 function recommendation(overrides: Partial<Recommendation> = {}): Recommendation {
@@ -130,5 +136,43 @@ describe("supplier catalog recommendation merge", () => {
 
     expect(mergeSupplierCatalogRows([], [inactive], "another-run")).toHaveLength(0);
     expect(mergeSupplierCatalogRows([], [inactive], "run-1")).toHaveLength(1);
+  });
+});
+
+describe("live Order Review inventory and target weeks", () => {
+  it("replaces the report snapshot with current Vinosmith availability and recalculates coverage", () => {
+    const [updated] = applyVinosmithAvailability([
+      recommendation({ product_code: "abc000001", true_available: 99, weekly_velocity: 2, on_order: 4 })
+    ], new Map([["ABC000001", 2]]));
+
+    expect(updated.true_available).toBe(2);
+    expect(updated.weeks_on_hand).toBe(1);
+    expect(updated.weeks_on_hand_with_on_order).toBe(3);
+  });
+
+  it("treats a report item absent from the latest Vinosmith inventory snapshot as zero available", () => {
+    const [updated] = applyVinosmithAvailability([
+      recommendation({ product_code: "ABC000001", true_available: 99, weekly_velocity: 2 })
+    ], new Map());
+
+    expect(updated.true_available).toBe(0);
+    expect(updated.weeks_on_hand).toBe(0);
+  });
+
+  it("uses five target weeks by default and keeps supplier overrides", () => {
+    const row = recommendation({
+      supplier_name: "Stateside",
+      weekly_velocity: 10,
+      true_available: 20,
+      on_order: 0,
+      pack_size: 12,
+      fob: 10,
+      trucking_cost_per_bottle: 1
+    });
+
+    expect(DEFAULT_SUPPLIER_TARGET_WEEKS).toBe(5);
+    expect(applySupplierTargetWeeks([row], {})[0].recommended_qty_rounded).toBe(36);
+    expect(applySupplierTargetWeeks([row], { Stateside: 6 })[0].recommended_qty_rounded).toBe(48);
+    expect(applySupplierTargetWeeks([row], { Stateside: 0 })[0].recommended_qty_rounded).toBe(0);
   });
 });

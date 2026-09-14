@@ -156,8 +156,9 @@ export function OrderDashboard({
     () =>
       Object.fromEntries(
         Object.entries(supplierTargetWeeks)
+          .filter(([, value]) => value.trim() !== "")
           .map(([supplierName, value]) => [supplierName, Number(value)] as const)
-          .filter(([, value]) => Number.isFinite(value) && value > 0)
+          .filter(([, value]) => Number.isFinite(value) && value >= 0)
       ),
     [supplierTargetWeeks]
   );

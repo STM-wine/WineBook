@@ -9,6 +9,7 @@ import type {
 } from "./types";
 
 export type SupplierGroupSortMode = "default" | "az" | "za";
+export const DEFAULT_SUPPLIER_TARGET_WEEKS = 5;
 
 export function asNumber(value: number | string | null | undefined): number {
   if (value === null || value === undefined || value === "") return 0;
@@ -82,13 +83,12 @@ function recommendationForTargetWeeks(row: Recommendation, targetWeeks: number):
 
 export function applySupplierTargetWeeks(
   rows: Recommendation[],
-  supplierTargetWeeks: Record<string, number>
+  supplierTargetWeeks: Record<string, number>,
+  defaultTargetWeeks = DEFAULT_SUPPLIER_TARGET_WEEKS
 ): Recommendation[] {
-  if (Object.keys(supplierTargetWeeks).length === 0) return rows;
-
   return rows.map((row) => {
     const supplier = row.supplier_name?.trim() || "Unknown Supplier";
-    const targetWeeks = supplierTargetWeeks[supplier];
+    const targetWeeks = supplierTargetWeeks[supplier] ?? defaultTargetWeeks;
     if (!targetWeeks || targetWeeks <= 0 || row.order_path === "di") return row;
 
     const qty = recommendationForTargetWeeks(row, targetWeeks);
@@ -104,6 +104,31 @@ export function applySupplierTargetWeeks(
       landed_cost: landedCost
     };
   });
+}
+
+export function applyVinosmithAvailability(
+  rows: Recommendation[],
+  availabilityByProductCode: ReadonlyMap<string, number>
+): Recommendation[] {
+  return rows.map((row) => {
+    const productCode = row.product_code?.trim().toUpperCase();
+    if (!productCode) return row;
+
+    const trueAvailable = Math.max(0, availabilityByProductCode.get(productCode) ?? 0);
+    const weeklyVelocity = asNumber(row.weekly_velocity);
+    const onOrder = asNumber(row.on_order);
+    return {
+      ...row,
+      true_available: trueAvailable,
+      weeks_on_hand: weeklyVelocity > 0 ? roundNumber(trueAvailable / weeklyVelocity, 2) : null,
+      weeks_on_hand_with_on_order: weeklyVelocity > 0 ? roundNumber((trueAvailable + onOrder) / weeklyVelocity, 2) : null
+    };
+  });
+}
+
+function roundNumber(value: number, digits: number) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
 }
 
 export function applySupplierTdmAssignments(rows: Recommendation[], suppliers: SupplierLogistics[]): Recommendation[] {

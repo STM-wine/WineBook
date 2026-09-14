@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { DashboardMetrics, InactiveQuickBooksItem, Recommendation, SupplierGroup } from "@/lib/types";
 import {
   activeFreeGoodsForRow,
+  DEFAULT_SUPPLIER_TARGET_WEEKS,
   formatCurrency,
   formatInteger,
   freeGoodsSummary,
@@ -149,7 +150,7 @@ export function OrderReviewView({
             onSaveOrderPath={onSaveOrderPath}
             onSetWorkingQty={onSetWorkingQty}
             onSaveWorkingQty={onSaveWorkingQty}
-            targetWeeks={supplierTargetWeeks[group.supplier] || ""}
+            targetWeeks={supplierTargetWeeks[group.supplier] ?? String(DEFAULT_SUPPLIER_TARGET_WEEKS)}
             onSetTargetWeeks={(value) => onSetSupplierTargetWeeks(group.supplier, value)}
             onRestoreInactiveWine={onRestoreInactiveWine}
             isPending={isPending}
