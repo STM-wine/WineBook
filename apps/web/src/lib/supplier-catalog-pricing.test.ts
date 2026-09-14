@@ -5,8 +5,10 @@ import {
   calculateGpMargin,
   calculatePricing,
   findDuplicateActivePriceLevels,
-  normalizeFobCosts
+  normalizeFobCosts,
+  supplierCatalogWineToInput
 } from "./supplier-catalog";
+import type { SupplierCatalogWine } from "./types";
 
 describe("production Supplier Hub pricing", () => {
   it("normalizes bottle and case FOB exactly once", () => {
@@ -116,5 +118,74 @@ describe("production Supplier Hub pricing", () => {
       { name: "On 1 Case", bottlePrice: 19, active: true },
       { name: "On 1 Case", bottlePrice: 18, active: false }
     ])).toEqual(["On 1 Case"]);
+  });
+
+  it("preserves catalog metadata when a draft is edited from Order Summary", () => {
+    const input = supplierCatalogWineToInput({
+      id: "wine-1",
+      supplier_id: "supplier-1",
+      supplier_name: "Stateside",
+      producer: "Domaine Vacheron",
+      wine_name: "Sancerre Blanc",
+      vintage: "2025",
+      pack_size: 6,
+      bottle_size: "750ml",
+      pricing_basis: "case",
+      pricing_model: "standard",
+      fob_bottle: 20,
+      fob_case: 120,
+      laid_in_per_bottle: 1.5,
+      availability_status: "available",
+      conversion_status: "net_new_product",
+      system_tags: ["Core"],
+      copied_from_supplier_catalog_wine_id: "wine-template",
+      quickbooks_item_id: null,
+      quickbooks_item_name: null,
+      quickbooks_item_number: null,
+      source_system: "supplier_hub",
+      source_id: "source-1",
+      price_levels: [{
+        id: "price-1",
+        supplier_catalog_wine_id: "wine-1",
+        name: "Frontline",
+        bottle_price: 32,
+        depletion_allowance: 0,
+        target_gp_margin: 0.32,
+        calculated_gp_margin: 0.3281,
+        is_frontline: true,
+        is_best: false,
+        display_order: 0,
+        active: true,
+        source_system: null,
+        source_id: null,
+        created_at: "2026-09-14T00:00:00Z",
+        updated_at: "2026-09-14T00:00:00Z"
+      }],
+      free_goods: [{
+        id: "free-1",
+        supplier_catalog_wine_id: "wine-1",
+        buy_quantity: 5,
+        free_quantity: 1,
+        unit: "case",
+        program_name: "5+1",
+        starts_on: null,
+        ends_on: null,
+        notes: null,
+        active: true,
+        created_at: "2026-09-14T00:00:00Z",
+        updated_at: "2026-09-14T00:00:00Z"
+      }]
+    } as SupplierCatalogWine);
+
+    expect(input).toMatchObject({
+      supplierId: "supplier-1",
+      pricingBasis: "case",
+      systemTags: ["Core"],
+      copiedFromSupplierCatalogWineId: "wine-template",
+      sourceSystem: "supplier_hub",
+      sourceId: "source-1"
+    });
+    expect(input.priceLevels?.[0]).toMatchObject({ id: "price-1", name: "Frontline", bottlePrice: 32 });
+    expect(input.freeGoods?.[0]).toMatchObject({ id: "free-1", buyQuantity: 5, freeQuantity: 1, unit: "case" });
   });
 });

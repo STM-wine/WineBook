@@ -724,6 +724,7 @@ export function OrderDashboard({
           supplierGroups={supplierGroups}
           supplierSort={supplierSort}
           supplierOptions={supplierOptions}
+          supplierCatalogWines={supplierCatalogWines}
           supplierTargetWeeks={supplierTargetWeeks}
           visibleCount={visibleRecommendations.length}
           onSaveApproval={saveApproval}
@@ -733,6 +734,8 @@ export function OrderDashboard({
           onSetWorkingQty={setWorkingQty}
           onSetSupplierTargetWeeks={setSupplierTargetWeeksValue}
           onRestoreInactiveWine={restoreInactiveWine}
+          onSaveCatalogWine={saveCatalogWine}
+          onDeleteCatalogWine={deleteCatalogWine}
           isPending={isPending}
         />
       ) : null}

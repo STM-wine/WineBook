@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import type { DashboardMetrics, InactiveQuickBooksItem, Recommendation, SupplierGroup } from "@/lib/types";
+import type {
+  DashboardMetrics,
+  InactiveQuickBooksItem,
+  Recommendation,
+  SupplierCatalogWine,
+  SupplierGroup
+} from "@/lib/types";
 import {
   activeFreeGoodsForRow,
   DEFAULT_SUPPLIER_TARGET_WEEKS,
@@ -10,6 +16,12 @@ import {
 } from "@/lib/order-data";
 import { MetricCard } from "./metric-card";
 import { WorkbenchGrid } from "./workbench-grid";
+import { supplierCatalogWineToInput, type SupplierCatalogWineInput } from "@/lib/supplier-catalog";
+
+type SaveCatalogWineInput = SupplierCatalogWineInput & {
+  existingCatalogWineId?: string | null;
+  priceChangeReason?: string;
+};
 
 export function OrderReviewView({
   brandManager,
@@ -28,6 +40,7 @@ export function OrderReviewView({
   supplierGroups,
   supplierSort,
   supplierOptions,
+  supplierCatalogWines,
   supplierTargetWeeks,
   visibleCount,
   onSaveApproval,
@@ -37,6 +50,8 @@ export function OrderReviewView({
   onSetWorkingQty,
   onSetSupplierTargetWeeks,
   onRestoreInactiveWine,
+  onSaveCatalogWine,
+  onDeleteCatalogWine,
   isPending
 }: {
   brandManager: string;
@@ -55,6 +70,7 @@ export function OrderReviewView({
   supplierGroups: SupplierGroup[];
   supplierSort: SupplierGroupSortMode;
   supplierOptions: string[];
+  supplierCatalogWines: SupplierCatalogWine[];
   supplierTargetWeeks: Record<string, string>;
   visibleCount: number;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
@@ -64,8 +80,24 @@ export function OrderReviewView({
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSetSupplierTargetWeeks: (supplierName: string, value: string) => void;
   onRestoreInactiveWine: (listId: string) => void;
+  onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
+  onDeleteCatalogWine: (input: { id: string }) => void;
   isPending: boolean;
 }) {
+  const [editingWine, setEditingWine] = useState<SupplierCatalogWine | null>(null);
+
+  function editNewItem(row: Recommendation) {
+    const wine = supplierCatalogWines.find((candidate) => candidate.id === row.supplier_catalog_wine_id);
+    if (wine) setEditingWine(wine);
+  }
+
+  function deleteNewItem(row: Recommendation) {
+    if (!row.supplier_catalog_wine_id) return;
+    const name = row.product_name || row.planning_sku || "this new item";
+    if (!window.confirm(`Delete ${name}? This removes the draft item from the workbench and Supplier Hub.`)) return;
+    onDeleteCatalogWine({ id: row.supplier_catalog_wine_id });
+  }
+
   return (
     <>
       <section className="metric-grid">
@@ -153,10 +185,23 @@ export function OrderReviewView({
             targetWeeks={supplierTargetWeeks[group.supplier] ?? String(DEFAULT_SUPPLIER_TARGET_WEEKS)}
             onSetTargetWeeks={(value) => onSetSupplierTargetWeeks(group.supplier, value)}
             onRestoreInactiveWine={onRestoreInactiveWine}
+            onEditNewItem={editNewItem}
+            onDeleteNewItem={deleteNewItem}
             isPending={isPending}
           />
         ))}
       </section>
+      {editingWine ? (
+        <NewItemEditDialog
+          wine={editingWine}
+          isPending={isPending}
+          onClose={() => setEditingWine(null)}
+          onSave={(input) => {
+            onSaveCatalogWine(input);
+            setEditingWine(null);
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -232,6 +277,8 @@ function SupplierSection({
   targetWeeks,
   onSetTargetWeeks,
   onRestoreInactiveWine,
+  onEditNewItem,
+  onDeleteNewItem,
   isPending
 }: {
   group: SupplierGroup;
@@ -244,6 +291,8 @@ function SupplierSection({
   targetWeeks: string;
   onSetTargetWeeks: (value: string) => void;
   onRestoreInactiveWine: (listId: string) => void;
+  onEditNewItem: (row: Recommendation) => void;
+  onDeleteNewItem: (row: Recommendation) => void;
   isPending: boolean;
 }) {
   const [showHistory, setShowHistory] = useState(false);
@@ -356,10 +405,98 @@ function SupplierSection({
             onSaveOrderPath={onSaveOrderPath}
             onSetWorkingQty={onSetWorkingQty}
             onSaveWorkingQty={onSaveWorkingQty}
+            onEditNewItem={onEditNewItem}
+            onDeleteNewItem={onDeleteNewItem}
           />
         </>
       ) : null}
     </details>
+  );
+}
+
+function NewItemEditDialog({
+  wine,
+  isPending,
+  onClose,
+  onSave
+}: {
+  wine: SupplierCatalogWine;
+  isPending: boolean;
+  onClose: () => void;
+  onSave: (input: SaveCatalogWineInput) => void;
+}) {
+  const [producer, setProducer] = useState(wine.producer);
+  const [wineName, setWineName] = useState(wine.wine_name);
+  const [vintage, setVintage] = useState(wine.vintage || "NV");
+  const [packSize, setPackSize] = useState(String(wine.pack_size || 12));
+  const [bottleSize, setBottleSize] = useState(wine.bottle_size || "750ml");
+  const usesCaseFob = wine.pricing_basis === "case";
+  const [fobCost, setFobCost] = useState(String(usesCaseFob ? wine.fob_case ?? "" : wine.fob_bottle ?? ""));
+  const [laidInPerBottle, setLaidInPerBottle] = useState(String(wine.laid_in_per_bottle ?? "0"));
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave({
+      ...supplierCatalogWineToInput(wine),
+      existingCatalogWineId: wine.id,
+      producer: producer.trim(),
+      wineName: wineName.trim(),
+      vintage: vintage.trim() || "NV",
+      packSize: Math.max(1, Math.trunc(Number(packSize) || 1)),
+      bottleSize: bottleSize.trim() || "750ml",
+      fobBottle: usesCaseFob ? null : fobCost.trim() ? Number(fobCost) : null,
+      fobCase: usesCaseFob ? (fobCost.trim() ? Number(fobCost) : null) : null,
+      laidInPerBottle: laidInPerBottle.trim() ? Number(laidInPerBottle) : 0,
+      priceChangeReason: "Order Summary draft edit"
+    });
+  }
+
+  return (
+    <div className="new-item-edit-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form className="new-item-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="new-item-edit-title" onSubmit={submit}>
+        <div className="new-item-edit-header">
+          <div>
+            <h2 id="new-item-edit-title">Edit New Item</h2>
+            <p>Update the draft before it becomes an official QuickBooks item.</p>
+          </div>
+          <button aria-label="Close edit dialog" className="ghost-button" type="button" onClick={onClose}>Close</button>
+        </div>
+        <div className="new-item-edit-grid">
+          <label>
+            Producer
+            <input required value={producer} onChange={(event) => setProducer(event.target.value)} />
+          </label>
+          <label className="wide-field">
+            Wine name
+            <input required value={wineName} onChange={(event) => setWineName(event.target.value)} />
+          </label>
+          <label>
+            Vintage
+            <input required value={vintage} onChange={(event) => setVintage(event.target.value)} />
+          </label>
+          <label>
+            Pack size
+            <input min="1" required type="number" value={packSize} onChange={(event) => setPackSize(event.target.value)} />
+          </label>
+          <label>
+            Bottle size
+            <input required value={bottleSize} onChange={(event) => setBottleSize(event.target.value)} />
+          </label>
+          <label>
+            {usesCaseFob ? "FOB / case" : "FOB / bottle"}
+            <input min="0" step="0.01" type="number" value={fobCost} onChange={(event) => setFobCost(event.target.value)} />
+          </label>
+          <label>
+            Laid-in / bottle
+            <input min="0" step="0.01" type="number" value={laidInPerBottle} onChange={(event) => setLaidInPerBottle(event.target.value)} />
+          </label>
+        </div>
+        <div className="new-item-edit-footer">
+          <button className="ghost-button" disabled={isPending} type="button" onClick={onClose}>Cancel</button>
+          <button className="primary-button" disabled={isPending} type="submit">Save Changes</button>
+        </div>
+      </form>
+    </div>
   );
 }
 

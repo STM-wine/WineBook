@@ -129,6 +129,81 @@ export type SupplierCatalogWineInput = {
   pricingCalculatedAt?: string | null;
 };
 
+export function supplierCatalogWineToInput(wine: SupplierCatalogWine): SupplierCatalogWineInput {
+  return {
+    supplierId: wine.supplier_id,
+    supplierName: wine.supplier_name,
+    producer: wine.producer,
+    wineName: wine.wine_name,
+    vintage: wine.vintage,
+    packSize: Math.max(1, Math.trunc(Number(wine.pack_size) || 1)),
+    bottleSize: wine.bottle_size,
+    fobBottle: Number(wine.fob_bottle) || 0,
+    fobCase: Number(wine.fob_case) || 0,
+    laidInPerBottle: Number(wine.laid_in_per_bottle) || 0,
+    frontlineOverride: null,
+    bestPriceOverride: null,
+    availabilityStatus: AVAILABILITY_STATUSES.includes(wine.availability_status as AvailabilityStatus)
+      ? (wine.availability_status as AvailabilityStatus)
+      : "unknown",
+    conversionStatus: CONVERSION_STATUSES.includes(wine.conversion_status as ConversionStatus)
+      ? (wine.conversion_status as ConversionStatus)
+      : "net_new_product",
+    systemTags: wine.system_tags || [],
+    copiedFromSupplierCatalogWineId: wine.copied_from_supplier_catalog_wine_id,
+    quickbooksItemId: wine.quickbooks_item_id,
+    quickbooksItemName: wine.quickbooks_item_name,
+    quickbooksItemNumber: wine.quickbooks_item_number,
+    sourceSystem: wine.source_system,
+    sourceId: wine.source_id,
+    pricingBasis: wine.pricing_basis === "case" ? "case" : "bottle",
+    pricingModel: wine.pricing_model === "grw_broker" ? "grw_broker" : "standard",
+    fobSourceDate: wine.fob_source_date,
+    laidInSourceDate: wine.laid_in_source_date,
+    priorPricingCostFingerprint: wine.pricing_cost_fingerprint,
+    pricingCalculatedAt: wine.pricing_calculated_at,
+    priceLevels: (wine.price_levels || []).map((level) => ({
+      id: level.id,
+      name: level.name,
+      bottlePrice: Number(level.bottle_price) || 0,
+      depletionAllowance: Number(level.depletion_allowance) || 0,
+      targetGpMargin: level.target_gp_margin === null ? null : Number(level.target_gp_margin),
+      calculatedGpMargin: Number(level.calculated_gp_margin) || 0,
+      isFrontline: level.is_frontline,
+      isBest: level.is_best,
+      displayOrder: Number(level.display_order) || 0,
+      active: level.active,
+      sourceSystem: level.source_system,
+      sourceId: level.source_id,
+      solveFor: SOLVE_FOR_MODES.includes(level.solve_for as SolveForMode) ? (level.solve_for as SolveForMode) : "gp",
+      approvalDecision: PRICE_APPROVAL_DECISIONS.includes(level.approval_decision as PriceApprovalDecision)
+        ? (level.approval_decision as PriceApprovalDecision)
+        : null,
+      overrideReason: level.override_reason,
+      approvalOwner: level.approval_owner,
+      decisionTimestamp: level.decision_timestamp,
+      suggestedPrice: level.suggested_price === null ? null : Number(level.suggested_price),
+      suggestedGpMargin: level.suggested_gp_margin === null ? null : Number(level.suggested_gp_margin),
+      daAlternative: level.da_alternative === null ? null : Number(level.da_alternative),
+      finalApprovedPrice: level.final_approved_price === null ? null : Number(level.final_approved_price),
+      finalApprovedDa: level.final_approved_da === null ? null : Number(level.final_approved_da),
+      finalGpMargin: level.final_gp_margin === null ? null : Number(level.final_gp_margin)
+    })),
+    freeGoods: (wine.free_goods || []).map((freeGood) => ({
+      id: freeGood.id,
+      buyQuantity: Number(freeGood.buy_quantity) || 0,
+      freeQuantity: Number(freeGood.free_quantity) || 0,
+      unit: freeGood.unit === "bottle" ? "bottle" : "case",
+      programName: freeGood.program_name,
+      startsOn: freeGood.starts_on,
+      endsOn: freeGood.ends_on,
+      notes: freeGood.notes,
+      active: freeGood.active,
+      extensionMetadata: freeGood.extension_metadata
+    }))
+  };
+}
+
 export type PricingResult = {
   packSize: number;
   fobBottle: number;

@@ -35,6 +35,8 @@ type WorkbenchGridProps = {
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
+  onEditNewItem: (row: Recommendation) => void;
+  onDeleteNewItem: (row: Recommendation) => void;
 };
 
 type WorkbenchRow = Recommendation & {
@@ -86,6 +88,35 @@ const OrderPathRenderer = (params: ICellRendererParams<WorkbenchRow>) => {
     </select>
   );
 };
+const NewItemActionsRenderer = (params: ICellRendererParams<WorkbenchRow>) => {
+  const row = params.data;
+  if (!row?.is_new_item || !row.supplier_catalog_wine_id) return null;
+
+  return (
+    <span className="new-item-actions">
+      <button
+        className="new-item-action-button"
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          params.context.onEditNewItem(row);
+        }}
+      >
+        Edit
+      </button>
+      <button
+        className="new-item-action-button is-delete"
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          params.context.onDeleteNewItem(row);
+        }}
+      >
+        Delete
+      </button>
+    </span>
+  );
+};
 const hasWineBadges = (row?: Recommendation | null) =>
   Boolean(row?.is_new_item || (row && activeFreeGoodsForRow(row).length > 0) || (row && isDiOpportunity(row)));
 const rowHeightForWine = (row?: WorkbenchRow | null) => {
@@ -133,7 +164,9 @@ export function WorkbenchGrid({
   onSaveApproval,
   onSaveOrderPath,
   onSetWorkingQty,
-  onSaveWorkingQty
+  onSaveWorkingQty,
+  onEditNewItem,
+  onDeleteNewItem
 }: WorkbenchGridProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [manualEditedCells, setManualEditedCells] = useState<ManualEditState>({});
@@ -180,6 +213,21 @@ export function WorkbenchGrid({
         wrapText: true,
         autoHeight: true
       },
+      ...(rows.some((row) => row.is_new_item && row.supplier_catalog_wine_id)
+        ? [{
+            headerName: "Actions",
+            colId: "new_item_actions",
+            pinned: "left" as const,
+            lockPinned: true,
+            width: 128,
+            sortable: false,
+            headerTooltip: "Edit or delete a draft item before it is created in QuickBooks.",
+            headerClass: "center-header",
+            cellClass: "center-cell new-item-actions-cell",
+            cellStyle: CENTER_CELL_STYLE,
+            cellRenderer: NewItemActionsRenderer
+          }]
+        : []),
       {
         headerName: "Approval",
         field: "approved",
@@ -417,7 +465,7 @@ export function WorkbenchGrid({
     ];
       return columns;
     },
-    [manualEditedCells, onSaveOrderPath, showForecast, showHistory]
+    [manualEditedCells, onDeleteNewItem, onEditNewItem, onSaveOrderPath, rows, showForecast, showHistory]
   );
 
   const defaultColDef = useMemo<ColDef<WorkbenchRow>>(
@@ -492,7 +540,7 @@ export function WorkbenchGrid({
         animateRows={false}
         enableBrowserTooltips
         tooltipShowDelay={0}
-        context={{ onSaveOrderPath }}
+        context={{ onDeleteNewItem, onEditNewItem, onSaveOrderPath }}
       />
     </div>
   );

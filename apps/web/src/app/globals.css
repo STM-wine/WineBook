@@ -2889,6 +2889,120 @@ th:nth-child(12) .table-sort-button {
   background: #fff8df;
 }
 
+.new-item-actions {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.new-item-action-button {
+  border: 1px solid #b5ad8d;
+  border-radius: 5px;
+  background: #fffdf4;
+  color: #4e4938;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 7px;
+}
+
+.new-item-action-button:hover {
+  background: #f2edda;
+}
+
+.new-item-action-button.is-delete {
+  border-color: #d4aaa5;
+  color: #8e3128;
+}
+
+.new-item-edit-overlay {
+  align-items: center;
+  background: rgb(24 24 20 / 52%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.new-item-edit-dialog {
+  background: #fff;
+  border: 1px solid #d8d3c3;
+  border-radius: 12px;
+  box-shadow: 0 22px 70px rgb(0 0 0 / 24%);
+  max-height: calc(100vh - 48px);
+  max-width: 760px;
+  overflow: auto;
+  padding: 24px;
+  width: 100%;
+}
+
+.new-item-edit-header,
+.new-item-edit-footer {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.new-item-edit-header h2,
+.new-item-edit-header p {
+  margin: 0;
+}
+
+.new-item-edit-header p {
+  color: var(--muted);
+  margin-top: 5px;
+}
+
+.new-item-edit-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 24px 0;
+}
+
+.new-item-edit-grid label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  text-transform: uppercase;
+}
+
+.new-item-edit-grid input {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font: inherit;
+  padding: 10px;
+  text-transform: none;
+}
+
+.new-item-edit-grid .wide-field {
+  grid-column: span 2;
+}
+
+.new-item-edit-footer {
+  border-top: 1px solid var(--line);
+  gap: 10px;
+  justify-content: flex-end;
+  padding-top: 18px;
+}
+
+@media (max-width: 680px) {
+  .new-item-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .new-item-edit-grid .wide-field {
+    grid-column: auto;
+  }
+}
+
 .form-actions {
   align-items: center;
   display: flex;
