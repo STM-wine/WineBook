@@ -776,8 +776,12 @@ export async function saveSupplierCatalogWine(input: {
       .eq("supplier_catalog_wine_id", saved.id)
       .eq("display_order", level.display_order))
   ]);
-  const metadataError = metadataUpdates.find((update) => update.error)?.error;
-  if (metadataError) throw new Error(metadataError.message);
+  const metadataError = metadataUpdates
+    .map((update) => update.error)
+    .find((error) => error && !isMissingOptionalPricingMetadataError(error));
+  if (metadataError) {
+    throw new Error(metadataError.message);
+  }
 
   const event = input.pricingModel === "grw_broker"
     ? null
@@ -797,6 +801,30 @@ export async function saveSupplierCatalogWine(input: {
     planningSku: saved.planning_sku,
     priceChangeCreated: Boolean(event)
   };
+}
+
+function isMissingOptionalPricingMetadataError(error: { code?: string; message?: string; details?: string | null }) {
+  const message = `${error.message || ""} ${error.details || ""}`.toLowerCase();
+  const optionalColumns = [
+    "pricing_model",
+    "fob_source_date",
+    "laid_in_source_date",
+    "pricing_calculated_at",
+    "pricing_cost_fingerprint",
+    "solve_for",
+    "approval_decision",
+    "suggested_price",
+    "suggested_gp_margin",
+    "da_alternative",
+    "final_approved_price",
+    "final_approved_da",
+    "final_gp_margin",
+    "override_reason",
+    "approval_owner",
+    "decision_timestamp"
+  ];
+  const mentionsOptionalColumn = optionalColumns.some((column) => message.includes(column));
+  return mentionsOptionalColumn && (error.code === "42703" || error.code === "PGRST204" || message.includes("does not exist") || message.includes("schema cache"));
 }
 
 export async function deletePendingSupplierCatalogWine(input: { id: string }) {
