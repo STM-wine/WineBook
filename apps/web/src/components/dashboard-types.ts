@@ -7,12 +7,11 @@ export type ActiveView =
   | "vinosmith-rescue"
   | "supplier-board"
   | "freight"
-  | "po-drafts"
-  | "quickbooks-items";
+  | "po-drafts";
 
 export const DEFAULT_VIEW: ActiveView = "company-dashboard";
 
-export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolean; requiresSettings?: boolean }> = [
+export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolean }> = [
   { id: "company-dashboard", label: "Home" },
   { id: "product-workspace", label: "Items" },
   { id: "order-review", label: "Order Review" },
@@ -21,11 +20,8 @@ export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolea
   { id: "vinosmith-rescue", label: "Vinosmith Plumbing", hidden: true },
   { id: "supplier-board", label: "Supplier Board", hidden: true },
   { id: "freight", label: "Freight" },
-  { id: "po-drafts", label: "PO Drafts" },
-  { id: "quickbooks-items", label: "QB Diagnostics", requiresSettings: true }
+  { id: "po-drafts", label: "PO Drafts" }
 ];
-
-export const NAV_VIEW_LABELS = VIEW_LABELS.filter((view) => !view.hidden);
 
 const VIEW_IDS = new Set(VIEW_LABELS.map((view) => view.id));
 

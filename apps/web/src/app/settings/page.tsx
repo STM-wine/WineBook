@@ -98,24 +98,6 @@ export default async function SettingsOverviewPage() {
             </div>
           </dl>
         </section>
-
-        <section className="settings-panel">
-          <div className="settings-panel-header">
-            <h2>Recent Changes</h2>
-            <Link className="button button-small button-outline" href="/settings/history">
-              History
-            </Link>
-          </div>
-          <div className="settings-list">
-            {data.recentVersions.slice(0, 5).map((version) => (
-              <article key={version.id}>
-                <strong>v{version.version_number} · {version.status}</strong>
-                <span>{version.proposal_summary || "Ordering logic update"}</span>
-                <small>{dateLabel(version.published_at || version.created_at)}</small>
-              </article>
-            ))}
-          </div>
-        </section>
       </div>
     </>
   );

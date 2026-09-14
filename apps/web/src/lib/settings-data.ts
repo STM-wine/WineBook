@@ -23,6 +23,7 @@ export type SettingsOverviewData = {
 type FetchSettingsOverviewOptions = {
   includeLatestRecommendations?: boolean;
   includeProfiles?: boolean;
+  includeRecentVersions?: boolean;
   changeRequestLimit?: number;
 };
 
@@ -82,13 +83,15 @@ export async function fetchSettingsOverview(
       .order("created_at", { ascending: false })
       .limit(options.changeRequestLimit ?? 50)
       .returns<SettingsChangeRequest[]>(),
-    supabase
-      .from("configuration_versions")
-      .select("*")
-      .eq("domain", "ordering_logic")
-      .order("version_number", { ascending: false })
-      .limit(12)
-      .returns<RawConfigurationVersion[]>(),
+    options.includeRecentVersions
+      ? supabase
+          .from("configuration_versions")
+          .select("*")
+          .eq("domain", "ordering_logic")
+          .order("version_number", { ascending: false })
+          .limit(12)
+          .returns<RawConfigurationVersion[]>()
+      : Promise.resolve({ data: [] as RawConfigurationVersion[], error: null }),
     supabase
       .from("report_runs")
       .select("id,report_date,completed_at,diagnostics,configuration_version_id,configuration_snapshot")

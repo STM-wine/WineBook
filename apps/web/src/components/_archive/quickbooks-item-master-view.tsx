@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatInteger } from "@/lib/order-data";
-import { MetricCard } from "./metric-card";
+import { MetricCard } from "@/components/metric-card";
 
 type QuickBooksItemMasterSummary = {
   statusCounts: {

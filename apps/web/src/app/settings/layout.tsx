@@ -7,13 +7,9 @@ const SETTINGS_NAV = [
   { href: "/settings", label: "Overview" },
   { href: "/settings/data-sync", label: "Data Health" },
   { href: "/settings/logic", label: "Logic Settings" },
-  { href: "/settings/gross-profit-center", label: "Gross Profit Center" },
-  { href: "/settings/laid-in-coverage", label: "Laid-In Coverage" },
   { href: "/settings/requests", label: "Change Requests" },
   { href: "/settings/access", label: "User Access" },
-  { href: "/settings/qb-vendors", label: "QB Vendors" },
-  { href: "/settings/suppliers", label: "Supplier Settings" },
-  { href: "/settings/history", label: "History" }
+  { href: "/settings/suppliers", label: "Supplier Settings" }
 ];
 
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {

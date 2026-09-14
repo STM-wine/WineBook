@@ -30,8 +30,7 @@ const ORDERING_VIEWS: ActiveView[] = [
   "database-order-preview",
   "po-drafts",
   "supplier-hub",
-  "freight",
-  "quickbooks-items"
+  "freight"
 ];
 
 export function AppTopbar({
@@ -49,7 +48,7 @@ export function AppTopbar({
   onSelectView
 }: AppTopbarProps) {
   const orderingViews = VIEW_LABELS.filter(
-    (view) => ORDERING_VIEWS.includes(view.id) && !view.hidden && (!view.requiresSettings || canViewSettings)
+    (view) => ORDERING_VIEWS.includes(view.id) && !view.hidden
   );
   const isOrderingActive = Boolean(activeView && ORDERING_VIEWS.includes(activeView));
   const brandContent = (

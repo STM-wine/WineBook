@@ -51,7 +51,6 @@ import { FreightView } from "./freight-view";
 import { OrderReviewView } from "./order-review-view";
 import { PoDraftsView } from "./po-drafts-view";
 import { ProductWorkspaceView } from "./product-workspace-view";
-import { QuickBooksItemMasterView } from "./quickbooks-item-master-view";
 import { StatusMessages } from "./status-messages";
 import { SupplierBoardView } from "./supplier-board-view";
 import { SupplierHubView } from "./supplier-hub-view";
@@ -145,17 +144,13 @@ export function OrderDashboard({
   useEffect(() => {
     const syncViewFromUrl = () => {
       const view = new URLSearchParams(window.location.search).get("view");
-      if (view === "quickbooks-items" && !canViewSettings) {
-        setActiveView(DEFAULT_VIEW);
-        return;
-      }
       setActiveView(isActiveView(view) ? view : DEFAULT_VIEW);
     };
 
     syncViewFromUrl();
     window.addEventListener("popstate", syncViewFromUrl);
     return () => window.removeEventListener("popstate", syncViewFromUrl);
-  }, [canViewSettings]);
+  }, []);
 
   const parsedSupplierTargetWeeks = useMemo(
     () =>
@@ -202,7 +197,6 @@ export function OrderDashboard({
     : undefined;
 
   function selectView(view: ActiveView) {
-    if (view === "quickbooks-items" && !canViewSettings) return;
     setActiveView(view);
     const url = new URL(window.location.href);
     if (view === DEFAULT_VIEW) {
@@ -709,7 +703,7 @@ export function OrderDashboard({
 
       {activeView === "company-dashboard" ? <CompanyDashboardView initialData={companyDashboard} /> : null}
 
-      {activeView === "product-workspace" ? <ProductWorkspaceView canViewDiagnostics={canViewSettings} /> : null}
+      {activeView === "product-workspace" ? <ProductWorkspaceView canManageMarkers={canViewSettings} /> : null}
 
       {activeView === "order-review" ? (
         <OrderReviewView
@@ -776,8 +770,6 @@ export function OrderDashboard({
           onStatusChange={changeDraftStatus}
         />
       ) : null}
-
-      {activeView === "quickbooks-items" && canViewSettings ? <QuickBooksItemMasterView /> : null}
     </main>
   );
 }

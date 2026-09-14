@@ -5,7 +5,6 @@ import { dateTimeLabel } from "@/lib/date-labels";
 import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
 import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
 import { MetricCard } from "./metric-card";
-import { QuickBooksItemMasterView } from "./quickbooks-item-master-view";
 
 type LoadState =
   | { status: "loading"; data: null; error: null }
@@ -62,9 +61,8 @@ const STATUS_FILTERS: Array<{ label: string; value: StatusFilter }> = [
   { label: "Inactive match", value: "inactive_match" }
 ];
 
-export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostics?: boolean }) {
+export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers?: boolean }) {
   const [includeInactive, setIncludeInactive] = useState(false);
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [state, setState] = useState<LoadState>({ status: "loading", data: null, error: null });
   const [cacheMeta, setCacheMeta] = useState<{ cachedAt: string; fromCache: boolean } | null>(null);
   const [isReloading, setIsReloading] = useState(false);
@@ -113,26 +111,6 @@ export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostic
   useEffect(() => {
     void loadWorkspace();
   }, [loadWorkspace]);
-
-  if (diagnosticsOpen && canViewDiagnostics) {
-    return (
-      <>
-        <section className="panel product-workspace-header">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Products / Items</p>
-              <h1>QuickBooks Item Diagnostics</h1>
-              <p>Read-only health checks preserved from the existing item master view.</p>
-            </div>
-            <button className="button button-outline button-small" onClick={() => setDiagnosticsOpen(false)} type="button">
-              Back to Workspace
-            </button>
-          </div>
-        </section>
-        <QuickBooksItemMasterView />
-      </>
-    );
-  }
 
   if (state.status === "loading") {
     return (
@@ -199,13 +177,11 @@ export function ProductWorkspaceView({ canViewDiagnostics }: { canViewDiagnostic
 
   return (
     <ProductWorkspaceTable
-      canViewDiagnostics={canViewDiagnostics}
-      canManageMarkers={canViewDiagnostics}
+      canManageMarkers={canManageMarkers}
       data={state.data}
       includeInactive={includeInactive}
       isReloading={isReloading}
       cacheMeta={cacheMeta}
-      onOpenDiagnostics={() => setDiagnosticsOpen(true)}
       onMarkerUpdated={handleMarkerUpdated}
       onReload={() => loadWorkspace({ force: true })}
       onSetIncludeInactive={setIncludeInactive}
@@ -239,24 +215,20 @@ async function fetchAndCacheProductWorkspace(includeInactive: boolean, force: bo
 
 function ProductWorkspaceTable({
   canManageMarkers,
-  canViewDiagnostics,
   data,
   includeInactive,
   isReloading,
   cacheMeta,
   onMarkerUpdated,
-  onOpenDiagnostics,
   onReload,
   onSetIncludeInactive
 }: {
   canManageMarkers?: boolean;
-  canViewDiagnostics?: boolean;
   data: ProductWorkspaceResponse;
   includeInactive: boolean;
   isReloading: boolean;
   cacheMeta: { cachedAt: string; fromCache: boolean } | null;
   onMarkerUpdated: (itemCode: string, marker: OrderingMarker) => void;
-  onOpenDiagnostics: () => void;
   onReload: () => void;
   onSetIncludeInactive: (value: boolean) => void;
 }) {
@@ -422,11 +394,6 @@ function ProductWorkspaceTable({
             <button className="button button-outline button-small" disabled={isReloading} onClick={onReload} type="button">
               {isReloading ? "Reloading..." : "Reload"}
             </button>
-            {canViewDiagnostics ? (
-              <button className="button button-outline button-small" onClick={onOpenDiagnostics} type="button">
-                QB Diagnostics
-              </button>
-            ) : null}
           </div>
         </div>
 
