@@ -10,7 +10,7 @@ import {
   fetchQuickBooksOnOrderItems
 } from "@/lib/supabase/recommendations";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import type {
   PurchaseOrderDraftWithLines,
   Recommendation,
@@ -148,6 +148,7 @@ export async function POST(request: Request) {
   }
 
   const { supabase, user } = access;
+  const integrationSupabase = createServiceRoleClient();
 
   const { data: activeDrafts, error: activeDraftsError } = await supabase
     .from("purchase_order_drafts")
@@ -203,7 +204,7 @@ export async function POST(request: Request) {
   try {
     const [fetchedRecommendations, quickBooksOnOrderItems] = await Promise.all([
       fetchAllRecommendationsForRun(supabase, reportRunId),
-      fetchQuickBooksOnOrderItems(supabase)
+      fetchQuickBooksOnOrderItems(integrationSupabase)
     ]);
     const { data: catalogWines, error: catalogError } = await supabase
       .from("supplier_catalog_wines")
