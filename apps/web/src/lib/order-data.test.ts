@@ -160,6 +160,15 @@ describe("live Order Review inventory and target weeks", () => {
     expect(updated.weeks_on_hand).toBe(0);
   });
 
+  it("preserves negative Vinosmith Available values exactly", () => {
+    const [updated] = applyVinosmithAvailability([
+      recommendation({ product_code: "ABC000001", true_available: 99, weekly_velocity: 2 })
+    ], new Map([["ABC000001", -6]]));
+
+    expect(updated.true_available).toBe(-6);
+    expect(updated.weeks_on_hand).toBe(-3);
+  });
+
   it("uses five target weeks by default and keeps supplier overrides", () => {
     const row = recommendation({
       supplier_name: "Stateside",

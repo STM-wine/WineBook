@@ -187,7 +187,7 @@ export function OrderDashboard({
   const dataUpdatedAt = formatSourceUpdatedAt(vinosmithLastSyncAt || reportRun.completed_at);
   const dataLabel = dataUpdatedAt ? `VS Updated ${dataUpdatedAt}` : `VS Date ${reportRun.report_date || "Latest run"}`;
   const dataTitle = vinosmithLastSyncAt
-    ? `Last successful Vinosmith source mirror pull ${dataUpdatedAt}.`
+    ? `Vinosmith Get Available inventory fetched ${dataUpdatedAt}.`
     : reportRun.report_date
       ? `Report date ${reportRun.report_date}${dataUpdatedAt ? `, completed ${dataUpdatedAt}` : ""}`
       : undefined;

@@ -3,7 +3,7 @@ import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { fetchCompanyDashboardData, unavailableCompanyDashboardData, type CompanyDashboardData } from "@/lib/company-dashboard-data";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
 import { unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
-import { fetchLatestVinosmithAvailability } from "@/lib/supabase/vinosmith-availability";
+import { fetchLiveVinosmithAvailability } from "@/lib/supabase/vinosmith-availability";
 import {
   fetchAllRecommendationsForRun,
   fetchQuickBooksOnOrderItems
@@ -136,7 +136,7 @@ async function loadHomePageData(): Promise<HomePageData> {
   })();
 
   const vinosmithLastSyncPromise = fetchLatestVinosmithPullAt(serviceRoleSupabase);
-  const vinosmithAvailabilityPromise = fetchLatestVinosmithAvailability(serviceRoleSupabase).catch(() => null);
+  const vinosmithAvailabilityPromise = fetchLiveVinosmithAvailability();
 
   const companyDashboardPromise = (() => {
     try {

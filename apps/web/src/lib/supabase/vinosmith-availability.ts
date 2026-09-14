@@ -1,6 +1,8 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createVinosmithDistributorClient } from "@/lib/integrations/vinosmith";
+import { aggregateVinosmithAvailable } from "@/lib/vinosmith-availability-data";
 
 type InventoryRow = {
   wine_id: string;
@@ -15,6 +17,36 @@ export type LatestVinosmithAvailability = {
 };
 
 const PAGE_SIZE = 1000;
+
+export async function fetchLiveVinosmithAvailability(options: {
+  token?: string;
+  fetchImpl?: typeof fetch;
+  now?: () => Date;
+} = {}): Promise<LatestVinosmithAvailability> {
+  const fetchImpl = options.fetchImpl || ((input, init = {}) =>
+    fetch(input, {
+      ...init,
+      signal: init.signal || AbortSignal.timeout(20_000)
+    }));
+  const client = createVinosmithDistributorClient({
+    token: options.token,
+    fetchImpl,
+    userAgent: "Stem-WineBook-Order-Summary-Available/1.0"
+  });
+  const response = await client.getInventory();
+  const records = response.data?.inventory;
+  if (!Array.isArray(records)) {
+    throw new Error("Vinosmith Get Available returned no inventory rows.");
+  }
+
+  return {
+    snapshotAt: (options.now || (() => new Date()))().toISOString(),
+    byProductCode: aggregateVinosmithAvailable(records.map((record) => ({
+      wineCode: record.wine?.code,
+      available: record.inventory?.available
+    })))
+  };
+}
 
 export async function fetchLatestVinosmithAvailability(
   supabase: SupabaseClient
@@ -47,16 +79,10 @@ export async function fetchLatestVinosmithAvailability(
     if (page.length < PAGE_SIZE) break;
   }
 
-  const byProductCode = new Map<string, number>();
-  for (const row of rows) {
-    const productCode = row.wine_code?.trim().toUpperCase();
-    if (!productCode) continue;
-    const available = Number(row.available);
-    byProductCode.set(
-      productCode,
-      (byProductCode.get(productCode) || 0) + (Number.isFinite(available) ? Math.max(0, available) : 0)
-    );
-  }
+  const byProductCode = aggregateVinosmithAvailable(rows.map((row) => ({
+    wineCode: row.wine_code,
+    available: row.available
+  })));
 
   return { snapshotAt, byProductCode };
 }

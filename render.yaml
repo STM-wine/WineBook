@@ -26,3 +26,5 @@ services:
         value: main
       - key: VINOSMITH_INGEST_WORKFLOW_ID
         value: daily-vinosmith-ingest.yml
+      - key: VINOSMITH_API_TOKEN
+        sync: false

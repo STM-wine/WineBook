@@ -331,7 +331,7 @@ export function WorkbenchGrid({
         field: "true_available",
         width: 108,
         headerTooltip:
-          "Current report value. The new ordering source path will use Vinosmith Available inventory.",
+          "Live Vinosmith Get Available value matched by exact wine code.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,

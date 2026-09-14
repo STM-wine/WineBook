@@ -115,7 +115,7 @@ export function applyVinosmithAvailability(
     const productCode = row.product_code?.trim().toUpperCase();
     if (!productCode) return row;
 
-    const trueAvailable = Math.max(0, availabilityByProductCode.get(productCode) ?? 0);
+    const trueAvailable = availabilityByProductCode.get(productCode) ?? 0;
     const weeklyVelocity = asNumber(row.weekly_velocity);
     const onOrder = asNumber(row.on_order);
     return {
