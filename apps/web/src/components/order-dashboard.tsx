@@ -7,6 +7,7 @@ import {
   deletePendingSupplierCatalogWine,
   deletePurchaseOrderLine,
   refreshVinosmithReports,
+  restoreInactiveSupplierWineToWorkbench,
   saveSupplierCatalogWine,
   saveSupplierLogisticsBatch,
   updateSupplierCatalogWorkbenchItems,
@@ -23,6 +24,7 @@ import type {
   ReportRun,
   SupplierCatalogWine,
   SupplierQuickBooksVendorMatch,
+  VinosmithExplorerWine,
   VinosmithExplorerData,
   WineRequest,
   SupplierLogistics
@@ -69,6 +71,7 @@ type Props = {
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
+  inactiveSupplierWines: VinosmithExplorerWine[];
   canViewSettings?: boolean;
 };
 
@@ -100,6 +103,7 @@ export function OrderDashboard({
   companyDashboard,
   quickBooksLastSyncAt,
   vinosmithLastSyncAt,
+  inactiveSupplierWines,
   canViewSettings
 }: Props) {
   const router = useRouter();
@@ -276,6 +280,22 @@ export function OrderDashboard({
         next[supplierName] = value;
       }
       return next;
+    });
+  }
+
+  function restoreInactiveWine(wineId: string) {
+    setPendingMessage("Re-adding inactive item to the workbench...");
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        const result = await restoreInactiveSupplierWineToWorkbench({ wineId, reportRunId: reportRun.id });
+        setPendingMessage(`Added to workbench: ${result.displayName}`);
+        router.refresh();
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not re-add the inactive item.");
+        setPendingMessage("");
+      }
     });
   }
 
@@ -710,6 +730,7 @@ export function OrderDashboard({
           suggestedOnly={suggestedOnly}
           supplier={supplier}
           supplierGroups={supplierGroups}
+          inactiveSupplierWines={inactiveSupplierWines}
           supplierSort={supplierSort}
           supplierOptions={supplierOptions}
           supplierTargetWeeks={supplierTargetWeeks}
@@ -720,6 +741,8 @@ export function OrderDashboard({
           onSaveWorkingQty={saveWorkingQty}
           onSetWorkingQty={setWorkingQty}
           onSetSupplierTargetWeeks={setSupplierTargetWeeksValue}
+          onRestoreInactiveWine={restoreInactiveWine}
+          isPending={isPending}
         />
       ) : null}
 

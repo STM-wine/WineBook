@@ -43,16 +43,18 @@ def build_available_wine(payload: dict, previous: dict | None = None) -> tuple[S
         producer=payload.get("producer", ""),
         wine_name=payload.get("wine_name", ""),
         vintage=payload.get("vintage") or "NV",
-        pack_size=payload.get("pack_size") or 12,
+        pack_size=payload.get("pack_size"),
         bottle_size=payload.get("bottle_size") or "750ml",
     )
     pricing = calculate_pricing(
-        pack_size=payload.get("pack_size") or 12,
+        pack_size=payload.get("pack_size"),
         fob_bottle=payload.get("fob_bottle"),
         fob_case=payload.get("fob_case"),
         laid_in_per_bottle=payload.get("laid_in_per_bottle") or 0,
         frontline_bottle_price=payload.get("frontline_bottle_price"),
         best_price=payload.get("best_price") if payload.get("best_price") not in ("", None) else None,
+        pricing_basis=payload.get("pricing_basis"),
+        grw_broker_model=payload.get("pricing_model") == "grw_broker",
     )
     wine = SupplierAvailableWine(
         supplier_name=payload.get("supplier_name", ""),
@@ -62,6 +64,7 @@ def build_available_wine(payload: dict, previous: dict | None = None) -> tuple[S
         pack_size=pricing.pack_size,
         bottle_size=payload.get("bottle_size", "750ml"),
         pricing_basis=payload.get("pricing_basis", "bottle"),
+        pricing_model=payload.get("pricing_model", "standard"),
         fob_bottle=pricing.fob_bottle,
         fob_case=pricing.fob_case,
         laid_in_per_bottle=pricing.laid_in_per_bottle,

@@ -11,6 +11,7 @@ import {
   CONVERSION_STATUSES,
   PLACEMENT_TYPES,
   SYSTEM_TAGS,
+  buildPlanningSku,
   buildOrderingWorkflowPayload,
   buildSupplierCatalogWine,
   decisionToRequestStatus,
@@ -21,7 +22,7 @@ import {
   type ConversionStatus
 } from "@/lib/supplier-catalog";
 import { createClient } from "@/lib/supabase/server";
-import type { QuickBooksVendorClassification, SupplierCatalogWine, WineRequest } from "@/lib/types";
+import type { QuickBooksVendorClassification, SupplierCatalogWine, VinosmithExplorerWine, WineRequest } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 const VALID_STATUSES = new Set(["rejected", "approved", "edited", "deferred"]);
@@ -539,6 +540,17 @@ export async function saveSupplierCatalogWine(input: {
     active?: boolean;
     sourceSystem?: string | null;
     sourceId?: string | null;
+    solveFor?: "price" | "da" | "gp";
+    approvalDecision?: "approve_price" | "pursue_da" | "revise" | "hold" | "no_change" | null;
+    overrideReason?: string | null;
+    approvalOwner?: string | null;
+    decisionTimestamp?: string | null;
+    suggestedPrice?: number | null;
+    suggestedGpMargin?: number | null;
+    daAlternative?: number | null;
+    finalApprovedPrice?: number | null;
+    finalApprovedDa?: number | null;
+    finalGpMargin?: number | null;
   }>;
   freeGoods?: Array<{
     id?: string;
@@ -555,6 +567,12 @@ export async function saveSupplierCatalogWine(input: {
   availabilityStatus?: string;
   conversionStatus?: string;
   priceChangeReason?: string;
+  pricingBasis?: "bottle" | "case";
+  pricingModel?: "standard" | "grw_broker";
+  fobSourceDate?: string | null;
+  laidInSourceDate?: string | null;
+  priorPricingCostFingerprint?: string | null;
+  pricingCalculatedAt?: string | null;
 }) {
   if (!input.producer.trim()) {
     throw new Error("Producer is required.");
@@ -562,8 +580,9 @@ export async function saveSupplierCatalogWine(input: {
   if (!input.wineName.trim()) {
     throw new Error("Fantasy Name is required.");
   }
-  if (Number(input.packSize || 12) < 1) {
-    throw new Error("Pack size must be at least 1.");
+  const parsedPackSize = Number(input.packSize);
+  if (!Number.isFinite(parsedPackSize) || parsedPackSize <= 0 || !Number.isInteger(parsedPackSize)) {
+    throw new Error("Pack size is required and must be a positive whole number.");
   }
   for (const [label, value] of [
     ["Bottle FOB", input.fobBottle],
@@ -589,11 +608,13 @@ export async function saveSupplierCatalogWine(input: {
   if (invalidTag) {
     throw new Error(`Unsupported system tag: ${invalidTag}.`);
   }
-  const invalidPriceLevel = (input.priceLevels || []).find(
-    (level) => Number(level.bottlePrice || 0) < 0 || Number(level.depletionAllowance || 0) < 0
+  const invalidPriceLevel = (input.priceLevels || []).find((level) =>
+    Number(level.bottlePrice || 0) < 0 || Number(level.depletionAllowance || 0) < 0 ||
+    (level.targetGpMargin !== null && level.targetGpMargin !== undefined &&
+      (!Number.isFinite(Number(level.targetGpMargin)) || Number(level.targetGpMargin) < 0 || Number(level.targetGpMargin) >= 1))
   );
   if (invalidPriceLevel) {
-    throw new Error("Price levels cannot have negative prices or depletion allowances.");
+    throw new Error("Price levels require nonnegative prices/DA and target GP below 100%.");
   }
   const invalidFreeGood = (input.freeGoods || []).find(
     (freeGood) => Number(freeGood.buyQuantity || 0) < 0 || Number(freeGood.freeQuantity || 0) < 0
@@ -609,7 +630,7 @@ export async function saveSupplierCatalogWine(input: {
     producer: input.producer,
     wineName: input.wineName,
     vintage: input.vintage || "NV",
-    packSize: input.packSize || 12,
+    packSize: input.packSize as number,
     bottleSize: input.bottleSize || "750ml",
     fobBottle: input.fobBottle,
     fobCase: input.fobCase,
@@ -627,15 +648,27 @@ export async function saveSupplierCatalogWine(input: {
     freeGoods: input.freeGoods,
     availabilityStatus: availabilityStatus as AvailabilityStatus,
     conversionStatus: conversionStatus as ConversionStatus,
-    priceChangeReason: input.priceChangeReason
+    priceChangeReason: input.priceChangeReason,
+    pricingBasis: input.pricingBasis,
+    pricingModel: input.pricingModel,
+    fobSourceDate: input.fobSourceDate,
+    laidInSourceDate: input.laidInSourceDate,
+    priorPricingCostFingerprint: input.priorPricingCostFingerprint,
+    pricingCalculatedAt: input.pricingCalculatedAt
   });
-  const lowGpLevel = (payload.price_levels || []).find(
+  const lowGpLevels = (payload.price_levels || []).filter(
     (level) => level.active !== false && Number(level.bottle_price || 0) > 0 && Number(level.calculated_gp_margin || 0) < MINIMUM_GP_MARGIN
   );
-  if (lowGpLevel || Number(payload.gross_profit_margin || 0) < MINIMUM_GP_MARGIN) {
-    throw new Error("Gross profit margin must be at least 28%. Override permission is not available yet.");
+  const frontlineLevel = (payload.price_levels || []).find((level) => level.is_frontline);
+  const requiredOverrides = [
+    ...lowGpLevels,
+    ...(Number(payload.gross_profit_margin || 0) < MINIMUM_GP_MARGIN && frontlineLevel && !lowGpLevels.includes(frontlineLevel) ? [frontlineLevel] : [])
+  ];
+  if (input.pricingModel !== "grw_broker" && requiredOverrides.some((level) =>
+    level.approval_decision !== "approve_price" || !level.override_reason || !level.approval_owner || !VALID_APPROVERS.has(level.approval_owner)
+  )) {
+      throw new Error("Any controllable price below 28% requires Approve price, an override reason, and an owner/approver.");
   }
-
   const { data: latestRun, error: latestRunError } = await supabase
     .from("report_runs")
     .select("id")
@@ -664,7 +697,18 @@ export async function saveSupplierCatalogWine(input: {
     display_order: level.display_order,
     active: level.active,
     source_system: level.source_system,
-    source_id: level.source_id
+    source_id: level.source_id,
+    solve_for: level.solve_for || "gp",
+    approval_decision: level.approval_decision,
+    suggested_price: level.suggested_price,
+    suggested_gp_margin: level.suggested_gp_margin,
+    da_alternative: level.da_alternative,
+    final_approved_price: level.final_approved_price,
+    final_approved_da: level.final_approved_da,
+    final_gp_margin: level.final_gp_margin,
+    override_reason: level.override_reason,
+    approval_owner: level.approval_owner,
+    decision_timestamp: level.approval_decision ? (level.decision_timestamp || new Date().toISOString()) : null
   }));
   const freeGoods = (payloadFreeGoods || []).map((freeGood) => ({
     buy_quantity: freeGood.buy_quantity,
@@ -697,7 +741,38 @@ export async function saveSupplierCatalogWine(input: {
   const saved = result.saved;
   const existing = result.previous;
 
-  const event = detectPriceChange(existing || null, saved, input.priceChangeReason || "Manual catalog update");
+  const metadataUpdates = await Promise.all([
+    supabase.from("supplier_catalog_wines").update({
+      pricing_model: input.pricingModel || "standard",
+      fob_source_date: input.fobSourceDate || null,
+      laid_in_source_date: input.laidInSourceDate || null,
+      pricing_calculated_at: new Date().toISOString(),
+      pricing_cost_fingerprint: payload.pricing_cost_fingerprint
+    }).eq("id", saved.id),
+    ...priceLevels.map((level) => supabase
+      .from("supplier_catalog_price_levels")
+      .update({
+        solve_for: level.solve_for,
+        approval_decision: level.approval_decision,
+        suggested_price: level.suggested_price,
+        suggested_gp_margin: level.suggested_gp_margin,
+        da_alternative: level.da_alternative,
+        final_approved_price: level.final_approved_price,
+        final_approved_da: level.final_approved_da,
+        final_gp_margin: level.final_gp_margin,
+        override_reason: level.override_reason,
+        approval_owner: level.approval_owner,
+        decision_timestamp: level.decision_timestamp
+      })
+      .eq("supplier_catalog_wine_id", saved.id)
+      .eq("display_order", level.display_order))
+  ]);
+  const metadataError = metadataUpdates.find((update) => update.error)?.error;
+  if (metadataError) throw new Error(metadataError.message);
+
+  const event = input.pricingModel === "grw_broker"
+    ? null
+    : detectPriceChange(existing || null, saved, input.priceChangeReason || "Manual catalog update");
   if (event) {
     const { error: eventError } = await supabase.from("price_change_events").insert(event);
     if (eventError) {
@@ -835,6 +910,156 @@ export async function updateSupplierCatalogWorkbenchItems(input: {
 
   revalidateSupplierCatalogData();
   revalidatePath("/");
+}
+
+export async function restoreInactiveSupplierWineToWorkbench(input: {
+  wineId: string;
+  reportRunId: string;
+}) {
+  if (!input.wineId || !input.reportRunId) {
+    throw new Error("Inactive wine and report run are required.");
+  }
+
+  const { supabase, user } = await requireWriteAccess();
+  const { data: sourceWine, error: sourceError } = await supabase
+    .from("vinosmith_wines")
+    .select("wine_id,code,name,vintage,importer_name,producer_name,product_family,unit_set,bottle_size,bottle_size_label,fob_price,category,country,region,appellation,active,orderable,core,inventory_item,last_seen_at")
+    .eq("wine_id", input.wineId)
+    .maybeSingle<VinosmithExplorerWine>();
+
+  if (sourceError || !sourceWine) {
+    throw new Error(sourceError?.message || "Inactive wine was not found.");
+  }
+  if (sourceWine.active !== false && sourceWine.orderable !== false) {
+    throw new Error("This wine is no longer inactive. Refresh Order Review to see the current item.");
+  }
+
+  const supplierName = sourceWine.importer_name?.trim();
+  const displayName = sourceWine.name?.trim() || sourceWine.product_family?.trim();
+  if (!supplierName || !displayName) {
+    throw new Error("This inactive wine is missing the supplier or display name needed for the workbench.");
+  }
+
+  const planningSku = buildPlanningSku(displayName);
+  const itemNumber = sourceWine.code?.trim() || null;
+  let existing: SupplierCatalogWine | null = null;
+
+  const { data: sourceMatch, error: sourceMatchError } = await supabase
+    .from("supplier_catalog_wines")
+    .select("*")
+    .eq("source_system", "vinosmith")
+    .eq("source_id", sourceWine.wine_id)
+    .limit(1)
+    .maybeSingle<SupplierCatalogWine>();
+  if (sourceMatchError) throw new Error(sourceMatchError.message);
+  existing = sourceMatch || null;
+
+  if (!existing && itemNumber) {
+    const { data: itemMatch, error: itemMatchError } = await supabase
+      .from("supplier_catalog_wines")
+      .select("*")
+      .eq("supplier_name", supplierName)
+      .ilike("quickbooks_item_number", itemNumber)
+      .limit(1)
+      .maybeSingle<SupplierCatalogWine>();
+    if (itemMatchError) throw new Error(itemMatchError.message);
+    existing = itemMatch || null;
+  }
+
+  if (!existing) {
+    const { data: skuMatch, error: skuMatchError } = await supabase
+      .from("supplier_catalog_wines")
+      .select("*")
+      .eq("supplier_name", supplierName)
+      .eq("planning_sku", planningSku)
+      .limit(1)
+      .maybeSingle<SupplierCatalogWine>();
+    if (skuMatchError) throw new Error(skuMatchError.message);
+    existing = skuMatch || null;
+  }
+
+  let catalogWineId = existing?.id || null;
+  const now = new Date().toISOString();
+  if (existing) {
+    const { error: updateError } = await supabase
+      .from("supplier_catalog_wines")
+      .update({
+        availability_status: "available",
+        conversion_status: "exact_existing_product",
+        product_lifecycle_status: "active_product",
+        quickbooks_item_number: existing.quickbooks_item_number || itemNumber,
+        quickbooks_sync_status: existing.quickbooks_item_number || itemNumber ? "linked" : existing.quickbooks_sync_status,
+        source_system: "vinosmith",
+        source_id: sourceWine.wine_id,
+        updated_at: now
+      })
+      .eq("id", existing.id);
+    if (updateError) throw new Error(updateError.message);
+  } else {
+    const packSize = Math.max(1, Math.round(asNumber(sourceWine.unit_set) || 1));
+    const fobBottle = Math.max(0, asNumber(sourceWine.fob_price));
+    const bottleSize = sourceWine.bottle_size_label?.trim() || sourceWine.bottle_size?.trim() || "750ml";
+    const producer = sourceWine.producer_name?.trim() || "Unknown producer";
+    const { data: inserted, error: insertError } = await supabase
+      .from("supplier_catalog_wines")
+      .insert({
+        supplier_name: supplierName,
+        producer,
+        wine_name: sourceWine.product_family?.trim() || displayName,
+        vintage: sourceWine.vintage?.trim() || "NV",
+        pack_size: packSize,
+        bottle_size: bottleSize,
+        pricing_basis: "bottle",
+        fob_bottle: fobBottle,
+        fob_case: fobBottle * packSize,
+        laid_in_per_bottle: 0,
+        landed_bottle_cost: fobBottle,
+        frontline_bottle_price: 0,
+        gross_profit_margin: 0,
+        availability_status: "available",
+        conversion_status: "exact_existing_product",
+        display_name: displayName,
+        planning_sku: planningSku,
+        planning_sku_without_vintage: buildPlanningSku(displayName, true),
+        diagnostics: { restored_from_inactive_vinosmith_wine: sourceWine.wine_id },
+        quickbooks_item_name: displayName,
+        quickbooks_item_number: itemNumber,
+        quickbooks_sync_status: itemNumber ? "linked" : "not_created",
+        product_lifecycle_status: "active_product",
+        accounting_create_payload: {},
+        system_tags: sourceWine.core ? ["Core"] : [],
+        source_system: "vinosmith",
+        source_id: sourceWine.wine_id,
+        updated_at: now
+      })
+      .select("id")
+      .single<{ id: string }>();
+    if (insertError || !inserted) throw new Error(insertError?.message || "Could not restore the inactive wine.");
+    catalogWineId = inserted.id;
+  }
+
+  if (!catalogWineId) throw new Error("Could not identify the restored supplier wine.");
+
+  const recommendedQty = Math.max(1, Math.round(asNumber(sourceWine.unit_set) || asNumber(existing?.pack_size) || 1));
+  const { error: workbenchError } = await supabase
+    .from("supplier_catalog_workbench_items")
+    .upsert({
+      report_run_id: input.reportRunId,
+      supplier_catalog_wine_id: catalogWineId,
+      recommendation_status: "rejected",
+      recommended_qty: recommendedQty,
+      approved_qty: 0,
+      order_path: "stateside",
+      active: true,
+      notes: "Restored from inactive Vinosmith item search.",
+      created_by: user.id,
+      updated_at: now
+    }, { onConflict: "report_run_id,supplier_catalog_wine_id" });
+  if (workbenchError) throw new Error(workbenchError.message);
+
+  revalidateSupplierCatalogData();
+  revalidatePath("/");
+  return { displayName, catalogWineId };
 }
 
 export async function createSupplierWineRequest(input: {

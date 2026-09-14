@@ -34,6 +34,7 @@ class SupplierAvailableWine:
     pack_size: int = 12
     bottle_size: str = "750ml"
     pricing_basis: str = "bottle"
+    pricing_model: str = "standard"
     fob_bottle: float = 0.0
     fob_case: float = 0.0
     laid_in_per_bottle: float = 0.0

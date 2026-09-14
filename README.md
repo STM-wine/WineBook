@@ -332,5 +332,5 @@ npm audit --audit-level=moderate
 - Keep calculation and ingest logic reusable outside Streamlit. Scheduled workers will need the same pipeline.
 - Keep `display_df` UI-only; use raw numeric frames for calculations and persistence.
 - Use Supabase service-role keys only in trusted server-side/local scripts.
-- Supabase Cron is the scheduling source of truth. GitHub Actions remains the Python worker and can still be manually dispatched for debugging. The Vinosmith source mirror refresh runs every 30 minutes through `vinosmith-source-mirror-refresh.yml`.
+- GitHub Actions is the scheduling source of truth for the Vinosmith source mirror. The workflow runs every 15 minutes and remains manually dispatchable for debugging. Supabase Cron is not used to dispatch this workflow.
 - The hosted-product direction is Next.js + Supabase Auth/Data on Render, with the existing Python worker retained for ingestion/calculation.

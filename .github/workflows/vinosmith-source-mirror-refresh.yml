@@ -3,7 +3,9 @@ name: Vinosmith Source Mirror Refresh
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    # GitHub Actions is the durable scheduler for the source mirror. The
+    # workflow remains manually dispatchable for recovery and debugging.
+    - cron: "*/15 * * * *"
 
 concurrency:
   group: vinosmith-source-mirror-refresh

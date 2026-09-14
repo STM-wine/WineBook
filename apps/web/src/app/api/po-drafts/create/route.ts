@@ -5,7 +5,11 @@ import { CACHE_TAGS } from "@/lib/cache-tags";
 import { asNumber, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { formatInteger } from "@/lib/order-data";
 import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
-import { fetchAllRecommendationsForRun } from "@/lib/supabase/recommendations";
+import {
+  fetchAllRecommendationsForRun,
+  fetchQuickBooksOnOrderItems
+} from "@/lib/supabase/recommendations";
+import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
 import { createClient } from "@/lib/supabase/server";
 import type {
   PurchaseOrderDraftWithLines,
@@ -197,7 +201,10 @@ export async function POST(request: Request) {
   let recommendations: Recommendation[];
   let supplierCatalogWines: SupplierCatalogWine[] = [];
   try {
-    const fetchedRecommendations = await fetchAllRecommendationsForRun(supabase, reportRunId);
+    const [fetchedRecommendations, quickBooksOnOrderItems] = await Promise.all([
+      fetchAllRecommendationsForRun(supabase, reportRunId),
+      fetchQuickBooksOnOrderItems(supabase)
+    ]);
     const { data: catalogWines, error: catalogError } = await supabase
       .from("supplier_catalog_wines")
       .select(`
@@ -211,7 +218,10 @@ export async function POST(request: Request) {
     }
 
     supplierCatalogWines = catalogWines || [];
-    recommendations = mergeSupplierCatalogRows(fetchedRecommendations, supplierCatalogWines, reportRunId);
+    recommendations = applyQuickBooksOnOrderToRecommendations(
+      mergeSupplierCatalogRows(fetchedRecommendations, supplierCatalogWines, reportRunId),
+      quickBooksOnOrderItems
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Could not load recommendations." },

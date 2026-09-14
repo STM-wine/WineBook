@@ -8,7 +8,7 @@ import type {
 } from "@/lib/types";
 
 export const AVAILABILITY_STATUSES = ["available", "limited", "sold_out", "unknown"] as const;
-export const SYSTEM_TAGS = ["Core", "BTG", "Limited", "Special Order", "Allocated"] as const;
+export const SYSTEM_TAGS = ["Core", "BTG", "Limited", "Special Order", "Allocated", "GRW Broker"] as const;
 export const CONVERSION_STATUSES = [
   "exact_existing_product",
   "new_vintage",
@@ -42,6 +42,10 @@ export const APPROVAL_DECISIONS = [
 ] as const;
 
 export const MINIMUM_GP_MARGIN = 0.28;
+export const FRONTLINE_TARGET_MARGIN = 0.32;
+export const BEST_TARGET_MARGIN = 0.30;
+export const SOLVE_FOR_MODES = ["price", "da", "gp"] as const;
+export const PRICE_APPROVAL_DECISIONS = ["approve_price", "pursue_da", "revise", "hold", "no_change"] as const;
 const GP_WARNING_PERSISTED = "Gross profit margin is below 28%.";
 const GP_WARNING_THRESHOLD = MINIMUM_GP_MARGIN;
 const PACK_RE = /^\s*(\d+)\s*[/xX]\s*([0-9.]+)\s*(ml|mL|ML|l|L)\s*$/;
@@ -50,6 +54,8 @@ export type AvailabilityStatus = (typeof AVAILABILITY_STATUSES)[number];
 export type ConversionStatus = (typeof CONVERSION_STATUSES)[number];
 export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
 export type SystemTag = (typeof SYSTEM_TAGS)[number];
+export type SolveForMode = (typeof SOLVE_FOR_MODES)[number];
+export type PriceApprovalDecision = (typeof PRICE_APPROVAL_DECISIONS)[number];
 
 export type SupplierCatalogPriceLevelInput = {
   id?: string;
@@ -64,6 +70,17 @@ export type SupplierCatalogPriceLevelInput = {
   active?: boolean;
   sourceSystem?: string | null;
   sourceId?: string | null;
+  solveFor?: SolveForMode;
+  approvalDecision?: PriceApprovalDecision | null;
+  overrideReason?: string | null;
+  approvalOwner?: string | null;
+  decisionTimestamp?: string | null;
+  suggestedPrice?: number | null;
+  suggestedGpMargin?: number | null;
+  daAlternative?: number | null;
+  finalApprovedPrice?: number | null;
+  finalApprovedDa?: number | null;
+  finalGpMargin?: number | null;
 };
 
 export type SupplierCatalogFreeGoodInput = {
@@ -104,6 +121,12 @@ export type SupplierCatalogWineInput = {
   priceLevels?: SupplierCatalogPriceLevelInput[];
   freeGoods?: SupplierCatalogFreeGoodInput[];
   priceChangeReason?: string;
+  pricingBasis?: "bottle" | "case";
+  pricingModel?: "standard" | "grw_broker";
+  fobSourceDate?: string | null;
+  laidInSourceDate?: string | null;
+  priorPricingCostFingerprint?: string | null;
+  pricingCalculatedAt?: string | null;
 };
 
 export type PricingResult = {
@@ -122,6 +145,26 @@ export type PricingResult = {
 export function money(value: unknown) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : 0;
+}
+
+export function normalizeFobCosts(input: {
+  packSize: number;
+  fobBottle?: number | null;
+  fobCase?: number | null;
+  pricingBasis?: "bottle" | "case" | null;
+}) {
+  const parsedPack = Number(input.packSize);
+  if (!Number.isFinite(parsedPack) || parsedPack <= 0 || !Number.isInteger(parsedPack)) {
+    throw new Error("Pack size is required and must be a positive whole number.");
+  }
+  const fobBottle = money(input.fobBottle);
+  const fobCase = money(input.fobCase);
+  if (fobBottle < 0 || fobCase < 0) throw new Error("FOB cost cannot be negative.");
+  const pricingBasis = input.pricingBasis || (fobCase > 0 && fobBottle <= 0 ? "case" : "bottle");
+  if (pricingBasis === "case") {
+    return { packSize: parsedPack, fobBottle: money(fobCase / parsedPack), fobCase, pricingBasis };
+  }
+  return { packSize: parsedPack, fobBottle, fobCase: money(fobBottle * parsedPack), pricingBasis };
 }
 
 export function normalizeSpaces(value: unknown) {
@@ -206,7 +249,7 @@ export function normalizeWineIdentity(input: {
 export function calculateBestPrice(frontlineBottlePrice: number) {
   const frontline = money(frontlineBottlePrice);
   if (frontline >= 50) return null;
-  if (frontline >= 20 && frontline <= 49) return money(frontline - 2);
+  if (frontline >= 20 && frontline < 50) return money(frontline - 2);
   if (frontline < 20 && frontline > 0) return money(frontline - 1);
   return null;
 }
@@ -231,7 +274,10 @@ export function requiredDepletionAllowanceForTargetMargin(input: {
 }) {
   const bottlePrice = money(input.bottlePrice);
   const landedBottleCost = money(input.landedBottleCost);
-  const targetGpMargin = Math.max(0, Math.min(0.99, Number(input.targetGpMargin) || 0));
+  const targetGpMargin = Number(input.targetGpMargin) || 0;
+  if (!Number.isFinite(targetGpMargin) || targetGpMargin < 0 || targetGpMargin >= 1) {
+    throw new Error("Target GP must be at least 0% and below 100%.");
+  }
   if (bottlePrice <= 0 || landedBottleCost <= 0 || targetGpMargin <= 0) return 0;
   return money(Math.max(0, landedBottleCost - bottlePrice * (1 - targetGpMargin)));
 }
@@ -241,7 +287,10 @@ export function requiredBottlePriceForTargetMargin(input: {
   depletionAllowance?: number | null;
   targetGpMargin?: number | null;
 }) {
-  const targetGpMargin = Math.max(0, Math.min(0.99, Number(input.targetGpMargin) || 0));
+  const targetGpMargin = Number(input.targetGpMargin) || 0;
+  if (!Number.isFinite(targetGpMargin) || targetGpMargin < 0 || targetGpMargin >= 1) {
+    throw new Error("Target GP must be at least 0% and below 100%.");
+  }
   const landedBottleCost = money(input.landedBottleCost);
   const depletionAllowance = money(input.depletionAllowance);
   const netCost = Math.max(0, landedBottleCost - depletionAllowance);
@@ -255,32 +304,32 @@ export function balancePriceLevel(input: {
   targetGpMargin?: number | null;
   landedBottleCost?: number | null;
   fallbackBottlePrice?: number | null;
+  solveFor?: SolveForMode;
 }) {
   const hasBottlePrice = input.bottlePrice !== null && input.bottlePrice !== undefined;
-  const hasDepletionAllowance = input.depletionAllowance !== null && input.depletionAllowance !== undefined;
   const hasTargetGpMargin = input.targetGpMargin !== null && input.targetGpMargin !== undefined;
-  const targetGpMargin = hasTargetGpMargin ? Math.max(0, Math.min(0.99, Number(input.targetGpMargin) || 0)) : null;
+  const targetGpMargin = hasTargetGpMargin ? Number(input.targetGpMargin) : null;
+  if (targetGpMargin !== null && (!Number.isFinite(targetGpMargin) || targetGpMargin < 0 || targetGpMargin >= 1)) {
+    throw new Error("Target GP must be at least 0% and below 100%.");
+  }
+  const solveFor = input.solveFor || "gp";
   const landedBottleCost = money(input.landedBottleCost);
   let bottlePrice = hasBottlePrice ? money(input.bottlePrice) : money(input.fallbackBottlePrice);
-  let depletionAllowance = hasDepletionAllowance ? money(input.depletionAllowance) : 0;
-  let calculatedField: "frontline" | "da" | "gp" | "fallback" = "gp";
+  let depletionAllowance = money(input.depletionAllowance);
+  let noDaRequired = false;
 
-  if (targetGpMargin !== null && hasDepletionAllowance) {
+  if (solveFor === "price") {
+    if (targetGpMargin === null) throw new Error("Target GP is required when solving for Price.");
     bottlePrice = requiredBottlePriceForTargetMargin({
       landedBottleCost,
       depletionAllowance,
       targetGpMargin
     });
-    calculatedField = "frontline";
-  } else if (targetGpMargin !== null && hasBottlePrice) {
-    depletionAllowance = requiredDepletionAllowanceForTargetMargin({
-      bottlePrice,
-      landedBottleCost,
-      targetGpMargin
-    });
-    calculatedField = "da";
-  } else if (!hasBottlePrice && bottlePrice > 0) {
-    calculatedField = "fallback";
+  } else if (solveFor === "da") {
+    if (targetGpMargin === null || !hasBottlePrice) throw new Error("Target GP and selling price are required when solving for DA.");
+    const rawDa = landedBottleCost - bottlePrice * (1 - targetGpMargin);
+    noDaRequired = rawDa <= 0;
+    depletionAllowance = money(Math.max(0, rawDa));
   }
 
   const calculatedGpMargin = calculateGpMargin({
@@ -294,7 +343,10 @@ export function balancePriceLevel(input: {
     depletionAllowance,
     targetGpMargin,
     calculatedGpMargin,
-    calculatedField,
+    calculatedField: solveFor,
+    solveFor,
+    noDaRequired,
+    daExceedsLandedCost: depletionAllowance > landedBottleCost,
     belowMinimumGp: bottlePrice > 0 && calculatedGpMargin < MINIMUM_GP_MARGIN
   };
 }
@@ -306,30 +358,55 @@ export function calculatePricing(input: {
   laidInPerBottle?: number | null;
   frontlineBottlePrice?: number | null;
   bestPrice?: number | null;
+  bestDepletionAllowance?: number | null;
+  pricingBasis?: "bottle" | "case" | null;
+  grwBrokerModel?: boolean;
 }): PricingResult {
-  const packSize = Math.max(1, Math.trunc(Number(input.packSize) || 12));
-  let fobBottle = money(input.fobBottle);
-  let fobCase = money(input.fobCase);
+  const normalized = normalizeFobCosts({
+    packSize: Number(input.packSize),
+    fobBottle: input.fobBottle,
+    fobCase: input.fobCase,
+    pricingBasis: input.pricingBasis
+  });
+  const { packSize, fobBottle, fobCase } = normalized;
   const laidInPerBottle = money(input.laidInPerBottle);
-
-  if (fobBottle <= 0 && fobCase > 0) {
-    fobBottle = money(fobCase / packSize);
-  }
-  if (fobCase <= 0 && fobBottle > 0) {
-    fobCase = money(fobBottle * packSize);
-  }
+  if (laidInPerBottle < 0) throw new Error("Laid-in cost cannot be negative.");
 
   const landedBottleCost = money(fobBottle + laidInPerBottle);
-  const frontlineBottlePrice = input.frontlineBottlePrice
-    ? money(input.frontlineBottlePrice)
-    : landedBottleCost
-      ? Math.ceil(landedBottleCost / 0.68)
-      : 0;
-  const bestPrice = input.bestPrice !== null && input.bestPrice !== undefined ? money(input.bestPrice) : calculateBestPrice(frontlineBottlePrice);
+  const unroundedFrontline = landedBottleCost ? landedBottleCost / (1 - FRONTLINE_TARGET_MARGIN) : 0;
+  const baseFrontline = unroundedFrontline > 0 && unroundedFrontline < 20
+    ? Math.ceil(unroundedFrontline * 4) / 4
+    : Math.ceil(unroundedFrontline);
+  const existingFrontline = money(input.frontlineBottlePrice);
+  const existingBest = input.bestPrice !== null && input.bestPrice !== undefined ? money(input.bestPrice) : null;
+  let frontlineBottlePrice = Math.max(baseFrontline, existingFrontline);
+  const discountFor = (frontline: number) => frontline < 20 ? 1 : frontline < 50 ? 2 : null;
+  if (existingBest !== null && frontlineBottlePrice < 50) {
+    while (frontlineBottlePrice < 50) {
+      const discount = discountFor(frontlineBottlePrice);
+      if (discount === null || frontlineBottlePrice >= existingBest + discount) break;
+      frontlineBottlePrice += 1;
+    }
+  }
+  let bestPrice = frontlineBottlePrice >= 50 ? existingBest : Math.max(calculateBestPrice(frontlineBottlePrice) || 0, existingBest || 0);
+  if (frontlineBottlePrice >= 50 && existingBest === null) bestPrice = null;
+  if (input.grwBrokerModel) {
+    frontlineBottlePrice = existingFrontline;
+    bestPrice = existingBest;
+  }
+  const bestGpMargin = bestPrice && bestPrice > 0 ? calculateGpMargin({
+    bottlePrice: bestPrice,
+    landedBottleCost,
+    depletionAllowance: input.bestDepletionAllowance
+  }) : null;
+  const bestTargetConflict = !input.grwBrokerModel && bestGpMargin !== null && bestGpMargin < BEST_TARGET_MARGIN;
   const grossProfitMargin = frontlineBottlePrice
     ? Math.round(((frontlineBottlePrice - landedBottleCost) / frontlineBottlePrice) * 10000) / 10000
     : 0;
-  const warnings = frontlineBottlePrice && grossProfitMargin < GP_WARNING_THRESHOLD ? [GP_WARNING_PERSISTED] : [];
+  const warnings: string[] = [];
+  if (!input.grwBrokerModel && frontlineBottlePrice && grossProfitMargin < GP_WARNING_THRESHOLD) warnings.push(GP_WARNING_PERSISTED);
+  if (money(input.bestDepletionAllowance) > landedBottleCost) warnings.push("Best depletion allowance exceeds landed cost.");
+  if (bestTargetConflict) warnings.push("Best ladder price is below the 30% target GP.");
 
   return {
     packSize,
@@ -342,10 +419,15 @@ export function calculatePricing(input: {
     grossProfitMargin,
     warnings,
     diagnostics: {
-      basis: "bottle",
+      basis: normalized.pricingBasis,
+      frontline_target_margin: FRONTLINE_TARGET_MARGIN,
+      best_target_margin: BEST_TARGET_MARGIN,
       gp_warning_threshold: GP_WARNING_THRESHOLD,
       frontline_formula: "CEILING(landed_bottle_cost / 0.68)",
       best_price_rule: "frontline >= 50 none; 20-49 minus 2; under 20 minus 1",
+      best_gp_margin: bestGpMargin,
+      best_target_conflict: bestTargetConflict,
+      informational_only: Boolean(input.grwBrokerModel),
       warnings
     }
   };
@@ -354,6 +436,18 @@ export function calculatePricing(input: {
 export function normalizeSystemTags(tags: string[] = []) {
   const valid = new Set<string>(SYSTEM_TAGS);
   return Array.from(new Set(tags.map(normalizeSpaces).filter((tag) => valid.has(tag))));
+}
+
+export function findDuplicateActivePriceLevels(levels: SupplierCatalogPriceLevelInput[] = []) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const level of levels.filter((row) => row.active !== false)) {
+    const key = normalizeSpaces(level.name).toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (!key) continue;
+    if (seen.has(key)) duplicates.add(normalizeSpaces(level.name));
+    seen.add(key);
+  }
+  return [...duplicates];
 }
 
 export function defaultPriceLevelsForPricing(pricing: PricingResult): SupplierCatalogPriceLevelInput[] {
@@ -366,7 +460,8 @@ export function defaultPriceLevelsForPricing(pricing: PricingResult): SupplierCa
       isFrontline: true,
       isBest: false,
       displayOrder: 0,
-      active: true
+      active: true,
+      solveFor: "gp" as const
     },
     ...(pricing.bestPrice !== null
       ? [
@@ -381,7 +476,8 @@ export function defaultPriceLevelsForPricing(pricing: PricingResult): SupplierCa
             isFrontline: false,
             isBest: true,
             displayOrder: 1,
-            active: true
+            active: true,
+            solveFor: "gp" as const
           }
         ]
       : [])
@@ -400,7 +496,8 @@ export function normalizePriceLevels(
         bottlePrice: level.bottlePrice,
         depletionAllowance: level.depletionAllowance,
         targetGpMargin,
-        landedBottleCost
+        landedBottleCost,
+        solveFor: level.solveFor || "gp"
       });
 
       return {
@@ -415,7 +512,22 @@ export function normalizePriceLevels(
         displayOrder: Math.max(0, Math.trunc(Number(level.displayOrder ?? index) || 0)),
         active: level.active ?? true,
         sourceSystem: level.sourceSystem || null,
-        sourceId: level.sourceId || null
+        sourceId: level.sourceId || null,
+        solveFor: level.solveFor || "gp",
+        approvalDecision: level.approvalDecision || null,
+        overrideReason: normalizeSpaces(level.overrideReason || "") || null,
+        approvalOwner: normalizeSpaces(level.approvalOwner || "") || null,
+        decisionTimestamp: level.decisionTimestamp || null,
+        suggestedPrice: level.suggestedPrice ?? balanced.bottlePrice,
+        suggestedGpMargin: level.suggestedGpMargin ?? balanced.calculatedGpMargin,
+        daAlternative: level.daAlternative ?? requiredDepletionAllowanceForTargetMargin({
+          bottlePrice: balanced.bottlePrice,
+          landedBottleCost,
+          targetGpMargin: MINIMUM_GP_MARGIN
+        }),
+        finalApprovedPrice: level.finalApprovedPrice ?? (level.approvalDecision === "approve_price" ? balanced.bottlePrice : null),
+        finalApprovedDa: level.finalApprovedDa ?? (level.approvalDecision === "approve_price" ? balanced.depletionAllowance : null),
+        finalGpMargin: level.finalGpMargin ?? (level.approvalDecision === "approve_price" ? balanced.calculatedGpMargin : null)
       };
     })
     .filter((level) => money(level.bottlePrice) > 0 || Boolean(level.isFrontline))
@@ -459,14 +571,18 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     fobCase: input.fobCase,
     laidInPerBottle: input.laidInPerBottle,
     frontlineBottlePrice: input.frontlineOverride,
-    bestPrice: input.bestPriceOverride
+    bestPrice: input.bestPriceOverride,
+    bestDepletionAllowance: input.priceLevels?.find((level) => level.isBest)?.depletionAllowance,
+    pricingBasis: input.pricingBasis,
+    grwBrokerModel: input.pricingModel === "grw_broker"
   });
   const priceLevels = normalizePriceLevels(
     input.priceLevels && input.priceLevels.length > 0 ? input.priceLevels : defaultPriceLevelsForPricing(pricing),
     pricing.landedBottleCost
   );
-  const frontlineLevel = priceLevels.find((level) => level.isFrontline) || priceLevels[0] || null;
-  const bestLevel = priceLevels.find((level) => level.isBest) || null;
+  const frontlineLevel = priceLevels.find((level) => level.active !== false && level.isFrontline) ||
+    priceLevels.find((level) => level.active !== false) || null;
+  const bestLevel = priceLevels.find((level) => level.active !== false && level.isBest) || null;
   const frontlineBottlePrice = frontlineLevel ? money(frontlineLevel.bottlePrice) : pricing.frontlineBottlePrice;
   const bestPrice = bestLevel ? money(bestLevel.bottlePrice) : pricing.bestPrice;
   const grossProfitMargin = calculateGpMargin({
@@ -474,11 +590,28 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     landedBottleCost: pricing.landedBottleCost,
     depletionAllowance: frontlineLevel?.depletionAllowance
   });
-  const warnings = frontlineBottlePrice && grossProfitMargin < GP_WARNING_THRESHOLD ? [GP_WARNING_PERSISTED] : [];
-  const priceLevelWarnings = priceLevels
+  const informationalOnly = input.pricingModel === "grw_broker";
+  const warnings = !informationalOnly && frontlineBottlePrice && grossProfitMargin < GP_WARNING_THRESHOLD ? [GP_WARNING_PERSISTED] : [];
+  const priceLevelWarnings = informationalOnly ? [] : priceLevels
     .filter((level) => level.active !== false && money(level.bottlePrice) > 0 && Number(level.calculatedGpMargin || 0) < GP_WARNING_THRESHOLD)
     .map((level) => `${level.name} gross profit margin is below 28%.`);
   const productLifecycleStatus = input.conversionStatus === "exact_existing_product" ? "supplier_available" : "pending_product_creation";
+  const pricingCostFingerprint = [pricing.packSize, pricing.fobBottle.toFixed(2), pricing.laidInPerBottle.toFixed(2)].join("|");
+  const costFreshnessWarnings = [
+    pricing.fobBottle <= 0 ? "FOB cost is missing." : "",
+    !input.fobSourceDate ? "FOB source date is missing." : "",
+    !input.laidInSourceDate ? "Laid-in source date is missing." : "",
+    pricing.laidInPerBottle === 0 ? "Laid-in cost is zero; confirm that no freight applies." : "",
+    input.pricingCalculatedAt && input.fobSourceDate && input.fobSourceDate > input.pricingCalculatedAt.slice(0, 10)
+      ? "FOB source is newer than the saved pricing calculation."
+      : "",
+    input.pricingCalculatedAt && input.laidInSourceDate && input.laidInSourceDate > input.pricingCalculatedAt.slice(0, 10)
+      ? "Laid-in source is newer than the saved pricing calculation."
+      : "",
+    input.priorPricingCostFingerprint && input.priorPricingCostFingerprint !== pricingCostFingerprint
+      ? "Cost changed after the saved pricing was calculated. Review the proposed prices before saving."
+      : ""
+  ].filter(Boolean);
 
   const supplierWine = {
     supplier_id: input.supplierId || null,
@@ -488,7 +621,12 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     vintage: identity.normalizedVintage,
     pack_size: pricing.packSize,
     bottle_size: normalizeSpaces(input.bottleSize || "750ml"),
-    pricing_basis: money(input.fobBottle) > 0 ? "bottle" : "case",
+    pricing_basis: input.pricingBasis || (money(input.fobBottle) > 0 ? "bottle" : "case"),
+    pricing_model: input.pricingModel || "standard",
+    fob_source_date: input.fobSourceDate || null,
+    laid_in_source_date: input.laidInSourceDate || null,
+    pricing_calculated_at: input.pricingCalculatedAt || null,
+    pricing_cost_fingerprint: pricingCostFingerprint,
     fob_bottle: pricing.fobBottle,
     fob_case: pricing.fobCase,
     laid_in_per_bottle: pricing.laidInPerBottle,
@@ -503,7 +641,13 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     planning_sku_without_vintage: identity.planningSkuWithoutVintage,
     diagnostics: {
       ...pricing.diagnostics,
-      warnings: Array.from(new Set([...warnings, ...priceLevelWarnings])),
+      warnings: Array.from(new Set([
+        ...warnings,
+        ...priceLevelWarnings,
+        ...costFreshnessWarnings,
+        ...priceLevels.filter((level) => money(level.depletionAllowance) > pricing.landedBottleCost)
+          .map((level) => `${level.name} depletion allowance exceeds landed cost.`)
+      ])),
       price_levels: priceLevels,
       free_goods: normalizeFreeGoods(input.freeGoods),
       quickbooks_item_name_preview: identity.displayName
@@ -542,6 +686,7 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
       bottle_price: level.bottlePrice || 0,
       depletion_allowance: level.depletionAllowance || 0,
       target_gp_margin: level.targetGpMargin ?? null,
+      solve_for: level.solveFor || "gp",
       calculated_gp_margin: level.calculatedGpMargin || 0,
       is_frontline: Boolean(level.isFrontline),
       is_best: Boolean(level.isBest),
@@ -549,6 +694,16 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
       active: level.active ?? true,
       source_system: level.sourceSystem || null,
       source_id: level.sourceId || null,
+      approval_decision: level.approvalDecision || null,
+      suggested_price: level.suggestedPrice ?? null,
+      suggested_gp_margin: level.suggestedGpMargin ?? null,
+      da_alternative: level.daAlternative ?? null,
+      final_approved_price: level.finalApprovedPrice ?? null,
+      final_approved_da: level.finalApprovedDa ?? null,
+      final_gp_margin: level.finalGpMargin ?? null,
+      override_reason: level.overrideReason || null,
+      approval_owner: level.approvalOwner || null,
+      decision_timestamp: level.decisionTimestamp || null,
       created_at: "",
       updated_at: ""
     })) satisfies SupplierCatalogPriceLevel[],

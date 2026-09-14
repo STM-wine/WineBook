@@ -17,7 +17,7 @@ class SupplierCatalogServiceTests(unittest.TestCase):
         self.assertEqual(result.frontline_bottle_price, 33)
         self.assertEqual(result.best_price, 31)
         self.assertAlmostEqual(result.gross_profit_margin, 0.3333)
-        self.assertEqual(result.warnings, [])
+        self.assertEqual(result.warnings, ["Best ladder price is below the 30% target GP."])
 
     def test_best_price_tiers(self):
         self.assertIsNone(calculate_best_price(51))
@@ -26,7 +26,36 @@ class SupplierCatalogServiceTests(unittest.TestCase):
         self.assertEqual(calculate_best_price(20), 18)
         self.assertEqual(calculate_best_price(19), 18)
 
-    def test_low_margin_warning_is_in_diagnostics(self):
+    def test_pack_size_must_be_a_positive_whole_number(self):
+        for invalid in (None, 0, -1, 2.5, "bad"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                calculate_pricing(pack_size=invalid, fob_case=240)
+
+    def test_best_30_percent_target_conflict_uses_best_da(self):
+        without_da = calculate_pricing(pack_size=12, fob_bottle=13)
+        with_da = calculate_pricing(pack_size=12, fob_bottle=13, best_depletion_allowance=1)
+        self.assertEqual((without_da.frontline_bottle_price, without_da.best_price), (19.25, 18.25))
+        self.assertTrue(without_da.diagnostics["best_target_conflict"])
+        self.assertEqual((with_da.frontline_bottle_price, with_da.best_price), (19.25, 18.25))
+        self.assertFalse(with_da.diagnostics["best_target_conflict"])
+
+    def test_da_warning_and_explicit_solve_validation(self):
+        result = balance_price_level(
+            bottle_price=20,
+            landed_bottle_cost=20,
+            depletion_allowance=21,
+            solve_for="gp",
+        )
+        self.assertTrue(result["da_exceeds_landed_cost"])
+        with self.assertRaisesRegex(ValueError, "below 100%"):
+            balance_price_level(
+                bottle_price=20,
+                landed_bottle_cost=20,
+                target_gp_margin=1,
+                solve_for="da",
+            )
+
+    def test_lower_frontline_override_never_reduces_recommendation(self):
         result = calculate_pricing(
             pack_size=12,
             fob_bottle=20,
@@ -34,8 +63,9 @@ class SupplierCatalogServiceTests(unittest.TestCase):
             frontline_bottle_price=28,
         )
 
-        self.assertLess(result.gross_profit_margin, 0.28)
-        self.assertIn("Gross profit margin is below 28%.", result.warnings)
+        self.assertEqual(result.frontline_bottle_price, 33)
+        self.assertAlmostEqual(result.gross_profit_margin, 0.3333)
+        self.assertNotIn("Gross profit margin is below 28%.", result.warnings)
         self.assertEqual(result.diagnostics["warnings"], result.warnings)
 
     def test_price_level_balancing_preserves_gp_then_da_before_frontline(self):
@@ -44,9 +74,10 @@ class SupplierCatalogServiceTests(unittest.TestCase):
             target_gp_margin=0.30,
             depletion_allowance=1.10,
             bottle_price=25,
+            solve_for="price",
         )
 
-        self.assertEqual(result["calculated_field"], "frontline")
+        self.assertEqual(result["calculated_field"], "price")
         self.assertEqual(result["bottle_price"], 27)
         self.assertEqual(result["depletion_allowance"], 1.10)
         self.assertAlmostEqual(result["calculated_gp_margin"], 0.30)
@@ -56,6 +87,7 @@ class SupplierCatalogServiceTests(unittest.TestCase):
             landed_bottle_cost=20,
             target_gp_margin=0.30,
             bottle_price=27,
+            solve_for="da",
         )
 
         self.assertEqual(result["calculated_field"], "da")

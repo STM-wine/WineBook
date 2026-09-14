@@ -17,6 +17,24 @@ function product(overrides: Partial<ProductWorkspaceRow> = {}): ProductWorkspace
 }
 
 describe("pricing model export", () => {
+  it("marks editable costs and prices in bold and retains hidden starting values for change highlighting", async () => {
+    const workbook = buildProductWorkspaceWorkbook([product()], "now");
+    const reopened = new ExcelJS.Workbook();
+    await reopened.xlsx.load(await workbook.xlsx.writeBuffer());
+    const sheet = reopened.getWorksheet("Pricing model")!;
+    for (const column of ["H", "I", "V", "X", "Z", "AA"]) expect(sheet.getCell(`${column}2`).font.bold).toBe(true);
+    expect(sheet.getColumn("AD").hidden).toBe(true);
+    expect(sheet.getCell("AD2").value).toBe(8);
+    expect(sheet.getCell("AI2").value).toBe(2);
+    expect(sheet.getCell("W2").font.bold).not.toBe(true);
+    expect(JSON.stringify(sheet.autoFilter)).toContain("AI2");
+  });
+  it("derives landed cost from editable FOB and laid-in instead of a stale source total", () => {
+    const sheet = buildProductWorkspaceWorkbook([product({ fob: 35, laidIn: 0.54, landedCost: null, frontline: 52 })], "now").getWorksheet("Pricing model")!;
+    expect(sheet.getCell("Q2").value).toEqual({ formula: 'IF(COUNT(H2:I2)=2,ROUND(H2+I2,2),"")', result: 35.54 });
+    expect(sheet.getCell("W2").result).toBe(0.3165);
+    expect(sheet.getCell("AC2").result).not.toContain("Missing landed cost");
+  });
   it("preserves source values, DA exceptions and per-bottle scenario formulas through Excel serialization", async () => {
     const workbook = buildProductWorkspaceWorkbook([product()], "2026-09-11T12:00:00Z");
     const saved = await workbook.xlsx.writeBuffer();
@@ -29,12 +47,12 @@ describe("pricing model export", () => {
     expect(sheet.getCell("W2").value).toMatchObject({ result: 0.5 });
     expect(sheet.getCell("Y2").value).toMatchObject({ result: 0.4375 });
     expect(sheet.getCell("AB2").value).toEqual({ formula: 'IF(AND(ISNUMBER(Z2),Z2>0,ISNUMBER(Q2),ISNUMBER(AA2)),ROUND((Z2-MAX(0,Q2-AA2))/Z2,4),"")', result: 0.3333 });
-    expect(sheet.getCell("AC2").value).toContain("Existing Best DA retained");
+    expect(sheet.getCell("AC2").result).toContain("Existing Best DA retained");
     expect(reopened.getWorksheet("Price levels")!.rowCount).toBe(4);
   });
 
   it("leaves GP blank for missing cost or invalid prices and caps cost relief at zero", () => {
-    const rows = [product({ landedCost: null }), product({ frontline: 0, bestPrice: null }), product({ landedCost: 1 })];
+    const rows = [product({ laidIn: null, landedCost: null }), product({ frontline: 0, bestPrice: null }), product({ fob: 0, laidIn: 1, landedCost: 1 })];
     const sheet = buildProductWorkspaceWorkbook(rows, "now").getWorksheet("Pricing model")!;
     // Read the cached result directly: ExcelJS omits empty strings from its value object.
     for (const address of ["W2", "W3", "Y3"]) {
@@ -57,8 +75,8 @@ describe("pricing model export", () => {
     ambiguous.priceLevels.push({ ...ambiguous.priceLevels[2], id: "duplicate" });
     const sheet = buildProductWorkspaceWorkbook([missing, ambiguous], "now").getWorksheet("Pricing model")!;
     expect(sheet.getCell("Z2").value).toBeNull();
-    expect(sheet.getCell("AC2").value).toContain("No On 1-Case match");
+    expect(sheet.getCell("AC2").result).toContain("No On 1-Case match");
     expect(sheet.getCell("Z3").value).toBeNull();
-    expect(sheet.getCell("AC3").value).toContain("Multiple On 1-Case matches");
+    expect(sheet.getCell("AC3").result).toContain("Multiple On 1-Case matches");
   });
 });

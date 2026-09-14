@@ -293,7 +293,7 @@ export function WorkbenchGrid({
         headerName: "On Order",
         field: "on_order",
         width: 92,
-        headerTooltip: "From RB6 On Order. Bottles already ordered but not yet received.",
+        headerTooltip: "From QuickBooks Qty On Order. Bottles already ordered but not yet received.",
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
