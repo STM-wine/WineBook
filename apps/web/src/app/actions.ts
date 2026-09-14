@@ -21,7 +21,7 @@ import {
   type AvailabilityStatus,
   type ConversionStatus
 } from "@/lib/supplier-catalog";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import {
   quickBooksItemCode,
   quickBooksItemDisplayName,
@@ -833,7 +833,8 @@ export async function deletePendingSupplierCatalogWine(input: { id: string }) {
     throw new Error("Missing supplier wine id.");
   }
 
-  const { supabase } = await requireWriteAccess();
+  await requireWriteAccess();
+  const supabase = createServiceRoleClient();
   const { data: wine, error: wineError } = await supabase
     .from("supplier_catalog_wines")
     .select("*")
@@ -876,6 +877,14 @@ export async function deletePendingSupplierCatalogWine(input: { id: string }) {
     throw new Error("This record has approved or communicated price changes and cannot be deleted here.");
   }
 
+  const { error: copiedWineError } = await supabase
+    .from("supplier_catalog_wines")
+    .update({ copied_from_supplier_catalog_wine_id: null })
+    .eq("copied_from_supplier_catalog_wine_id", input.id);
+  if (copiedWineError) {
+    throw new Error(copiedWineError.message);
+  }
+
   const childDeletes = await Promise.all([
     supabase.from("price_change_events").delete().eq("supplier_catalog_wine_id", input.id).in("status", ["draft", "pending_review"]),
     supabase.from("supplier_catalog_price_levels").delete().eq("supplier_catalog_wine_id", input.id),
@@ -887,9 +896,17 @@ export async function deletePendingSupplierCatalogWine(input: { id: string }) {
     throw new Error(childDeleteError.message);
   }
 
-  const { error: deleteError } = await supabase.from("supplier_catalog_wines").delete().eq("id", input.id);
+  const { data: deletedWine, error: deleteError } = await supabase
+    .from("supplier_catalog_wines")
+    .delete()
+    .eq("id", input.id)
+    .select("id")
+    .maybeSingle<{ id: string }>();
   if (deleteError) {
     throw new Error(deleteError.message);
+  }
+  if (!deletedWine) {
+    throw new Error("The pending product was not deleted. Please reload and try again.");
   }
 
   revalidateSupplierCatalogData();
