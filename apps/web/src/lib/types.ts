@@ -130,6 +130,11 @@ export type SupplierCatalogWine = {
   pack_size: number | string;
   bottle_size: string;
   pricing_basis: string;
+  pricing_model?: "standard" | "grw_broker" | string;
+  fob_source_date?: string | null;
+  laid_in_source_date?: string | null;
+  pricing_calculated_at?: string | null;
+  pricing_cost_fingerprint?: string | null;
   fob_bottle: number | string;
   fob_case: number | string;
   laid_in_per_bottle: number | string;
@@ -167,6 +172,7 @@ export type SupplierCatalogPriceLevel = {
   bottle_price: number | string;
   depletion_allowance: number | string;
   target_gp_margin: number | string | null;
+  solve_for?: "price" | "da" | "gp" | string;
   calculated_gp_margin: number | string;
   is_frontline: boolean;
   is_best: boolean;
@@ -174,6 +180,16 @@ export type SupplierCatalogPriceLevel = {
   active: boolean;
   source_system: string | null;
   source_id: string | null;
+  approval_decision?: "approve_price" | "pursue_da" | "revise" | "hold" | "no_change" | null;
+  suggested_price?: number | string | null;
+  suggested_gp_margin?: number | string | null;
+  da_alternative?: number | string | null;
+  final_approved_price?: number | string | null;
+  final_approved_da?: number | string | null;
+  final_gp_margin?: number | string | null;
+  override_reason?: string | null;
+  approval_owner?: string | null;
+  decision_timestamp?: string | null;
   created_at: string;
   updated_at: string;
 };

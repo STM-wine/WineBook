@@ -33,6 +33,8 @@ def calculate_frontline(fob_bottle: float, sku_prefix: str) -> int:
     """
     Calculate Frontline price (rounded up to whole dollar).
     
+    BDX status comes from the SKU prefix parsed from the invoice.
+
     If BDX: ceil(FOB Bottle × 1.15)
     Else: ceil((FOB Bottle × 1.15 / 1.05))
     """
@@ -80,6 +82,10 @@ def apply_pricing(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Create priced item with all original fields plus pricing
         priced_item = {
             **item,
+            'is_bdx': sku_prefix == 'BDX',
+            'bdx_status_source': 'SKU prefix parsed from invoice',
+            'pricing_model': 'grw_broker',
+            'pricing_control_scope': 'informational_only',
             'fob_bottle': round(fob_bottle, 2),
             'fob_case': round(fob_case, 2),
             'frontline': frontline,
