@@ -10,11 +10,12 @@ export type ActiveView =
   | "po-drafts";
 
 export const DEFAULT_VIEW: ActiveView = "company-dashboard";
+export const PRODUCTS_DEFAULT_VIEW: ActiveView = "order-review";
 
 export const VIEW_LABELS: Array<{ id: ActiveView; label: string; hidden?: boolean }> = [
   { id: "company-dashboard", label: "Home" },
+  { id: "order-review", label: "Order Summary" },
   { id: "product-workspace", label: "Items" },
-  { id: "order-review", label: "Order Review" },
   { id: "database-order-preview", label: "DB Order Preview" },
   { id: "supplier-hub", label: "Supplier Hub" },
   { id: "vinosmith-rescue", label: "Vinosmith Plumbing", hidden: true },

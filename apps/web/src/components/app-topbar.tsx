@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { AppUserMenu } from "./app-user-menu";
-import { ActiveView, DEFAULT_VIEW, VIEW_LABELS } from "./dashboard-types";
+import { ActiveView, DEFAULT_VIEW, PRODUCTS_DEFAULT_VIEW, VIEW_LABELS } from "./dashboard-types";
 
 type AppTopbarProps = {
   activeModule?: "grw-converter" | "lead-intelligence" | "supplier-offer-compiler" | "settings";
@@ -25,8 +25,8 @@ function viewHref(view: ActiveView) {
 
 const HOME_VIEW: ActiveView = "company-dashboard";
 const ORDERING_VIEWS: ActiveView[] = [
-  "product-workspace",
   "order-review",
+  "product-workspace",
   "database-order-preview",
   "po-drafts",
   "supplier-hub",
@@ -74,7 +74,7 @@ export function AppTopbar({
           {onSelectView ? (
             <button
               className={isOrderingActive ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"}
-              onClick={() => onSelectView("product-workspace")}
+              onClick={() => onSelectView(PRODUCTS_DEFAULT_VIEW)}
               type="button"
               aria-haspopup="menu"
             >
