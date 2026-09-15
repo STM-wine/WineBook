@@ -523,7 +523,6 @@ export function OrderDashboard({
         }
         setDraftRows(result.drafts || []);
         selectView("po-drafts");
-        router.refresh();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not create PO drafts.");
         setPendingMessage("");
