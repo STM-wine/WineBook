@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import type { ProductWorkspaceRow } from "./product-workspace-types";
 
 const headers = [
-  "Item #", "Product", "Brand", "Supplier", "Revenue", "Core", "BTG", "FOB", "Laid-in",
+  "Item #", "Product", "Brand", "Supplier", "Revenue", "Replenishment", "Auto reorder", "FOB", "Laid-in",
   "Frontline", "Best", "Lowest GP", "Status", "Source", "Vintage", "Pack", "Landed cost",
   "Current FL DA", "Current Best DA", "Current On 1-Case", "Current On 1-Case DA",
   "New FL", "New FL GP %", "New Best", "New Best GP %", "New On 1-Case", "New DA", "New On 1-Case GP %", "Review notes",
@@ -47,7 +47,10 @@ export function buildProductWorkspaceWorkbook(rows: ProductWorkspaceRow[], gener
     ].filter(Boolean).join(" ");
     const row = sheet.addRow([
       product.itemCode, product.productName, product.brand, product.supplierName, product.revenueCenter,
-      product.orderingMarker.isCore ? "Yes" : "No", product.orderingMarker.isBtg ? "Yes" : "No",
+      product.orderingMarker.replenishmentPolicy,
+      product.orderingMarker.replenishmentPolicy === "Allocated" || product.orderingMarker.replenishmentPolicy === "Special Order"
+        ? "Manual only"
+        : product.orderingMarker.recommendationsSuppressed ? "Paused" : "Automatic",
       product.fob, product.laidIn, product.frontline, product.bestPrice,
       product.lowestGpPercent === null ? null : product.lowestGpPercent / 100,
       product.statusLabel, product.sourceHealthLabel, product.vintage, product.pack, product.landedCost,

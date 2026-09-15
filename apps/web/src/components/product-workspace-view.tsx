@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { dateTimeLabel } from "@/lib/date-labels";
 import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
 import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
+import { REPLENISHMENT_POLICIES, type ReplenishmentPolicy } from "@/lib/replenishment-policy";
 import { MetricCard } from "./metric-card";
 
 type LoadState =
@@ -18,8 +19,8 @@ type SortKey =
   | "pack"
   | "supplierName"
   | "revenueCenter"
-  | "isCore"
-  | "isBtg"
+  | "replenishmentPolicy"
+  | "recommendationsSuppressed"
   | "fob"
   | "laidIn"
   | "landedCost"
@@ -146,7 +147,9 @@ export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers?: 
     setState((current) => {
       if (current.status !== "loaded") return current;
       const rows = current.data.rows.map((row) => {
-        if (normalizeCode(row.itemCode) !== normalizedItemCode) return row;
+        const sameItem = normalizeCode(row.itemCode) === normalizedItemCode;
+        const sameFamily = Boolean(marker.policyFamilyKey && row.orderingMarker.policyFamilyKey === marker.policyFamilyKey);
+        if (!sameItem && !sameFamily) return row;
         return {
           ...row,
           orderingMarker: marker,
@@ -159,8 +162,13 @@ export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers?: 
         rows,
         summary: {
           ...current.data.summary,
-          btgMarkers: rows.filter((row) => row.orderingMarker.isBtg).length,
-          coreMarkers: rows.filter((row) => row.orderingMarker.isCore).length
+          btgMarkers: 0,
+          coreMarkers: rows.filter((row) => row.orderingMarker.replenishmentPolicy === "Core").length,
+          policyCounts: rows.reduce<Record<string, number>>((counts, row) => {
+            const policy = row.orderingMarker.replenishmentPolicy;
+            counts[policy] = (counts[policy] || 0) + 1;
+            return counts;
+          }, {})
         }
       };
       const cached = productWorkspaceCache.get(cacheKey);
@@ -242,6 +250,13 @@ function ProductWorkspaceTable({
   const [markerError, setMarkerError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  useEffect(() => {
+    const linkedItem = new URLSearchParams(window.location.search).get("item")?.trim();
+    if (!linkedItem) return;
+    setSearch(linkedItem);
+    const linkedRow = data.rows.find((row) => normalizeCode(row.itemCode) === normalizeCode(linkedItem));
+    if (linkedRow) setSelectedId(linkedRow.id);
+  }, [data.rows]);
   const supplierOptions = useMemo(
     () => ["All", ...Array.from(new Set(data.rows.map((row) => row.supplierName || "Unknown").sort((a, b) => a.localeCompare(b))))],
     [data.rows]
@@ -346,8 +361,10 @@ function ProductWorkspaceTable({
         body: JSON.stringify({
           itemCode: row.itemCode,
           quickbooksItemListId: row.quickbooks.listId || null,
-          isBtg: marker.isBtg,
-          isCore: marker.isCore,
+          replenishmentPolicy: marker.replenishmentPolicy,
+          recommendationsSuppressed: marker.recommendationsSuppressed,
+          suppressionReason: marker.suppressionReason,
+          suppressedUntil: marker.suppressedUntil,
           note
         })
       });
@@ -380,7 +397,7 @@ function ProductWorkspaceTable({
           <div>
             <p className="eyebrow">Products / Items</p>
             <h1>Product Workspace</h1>
-            <p>QuickBooks and source proof table with app-owned Core/BTG ordering markers. Live Order Review is unchanged.</p>
+            <p>QuickBooks and source proof table with Stem-owned replenishment policies.</p>
             <small className="product-workspace-cache-note">
               {cacheMeta
                 ? `${cacheMeta.fromCache ? "Cached" : "Loaded"} ${dateTimeLabel(cacheMeta.cachedAt)}`
@@ -463,8 +480,8 @@ function ProductWorkspaceTable({
                   <SortableHeader label="Product / brand" sortKey="productName" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Supplier" sortKey="supplierName" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Revenue" sortKey="revenueCenter" sort={sort} onSort={changeSort} />
-                  <SortableHeader label="Core" sortKey="isCore" sort={sort} onSort={changeSort} />
-                  <SortableHeader label="BTG" sortKey="isBtg" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="Replenishment" sortKey="replenishmentPolicy" sort={sort} onSort={changeSort} />
+                  <SortableHeader label="Auto reorder" sortKey="recommendationsSuppressed" sort={sort} onSort={changeSort} />
                   <SortableHeader label="FOB" sortKey="fob" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Laid-in" sortKey="laidIn" sort={sort} onSort={changeSort} />
                   <SortableHeader label="Frontline" sortKey="frontline" sort={sort} onSort={changeSort} />
@@ -489,19 +506,31 @@ function ProductWorkspaceTable({
                     <td title={row.supplierSource || "No supplier source matched"}>{row.supplierName || "Unmatched"}</td>
                     <td>{row.revenueCenter}</td>
                     <td onClick={(event) => event.stopPropagation()}>
-                      <MarkerToggle
-                        checked={row.orderingMarker.isCore}
+                      <PolicySelect
+                        policy={row.orderingMarker.replenishmentPolicy}
                         disabled={!canManageMarkers || updatingMarkerCode === row.itemCode}
-                        label="Core"
-                        onChange={(checked) => saveOrderingMarker(row, { ...row.orderingMarker, isCore: checked })}
+                        onChange={(policy) => saveOrderingMarker(row, {
+                          ...row.orderingMarker,
+                          replenishmentPolicy: policy,
+                          familyDefaultPolicy: policy,
+                          isCore: policy === "Core",
+                          isBtg: false,
+                          recommendationsSuppressed: policy === "Limited" ? row.orderingMarker.recommendationsSuppressed : false,
+                          suppressionReason: policy === "Limited" ? row.orderingMarker.suppressionReason : null,
+                          suppressedUntil: policy === "Limited" ? row.orderingMarker.suppressedUntil : null
+                        })}
                       />
                     </td>
                     <td onClick={(event) => event.stopPropagation()}>
-                      <MarkerToggle
-                        checked={row.orderingMarker.isBtg}
+                      <RecommendationModeControl
+                        marker={row.orderingMarker}
                         disabled={!canManageMarkers || updatingMarkerCode === row.itemCode}
-                        label="BTG"
-                        onChange={(checked) => saveOrderingMarker(row, { ...row.orderingMarker, isBtg: checked })}
+                        onChange={(suppressed) => saveOrderingMarker(row, {
+                          ...row.orderingMarker,
+                          recommendationsSuppressed: suppressed,
+                          suppressionReason: suppressed ? row.orderingMarker.suppressionReason || "Temporarily unavailable" : null,
+                          suppressedUntil: suppressed ? row.orderingMarker.suppressedUntil : null
+                        })}
                       />
                     </td>
                     <td title={row.fobSource || "Missing QuickBooks FOB"}>{moneyOrDash(row.fob)}</td>
@@ -559,10 +588,11 @@ function ProductWorkspaceDrawer({ row }: { row: ProductWorkspaceRow | null }) {
         </dl>
       </div>
       <div className="drawer-section">
-        <h3>Ordering Markers</h3>
+        <h3>Replenishment</h3>
         <dl>
-          <div><dt>Core</dt><dd>{row.orderingMarker.isCore ? "On" : "Off"}</dd></div>
-          <div><dt>BTG</dt><dd>{row.orderingMarker.isBtg ? "On" : "Off"}</dd></div>
+          <div><dt>Policy</dt><dd>{row.orderingMarker.replenishmentPolicy}</dd></div>
+          <div><dt>Family</dt><dd>{row.orderingMarker.policyFamilyName || "Item only"}</dd></div>
+          <div><dt>Recommendation</dt><dd>{recommendationModeLabel(row.orderingMarker)}</dd></div>
           <div><dt>Updated</dt><dd>{dateTimeLabel(row.orderingMarker.updatedAt)} <small>{row.orderingMarker.noteSource || "No marker row"}</small></dd></div>
           <div><dt>Note</dt><dd>{row.orderingMarker.markerNote || "No note"}</dd></div>
         </dl>
@@ -615,27 +645,53 @@ function ProductWorkspaceDrawer({ row }: { row: ProductWorkspaceRow | null }) {
   );
 }
 
-function MarkerToggle({
-  checked,
+function PolicySelect({
+  policy,
   disabled,
-  label,
   onChange
 }: {
-  checked: boolean;
+  policy: ReplenishmentPolicy;
   disabled: boolean;
-  label: string;
-  onChange: (checked: boolean) => void;
+  onChange: (policy: ReplenishmentPolicy) => void;
 }) {
   return (
-    <label className={`marker-toggle${checked ? " marker-toggle-on" : ""}${disabled ? " marker-toggle-disabled" : ""}`} title={`${label} ordering marker`}>
+    <select
+      aria-label="Replenishment policy"
+      className="policy-select"
+      disabled={disabled}
+      value={policy}
+      onChange={(event) => onChange(event.target.value as ReplenishmentPolicy)}
+    >
+      {REPLENISHMENT_POLICIES.map((option) => <option key={option}>{option}</option>)}
+    </select>
+  );
+}
+
+function RecommendationModeControl({
+  marker,
+  disabled,
+  onChange
+}: {
+  marker: OrderingMarker;
+  disabled: boolean;
+  onChange: (suppressed: boolean) => void;
+}) {
+  if (marker.replenishmentPolicy === "Allocated" || marker.replenishmentPolicy === "Special Order") {
+    return <span className="policy-mode-static">Manual</span>;
+  }
+  if (marker.replenishmentPolicy !== "Limited") {
+    return <span className="policy-mode-static">Automatic</span>;
+  }
+  return (
+    <label className={`marker-toggle${marker.recommendationsSuppressed ? "" : " marker-toggle-on"}${disabled ? " marker-toggle-disabled" : ""}`} title="Toggle automatic reorder recommendations for this Limited wine family">
       <input
-        aria-label={label}
-        checked={checked}
+        aria-label="Automatic reorder"
+        checked={!marker.recommendationsSuppressed}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
+        onChange={(event) => onChange(!event.target.checked)}
         type="checkbox"
       />
-      <span>{checked ? "On" : "Off"}</span>
+      <span>{marker.recommendationsSuppressed ? "Paused" : "On"}</span>
     </label>
   );
 }
@@ -671,13 +727,22 @@ function compareRows(a: ProductWorkspaceRow, b: ProductWorkspaceRow, key: SortKe
 }
 
 function sortValue(row: ProductWorkspaceRow, key: SortKey) {
-  if (key === "isCore") return row.orderingMarker.isCore ? 1 : 0;
-  if (key === "isBtg") return row.orderingMarker.isBtg ? 1 : 0;
+  if (key === "replenishmentPolicy") return row.orderingMarker.replenishmentPolicy;
+  if (key === "recommendationsSuppressed") return row.orderingMarker.recommendationsSuppressed ? 1 : 0;
   const value = row[key];
   if (key === "active") return row.statusLabel;
   if (typeof value === "number") return value;
   if (value === null || value === undefined) return "";
   return value;
+}
+
+function recommendationModeLabel(marker: OrderingMarker) {
+  if (marker.replenishmentPolicy === "Allocated" || marker.replenishmentPolicy === "Special Order") return "Manual only";
+  if (marker.recommendationsSuppressed) {
+    const until = marker.suppressedUntil ? ` until ${marker.suppressedUntil}` : "";
+    return `Paused${until}${marker.suppressionReason ? `: ${marker.suppressionReason}` : ""}`;
+  }
+  return "Automatic";
 }
 
 function moneyOrDash(value: number | null) {

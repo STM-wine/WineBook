@@ -8,6 +8,7 @@ import type {
   ProductWorkspaceSource,
   ProductWorkspaceStatusKey
 } from "@/lib/product-workspace-types";
+import { replenishmentPolicy } from "@/lib/replenishment-policy";
 
 type ProductWorkspaceClient = SupabaseClient<any, "public", any>;
 
@@ -98,6 +99,13 @@ type OrderingItemMarkerRow = {
   quickbooks_item_list_id: string | null;
   is_btg: boolean | null;
   is_core: boolean | null;
+  replenishment_policy: string | null;
+  policy_family_key: string | null;
+  policy_family_name: string | null;
+  family_default_policy: string | null;
+  recommendations_suppressed: boolean | null;
+  suppression_reason: string | null;
+  suppressed_until: string | null;
   marker_note: string | null;
   note_source: string | null;
   updated_at: string | null;
@@ -313,8 +321,13 @@ export async function GET(request: Request) {
       vsStatusUnknown: rows.filter((row) => row.statusKey === "qb_active_vs_unknown" || row.statusKey === "qb_inactive_vs_unknown").length,
       qbInactiveVsActive: rows.filter((row) => row.statusKey === "qb_inactive_vs_active").length,
       vsActiveQbMissing: rows.filter((row) => row.statusKey === "vs_active_qb_missing").length,
-      btgMarkers: rows.filter((row) => row.orderingMarker.isBtg).length,
-      coreMarkers: rows.filter((row) => row.orderingMarker.isCore).length
+      btgMarkers: 0,
+      coreMarkers: rows.filter((row) => row.orderingMarker.replenishmentPolicy === "Core").length,
+      policyCounts: rows.reduce<Record<string, number>>((counts, row) => {
+        const policy = row.orderingMarker.replenishmentPolicy;
+        counts[policy] = (counts[policy] || 0) + 1;
+        return counts;
+      }, {})
     };
 
     const response: ProductWorkspaceResponse = {
@@ -543,7 +556,7 @@ async function fetchOrderingItemMarkers(supabase: ProductWorkspaceClient) {
   while (true) {
     const { data, error } = await supabase
       .from("ordering_item_markers")
-      .select("item_code,quickbooks_item_list_id,is_btg,is_core,marker_note,note_source,updated_at,updated_by")
+      .select("item_code,quickbooks_item_list_id,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,suppressed_until,marker_note,note_source,updated_at,updated_by")
       .order("item_code", { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
       .returns<OrderingItemMarkerRow[]>();
@@ -856,9 +869,19 @@ function sourceBadgesForRow(
 }
 
 function productWorkspaceMarker(marker: OrderingItemMarkerRow | null): ProductWorkspaceRow["orderingMarker"] {
+  const policy = replenishmentPolicy(
+    marker?.replenishment_policy || (marker?.is_core === true || marker?.is_btg === true ? "Core" : null)
+  );
   return {
-    isBtg: marker?.is_btg === true,
-    isCore: marker?.is_core === true,
+    isBtg: false,
+    isCore: policy === "Core",
+    replenishmentPolicy: policy,
+    policyFamilyKey: marker?.policy_family_key || null,
+    policyFamilyName: marker?.policy_family_name || null,
+    familyDefaultPolicy: replenishmentPolicy(marker?.family_default_policy || policy),
+    recommendationsSuppressed: policy === "Limited" && marker?.recommendations_suppressed === true,
+    suppressionReason: marker?.suppression_reason || null,
+    suppressedUntil: marker?.suppressed_until || null,
     markerNote: marker?.marker_note || null,
     noteSource: marker?.note_source || null,
     updatedAt: marker?.updated_at || null,

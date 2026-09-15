@@ -28,6 +28,9 @@ export type Recommendation = {
   brand_manager: string | null;
   is_btg: boolean | null;
   is_core: boolean | null;
+  replenishment_policy?: "Core" | "Limited Core" | "Limited" | "Allocated" | "Special Order" | null;
+  policy_family_key?: string | null;
+  recommendations_suppressed?: boolean | null;
   last_30_day_sales: number | string | null;
   last_60_day_sales: number | string | null;
   last_90_day_sales: number | string | null;

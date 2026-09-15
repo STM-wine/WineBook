@@ -7,6 +7,7 @@ import type {
   SupplierLogistics,
   SupplierGroup
 } from "./types";
+import { replenishmentPolicy, type ReplenishmentPolicy } from "./replenishment-policy";
 
 export type SupplierGroupSortMode = "default" | "az" | "za";
 export const DEFAULT_SUPPLIER_TARGET_WEEKS = 5;
@@ -89,6 +90,9 @@ export function applySupplierTargetWeeks(
   return rows.map((row) => {
     const supplier = row.supplier_name?.trim() || "Unknown Supplier";
     const targetWeeks = supplierTargetWeeks[supplier] ?? defaultTargetWeeks;
+    const policy = rowReplenishmentPolicy(row);
+    const automatic = policy !== "Allocated" && policy !== "Special Order" && !(policy === "Limited" && row.recommendations_suppressed === true);
+    if (!automatic) return row;
     if (!targetWeeks || targetWeeks <= 0 || row.order_path === "di") return row;
     if (row.supplier_catalog_workbench_item_id && asNumber(row.weekly_velocity) <= 0) return row;
 
@@ -157,9 +161,12 @@ export function isApproved(row: Recommendation): boolean {
 }
 
 export function displayWineName(row: Recommendation): string {
-  const flags = [row.is_core ? "⭐" : "", row.is_btg ? "🍷" : ""].filter(Boolean);
-  const suffix = flags.length ? ` ${flags.join(" ")}` : "";
-  return `${row.product_name || row.planning_sku || "Unnamed wine"}${suffix}`;
+  return row.product_name || row.planning_sku || "Unnamed wine";
+}
+
+export function rowReplenishmentPolicy(row: Recommendation): ReplenishmentPolicy {
+  if (row.replenishment_policy) return replenishmentPolicy(row.replenishment_policy);
+  return row.is_core || row.is_btg ? "Core" : "Limited";
 }
 
 export function isManualCatalogRow(row: Pick<Recommendation, "supplier_catalog_wine_id">): boolean {
@@ -219,6 +226,10 @@ export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, r
   const trucking = asNumber(wine.laid_in_per_bottle);
   const orderCost = fob * recommendedQty;
   const landedCost = (fob + trucking) * recommendedQty;
+  const catalogPolicy = replenishmentPolicy(
+    wine.system_tags?.find((tag) => ["Core", "Limited Core", "Limited", "Allocated", "Special Order"].includes(tag)) ||
+    (wine.system_tags?.includes("BTG") ? "Core" : "Limited")
+  );
 
   return {
     id: workbenchItem?.id || `manual-catalog:${wine.id}`,
@@ -230,8 +241,10 @@ export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, r
     product_code: wine.quickbooks_item_number || null,
     supplier_name: wine.supplier_name,
     brand_manager: null,
-    is_btg: Boolean(wine.system_tags?.includes("BTG")),
-    is_core: Boolean(wine.system_tags?.includes("Core")),
+    is_btg: false,
+    is_core: catalogPolicy === "Core",
+    replenishment_policy: catalogPolicy,
+    recommendations_suppressed: false,
     last_30_day_sales: 0,
     last_60_day_sales: 0,
     last_90_day_sales: 0,

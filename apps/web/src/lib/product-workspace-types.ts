@@ -52,6 +52,13 @@ export type ProductWorkspaceRow = {
   orderingMarker: {
     isBtg: boolean;
     isCore: boolean;
+    replenishmentPolicy: "Core" | "Limited Core" | "Limited" | "Allocated" | "Special Order";
+    policyFamilyKey: string | null;
+    policyFamilyName: string | null;
+    familyDefaultPolicy: "Core" | "Limited Core" | "Limited" | "Allocated" | "Special Order";
+    recommendationsSuppressed: boolean;
+    suppressionReason: string | null;
+    suppressedUntil: string | null;
     markerNote: string | null;
     noteSource: string | null;
     updatedAt: string | null;
@@ -102,6 +109,7 @@ export type ProductWorkspaceSummary = {
   vsActiveQbMissing: number;
   btgMarkers: number;
   coreMarkers: number;
+  policyCounts: Record<string, number>;
 };
 
 export type ProductWorkspaceResponse = {
