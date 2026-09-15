@@ -30,6 +30,7 @@ import type {
   SupplierLogistics
 } from "@/lib/types";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
+import type { ReplenishmentPolicyFilter } from "@/lib/replenishment-policy";
 import {
   applySupplierTargetWeeks,
   applySupplierTdmAssignments,
@@ -128,6 +129,7 @@ export function OrderDashboard({
   const [suggestedOnly, setSuggestedOnly] = useState(false);
   const [expandAll, setExpandAll] = useState(false);
   const [supplierSort, setSupplierSort] = useState<SupplierGroupSortMode>("default");
+  const [replenishmentPolicyFilter, setReplenishmentPolicyFilter] = useState<ReplenishmentPolicyFilter>("All");
   const [supplierHubAddWineSupplier, setSupplierHubAddWineSupplier] = useState<string | null>(null);
   const [supplierTargetWeeks, setSupplierTargetWeeks] = useState<Record<string, string>>({});
   const [pendingMessage, setPendingMessage] = useState("");
@@ -183,8 +185,8 @@ export function OrderDashboard({
     [displayRows]
   );
   const visibleRecommendations = useMemo(
-    () => filterRecommendations(displayRows, { supplier, brandManager, search, suggestedOnly }),
-    [displayRows, supplier, brandManager, search, suggestedOnly]
+    () => filterRecommendations(displayRows, { supplier, brandManager, search, suggestedOnly, replenishmentPolicy: replenishmentPolicyFilter }),
+    [displayRows, supplier, brandManager, search, suggestedOnly, replenishmentPolicyFilter]
   );
   const metrics = useMemo(() => buildMetrics(visibleRecommendations), [visibleRecommendations]);
   const supplierGroups = useMemo(
@@ -767,6 +769,8 @@ export function OrderDashboard({
           setSuggestedOnly={setSuggestedOnly}
           setSupplier={setSupplier}
           setSupplierSort={setSupplierSort}
+          replenishmentPolicyFilter={replenishmentPolicyFilter}
+          setReplenishmentPolicyFilter={setReplenishmentPolicyFilter}
           suggestedOnly={suggestedOnly}
           supplier={supplier}
           supplierGroups={supplierGroups}

@@ -169,6 +169,17 @@ export function rowReplenishmentPolicy(row: Recommendation): ReplenishmentPolicy
   return row.is_core || row.is_btg ? "Core" : "Limited";
 }
 
+export function formatVelocityTrend(
+  row: Pick<Recommendation, "velocity_trend_pct" | "velocity_trend_label">
+) {
+  if (row.velocity_trend_pct === null || row.velocity_trend_pct === undefined || row.velocity_trend_pct === "") {
+    return row.velocity_trend_label || "—";
+  }
+  const value = Number(row.velocity_trend_pct);
+  if (!Number.isFinite(value)) return row.velocity_trend_label || "—";
+  return `${value > 0 ? "+" : ""}${formatDecimal(value, 0)}%`;
+}
+
 export function isManualCatalogRow(row: Pick<Recommendation, "supplier_catalog_wine_id">): boolean {
   return Boolean(row.supplier_catalog_wine_id);
 }
@@ -471,6 +482,7 @@ export function filterRecommendations(
     brandManager: string;
     search: string;
     suggestedOnly: boolean;
+    replenishmentPolicy?: "All" | ReplenishmentPolicy;
   }
 ): Recommendation[] {
   const search = filters.search.trim().toLowerCase();
@@ -480,6 +492,9 @@ export function filterRecommendations(
       return false;
     }
     if (filters.brandManager !== "All" && (row.brand_manager?.trim() || "") !== filters.brandManager) {
+      return false;
+    }
+    if (filters.replenishmentPolicy && filters.replenishmentPolicy !== "All" && rowReplenishmentPolicy(row) !== filters.replenishmentPolicy) {
       return false;
     }
     if (filters.suggestedOnly && asNumber(row.recommended_qty_rounded) <= 0) {
