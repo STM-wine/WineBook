@@ -113,6 +113,7 @@ export function PoDraftsView({
   isPending,
   reportRunId,
   suppliers,
+  onCancelDrafts,
   onDeleteLine,
   onStatusChange
 }: {
@@ -120,6 +121,7 @@ export function PoDraftsView({
   isPending: boolean;
   reportRunId: string;
   suppliers: SupplierLogistics[];
+  onCancelDrafts: (draftIds: string[]) => void;
   onDeleteLine: (lineId: string, draftId: string) => void;
   onStatusChange: (draftId: string, status: string) => void;
 }) {
@@ -265,6 +267,13 @@ export function PoDraftsView({
     URL.revokeObjectURL(url);
   }
 
+  function cancelDrafts(ids: string[], label: string) {
+    if (ids.length === 0) return;
+    if (!window.confirm(`Cancel ${ids.length.toLocaleString()} ${label} PO draft${ids.length === 1 ? "" : "s"}? Entered drafts will not be changed.`)) return;
+    onCancelDrafts(ids);
+    setSelectedDraftIds((current) => new Set(Array.from(current).filter((id) => !ids.includes(id))));
+  }
+
   return (
     <section className="panel po-panel" id="po-drafts">
       <div className="section-heading">
@@ -273,6 +282,22 @@ export function PoDraftsView({
           <p>Drafts created from approved lines in the current report run.</p>
         </div>
         <div className="po-export-all-actions">
+          <button
+            className="ghost-button remove-line-button"
+            disabled={selectedCount === 0 || isPending}
+            onClick={() => cancelDrafts(selectedDraftIdList, "selected")}
+            type="button"
+          >
+            Cancel Selected
+          </button>
+          <button
+            className="ghost-button remove-line-button"
+            disabled={exportableDrafts.length === 0 || isPending}
+            onClick={() => cancelDrafts(exportableDrafts.map((draft) => draft.id), "active")}
+            type="button"
+          >
+            Cancel All Active
+          </button>
           <a
             className={selectedCount === 0 ? "button button-small disabled-link" : "button button-small"}
             download={`POs selected ${poTimestamp()}.xlsx`}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  cancelPurchaseOrderDrafts,
   createSupplierWineRequest,
   deletePendingSupplierCatalogWine,
   deletePurchaseOrderLine,
@@ -579,6 +580,28 @@ export function OrderDashboard({
     });
   }
 
+  function cancelDrafts(draftIds: string[]) {
+    const ids = Array.from(new Set(draftIds.filter(Boolean)));
+    if (ids.length === 0) return;
+    setPendingMessage(`Cancelling ${ids.length.toLocaleString()} PO draft${ids.length === 1 ? "" : "s"}...`);
+    setErrorMessage("");
+    const previousDrafts = draftRows;
+    const selected = new Set(ids);
+    setDraftRows((current) => current.map((draft) => selected.has(draft.id) ? { ...draft, status: "cancelled", updated_at: new Date().toISOString() } : draft));
+
+    startTransition(async () => {
+      try {
+        const result = await cancelPurchaseOrderDrafts({ ids });
+        setPendingMessage(`${result.cancelled.toLocaleString()} active PO draft${result.cancelled === 1 ? "" : "s"} cancelled.`);
+        router.refresh();
+      } catch (error) {
+        setDraftRows(previousDrafts);
+        setErrorMessage(error instanceof Error ? error.message : "Could not cancel PO drafts.");
+        setPendingMessage("");
+      }
+    });
+  }
+
   function removeDraftLine(lineId: string, draftId: string) {
     setPendingMessage("Removing PO draft line...");
     setErrorMessage("");
@@ -797,6 +820,7 @@ export function OrderDashboard({
           isPending={isPending}
           reportRunId={reportRun.id}
           suppliers={suppliers}
+          onCancelDrafts={cancelDrafts}
           onDeleteLine={removeDraftLine}
           onStatusChange={changeDraftStatus}
         />
