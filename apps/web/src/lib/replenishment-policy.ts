@@ -7,6 +7,7 @@ export const REPLENISHMENT_POLICIES = [
 ] as const;
 
 export type ReplenishmentPolicy = (typeof REPLENISHMENT_POLICIES)[number];
+export type ReplenishmentPolicyFilter = "All" | ReplenishmentPolicy;
 
 export function replenishmentPolicy(value: unknown): ReplenishmentPolicy {
   return REPLENISHMENT_POLICIES.includes(value as ReplenishmentPolicy)

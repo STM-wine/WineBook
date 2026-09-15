@@ -17,6 +17,7 @@ import {
 import { MetricCard } from "./metric-card";
 import { WorkbenchGrid } from "./workbench-grid";
 import { supplierCatalogWineToInput, type SupplierCatalogWineInput } from "@/lib/supplier-catalog";
+import { REPLENISHMENT_POLICIES, type ReplenishmentPolicyFilter } from "@/lib/replenishment-policy";
 
 type SaveCatalogWineInput = SupplierCatalogWineInput & {
   existingCatalogWineId?: string | null;
@@ -35,6 +36,8 @@ export function OrderReviewView({
   setSuggestedOnly,
   setSupplier,
   setSupplierSort,
+  replenishmentPolicyFilter,
+  setReplenishmentPolicyFilter,
   suggestedOnly,
   supplier,
   supplierGroups,
@@ -66,6 +69,8 @@ export function OrderReviewView({
   setSuggestedOnly: (value: boolean) => void;
   setSupplier: (value: string) => void;
   setSupplierSort: (value: SupplierGroupSortMode) => void;
+  replenishmentPolicyFilter: ReplenishmentPolicyFilter;
+  setReplenishmentPolicyFilter: (value: ReplenishmentPolicyFilter) => void;
   suggestedOnly: boolean;
   supplier: string;
   supplierGroups: SupplierGroup[];
@@ -167,6 +172,16 @@ export function OrderReviewView({
               <option value="default">Supplier Suggested Orders</option>
               <option value="az">A-Z</option>
               <option value="za">Z-A</option>
+            </select>
+          </label>
+          <label className="compact-select-control">
+            Replenishment
+            <select
+              value={replenishmentPolicyFilter}
+              onChange={(event) => setReplenishmentPolicyFilter(event.target.value as ReplenishmentPolicyFilter)}
+            >
+              <option value="All">All policies</option>
+              {REPLENISHMENT_POLICIES.map((policy) => <option key={policy}>{policy}</option>)}
             </select>
           </label>
         </div>

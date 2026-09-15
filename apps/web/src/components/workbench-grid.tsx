@@ -20,6 +20,7 @@ import {
   formatCurrency,
   formatDecimal,
   formatInteger,
+  formatVelocityTrend,
   freeGoodsSummary,
   rowReplenishmentPolicy,
   rowApprovedEstimate,
@@ -128,13 +129,17 @@ const NewItemActionsRenderer = (params: ICellRendererParams<WorkbenchRow>) => {
     </span>
   );
 };
-const hasWineBadges = (row?: Recommendation | null) =>
-  Boolean(row?.is_new_item || (row && activeFreeGoodsForRow(row).length > 0) || (row && isDiOpportunity(row)));
+const wineBadgeCount = (row?: Recommendation | null) => {
+  if (!row) return 0;
+  return 1 +
+    (activeFreeGoodsForRow(row).length > 0 ? 1 : 0) +
+    (isDiOpportunity(row) ? 1 : 0);
+};
 const rowHeightForWine = (row?: WorkbenchRow | null) => {
   const name = row?.wine_display ?? "";
-  const lines = Math.max(1, Math.ceil(name.length / 52));
-  const badgeSpace = hasWineBadges(row) ? 18 : 0;
-  return Math.max(badgeSpace ? 48 : 36, Math.min(96, 18 + lines * 16 + badgeSpace));
+  const lines = Math.max(1, Math.ceil(name.length / 42));
+  const badgeSpace = wineBadgeCount(row) * 22;
+  return Math.max(56, Math.min(140, 16 + lines * 17 + badgeSpace));
 };
 const roundUpToPack = (qty: number, packSize: number) => {
   const pack = Math.max(1, Math.round(packSize || 1));
@@ -438,8 +443,7 @@ export function WorkbenchGrid({
       },
       {
         headerName: "Velocity Trend",
-        valueGetter: (params) =>
-          params.data?.velocity_trend_label || `${formatDecimal(asNumber(params.data?.velocity_trend_pct), 0)}%`,
+        valueGetter: (params) => params.data ? formatVelocityTrend(params.data) : "—",
         width: 112,
         headerTooltip: "Formula: ((Last 30d Sales - Prior 30d Sales) / Prior 30d Sales) x 100.",
         headerClass: "number-header",

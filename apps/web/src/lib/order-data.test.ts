@@ -4,6 +4,7 @@ import {
   applyVinosmithAvailability,
   DEFAULT_SUPPLIER_TARGET_WEEKS,
   filterRecommendations,
+  formatVelocityTrend,
   mergeSupplierCatalogRows,
   removeSupplierCatalogWineFromWorkbench,
   replaceSupplierCatalogWineInWorkbench,
@@ -186,6 +187,30 @@ describe("supplier catalog recommendation merge", () => {
     const retained = recommendation({ id: "rec-2", supplier_catalog_wine_id: "catalog-2" });
 
     expect(removeSupplierCatalogWineFromWorkbench([deleted, retained], "catalog-1")).toEqual([retained]);
+  });
+});
+
+describe("order summary display and filters", () => {
+  it("formats velocity direction as a signed percentage while preserving non-computable labels", () => {
+    expect(formatVelocityTrend(recommendation({ velocity_trend_pct: 100, velocity_trend_label: "Up" }))).toBe("+100%");
+    expect(formatVelocityTrend(recommendation({ velocity_trend_pct: -50, velocity_trend_label: "Down" }))).toBe("-50%");
+    expect(formatVelocityTrend(recommendation({ velocity_trend_pct: 0, velocity_trend_label: "Flat" }))).toBe("0%");
+    expect(formatVelocityTrend(recommendation({ velocity_trend_pct: null, velocity_trend_label: "New" }))).toBe("New");
+  });
+
+  it("filters workbench rows by replenishment policy", () => {
+    const rows = [
+      recommendation({ id: "core", replenishment_policy: "Core" }),
+      recommendation({ id: "limited", replenishment_policy: "Limited" }),
+      recommendation({ id: "special", replenishment_policy: "Special Order" })
+    ];
+    expect(filterRecommendations(rows, {
+      supplier: "All",
+      brandManager: "All",
+      search: "",
+      suggestedOnly: false,
+      replenishmentPolicy: "Limited"
+    }).map((row) => row.id)).toEqual(["limited"]);
   });
 });
 
