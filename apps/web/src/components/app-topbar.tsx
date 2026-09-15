@@ -80,7 +80,7 @@ export function AppTopbar({
               Products
             </button>
           ) : (
-            <Link className={isOrderingActive ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"} href="/products" aria-haspopup="menu">
+            <Link className={isOrderingActive ? "nav-dropdown-trigger active" : "nav-dropdown-trigger"} href={viewHref(PRODUCTS_DEFAULT_VIEW)} aria-haspopup="menu">
               Products
             </Link>
           )}

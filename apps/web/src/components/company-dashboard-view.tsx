@@ -126,10 +126,13 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const [repSort, setRepSort] = useState<SortState>({ key: "net", direction: "desc" });
   const [accountSort, setAccountSort] = useState<SortState>({ key: "net", direction: "desc" });
   const [accountInvoicePanel, setAccountInvoicePanel] = useState<AccountInvoicePanelState | null>(null);
+  const [repSummaryExpanded, setRepSummaryExpanded] = useState(false);
+  const [accountSummaryExpanded, setAccountSummaryExpanded] = useState(false);
   const activeDashboardRequests = useRef<Set<AbortController>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [isProfitLoading, setIsProfitLoading] = useState(false);
   const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
+  const [isBreakdownsLoading, setIsBreakdownsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const activeKey = cacheKeyFor(activePeriod, dateFrom, dateTo, selectedBusinessLine);
   const data = dataByPeriod[activeKey] || initialData;
@@ -170,6 +173,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setIsLoading(false);
     setIsProfitLoading(false);
     setIsDrilldownLoading(false);
+    setIsBreakdownsLoading(false);
   }
 
   async function selectDateRange(rangeLabel: DateRangeLabel) {
@@ -197,7 +201,9 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
       setDateFrom(cachedData.dateFrom);
       setDateTo(cachedData.dateTo);
       setAccountData(cachedData);
-      if (cachedData.summary.grossProfitPercent === null) {
+      if ((repSummaryExpanded || accountSummaryExpanded) && !cachedData.breakdownsLoaded) {
+        void loadBreakdowns(cachedData);
+      } else if (cachedData.summary.grossProfitPercent === null) {
         void hydrateProfit(cachedData);
       }
       return;
@@ -212,6 +218,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         dateTo: preset.period ? undefined : preset.dateTo,
         period: preset.period,
         includeProfit: requiresProfit,
+        includeBreakdowns: repSummaryExpanded || accountSummaryExpanded,
         businessLine: nextBusinessLine,
         signal: controller.signal
       });
@@ -240,9 +247,12 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setErrorMessage("");
     const key = cacheKeyFor("custom", dateFrom, dateTo, nextBusinessLine);
     if (dataByPeriod[key]) {
-      setAccountData(dataByPeriod[key]);
-      if (dataByPeriod[key].summary.grossProfitPercent === null) {
-        void hydrateProfit(dataByPeriod[key]);
+      const cachedData = dataByPeriod[key];
+      setAccountData(cachedData);
+      if ((repSummaryExpanded || accountSummaryExpanded) && !cachedData.breakdownsLoaded) {
+        void loadBreakdowns(cachedData);
+      } else if (cachedData.summary.grossProfitPercent === null) {
+        void hydrateProfit(cachedData);
       }
       return;
     }
@@ -255,6 +265,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         dateFrom,
         dateTo,
         includeProfit: requiresProfit,
+        includeBreakdowns: repSummaryExpanded || accountSummaryExpanded,
         businessLine: nextBusinessLine,
         signal: controller.signal
       });
@@ -272,6 +283,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
   async function selectRep(row: QuickBooksSalesSummaryRow) {
     setSelectedRep(row.label);
+    setAccountSummaryExpanded(true);
     setAccountInvoicePanel(null);
     setErrorMessage("");
     const controller = startDashboardRequest();
@@ -316,7 +328,9 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     const cachedData = dataByPeriod[key];
     if (cachedData) {
       setAccountData(cachedData);
-      if (cachedData.summary.grossProfitPercent === null) {
+      if ((repSummaryExpanded || accountSummaryExpanded) && !cachedData.breakdownsLoaded) {
+        void loadBreakdowns(cachedData);
+      } else if (cachedData.summary.grossProfitPercent === null) {
         void hydrateProfit(cachedData);
       }
       return;
@@ -330,6 +344,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         dateTo: activePeriod === "custom" ? dateTo : undefined,
         period: activePeriod === "custom" ? undefined : activePeriod,
         includeProfit: true,
+        includeBreakdowns: repSummaryExpanded || accountSummaryExpanded,
         businessLine: nextBusinessLine,
         signal: controller.signal
       });
@@ -357,6 +372,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         dateTo: baseData.period === "custom" ? baseData.dateTo : undefined,
         period: baseData.period === "custom" ? undefined : baseData.period,
         includeProfit: true,
+        includeBreakdowns: repSummaryExpanded || accountSummaryExpanded,
         businessLine: baseData.businessLine,
         signal: controller.signal
       });
@@ -381,6 +397,50 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
     const range = latestMonthRangeWithin(data.dateFrom, data.dateTo);
     await loadAccountInvoices(row, range, "month");
+  }
+
+  async function expandSummary(kind: "rep" | "account") {
+    if (kind === "rep") {
+      if (repSummaryExpanded) {
+        setRepSummaryExpanded(false);
+        return;
+      }
+      setRepSummaryExpanded(true);
+    } else {
+      if (accountSummaryExpanded) {
+        setAccountSummaryExpanded(false);
+        return;
+      }
+      setAccountSummaryExpanded(true);
+    }
+
+    await loadBreakdowns(data);
+  }
+
+  async function loadBreakdowns(baseData: CompanyDashboardData) {
+    if (baseData.breakdownsLoaded || isBreakdownsLoading) return;
+    const controller = startDashboardRequest();
+    setIsBreakdownsLoading(true);
+    setErrorMessage("");
+    try {
+      const dashboardData = await loadCompanyDashboard({
+        dateFrom: baseData.period === "custom" ? baseData.dateFrom : undefined,
+        dateTo: baseData.period === "custom" ? baseData.dateTo : undefined,
+        period: baseData.period === "custom" ? undefined : baseData.period,
+        includeProfit: true,
+        includeBreakdowns: true,
+        businessLine: baseData.businessLine,
+        signal: controller.signal
+      });
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+      if (!selectedRep) setAccountData(dashboardData);
+    } catch (error) {
+      if (isAbortError(error)) return;
+      setErrorMessage(error instanceof Error ? error.message : "Could not load sales summaries.");
+    } finally {
+      finishDashboardRequest(controller);
+      setIsBreakdownsLoading(false);
+    }
   }
 
   async function loadFullAccountRange() {
@@ -504,9 +564,19 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
             </div>
             <p>Selected range {tableRangeLabel} · Click a rep to drill into account sales.</p>
           </div>
-          {isLoading ? <span className="data-pill">Loading</span> : null}
+          <div className="company-panel-actions">
+            {isBreakdownsLoading || isLoading ? <span className="data-pill">Loading</span> : null}
+            <button
+              aria-expanded={repSummaryExpanded}
+              className="button button-tiny button-outline"
+              onClick={() => void expandSummary("rep")}
+              type="button"
+            >
+              {repSummaryExpanded ? "Collapse" : "Show"}
+            </button>
+          </div>
         </div>
-        <div className="table-scroll">
+        {repSummaryExpanded ? <div className="table-scroll">
           <table className="data-table company-rep-table">
             <thead>
               <tr>
@@ -567,7 +637,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
               ) : null}
             </tbody>
           </table>
-        </div>
+        </div> : <p className="company-collapsed-summary">Open to load sales totals by representative.</p>}
       </section>
 
       <section className="company-dashboard-panel">
@@ -580,15 +650,23 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
             <p>Selected range {tableRangeLabel} · {selectedRep ? "Filtered from the selected rep." : "Company account sales, descending by net sales."}</p>
           </div>
           <div className="company-panel-actions">
-            {isDrilldownLoading ? <span className="data-pill">Loading</span> : null}
+            {isBreakdownsLoading || isDrilldownLoading ? <span className="data-pill">Loading</span> : null}
             {selectedRep ? (
               <button className="button button-tiny button-outline" onClick={clearRep} type="button">
                 All Reps
               </button>
             ) : null}
+            <button
+              aria-expanded={accountSummaryExpanded}
+              className="button button-tiny button-outline"
+              onClick={() => void expandSummary("account")}
+              type="button"
+            >
+              {accountSummaryExpanded ? "Collapse" : "Show"}
+            </button>
           </div>
         </div>
-        <div className="table-scroll company-account-scroll">
+        {accountSummaryExpanded ? <div className="table-scroll company-account-scroll">
           <table className="data-table company-account-table">
             <thead>
               <tr>
@@ -651,7 +729,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
               ) : null}
             </tbody>
           </table>
-        </div>
+        </div> : <p className="company-collapsed-summary">Open to load account sales totals.</p>}
       </section>
     </section>
   );
@@ -1109,6 +1187,7 @@ async function loadCompanyDashboard({
   businessLine,
   dateFrom,
   dateTo,
+  includeBreakdowns,
   includeProfit,
   period,
   rep,
@@ -1117,6 +1196,7 @@ async function loadCompanyDashboard({
   businessLine?: CompanyDashboardBusinessLine;
   dateFrom?: string;
   dateTo?: string;
+  includeBreakdowns?: boolean;
   includeProfit?: boolean;
   period?: CompanyDashboardPeriod;
   rep?: string;
@@ -1130,6 +1210,7 @@ async function loadCompanyDashboard({
     params.set("period", period);
   }
   if (includeProfit === false) params.set("includeProfit", "false");
+  if (includeBreakdowns === false) params.set("includeBreakdowns", "false");
   if (businessLine && businessLine !== "all") params.set("businessLine", businessLine);
   if (rep) params.set("rep", rep);
   const response = await fetch(`/api/company-dashboard?${params.toString()}`, { signal });

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
   cancelPurchaseOrderDrafts,
   createSupplierWineRequest,
@@ -17,7 +18,6 @@ import {
   updateRecommendationOrderPath,
   updateRecommendationApprovals
 } from "@/app/actions";
-import type { CompanyDashboardData } from "@/lib/company-dashboard-data";
 import type {
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
@@ -49,15 +49,22 @@ import {
 } from "@/lib/order-data";
 import { AppTopbar } from "./app-topbar";
 import { ActiveView, DEFAULT_VIEW, isActiveView } from "./dashboard-types";
-import { CompanyDashboardView } from "./company-dashboard-view";
-import { FreightView } from "./freight-view";
-import { OrderReviewView } from "./order-review-view";
-import { PoDraftsView } from "./po-drafts-view";
-import { ProductWorkspaceView } from "./product-workspace-view";
 import { StatusMessages } from "./status-messages";
-import { SupplierBoardView } from "./supplier-board-view";
-import { SupplierHubView } from "./supplier-hub-view";
-import { VinosmithRescueExplorerView } from "./vinosmith-rescue-explorer-view";
+
+const FreightView = dynamic(() => import("./freight-view").then((module) => module.FreightView), { loading: ViewLoading });
+const OrderReviewView = dynamic(() => import("./order-review-view").then((module) => module.OrderReviewView), { loading: ViewLoading });
+const PoDraftsView = dynamic(() => import("./po-drafts-view").then((module) => module.PoDraftsView), { loading: ViewLoading });
+const ProductWorkspaceView = dynamic(() => import("./product-workspace-view").then((module) => module.ProductWorkspaceView), { loading: ViewLoading });
+const SupplierBoardView = dynamic(() => import("./supplier-board-view").then((module) => module.SupplierBoardView), { loading: ViewLoading });
+const SupplierHubView = dynamic(() => import("./supplier-hub-view").then((module) => module.SupplierHubView), { loading: ViewLoading });
+const VinosmithRescueExplorerView = dynamic(
+  () => import("./vinosmith-rescue-explorer-view").then((module) => module.VinosmithRescueExplorerView),
+  { loading: ViewLoading }
+);
+
+function ViewLoading() {
+  return <section className="panel"><p className="muted">Loading workspace...</p></section>;
+}
 
 type Props = {
   reportRun: ReportRun;
@@ -69,7 +76,7 @@ type Props = {
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
   quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
-  companyDashboard: CompanyDashboardData;
+  initialView: ActiveView;
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
   orderingDataWarning?: string | null;
@@ -101,7 +108,7 @@ export function OrderDashboard({
   wineRequests,
   priceChangeEvents,
   quickBooksSupplierMatches,
-  companyDashboard,
+  initialView,
   quickBooksLastSyncAt,
   vinosmithLastSyncAt,
   orderingDataWarning,
@@ -121,7 +128,7 @@ export function OrderDashboard({
   );
   const [rows, setRows] = useState(combinedRecommendations);
   const [draftRows, setDraftRows] = useState(poDrafts);
-  const [activeView, setActiveView] = useState<ActiveView>(DEFAULT_VIEW);
+  const [activeView, setActiveView] = useState<ActiveView>(initialView);
   const [supplier, setSupplier] = useState("All");
   const [brandManager, setBrandManager] = useState("All");
   const [search, setSearch] = useState("");
@@ -208,6 +215,10 @@ export function OrderDashboard({
     : undefined;
 
   function selectView(view: ActiveView) {
+    if (view === DEFAULT_VIEW) {
+      window.location.assign("/");
+      return;
+    }
     setActiveView(view);
     setSupplierHubAddWineSupplier(null);
     const url = new URL(window.location.href);
@@ -749,8 +760,6 @@ export function OrderDashboard({
           </div>
         </div>
       ) : null}
-
-      {activeView === "company-dashboard" ? <CompanyDashboardView initialData={companyDashboard} /> : null}
 
       {activeView === "product-workspace" ? <ProductWorkspaceView canManageMarkers={canViewSettings} /> : null}
 

@@ -76,7 +76,7 @@ const BUSINESS_LINE_LABELS: Record<Exclude<StoredGrossProfitBusinessLine, "all">
 export async function fetchStoredGrossProfitRollups(
   supabase: SupabaseClient,
   range: { from: string; to: string },
-  options: { rep?: string; businessLine?: StoredGrossProfitBusinessLine } = {}
+  options: { rep?: string; businessLine?: StoredGrossProfitBusinessLine; includeBreakdowns?: boolean } = {}
 ): Promise<StoredGrossProfitRollups> {
   const businessLine = options.businessLine || "all";
   const expectedDays = daysInclusive(range.from, range.to);
@@ -85,24 +85,27 @@ export async function fetchStoredGrossProfitRollups(
   }
 
   const repKey = rowKey(options.rep || "");
+  const includeBreakdowns = options.includeBreakdowns !== false;
   const [companyRows, repRows, accountRows, businessLineRows] = await Promise.all([
     fetchStoredRows(supabase, range, {
       businessLine,
       scopeType: repKey ? "rep" : "company",
       scopeKey: repKey || "all"
     }),
-    repKey
+    !includeBreakdowns || repKey
       ? Promise.resolve([] as StoredRollupRow[])
       : fetchStoredRows(supabase, range, {
           businessLine,
           scopeType: "rep"
         }),
-    fetchStoredRows(supabase, range, {
-      businessLine,
-      scopeType: repKey ? "rep_account" : "account",
-      parentScopeType: repKey ? "rep" : undefined,
-      parentScopeKey: repKey || undefined
-    }),
+    includeBreakdowns
+      ? fetchStoredRows(supabase, range, {
+          businessLine,
+          scopeType: repKey ? "rep_account" : "account",
+          parentScopeType: repKey ? "rep" : undefined,
+          parentScopeKey: repKey || undefined
+        })
+      : Promise.resolve([] as StoredRollupRow[]),
     fetchBusinessLineSummaryRows(supabase, range, repKey)
   ]);
 

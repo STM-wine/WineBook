@@ -53,6 +53,7 @@ export type CompanyDashboardData = {
   businessLineSummaries: CompanyDashboardBusinessLineSummary[];
   byRep: QuickBooksSalesSummaryRow[];
   byAccount: QuickBooksSalesSummaryRow[];
+  breakdownsLoaded: boolean;
   selectedRep: string | null;
   unavailableReason: string | null;
 };
@@ -64,22 +65,31 @@ const MAX_AUTO_GROSS_PROFIT_DAYS = 366;
 export async function fetchCompanyDashboardData(
   supabase: SupabaseClient,
   period: CompanyDashboardPeriod = "mtd",
-  filters: { dateFrom?: string; dateTo?: string; rep?: string; includeGrossProfit?: boolean; businessLine?: string } = {}
+  filters: {
+    dateFrom?: string;
+    dateTo?: string;
+    rep?: string;
+    includeGrossProfit?: boolean;
+    includeBreakdowns?: boolean;
+    businessLine?: string;
+  } = {}
 ): Promise<CompanyDashboardData> {
   const range =
     filters.dateFrom && filters.dateTo
       ? { from: filters.dateFrom, to: filters.dateTo }
       : rangeForPeriod(period);
   const includeGrossProfit = filters.includeGrossProfit !== false;
+  const includeBreakdowns = filters.includeBreakdowns !== false;
   const businessLine = parseCompanyDashboardBusinessLine(filters.businessLine);
   const comparisonRange = comparableLastYearRange(range);
   const includeComparisonGrossProfit = includeGrossProfit && canAutoLoadGrossProfitRange(range);
 
   const [current, comparison, salesThroughDate] = await Promise.all([
-    fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit, businessLine }),
+    fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit, includeBreakdowns, businessLine }),
     comparisonRange
       ? fetchPeriodDashboardData(supabase, comparisonRange, filters.rep, {
           includeGrossProfit: includeComparisonGrossProfit,
+          includeBreakdowns,
           businessLine
         })
       : Promise.resolve(null),
@@ -108,6 +118,7 @@ export async function fetchCompanyDashboardData(
     businessLineSummaries: currentRows.businessLineSummaries,
     byRep: currentRows.byRep,
     byAccount: currentRows.byAccount,
+    breakdownsLoaded: includeBreakdowns,
     selectedRep: cleanFilter(filters.rep) || null,
     unavailableReason: current.unavailableReason
   };
@@ -157,6 +168,7 @@ export function unavailableCompanyDashboardData(
     businessLineSummaries: emptyBusinessLineSummaries(),
     byRep: [],
     byAccount: [],
+    breakdownsLoaded: false,
     selectedRep: cleanFilter(filters.rep) || null,
     unavailableReason: reason
   };
@@ -174,15 +186,20 @@ async function fetchPeriodDashboardData(
   supabase: SupabaseClient,
   range: { from: string; to: string },
   rep?: string,
-  options: { includeGrossProfit?: boolean; businessLine?: CompanyDashboardBusinessLine } = {}
+  options: {
+    includeGrossProfit?: boolean;
+    includeBreakdowns?: boolean;
+    businessLine?: CompanyDashboardBusinessLine;
+  } = {}
 ): Promise<PeriodDashboardData> {
   const businessLine = options.businessLine || "all";
+  const includeBreakdowns = options.includeBreakdowns !== false;
   if (options.includeGrossProfit !== false) {
-    const grossProfit = await fetchGrossProfitRollups(supabase, range, rep, businessLine);
+    const grossProfit = await fetchGrossProfitRollups(supabase, range, rep, businessLine, includeBreakdowns);
     if (!grossProfit.unavailableReason) {
       return {
-        byRep: grossProfit.byRepRows,
-        byAccount: grossProfit.byAccountRows,
+        byRep: includeBreakdowns ? grossProfit.byRepRows : [],
+        byAccount: includeBreakdowns ? grossProfit.byAccountRows : [],
         businessLineSummaries: grossProfit.businessLineSummaries,
         unavailableReason: null,
         summary: grossProfit.summary
@@ -197,8 +214,8 @@ async function fetchPeriodDashboardData(
       includeItems: false
     });
     return {
-      byRep: mergeGrossProfitRows(sales.byRep, grossProfit.byRep),
-      byAccount: mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount),
+      byRep: includeBreakdowns ? mergeGrossProfitRows(sales.byRep, grossProfit.byRep) : [],
+      byAccount: includeBreakdowns ? mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount) : [],
       businessLineSummaries: grossProfit.businessLineSummaries,
       unavailableReason: sales.unavailableReason || null,
       summary: {
@@ -225,8 +242,8 @@ async function fetchPeriodDashboardData(
   });
   const grossProfit = emptyGrossProfitRollups();
   return {
-    byRep: mergeGrossProfitRows(sales.byRep, grossProfit.byRep),
-    byAccount: mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount),
+    byRep: includeBreakdowns ? mergeGrossProfitRows(sales.byRep, grossProfit.byRep) : [],
+    byAccount: includeBreakdowns ? mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount) : [],
     businessLineSummaries: grossProfit.businessLineSummaries,
     unavailableReason: sales.unavailableReason || null,
     summary: {
@@ -335,19 +352,21 @@ async function fetchGrossProfitRollups(
   supabase: SupabaseClient,
   range: { from: string; to: string },
   rep?: string,
-  businessLine: CompanyDashboardBusinessLine = "all"
+  businessLine: CompanyDashboardBusinessLine = "all",
+  includeBreakdowns = true
 ): Promise<GrossProfitRollups> {
   if (shouldUseStoredGrossProfit(range)) {
-    return fetchStoredOrHybridGrossProfitRollups(supabase, range, rep, businessLine);
+    return fetchStoredOrHybridGrossProfitRollups(supabase, range, rep, businessLine, includeBreakdowns);
   }
-  return fetchLiveGrossProfitRollups(supabase, range, rep, businessLine);
+  return fetchLiveGrossProfitRollups(supabase, range, rep, businessLine, includeBreakdowns);
 }
 
 async function fetchLiveGrossProfitRollups(
   supabase: SupabaseClient,
   range: { from: string; to: string },
   rep?: string,
-  businessLine: CompanyDashboardBusinessLine = "all"
+  businessLine: CompanyDashboardBusinessLine = "all",
+  includeBreakdowns = true
 ): Promise<GrossProfitRollups> {
   try {
     const grossProfitCenter = await buildGrossProfitCenterWithRetry(supabase, range);
@@ -355,10 +374,10 @@ async function fetchLiveGrossProfitRollups(
     const filteredLines = filterGrossProfitLinesByBusinessLine(repFilteredLines, businessLine);
     return {
       summary: summarizeGrossProfitLines(filteredLines),
-      byRep: rollupGrossProfitLines(filteredLines, (line) => cleanLabel(line.salesRep, "Unassigned Rep")),
-      byAccount: rollupGrossProfitLines(filteredLines, (line) => cleanLabel(line.customerFullName, "Unknown Account")),
-      byRepRows: rollupSalesRows(filteredLines, (line) => cleanLabel(line.salesRep, "Unassigned Rep")),
-      byAccountRows: rollupSalesRows(filteredLines, (line) => cleanLabel(line.customerFullName, "Unknown Account")),
+      byRep: includeBreakdowns ? rollupGrossProfitLines(filteredLines, (line) => cleanLabel(line.salesRep, "Unassigned Rep")) : new Map(),
+      byAccount: includeBreakdowns ? rollupGrossProfitLines(filteredLines, (line) => cleanLabel(line.customerFullName, "Unknown Account")) : new Map(),
+      byRepRows: includeBreakdowns ? rollupSalesRows(filteredLines, (line) => cleanLabel(line.salesRep, "Unassigned Rep")) : [],
+      byAccountRows: includeBreakdowns ? rollupSalesRows(filteredLines, (line) => cleanLabel(line.customerFullName, "Unknown Account")) : [],
       businessLineSummaries: summarizeBusinessLineSplits(repFilteredLines),
       unavailableReason: null
     };
@@ -374,7 +393,8 @@ async function fetchStoredOrHybridGrossProfitRollups(
   supabase: SupabaseClient,
   range: { from: string; to: string },
   rep?: string,
-  businessLine: CompanyDashboardBusinessLine = "all"
+  businessLine: CompanyDashboardBusinessLine = "all",
+  includeBreakdowns = true
 ): Promise<GrossProfitRollups> {
   const stableCutoff = stableGrossProfitCutoff();
   const storedRange = {
@@ -393,13 +413,14 @@ async function fetchStoredOrHybridGrossProfitRollups(
     const stored = storedRange.from <= storedRange.to
       ? await fetchStoredGrossProfitRollups(supabase, storedRange, {
           rep: cleanFilter(rep),
-          businessLine: businessLine as StoredGrossProfitBusinessLine
+          businessLine: businessLine as StoredGrossProfitBusinessLine,
+          includeBreakdowns
         })
       : null;
     if (stored?.unavailableReason) throw new Error(stored.unavailableReason);
 
     const live = liveRange && liveRange.from <= liveRange.to
-      ? await fetchLiveGrossProfitRollups(supabase, liveRange, rep, businessLine)
+      ? await fetchLiveGrossProfitRollups(supabase, liveRange, rep, businessLine, includeBreakdowns)
       : null;
     if (live?.unavailableReason) throw new Error(live.unavailableReason);
 

@@ -1,7 +1,10 @@
 import { OrderDashboard } from "@/components/order-dashboard";
+import { CompanyHome } from "@/components/company-home";
+import { ProductWorkspaceHome } from "@/components/product-workspace-home";
+import { DEFAULT_VIEW, isActiveView, type ActiveView } from "@/components/dashboard-types";
 import { refreshOrderingDataFromForm } from "@/app/actions";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
-import { fetchCompanyDashboardData, unavailableCompanyDashboardData, type CompanyDashboardData } from "@/lib/company-dashboard-data";
+import { fetchCompanyDashboardData, unavailableCompanyDashboardData } from "@/lib/company-dashboard-data";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
 import { unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { fetchLiveVinosmithAvailability } from "@/lib/supabase/vinosmith-availability";
@@ -28,14 +31,43 @@ import { fetchActiveOrderingRun, orderingSourceMode } from "@/lib/source-backed-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function HomePage() {
+type HomePageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function HomePage({ searchParams }: HomePageProps) {
   const context = await getAppContext();
   if ("pendingEmail" in context) {
     return <AccountPending email={context.pendingEmail} />;
   }
   const { permissions } = context;
+  const params = await searchParams;
+  const requestedView = singleParam(params.view);
+  const initialView: ActiveView = isActiveView(requestedView) ? requestedView : DEFAULT_VIEW;
 
-  const data = await loadHomePageData();
+  if (initialView === DEFAULT_VIEW) {
+    const companyDashboard = await fetchCompanyDashboardData(createServiceRoleClient(), "mtd", {
+      includeBreakdowns: false
+    }).catch((error) =>
+      unavailableCompanyDashboardData(
+        error instanceof Error ? error.message : "Company Dashboard is not configured.",
+        "mtd"
+      )
+    );
+
+    return (
+      <CompanyHome
+        companyDashboard={companyDashboard}
+        canViewSettings={hasPermission(permissions, "view_settings")}
+      />
+    );
+  }
+
+  if (initialView === "product-workspace") {
+    return <ProductWorkspaceHome canViewSettings={hasPermission(permissions, "view_settings")} />;
+  }
+
+  const data = await loadOrderingPageData();
   const latestRun = data.latestRun;
 
   if (!latestRun) {
@@ -66,7 +98,7 @@ export default async function HomePage() {
       wineRequests={data.wineRequests}
       priceChangeEvents={data.priceChangeEvents}
       quickBooksSupplierMatches={data.quickBooksSupplierMatches}
-      companyDashboard={data.companyDashboard}
+      initialView={initialView}
       quickBooksLastSyncAt={data.quickBooksLastSyncAt}
       vinosmithLastSyncAt={data.vinosmithLastSyncAt}
       orderingDataWarning={data.orderingDataWarning}
@@ -75,7 +107,7 @@ export default async function HomePage() {
   );
 }
 
-type HomePageData = {
+type OrderingPageData = {
   reportRuns: ReportRun[];
   latestRun: ReportRun | null;
   recommendations: Recommendation[];
@@ -85,13 +117,12 @@ type HomePageData = {
   wineRequests: WineRequest[];
   priceChangeEvents: PriceChangeEvent[];
   quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
-  companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
   orderingDataWarning: string | null;
 };
 
-async function loadHomePageData(): Promise<HomePageData> {
+async function loadOrderingPageData(): Promise<OrderingPageData> {
   const serviceRoleSupabase = createServiceRoleClient();
   const reportRunsPromise = serviceRoleSupabase
     .from("report_runs")
@@ -149,22 +180,11 @@ async function loadHomePageData(): Promise<HomePageData> {
     .then((data) => ({ data, error: null as string | null }))
     .catch((error) => ({ data: null, error: error instanceof Error ? error.message : "Vinosmith Get Available failed." }));
 
-  const companyDashboardPromise = (() => {
-    try {
-      return fetchCompanyDashboardData(serviceRoleSupabase, "mtd");
-    } catch (error) {
-      return Promise.resolve(
-        unavailableCompanyDashboardData(error instanceof Error ? error.message : "Company Dashboard is not configured.", "mtd")
-      );
-    }
-  })();
-
   const [
     { data: reportRuns },
     { data: supplierCatalogWines },
     { data: wineRequests },
     { data: priceChangeEvents },
-    companyDashboard,
     quickBooksLastSyncAt,
     vinosmithLastSyncAt,
     activeOrderingRun
@@ -173,7 +193,6 @@ async function loadHomePageData(): Promise<HomePageData> {
     supplierCatalogPromise,
     wineRequestsPromise,
     priceChangeEventsPromise,
-    companyDashboardPromise,
     quickBooksLastSyncPromise,
     vinosmithLastSyncPromise,
     activeOrderingRunPromise
@@ -191,7 +210,6 @@ async function loadHomePageData(): Promise<HomePageData> {
       wineRequests: wineRequests || [],
       priceChangeEvents: priceChangeEvents || [],
       quickBooksSupplierMatches: [],
-      companyDashboard,
       quickBooksLastSyncAt,
       vinosmithLastSyncAt,
       orderingDataWarning: null
@@ -309,11 +327,14 @@ async function loadHomePageData(): Promise<HomePageData> {
     wineRequests: wineRequests || [],
     priceChangeEvents: priceChangeEvents || [],
     quickBooksSupplierMatches,
-    companyDashboard,
     quickBooksLastSyncAt,
     vinosmithLastSyncAt: vinosmithAvailabilityResult.data?.snapshotAt || vinosmithLastSyncAt,
     orderingDataWarning: orderingWarnings.join(" ") || null
   };
+}
+
+function singleParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] || null : value || null;
 }
 
 async function fetchLatestVinosmithPullAt(supabase: ReturnType<typeof createServiceRoleClient>) {
