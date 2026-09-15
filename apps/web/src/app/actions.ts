@@ -314,6 +314,30 @@ export async function updatePurchaseOrderDraftStatus(input: { id: string; status
   revalidatePath("/");
 }
 
+export async function cancelPurchaseOrderDrafts(input: { ids: string[] }) {
+  const ids = Array.from(new Set(input.ids.filter(Boolean)));
+  if (ids.length === 0) return { cancelled: 0 };
+  if (ids.length > 500) throw new Error("Too many PO drafts selected.");
+
+  const { supabase, user } = await requireWriteAccess();
+  const { data, error } = await supabase
+    .from("purchase_order_drafts")
+    .update({
+      status: "cancelled",
+      reviewed_by: user.id,
+      updated_at: new Date().toISOString()
+    })
+    .in("id", ids)
+    .in("status", ["draft", "ready_for_entry"])
+    .select("id")
+    .returns<Array<{ id: string }>>();
+
+  if (error) throw new Error(error.message);
+  revalidateDashboardData();
+  revalidatePath("/");
+  return { cancelled: data?.length || 0 };
+}
+
 export async function deletePurchaseOrderLine(input: { id: string; draftId: string }) {
   if (!input.id) {
     throw new Error("Missing PO line id.");
