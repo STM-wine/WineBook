@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "./types";
-import { poExportLines, type PoExportLine } from "./po-utils";
+import { poExportLines, type PoExportLine, type PoExportPriceLookup } from "./po-utils";
 
 async function templatePath() {
   const candidates = [
@@ -44,7 +44,9 @@ function buildFallbackWorkbook(lines: PoExportLine[]) {
     { header: "Item Warning", key: "itemWarning", width: 28 },
     { header: "Wine", key: "wine", width: 48 },
     { header: "FOB", key: "fob", width: 12 },
-    { header: "Laid In Cost", key: "laidInPerBottle", width: 14 }
+    { header: "Laid In Cost", key: "laidInPerBottle", width: 14 },
+    { header: "Frontline", key: "frontline", width: 12 },
+    { header: "Best", key: "best", width: 12 }
   ];
   sheet.getRow(1).font = { bold: true };
 
@@ -62,15 +64,21 @@ function buildFallbackWorkbook(lines: PoExportLine[]) {
       itemWarning: line.itemWarning,
       wine: line.wine,
       fob: line.fob,
-      laidInPerBottle: line.laidInPerBottle
+      laidInPerBottle: line.laidInPerBottle,
+      frontline: line.frontline,
+      best: line.best
     });
   }
 
   return workbook;
 }
 
-export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[], suppliers: SupplierLogistics[] = []) {
-  const lines = poExportLines(drafts, suppliers);
+export async function poTemplateXlsxBuffer(
+  drafts: PurchaseOrderDraftWithLines[],
+  suppliers: SupplierLogistics[] = [],
+  prices: PoExportPriceLookup = {}
+) {
+  const lines = poExportLines(drafts, suppliers, prices);
   const workbook = new ExcelJS.Workbook();
   const existingTemplate = await templatePath();
 
@@ -111,8 +119,10 @@ export async function poTemplateXlsxBuffer(drafts: PurchaseOrderDraftWithLines[]
     sheet.getCell(excelRow, 5).value = line.wine;
     sheet.getCell(excelRow, 6).value = line.fob;
     sheet.getCell(excelRow, 7).value = line.laidInPerBottle;
+    sheet.getCell(excelRow, 8).value = line.frontline;
+    sheet.getCell(excelRow, 9).value = line.best;
     if (line.itemWarning) {
-      for (let column = 1; column <= 7; column += 1) {
+      for (let column = 1; column <= 9; column += 1) {
         sheet.getCell(excelRow, column).fill = {
           type: "pattern",
           pattern: "solid",

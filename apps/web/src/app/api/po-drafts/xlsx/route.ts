@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { poTemplateXlsxBuffer } from "@/lib/po-export";
 import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
-import { poDraftSupplierLabel, poTimestamp } from "@/lib/po-utils";
-import { createClient } from "@/lib/supabase/server";
+import { poDraftSupplierLabel, poLinePriceKey, poTimestamp, type PoExportPriceLookup } from "@/lib/po-utils";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 
 async function hydrateLineProducers(
@@ -43,6 +43,116 @@ async function hydrateLineProducers(
   }));
 }
 
+function normalizedPriceLabel(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
+}
+
+function positivePrice(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) / 100 : null;
+}
+
+async function loadPoExportPrices(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  drafts: PurchaseOrderDraftWithLines[]
+): Promise<PoExportPriceLookup> {
+  const lines = drafts.flatMap((draft) => draft.lines || []);
+  const catalogWineIds = Array.from(new Set(lines.map((line) => line.supplier_catalog_wine_id).filter(Boolean))) as string[];
+  const productCodes = Array.from(new Set(lines.map((line) => line.product_code?.trim()).filter(Boolean))) as string[];
+
+  const [
+    { data: catalogWines, error: catalogError },
+    { data: vinosmithWines, error: wineError },
+    { data: quickBooksItemsByName, error: qbNameError },
+    { data: quickBooksItemsByFullName, error: qbFullNameError }
+  ] = await Promise.all([
+    catalogWineIds.length > 0
+      ? supabase
+          .from("supplier_catalog_wines")
+          .select("id,frontline_bottle_price,best_price")
+          .in("id", catalogWineIds)
+      : Promise.resolve({ data: [], error: null }),
+    productCodes.length > 0
+      ? supabase
+          .from("vinosmith_wines")
+          .select("wine_id,code")
+          .in("code", productCodes)
+      : Promise.resolve({ data: [], error: null }),
+    productCodes.length > 0
+      ? supabase
+          .from("quickbooks_items")
+          .select("name,full_name,sales_price")
+          .in("name", productCodes)
+      : Promise.resolve({ data: [], error: null }),
+    productCodes.length > 0
+      ? supabase
+          .from("quickbooks_items")
+          .select("name,full_name,sales_price")
+          .in("full_name", productCodes)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+
+  if (catalogError) throw new Error(catalogError.message);
+  if (wineError) throw new Error(wineError.message);
+  if (qbNameError) throw new Error(qbNameError.message);
+  if (qbFullNameError) throw new Error(qbFullNameError.message);
+  const quickBooksItems = Array.from(new Map(
+    [...(quickBooksItemsByName || []), ...(quickBooksItemsByFullName || [])]
+      .map((item) => [`${item.name || ""}\u0000${item.full_name || ""}`, item])
+  ).values());
+
+  const wineIds = (vinosmithWines || []).map((wine) => wine.wine_id as string);
+  const { data: vinosmithPrices, error: priceError } = wineIds.length > 0
+    ? await supabase
+        .from("vinosmith_prices")
+        .select("wine_id,label,price_cents,is_default,active,disabled")
+        .in("wine_id", wineIds)
+        .eq("active", true)
+        .or("disabled.is.null,disabled.eq.false")
+    : { data: [], error: null };
+  if (priceError) throw new Error(priceError.message);
+
+  const catalogById = new Map((catalogWines || []).map((wine) => [wine.id as string, {
+    frontline: positivePrice(wine.frontline_bottle_price),
+    best: positivePrice(wine.best_price)
+  }]));
+  const wineIdByCode = new Map((vinosmithWines || []).map((wine) => [normalizedPriceLabel(wine.code), wine.wine_id as string]));
+  const vinosmithPricesByWineId = new Map<string, Array<{ label: string | null; price_cents: number | null; is_default: boolean | null }>>();
+  for (const price of vinosmithPrices || []) {
+    const current = vinosmithPricesByWineId.get(price.wine_id as string) || [];
+    current.push(price as { label: string | null; price_cents: number | null; is_default: boolean | null });
+    vinosmithPricesByWineId.set(price.wine_id as string, current);
+  }
+  const qbFrontlineByCode = new Map<string, number | null>();
+  for (const item of quickBooksItems || []) {
+    const frontline = positivePrice(item.sales_price);
+    if (item.name) qbFrontlineByCode.set(normalizedPriceLabel(item.name), frontline);
+    if (item.full_name) qbFrontlineByCode.set(normalizedPriceLabel(item.full_name), frontline);
+  }
+
+  return Object.fromEntries(lines.map((line) => {
+    const codeKey = normalizedPriceLabel(line.product_code);
+    const catalog = line.supplier_catalog_wine_id ? catalogById.get(line.supplier_catalog_wine_id) : undefined;
+    const wineId = wineIdByCode.get(codeKey);
+    const levels = wineId ? vinosmithPricesByWineId.get(wineId) || [] : [];
+    const frontlineLevel = levels.find((level) => level.is_default && positivePrice((level.price_cents || 0) / 100) !== null)
+      || levels.find((level) => normalizedPriceLabel(level.label).includes("front"));
+    const bestLevel = levels.find((level) => normalizedPriceLabel(level.label).includes("best"));
+    const vinosmith = {
+      frontline: positivePrice(frontlineLevel?.price_cents ? frontlineLevel.price_cents / 100 : null),
+      best: positivePrice(bestLevel?.price_cents ? bestLevel.price_cents / 100 : null)
+    };
+    const price = line.is_new_item
+      ? { frontline: catalog?.frontline ?? vinosmith.frontline, best: catalog?.best ?? vinosmith.best }
+      : {
+          frontline: vinosmith.frontline ?? catalog?.frontline ?? qbFrontlineByCode.get(codeKey) ?? null,
+          best: vinosmith.best ?? catalog?.best ?? null
+        };
+    return [poLinePriceKey(line), price];
+  }));
+}
+
 export async function GET(request: NextRequest) {
   const reportRunId = request.nextUrl.searchParams.get("reportRunId");
   const draftId = request.nextUrl.searchParams.get("draftId");
@@ -62,6 +172,7 @@ export async function GET(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Sign in required." }, { status: 401 });
   }
+  const integrationSupabase = createServiceRoleClient();
 
   let draftsQuery = supabase
     .from("purchase_order_drafts")
@@ -124,7 +235,7 @@ export async function GET(request: NextRequest) {
 
   let exportDrafts: PurchaseOrderDraftWithLines[];
   try {
-    exportDrafts = await hydrateLineProducers(supabase, drafts || []);
+    exportDrafts = await hydrateLineProducers(integrationSupabase, drafts || []);
   } catch (producerError) {
     return NextResponse.json(
       { error: producerError instanceof Error ? producerError.message : "Could not load producer names." },
@@ -136,7 +247,16 @@ export async function GET(request: NextRequest) {
     .from("suppliers")
     .select("id,importer_id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,notes,active")
     .returns<SupplierLogistics[]>();
-  const buffer = await poTemplateXlsxBuffer(exportDrafts, suppliers || []);
+  let prices: PoExportPriceLookup;
+  try {
+    prices = await loadPoExportPrices(integrationSupabase, exportDrafts);
+  } catch (priceError) {
+    return NextResponse.json(
+      { error: priceError instanceof Error ? priceError.message : "Could not load Frontline and Best pricing." },
+      { status: 500 }
+    );
+  }
+  const buffer = await poTemplateXlsxBuffer(exportDrafts, suppliers || [], prices);
   const supplierFilenamePart =
     draftId && exportDrafts[0]
       ? poDraftSupplierLabel(exportDrafts[0])

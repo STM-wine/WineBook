@@ -11,10 +11,23 @@ export type PoExportLine = {
   quantity: number;
   fob: number;
   laidInPerBottle: number;
+  frontline: number | null;
+  best: number | null;
   totalWineCost: number;
   totalLaidInCost: number;
   estimatedCost: number;
 };
+
+export type PoExportPrice = {
+  frontline: number | null;
+  best: number | null;
+};
+
+export type PoExportPriceLookup = Record<string, PoExportPrice>;
+
+export function poLinePriceKey(line: Pick<PurchaseOrderLine, "id">) {
+  return line.id;
+}
 
 function supplierKey(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
@@ -79,7 +92,11 @@ function poLineProducer(line: PurchaseOrderLine) {
   return line.producer_name?.trim() || producerFromDescription(line.product_name);
 }
 
-export function poExportLines(drafts: PurchaseOrderDraftWithLines[], suppliers: SupplierLogistics[] = []): PoExportLine[] {
+export function poExportLines(
+  drafts: PurchaseOrderDraftWithLines[],
+  suppliers: SupplierLogistics[] = [],
+  prices: PoExportPriceLookup = {}
+): PoExportLine[] {
   const supplierLookup = supplierLogisticsLookup(suppliers);
 
   return drafts
@@ -88,6 +105,7 @@ export function poExportLines(drafts: PurchaseOrderDraftWithLines[], suppliers: 
 
       return (draft.lines || []).map((line) => {
         const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidIn);
+        const price = prices[poLinePriceKey(line)] || { frontline: null, best: null };
 
         return {
           supplier: poDraftSupplierLabel(draft),
@@ -98,6 +116,8 @@ export function poExportLines(drafts: PurchaseOrderDraftWithLines[], suppliers: 
           quantity: qty,
           fob,
           laidInPerBottle: laidIn,
+          frontline: price.frontline,
+          best: price.best,
           totalWineCost: wineCost,
           totalLaidInCost: laidInCost,
           estimatedCost
