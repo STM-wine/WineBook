@@ -2,10 +2,6 @@ name: Source-backed Ordering Refresh
 
 on:
   workflow_dispatch:
-  schedule:
-    # Build one early-morning ordering snapshot. The builder is content-
-    # idempotent and carries open buyer work when source facts change.
-    - cron: "30 13 * * *"
 
 concurrency:
   group: source-backed-ordering-refresh

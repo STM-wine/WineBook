@@ -30,3 +30,5 @@ services:
         sync: false
       - key: ORDERING_REFRESH_SECRET
         sync: false
+      - key: ORDERING_SOURCE_MODE
+        value: source

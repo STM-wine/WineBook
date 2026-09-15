@@ -13,7 +13,14 @@ export type OrderingRun = ReportRun & {
   source_file_ids?: string[];
 };
 
-export async function fetchActiveOrderingRun(supabase: OrderingClient): Promise<OrderingRun | null> {
+export type OrderingSourceMode = "source" | "legacy";
+
+export function orderingSourceMode(value: string | null | undefined): OrderingSourceMode {
+  return value?.trim().toLowerCase() === "legacy" ? "legacy" : "source";
+}
+
+export async function fetchActiveOrderingRun(supabase: OrderingClient, mode: OrderingSourceMode = "source"): Promise<OrderingRun | null> {
+  if (mode === "legacy") return fetchLatestCompletedRun(supabase, undefined, true);
   const sourceRun = await fetchLatestCompletedRun(supabase, "quickbooks_sync");
   if (sourceRun) return sourceRun;
   return fetchLatestCompletedRun(supabase);
@@ -112,7 +119,7 @@ export function isSourceBackedRun(run: Pick<OrderingRun, "run_type" | "diagnosti
   return run?.run_type === "quickbooks_sync" && run.diagnostics?.ordering_source === ORDERING_SOURCE;
 }
 
-async function fetchLatestCompletedRun(supabase: OrderingClient, runType?: OrderingRun["run_type"]) {
+async function fetchLatestCompletedRun(supabase: OrderingClient, runType?: OrderingRun["run_type"], excludeSource = false) {
   let query = supabase
     .from("report_runs")
     .select("id,run_type,report_date,completed_at,diagnostics,configuration_version_id,configuration_snapshot,source_file_ids")
@@ -120,6 +127,7 @@ async function fetchLatestCompletedRun(supabase: OrderingClient, runType?: Order
     .order("completed_at", { ascending: false })
     .limit(1);
   if (runType) query = query.eq("run_type", runType);
+  if (excludeSource) query = query.neq("run_type", "quickbooks_sync");
   const { data, error } = await query.maybeSingle<OrderingRun>();
   if (error) throw new Error(error.message);
   return data || null;

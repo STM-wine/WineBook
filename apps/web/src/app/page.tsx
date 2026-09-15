@@ -23,7 +23,7 @@ import type {
 } from "@/lib/types";
 import { applyVinosmithAvailability, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { fetchActiveOrderingRun } from "@/lib/source-backed-ordering-runs";
+import { fetchActiveOrderingRun, orderingSourceMode } from "@/lib/source-backed-ordering-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -143,7 +143,8 @@ async function loadHomePageData(): Promise<HomePageData> {
   })();
 
   const vinosmithLastSyncPromise = fetchLatestVinosmithPullAt(serviceRoleSupabase);
-  const activeOrderingRunPromise = fetchActiveOrderingRun(serviceRoleSupabase);
+  const configuredOrderingSourceMode = orderingSourceMode(process.env.ORDERING_SOURCE_MODE);
+  const activeOrderingRunPromise = fetchActiveOrderingRun(serviceRoleSupabase, configuredOrderingSourceMode);
   const vinosmithAvailabilityPromise = fetchLiveVinosmithAvailability()
     .then((data) => ({ data, error: null as string | null }))
     .catch((error) => ({ data: null, error: error instanceof Error ? error.message : "Vinosmith Get Available failed." }));
@@ -284,6 +285,9 @@ async function loadHomePageData(): Promise<HomePageData> {
     quickBooksOnOrderItems
   ).sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0));
   const orderingWarnings = [
+    configuredOrderingSourceMode === "legacy"
+      ? "Order Summary is intentionally pinned to the legacy RB6/RADs rollback path by ORDERING_SOURCE_MODE."
+      : null,
     latestRun.run_type !== "quickbooks_sync"
       ? "Ordering data is using the legacy RB6/RADs fallback because no completed source-backed run is available."
       : null,
