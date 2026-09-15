@@ -316,6 +316,8 @@ export function recommendationMatchesCatalogWine(
   row: Recommendation,
   wine: SupplierCatalogWine
 ): boolean {
+  if (row.supplier_catalog_wine_id && row.supplier_catalog_wine_id === wine.id) return true;
+
   const rowSupplier = normalizeIdentityText(row.supplier_name);
   const wineSupplier = normalizeIdentityText(wine.supplier_name);
   if (!rowSupplier || !wineSupplier || rowSupplier !== wineSupplier) return false;

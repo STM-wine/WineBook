@@ -57,6 +57,22 @@ export type SystemTag = (typeof SYSTEM_TAGS)[number];
 export type SolveForMode = (typeof SOLVE_FOR_MODES)[number];
 export type PriceApprovalDecision = (typeof PRICE_APPROVAL_DECISIONS)[number];
 
+export function hasOfficialQuickBooksProduct(
+  wine: Pick<
+    SupplierCatalogWine,
+    "product_lifecycle_status" | "quickbooks_item_id" | "quickbooks_item_number"
+  >
+) {
+  const isRealReference = (value: string | null | undefined) => {
+    const normalized = (value || "").trim().toUpperCase();
+    return Boolean(normalized && !["NEW", "NEW ITEM", "TBD", "PENDING"].includes(normalized));
+  };
+
+  return wine.product_lifecycle_status === "active_product" ||
+    isRealReference(wine.quickbooks_item_id) ||
+    isRealReference(wine.quickbooks_item_number);
+}
+
 export type SupplierCatalogPriceLevelInput = {
   id?: string;
   name: string;

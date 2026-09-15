@@ -16,6 +16,7 @@ import {
   buildSupplierCatalogWine,
   decisionToRequestStatus,
   detectPriceChange,
+  hasOfficialQuickBooksProduct,
   MINIMUM_GP_MARGIN,
   type ApprovalDecision,
   type AvailabilityStatus,
@@ -845,12 +846,7 @@ export async function deletePendingSupplierCatalogWine(input: { id: string }) {
     throw new Error(wineError?.message || "Supplier wine not found.");
   }
 
-  const hasOfficialProduct =
-    wine.product_lifecycle_status === "active_product" ||
-    wine.quickbooks_sync_status === "created" ||
-    wine.quickbooks_sync_status === "linked" ||
-    Boolean(wine.quickbooks_item_id?.trim()) ||
-    Boolean(wine.quickbooks_item_number?.trim());
+  const hasOfficialProduct = hasOfficialQuickBooksProduct(wine);
   const isDraftOnlyProduct =
     !hasOfficialProduct &&
     (wine.product_lifecycle_status === "pending_product_creation" ||

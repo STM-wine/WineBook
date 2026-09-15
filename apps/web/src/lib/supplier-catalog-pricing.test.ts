@@ -5,12 +5,26 @@ import {
   calculateGpMargin,
   calculatePricing,
   findDuplicateActivePriceLevels,
+  hasOfficialQuickBooksProduct,
   normalizeFobCosts,
   supplierCatalogWineToInput
 } from "./supplier-catalog";
 import type { SupplierCatalogWine } from "./types";
 
 describe("production Supplier Hub pricing", () => {
+  it("does not treat legacy NEW placeholders as official QuickBooks products", () => {
+    expect(hasOfficialQuickBooksProduct({
+      product_lifecycle_status: "pending_product_creation",
+      quickbooks_item_id: "NEW",
+      quickbooks_item_number: "NEW"
+    })).toBe(false);
+    expect(hasOfficialQuickBooksProduct({
+      product_lifecycle_status: "supplier_available",
+      quickbooks_item_id: "80000001-123456",
+      quickbooks_item_number: "ABC000001"
+    })).toBe(true);
+  });
+
   it("normalizes bottle and case FOB exactly once", () => {
     expect(normalizeFobCosts({ packSize: 12, fobCase: 240, pricingBasis: "case" })).toMatchObject({
       fobBottle: 20,

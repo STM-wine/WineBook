@@ -141,6 +141,17 @@ describe("supplier catalog recommendation merge", () => {
     expect(mergeSupplierCatalogRows([], [inactive], "run-1")).toHaveLength(1);
   });
 
+  it("does not duplicate the same catalog row when its supplier is blank", () => {
+    const wine = catalogWine({ supplier_name: "" });
+    const existing = recommendation({
+      supplier_name: null,
+      supplier_catalog_wine_id: wine.id,
+      planning_sku: wine.planning_sku
+    });
+
+    expect(mergeSupplierCatalogRows([existing], [wine], "run-1")).toEqual([existing]);
+  });
+
   it("replaces an edited catalog wine in the visible workbench without losing its order state", () => {
     const original = recommendation({
       id: "workbench-1",
