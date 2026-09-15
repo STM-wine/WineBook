@@ -27,7 +27,6 @@ const HOME_VIEW: ActiveView = "company-dashboard";
 const ORDERING_VIEWS: ActiveView[] = [
   "order-review",
   "product-workspace",
-  "database-order-preview",
   "po-drafts",
   "supplier-hub",
   "freight"

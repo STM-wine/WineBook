@@ -50,7 +50,6 @@ import {
 import { AppTopbar } from "./app-topbar";
 import { ActiveView, DEFAULT_VIEW, isActiveView } from "./dashboard-types";
 import { CompanyDashboardView } from "./company-dashboard-view";
-import { DatabaseOrderSummaryPreviewView } from "./database-order-summary-preview-view";
 import { FreightView } from "./freight-view";
 import { OrderReviewView } from "./order-review-view";
 import { PoDraftsView } from "./po-drafts-view";
@@ -791,8 +790,6 @@ export function OrderDashboard({
           isPending={isPending}
         />
       ) : null}
-
-      {activeView === "database-order-preview" ? <DatabaseOrderSummaryPreviewView /> : null}
 
       {activeView === "supplier-hub" ? (
         <SupplierHubView
