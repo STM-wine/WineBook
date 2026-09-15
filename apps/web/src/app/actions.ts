@@ -33,6 +33,7 @@ import {
   type QuickBooksItemIdentityRow
 } from "@/lib/quickbooks-item-fields";
 import type { QuickBooksVendorClassification, SupplierCatalogWine, WineRequest } from "@/lib/types";
+import { createSourceBackedOrderingRun } from "@/lib/source-backed-ordering-runs";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 const VALID_STATUSES = new Set(["rejected", "approved", "edited", "deferred"]);
@@ -86,15 +87,14 @@ type RefreshVinosmithReportsResult =
       error: string;
     };
 
+type RefreshOrderingDataResult =
+  | { ok: true; reportDate: string; rowCount: number; reused: boolean; diagnostics: Record<string, unknown> }
+  | { ok: false; error: string };
+
 function reportDateForTimezone(value = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: REPORT_TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(value);
-  const partMap = new Map(parts.map((part) => [part.type, part.value]));
-  return `${partMap.get("year")}-${partMap.get("month")}-${partMap.get("day")}`;
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: REPORT_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
 }
 
 async function requireWriteAccess() {
@@ -120,68 +120,51 @@ async function requireWriteAccess() {
   return { supabase, user };
 }
 
-export async function refreshVinosmithReports(): Promise<RefreshVinosmithReportsResult> {
+export async function refreshOrderingData(): Promise<RefreshOrderingDataResult> {
   try {
     const { user } = await requireWriteAccess();
+    const result = await createSourceBackedOrderingRun(createServiceRoleClient(), user.id);
+    revalidateDashboardData();
+
+    return {
+      ok: true,
+      reportDate: result.run.report_date || "current",
+      rowCount: result.rowCount,
+      reused: result.reused,
+      diagnostics: result.diagnostics
+    };
+  } catch (error) {
+    console.error("Source-backed ordering refresh failed.", error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not generate ordering data."
+    };
+  }
+}
+
+export async function refreshOrderingDataFromForm() {
+  const result = await refreshOrderingData();
+  if (!result.ok) throw new Error(result.error);
+}
+
+export async function refreshVinosmithReports(): Promise<RefreshVinosmithReportsResult> {
+  try {
+    await requireWriteAccess();
     const token = process.env.GITHUB_WORKFLOW_DISPATCH_TOKEN;
     const repo = process.env.GITHUB_WORKFLOW_REPO || DEFAULT_GITHUB_WORKFLOW_REPO;
     const ref = process.env.GITHUB_WORKFLOW_REF || DEFAULT_GITHUB_WORKFLOW_REF;
     const workflowId = process.env.VINOSMITH_INGEST_WORKFLOW_ID || DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID;
     const reportDate = reportDateForTimezone();
-
-    if (!token) {
-      return {
-        ok: false,
-        error: "Report refresh is not configured yet. Add GITHUB_WORKFLOW_DISPATCH_TOKEN in .env.local for local dev and in Render for production, then restart the app."
-      };
-    }
-
+    if (!token) return { ok: false, error: "Legacy report refresh is not configured." };
     const response = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflowId}/dispatches`, {
       method: "POST",
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "X-GitHub-Api-Version": "2022-11-28"
-      },
-      body: JSON.stringify({
-        ref,
-        inputs: {
-          report_date: reportDate,
-          force: "true"
-        }
-      })
+      headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28" },
+      body: JSON.stringify({ ref, inputs: { report_date: reportDate, force: "true" } })
     });
-
-    if (!response.ok) {
-      const body = await response.text();
-      console.error("GitHub workflow dispatch failed.", {
-        status: response.status,
-        statusText: response.statusText,
-        body
-      });
-      return {
-        ok: false,
-        error:
-          response.status === 401 || response.status === 403
-            ? "GitHub rejected the refresh request. Check that GITHUB_WORKFLOW_DISPATCH_TOKEN has Actions write access."
-            : `GitHub could not queue the refresh request (${response.status}). Check the workflow configuration.`
-      };
-    }
-
-    console.info(`Vinosmith refresh requested by ${user.email || user.id} for ${reportDate}.`);
-
-    return {
-      ok: true,
-      reportDate,
-      workflowUrl: `https://github.com/${repo}/actions/workflows/${workflowId}`
-    };
+    if (!response.ok) return { ok: false, error: `GitHub could not queue the legacy report refresh (${response.status}).` };
+    return { ok: true, reportDate, workflowUrl: `https://github.com/${repo}/actions/workflows/${workflowId}` };
   } catch (error) {
-    console.error("Vinosmith refresh request failed.", error);
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Could not queue Vinosmith report refresh."
-    };
+    return { ok: false, error: error instanceof Error ? error.message : "Could not queue legacy report refresh." };
   }
 }
 

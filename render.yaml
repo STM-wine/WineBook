@@ -28,3 +28,5 @@ services:
         value: daily-vinosmith-ingest.yml
       - key: VINOSMITH_API_TOKEN
         sync: false
+      - key: ORDERING_REFRESH_SECRET
+        sync: false

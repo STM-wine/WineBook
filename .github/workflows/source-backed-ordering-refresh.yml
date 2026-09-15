@@ -1,0 +1,29 @@
+name: Source-backed Ordering Refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Build one early-morning ordering snapshot. The builder is content-
+    # idempotent and carries open buyer work when source facts change.
+    - cron: "30 13 * * *"
+
+concurrency:
+  group: source-backed-ordering-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-ordering-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Generate QuickBooks + Vinosmith Available + Stem ordering run
+        env:
+          ORDERING_REFRESH_URL: https://winebook.onrender.com
+          ORDERING_REFRESH_SECRET: ${{ secrets.ORDERING_REFRESH_SECRET }}
+        run: |
+          test -n "$ORDERING_REFRESH_URL"
+          test -n "$ORDERING_REFRESH_SECRET"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer $ORDERING_REFRESH_SECRET" \
+            "$ORDERING_REFRESH_URL/api/ordering-runs/refresh"
