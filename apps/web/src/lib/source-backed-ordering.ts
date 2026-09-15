@@ -1,7 +1,13 @@
 import type { OrderingLogicSettings } from "./ordering-logic";
+import {
+  recommendationIsAutomatic,
+  replenishmentPolicy,
+  replenishmentPolicyFamilyKey,
+  type ReplenishmentPolicy
+} from "./replenishment-policy";
 
 export const ORDERING_SOURCE = "quickbooks_vinosmith_stem";
-export const ORDERING_BUILDER_VERSION = 1;
+export const ORDERING_BUILDER_VERSION = 2;
 
 export type SourceQuickBooksItem = {
   list_id: string;
@@ -24,6 +30,7 @@ export type SourceVinosmithWine = {
   wine_id: string;
   code: string | null;
   name: string | null;
+  vintage?: string | number | null;
   importer_name: string | null;
 };
 
@@ -44,6 +51,11 @@ export type SourceOrderingMarker = {
   quickbooks_item_list_id: string | null;
   is_btg: boolean | null;
   is_core: boolean | null;
+  replenishment_policy?: string | null;
+  policy_family_key?: string | null;
+  policy_family_name?: string | null;
+  family_default_policy?: string | null;
+  recommendations_suppressed?: boolean | null;
 };
 
 export type SourceVendorMapping = {
@@ -76,6 +88,9 @@ export type SourceBackedRecommendationRow = {
   brand_manager: string | null;
   is_btg: boolean;
   is_core: boolean;
+  replenishment_policy: ReplenishmentPolicy;
+  policy_family_key: string | null;
+  recommendations_suppressed: boolean;
   last_30_day_sales: number;
   last_60_day_sales: number;
   last_90_day_sales: number;
@@ -205,6 +220,11 @@ export function buildSourceBackedOrderingRows(input: {
   const vendorsById = new Map(input.quickBooksVendors.map((vendor) => [vendor.list_id, vendor]));
   const mappingsByVendorId = new Map(input.vendorMappings.map((mapping) => [mapping.quickbooks_vendor_list_id, mapping]));
   const markersByCode = new Map(input.markers.map((marker) => [normalizeOrderingItemCode(marker.item_code), marker]));
+  const familyDefaults = new Map(
+    input.markers
+      .filter((marker) => marker.policy_family_key)
+      .map((marker) => [marker.policy_family_key!, replenishmentPolicy(marker.family_default_policy || marker.replenishment_policy)])
+  );
 
   const activeItems = input.quickBooksItems.filter((item) => {
     const code = normalizeOrderingItemCode(quickBooksItemCode(item));
@@ -232,7 +252,14 @@ export function buildSourceBackedOrderingRows(input: {
         : vinosmithSupplier
           ? "vinosmith_importer_fallback"
           : "missing";
-    const marker = markersByCode.get(productCode) || null;
+    const exactMarker = markersByCode.get(productCode) || null;
+    const policyFamilyKey = wine?.name ? replenishmentPolicyFamilyKey(wine.name, wine.vintage) : "";
+    const legacyPolicy = exactMarker?.is_core === true || exactMarker?.is_btg === true ? "Core" : null;
+    const policy = replenishmentPolicy(
+      exactMarker?.replenishment_policy || legacyPolicy || (policyFamilyKey ? familyDefaults.get(policyFamilyKey) : null)
+    );
+    const recommendationsSuppressed = policy === "Limited" && exactMarker?.recommendations_suppressed === true;
+    const automaticRecommendation = recommendationIsAutomatic(policy, recommendationsSuppressed);
     const sales = input.salesByCode.get(productCode) || emptySalesWindows();
     const pack = quickBooksPackSize(item, input.settings.default_pack_size);
     const purchaseCost = nullableNumber(item.purchase_cost);
@@ -241,14 +268,15 @@ export function buildSourceBackedOrderingRows(input: {
     const fobSource = purchaseCost !== null ? "quickbooks_purchase_cost" : averageCost !== null ? "quickbooks_average_cost" : "missing";
     const onOrder = Math.max(0, numberValue(item.quantity_on_order));
     const weeklyVelocity = sales.last30 / 4.345;
-    const isBtg = marker?.is_btg === true;
-    const isCore = marker?.is_core === true;
+    const isBtg = false;
+    const isCore = policy === "Core";
     const calculation = calculateSourceRecommendation({
       weeklyVelocity,
       trueAvailable,
       onOrder,
       isBtg,
       isCore,
+      automaticRecommendation,
       packSize: pack.packSize,
       settings: input.settings,
       referenceDate: input.referenceDate
@@ -272,6 +300,9 @@ export function buildSourceBackedOrderingRows(input: {
       brand_manager: supplier?.tdm?.trim() || null,
       is_btg: isBtg,
       is_core: isCore,
+      replenishment_policy: policy,
+      policy_family_key: policyFamilyKey || exactMarker?.policy_family_key || null,
+      recommendations_suppressed: recommendationsSuppressed,
       last_30_day_sales: sales.last30,
       last_60_day_sales: sales.last60,
       last_90_day_sales: sales.last90,
@@ -318,6 +349,10 @@ export function buildSourceBackedOrderingRows(input: {
         quickbooks_preferred_vendor_name: preferredVendorName,
         pack_size_source: pack.source,
         fob_source: fobSource,
+        replenishment_policy: policy,
+        policy_source: exactMarker ? "item" : policyFamilyKey && familyDefaults.has(policyFamilyKey) ? "family_inherited" : "default_limited",
+        automatic_recommendation: automaticRecommendation,
+        recommendations_suppressed: recommendationsSuppressed,
         blockers
       }
     } satisfies SourceBackedRecommendationRow;
@@ -359,6 +394,7 @@ export function calculateSourceRecommendation(input: {
   onOrder: number;
   isBtg: boolean;
   isCore: boolean;
+  automaticRecommendation?: boolean;
   packSize: number;
   settings: OrderingLogicSettings;
   referenceDate: string;
@@ -369,7 +405,7 @@ export function calculateSourceRecommendation(input: {
   const multiplier = input.settings.monthly_mode_enabled ? monthSettings?.multiplier || 1 : 1;
   const targetQty = Math.max(0, input.weeklyVelocity) * (targetDays / 7);
   const baseRaw = Math.max(0, targetQty - (input.trueAvailable + Math.max(0, input.onOrder)));
-  const raw = baseRaw * multiplier;
+  const raw = input.automaticRecommendation === false ? 0 : baseRaw * multiplier;
   const packSize = Math.max(1, Math.round(input.packSize));
   const preserveOnePack = (input.isBtg && input.settings.btg_round_sub_case_to_one_pack) || (input.isCore && input.settings.core_round_sub_case_to_one_pack);
   const rounded = raw <= 0 || (!preserveOnePack && raw < input.settings.standard_minimum_packs * packSize)

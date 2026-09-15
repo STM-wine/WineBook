@@ -21,6 +21,7 @@ import {
   formatDecimal,
   formatInteger,
   freeGoodsSummary,
+  rowReplenishmentPolicy,
   rowApprovedEstimate,
   rowRecommendedQty
 } from "@/lib/order-data";
@@ -57,6 +58,16 @@ const currencyFormatter = (params: ValueFormatterParams<WorkbenchRow, number>) =
 const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
   <span className="wine-cell-value">
     <span>{params.valueFormatted ?? params.value ?? ""}</span>
+    {params.data && !params.data.is_new_item ? (
+      <a
+        className="replenishment-policy-link"
+        href={`/?view=product-workspace&item=${encodeURIComponent(params.data.product_code || params.data.planning_sku || "")}`}
+        onClick={(event) => event.stopPropagation()}
+        title="Open this wine in Items to edit its replenishment policy"
+      >
+        {rowReplenishmentPolicy(params.data)}
+      </a>
+    ) : null}
     {params.data?.is_new_item ? <span className="new-item-badge">New Item</span> : null}
     {params.data && activeFreeGoodsForRow(params.data).length > 0 ? <span className="free-goods-badge">Free Goods</span> : null}
     {params.data && isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}

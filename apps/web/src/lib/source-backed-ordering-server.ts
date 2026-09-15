@@ -49,7 +49,7 @@ export async function fetchSourceBackedOrderingData(
   const [configuration, quickBooksItems, vinosmithWines, suppliers, quickBooksVendors, vendorMappings, markers, availability] = await Promise.all([
     fetchPublishedOrderingConfiguration(supabase),
     fetchAll<SourceQuickBooksItem>(supabase, "quickbooks_items", "list_id,name,full_name,sales_desc,purchase_desc,is_active,item_type,quantity_on_hand,quantity_on_order,purchase_cost,average_cost,custom_fields,raw_data,last_seen_at", "list_id"),
-    fetchAll<SourceVinosmithWine>(supabase, "vinosmith_wines", "wine_id,code,name,importer_name", "wine_id"),
+    fetchAll<SourceVinosmithWine>(supabase, "vinosmith_wines", "wine_id,code,name,vintage,importer_name", "wine_id"),
     fetchAll<SourceSupplier>(supabase, "suppliers", "id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,active", "name"),
     fetchAll<SourceQuickBooksVendor>(supabase, "quickbooks_vendors", "list_id,name,full_name", "list_id"),
     fetchAll<SourceVendorMapping>(supabase, "quickbooks_vendor_mappings", "quickbooks_vendor_list_id,supplier_id,vendor_classification", "quickbooks_vendor_list_id"),
@@ -113,7 +113,12 @@ export async function fetchPublishedOrderingConfiguration(supabase: SourceClient
 
 async function fetchOrderingMarkers(supabase: SourceClient) {
   try {
-    return await fetchAll<SourceOrderingMarker>(supabase, "ordering_item_markers", "item_code,quickbooks_item_list_id,is_btg,is_core", "item_code");
+    return await fetchAll<SourceOrderingMarker>(
+      supabase,
+      "ordering_item_markers",
+      "item_code,quickbooks_item_list_id,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed",
+      "item_code"
+    );
   } catch (error) {
     if (error instanceof Error && error.message.toLowerCase().includes("ordering_item_markers")) return [];
     throw error;

@@ -8,7 +8,7 @@ import type {
 } from "@/lib/types";
 
 export const AVAILABILITY_STATUSES = ["available", "limited", "sold_out", "unknown"] as const;
-export const SYSTEM_TAGS = ["Core", "BTG", "Limited", "Special Order", "Allocated", "GRW Broker"] as const;
+export const SYSTEM_TAGS = ["Core", "Limited Core", "Limited", "Special Order", "Allocated", "GRW Broker"] as const;
 export const CONVERSION_STATUSES = [
   "exact_existing_product",
   "new_vintage",

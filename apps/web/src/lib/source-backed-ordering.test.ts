@@ -37,7 +37,10 @@ function build(overrides: Partial<Parameters<typeof buildSourceBackedOrderingRow
     ],
     quickBooksVendors: [{ list_id: "vendor-1", name: "Mapped Vendor", full_name: "Mapped Vendor" }],
     vendorMappings: [{ quickbooks_vendor_list_id: "vendor-1", supplier_id: "supplier-1", vendor_classification: "inventory_wine" }],
-    markers: [{ item_code: "ab12345", quickbooks_item_list_id: "qb-1", is_btg: true, is_core: false }],
+    markers: [{
+      item_code: "ab12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: true,
+      replenishment_policy: "Core", policy_family_key: "vinosmith name", family_default_policy: "Core"
+    }],
     salesByCode: new Map([["AB12345", sales()]]), settings, referenceDate: "2026-09-14", ...overrides
   });
 }
@@ -48,7 +51,8 @@ describe("source-backed ordering rows", () => {
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]).toMatchObject({
       product_code: "AB12345", product_name: "Domaine Test Blanc 2025", supplier_name: "Mapped Supplier",
-      true_available: 5, on_order: 3, fob: 10, pack_size: 6, is_btg: true, is_core: false,
+      true_available: 5, on_order: 3, fob: 10, pack_size: 6, is_btg: false, is_core: true,
+      replenishment_policy: "Core", recommendations_suppressed: false,
       last_30_day_sales: 20, next_60_day_forecast: 16, brand_manager: "Alex"
     });
     expect(result.rows[0].diagnostics).toMatchObject({ quickbooks_item_list_id: "qb-1", vinosmith_wine_id: "wine-1", supplier_source: "quickbooks_preferred_vendor" });
@@ -106,8 +110,52 @@ describe("source-backed ordering rows", () => {
     expect(result.rows[0].diagnostics.supplier_source).toBe("vinosmith_importer_fallback");
   });
 
-  it("defaults missing Core and BTG markers to false", () => {
-    expect(build({ markers: [] }).rows[0]).toMatchObject({ is_core: false, is_btg: false });
+  it("defaults missing policies to Limited and removes the redundant BTG behavior", () => {
+    expect(build({ markers: [] }).rows[0]).toMatchObject({
+      is_core: false, is_btg: false, replenishment_policy: "Limited", recommendations_suppressed: false
+    });
+  });
+
+  it("inherits the family default for a newly introduced vintage", () => {
+    const result = build({
+      markers: [{
+        item_code: "OLD12345", quickbooks_item_list_id: null, is_btg: false, is_core: true,
+        replenishment_policy: "Core", policy_family_key: "vinosmith name", family_default_policy: "Core"
+      }]
+    });
+    expect(result.rows[0]).toMatchObject({ replenishment_policy: "Core", is_core: true });
+    expect(result.rows[0].diagnostics).toMatchObject({ policy_source: "family_inherited" });
+  });
+
+  it("keeps legacy Core and BTG markers compatible during rollback", () => {
+    for (const marker of [
+      { item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: true },
+      { item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: true, is_core: false }
+    ]) {
+      const result = build({ markers: [marker] });
+      expect(result.rows[0]).toMatchObject({ replenishment_policy: "Core", is_core: true, is_btg: false });
+    }
+  });
+
+  it("never automatically recommends Allocated or Special Order wines", () => {
+    for (const policy of ["Allocated", "Special Order"] as const) {
+      const result = build({
+        markers: [{ item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: false, replenishment_policy: policy }],
+        salesByCode: new Map([["AB12345", sales({ last30: 100 })]])
+      });
+      expect(result.rows[0]).toMatchObject({ replenishment_policy: policy, recommended_qty_raw: 0, recommended_qty_rounded: 0 });
+    }
+  });
+
+  it("allows Limited recommendations to be paused without disabling manual ordering", () => {
+    const result = build({
+      markers: [{
+        item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: false,
+        replenishment_policy: "Limited", recommendations_suppressed: true
+      }],
+      salesByCode: new Map([["AB12345", sales({ last30: 100 })]])
+    });
+    expect(result.rows[0]).toMatchObject({ replenishment_policy: "Limited", recommendations_suppressed: true, recommended_qty_rounded: 0 });
   });
 });
 

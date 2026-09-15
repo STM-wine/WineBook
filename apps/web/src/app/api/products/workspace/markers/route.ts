@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
+import { replenishmentPolicy } from "@/lib/replenishment-policy";
 
 type PermissionRow = {
   permission: string;
@@ -10,6 +11,10 @@ type MarkerRequestBody = {
   quickbooksItemListId?: unknown;
   isBtg?: unknown;
   isCore?: unknown;
+  replenishmentPolicy?: unknown;
+  recommendationsSuppressed?: unknown;
+  suppressionReason?: unknown;
+  suppressedUntil?: unknown;
   note?: unknown;
 };
 
@@ -55,8 +60,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Item code is required." }, { status: 400 });
   }
 
-  const isBtg = Boolean(body?.isBtg);
-  const isCore = Boolean(body?.isCore);
+  const policy = replenishmentPolicy(body?.replenishmentPolicy);
+  const recommendationsSuppressed = policy === "Limited" && body?.recommendationsSuppressed === true;
+  const suppressionReason = recommendationsSuppressed ? stringOrNull(body?.suppressionReason) : null;
+  const suppressedUntil = recommendationsSuppressed ? dateOrNull(body?.suppressedUntil) : null;
   const quickbooksItemListId = stringOrNull(body?.quickbooksItemListId);
   const note = stringOrNull(body?.note) || "Manual Product Workspace marker update";
 
@@ -68,17 +75,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  const { error: upsertError } = await supabase
+  const { data: currentMarker, error: currentMarkerError } = await supabase
     .from("ordering_item_markers")
-    .upsert({
-      item_code: itemCode,
-      quickbooks_item_list_id: quickbooksItemListId,
-      is_btg: isBtg,
-      is_core: isCore,
-      marker_note: note,
-      note_source: "manual",
-      updated_by: user.id
-    }, { onConflict: "item_code" });
+    .select("policy_family_key")
+    .eq("item_code", itemCode)
+    .maybeSingle<{ policy_family_key: string | null }>();
+  if (currentMarkerError) {
+    return NextResponse.json({ error: currentMarkerError.message }, { status: 500 });
+  }
+
+  const update = {
+    is_btg: false,
+    is_core: policy === "Core",
+    replenishment_policy: policy,
+    family_default_policy: policy,
+    recommendations_suppressed: recommendationsSuppressed,
+    suppression_reason: suppressionReason,
+    suppressed_until: suppressedUntil,
+    marker_note: note,
+    note_source: "manual",
+    updated_by: user.id
+  };
+  const familyKey = currentMarker?.policy_family_key || null;
+  const write = familyKey
+    ? supabase.from("ordering_item_markers").update(update).eq("policy_family_key", familyKey)
+    : supabase.from("ordering_item_markers").upsert({
+        item_code: itemCode,
+        quickbooks_item_list_id: quickbooksItemListId,
+        ...update
+      }, { onConflict: "item_code" });
+  const { error: upsertError } = await write;
 
   if (upsertError) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
@@ -86,12 +112,19 @@ export async function POST(request: Request) {
 
   const { data: marker, error: markerError } = await supabase
     .from("ordering_item_markers")
-    .select("item_code,is_btg,is_core,marker_note,note_source,updated_at,updated_by")
+    .select("item_code,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,suppressed_until,marker_note,note_source,updated_at,updated_by")
     .eq("item_code", itemCode)
     .maybeSingle<{
       item_code: string;
       is_btg: boolean | null;
       is_core: boolean | null;
+      replenishment_policy: string | null;
+      policy_family_key: string | null;
+      policy_family_name: string | null;
+      family_default_policy: string | null;
+      recommendations_suppressed: boolean | null;
+      suppression_reason: string | null;
+      suppressed_until: string | null;
       marker_note: string | null;
       note_source: string | null;
       updated_at: string | null;
@@ -107,6 +140,13 @@ export async function POST(request: Request) {
     orderingMarker: {
       isBtg: marker?.is_btg === true,
       isCore: marker?.is_core === true,
+      replenishmentPolicy: replenishmentPolicy(marker?.replenishment_policy),
+      policyFamilyKey: marker?.policy_family_key || null,
+      policyFamilyName: marker?.policy_family_name || null,
+      familyDefaultPolicy: replenishmentPolicy(marker?.family_default_policy || marker?.replenishment_policy),
+      recommendationsSuppressed: marker?.recommendations_suppressed === true,
+      suppressionReason: marker?.suppression_reason || null,
+      suppressedUntil: marker?.suppressed_until || null,
       markerNote: marker?.marker_note || null,
       noteSource: marker?.note_source || null,
       updatedAt: marker?.updated_at || null,
@@ -126,4 +166,9 @@ function normalizeCode(value: unknown) {
 
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function dateOrNull(value: unknown) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return null;
+  return value.trim();
 }
