@@ -52,6 +52,26 @@ export function producerFromDescription(value: string | null | undefined) {
   return words[0];
 }
 
+export function hydratePoLineProducers(
+  drafts: PurchaseOrderDraftWithLines[],
+  catalogProducersById: Record<string, string | null>,
+  vinosmithProducersByCode: Record<string, string | null>,
+  quickBooksProducersByCode: Record<string, string | null> = {}
+): PurchaseOrderDraftWithLines[] {
+  return drafts.map((draft) => ({
+    ...draft,
+    lines: (draft.lines || []).map((line) => ({
+      ...line,
+      producer_name:
+        line.producer_name?.trim() ||
+        (line.supplier_catalog_wine_id ? catalogProducersById[line.supplier_catalog_wine_id]?.trim() : "") ||
+        vinosmithProducersByCode[(line.product_code || "").trim().toLowerCase()]?.trim() ||
+        quickBooksProducersByCode[(line.product_code || "").trim().toLowerCase()]?.trim() ||
+        null
+    }))
+  }));
+}
+
 export function poOrderPathLabel(path: OrderPath) {
   return path === "di" ? "DI" : "Stateside";
 }

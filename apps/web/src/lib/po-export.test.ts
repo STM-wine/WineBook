@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 import { poTemplateXlsxBuffer } from "./po-export";
+import { hydratePoLineProducers } from "./po-utils";
 import type { PurchaseOrderDraftWithLines } from "./types";
 
 function draft(): PurchaseOrderDraftWithLines {
@@ -40,6 +41,31 @@ function draft(): PurchaseOrderDraftWithLines {
 }
 
 describe("PO workbook export", () => {
+  it("uses complete Vinosmith producer names instead of guessing the first word", () => {
+    const vacheron = draft();
+    vacheron.lines[0].producer_name = null;
+    const durdilly = draft();
+    durdilly.id = "draft-2";
+    durdilly.lines[0] = { ...durdilly.lines[0], id: "line-2", product_code: "BI00002", producer_name: null };
+
+    const hydrated = hydratePoLineProducers([vacheron, durdilly], {}, {
+      bi00001: "Domaine Vacheron",
+      bi00002: "Paul Durdilly"
+    });
+
+    expect(hydrated[0].lines[0].producer_name).toBe("Domaine Vacheron");
+    expect(hydrated[1].lines[0].producer_name).toBe("Paul Durdilly");
+  });
+
+  it("uses the QuickBooks Producer custom field when Vinosmith has no matching wine", () => {
+    const rune = draft();
+    rune.lines[0] = { ...rune.lines[0], product_code: "RUN000059", producer_name: null };
+
+    const [hydrated] = hydratePoLineProducers([rune], {}, {}, { run000059: "Rune Wines" });
+
+    expect(hydrated.lines[0].producer_name).toBe("Rune Wines");
+  });
+
   it("writes Frontline and Best into template columns H and I", async () => {
     const buffer = await poTemplateXlsxBuffer([draft()], [], {
       "line-1": { frontline: 38, best: 36 }

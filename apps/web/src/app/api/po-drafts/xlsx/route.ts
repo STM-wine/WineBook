@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { poTemplateXlsxBuffer } from "@/lib/po-export";
 import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
-import { poDraftSupplierLabel, poLinePriceKey, poTimestamp, type PoExportPriceLookup } from "@/lib/po-utils";
+import { quickBooksProducer, type QuickBooksItemIdentityRow } from "@/lib/quickbooks-item-fields";
+import {
+  hydratePoLineProducers,
+  poDraftSupplierLabel,
+  poLinePriceKey,
+  poTimestamp,
+  type PoExportPriceLookup
+} from "@/lib/po-utils";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
 
@@ -9,38 +16,77 @@ async function hydrateLineProducers(
   supabase: Awaited<ReturnType<typeof createClient>>,
   drafts: PurchaseOrderDraftWithLines[]
 ) {
+  const linesMissingProducer = drafts
+    .flatMap((draft) => draft.lines || [])
+    .filter((line) => !line.producer_name?.trim());
   const catalogWineIds = Array.from(
     new Set(
-      drafts
-        .flatMap((draft) => draft.lines || [])
-        .filter((line) => !line.producer_name?.trim())
+      linesMissingProducer
         .map((line) => line.supplier_catalog_wine_id)
         .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
     )
   );
+  const productCodes = Array.from(
+    new Set(
+      linesMissingProducer
+        .map((line) => line.product_code?.trim())
+        .filter((code): code is string => typeof code === "string" && code.length > 0)
+    )
+  );
 
-  if (catalogWineIds.length === 0) {
+  if (catalogWineIds.length === 0 && productCodes.length === 0) {
     return drafts;
   }
 
-  const { data: catalogWines, error } = await supabase
-    .from("supplier_catalog_wines")
-    .select("id,producer")
-    .in("id", catalogWineIds)
-    .returns<Array<{ id: string; producer: string | null }>>();
+  const [
+    { data: catalogWines, error: catalogError },
+    { data: vinosmithWines, error: vinosmithError },
+    { data: quickBooksItems, error: quickBooksError }
+  ] = await Promise.all([
+    catalogWineIds.length > 0
+      ? supabase
+          .from("supplier_catalog_wines")
+          .select("id,producer")
+          .in("id", catalogWineIds)
+          .returns<Array<{ id: string; producer: string | null }>>()
+      : Promise.resolve({ data: [], error: null }),
+    productCodes.length > 0
+      ? supabase
+          .from("vinosmith_wines")
+          .select("code,producer_name")
+          .in("code", productCodes)
+          .returns<Array<{ code: string | null; producer_name: string | null }>>()
+      : Promise.resolve({ data: [], error: null }),
+    productCodes.length > 0
+      ? supabase
+          .from("quickbooks_items")
+          .select("list_id,name,full_name,custom_fields")
+          .in("name", productCodes)
+          .returns<QuickBooksItemIdentityRow[]>()
+      : Promise.resolve({ data: [], error: null })
+  ]);
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (catalogError) throw new Error(catalogError.message);
+  if (vinosmithError) throw new Error(vinosmithError.message);
+  if (quickBooksError) throw new Error(quickBooksError.message);
 
-  const producersById = new Map((catalogWines || []).map((wine) => [wine.id, wine.producer || null]));
-  return drafts.map((draft) => ({
-    ...draft,
-    lines: (draft.lines || []).map((line) => ({
-      ...line,
-      producer_name: line.producer_name || (line.supplier_catalog_wine_id ? producersById.get(line.supplier_catalog_wine_id) || null : null)
-    }))
-  }));
+  return hydratePoLineProducers(
+    drafts,
+    Object.fromEntries((catalogWines || []).map((wine) => [wine.id, wine.producer || null])),
+    Object.fromEntries(
+      (vinosmithWines || [])
+        .filter((wine) => wine.code)
+        .map((wine) => [wine.code!.trim().toLowerCase(), wine.producer_name || null])
+    ),
+    Object.fromEntries(
+      (quickBooksItems || []).flatMap((item) => {
+        const producer = quickBooksProducer(item) || null;
+        return [item.name, item.full_name]
+          .filter((code): code is string => Boolean(code?.trim()))
+          .map((code) => [code.trim().toLowerCase(), producer]);
+      })
+    )
+  );
 }
 
 function normalizedPriceLabel(value: string | null | undefined) {
