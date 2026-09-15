@@ -52,6 +52,7 @@ export function OrderReviewView({
   onRestoreInactiveWine,
   onSaveCatalogWine,
   onDeleteCatalogWine,
+  onAddWine,
   isPending
 }: {
   brandManager: string;
@@ -82,6 +83,7 @@ export function OrderReviewView({
   onRestoreInactiveWine: (listId: string) => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
   onDeleteCatalogWine: (input: { id: string }) => void;
+  onAddWine: (supplierName: string) => void;
   isPending: boolean;
 }) {
   const [editingWine, setEditingWine] = useState<SupplierCatalogWine | null>(null);
@@ -187,6 +189,7 @@ export function OrderReviewView({
             onRestoreInactiveWine={onRestoreInactiveWine}
             onEditNewItem={editNewItem}
             onDeleteNewItem={deleteNewItem}
+            onAddWine={onAddWine}
             isPending={isPending}
           />
         ))}
@@ -279,6 +282,7 @@ function SupplierSection({
   onRestoreInactiveWine,
   onEditNewItem,
   onDeleteNewItem,
+  onAddWine,
   isPending
 }: {
   group: SupplierGroup;
@@ -293,6 +297,7 @@ function SupplierSection({
   onRestoreInactiveWine: (listId: string) => void;
   onEditNewItem: (row: Recommendation) => void;
   onDeleteNewItem: (row: Recommendation) => void;
+  onAddWine: (supplierName: string) => void;
   isPending: boolean;
 }) {
   const [showHistory, setShowHistory] = useState(false);
@@ -326,6 +331,19 @@ function SupplierSection({
           {group.freeGoodProgramCount > 0 ? <span className="free-goods-chip">{formatInteger(group.freeGoodProgramCount)} free-goods</span> : null}
         </div>
         <div className="supplier-summary-actions">
+          {group.supplier !== "Unknown Supplier" ? (
+            <button
+              className="ghost-button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onAddWine(group.supplier);
+              }}
+              type="button"
+            >
+              Add Wine
+            </button>
+          ) : null}
           <button
             className="ghost-button clear-approvals-button"
             disabled={!hasApprovedOrders}

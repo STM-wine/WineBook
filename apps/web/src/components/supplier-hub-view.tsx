@@ -89,6 +89,7 @@ function isSearchableSupplierWine(wine: SupplierCatalogWine) {
 }
 
 export function SupplierHubView({
+  addWineSupplierName,
   suppliers,
   supplierCatalogWines,
   wineRequests,
@@ -101,6 +102,7 @@ export function SupplierHubView({
   onSaveSuppliers,
   onUpdateWineRequestApproval
 }: {
+  addWineSupplierName?: string | null;
   suppliers: SupplierLogistics[];
   supplierCatalogWines: SupplierCatalogWine[];
   wineRequests: WineRequest[];
@@ -113,12 +115,18 @@ export function SupplierHubView({
   onSaveSuppliers: (suppliers: SupplierLogistics[]) => void;
   onUpdateWineRequestApproval: (input: UpdateWineRequestApprovalInput) => void;
 }) {
-  const [activeArea, setActiveArea] = useState<HubArea>("search");
+  const [activeArea, setActiveArea] = useState<HubArea>(addWineSupplierName ? "add" : "search");
   const [pendingEditWineId, setPendingEditWineId] = useState<string | null>(null);
   const searchableCatalogWines = useMemo(() => supplierCatalogWines.filter(isSearchableSupplierWine), [supplierCatalogWines]);
   const pendingWineCount = supplierCatalogWines.filter(isDraftOnlyCatalogWine).length;
   const pendingRequestCount = wineRequests.filter((request) => request.request_status === "pending_review").length;
   const draftPriceChanges = priceChangeEvents.filter((event) => event.status === "draft").length;
+
+  useEffect(() => {
+    if (!addWineSupplierName) return;
+    setPendingEditWineId(null);
+    setActiveArea("add");
+  }, [addWineSupplierName]);
 
   return (
     <section className="panel supplier-hub-panel" id="supplier-hub">
@@ -164,6 +172,7 @@ export function SupplierHubView({
       {activeArea === "search" ? <SearchWinesPanel wines={searchableCatalogWines} /> : null}
       {activeArea === "add" ? (
         <AddWinePanel
+          initialSupplierName={addWineSupplierName}
           suppliers={suppliers}
           wines={searchableCatalogWines}
           isPending={isPending}
@@ -207,6 +216,7 @@ export function SupplierHubView({
 }
 
 function AddWinePanel({
+  initialSupplierName,
   suppliers,
   wines,
   isPending,
@@ -214,6 +224,7 @@ function AddWinePanel({
   onClearPendingEdit,
   onSaveCatalogWine
 }: {
+  initialSupplierName?: string | null;
   suppliers: SupplierLogistics[];
   wines: SupplierCatalogWine[];
   isPending: boolean;
@@ -347,6 +358,12 @@ function AddWinePanel({
       setLaidInPerBottle("0");
     }
   }
+
+  useEffect(() => {
+    if (!initialSupplierName || editWine) return;
+    startNewSku();
+    setSupplierValue(initialSupplierName);
+  }, [initialSupplierName]);
 
   function applyWineTemplate(
     wine: SupplierCatalogWine,

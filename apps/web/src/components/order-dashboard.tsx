@@ -125,6 +125,7 @@ export function OrderDashboard({
   const [suggestedOnly, setSuggestedOnly] = useState(false);
   const [expandAll, setExpandAll] = useState(false);
   const [supplierSort, setSupplierSort] = useState<SupplierGroupSortMode>("default");
+  const [supplierHubAddWineSupplier, setSupplierHubAddWineSupplier] = useState<string | null>(null);
   const [supplierTargetWeeks, setSupplierTargetWeeks] = useState<Record<string, string>>({});
   const [pendingMessage, setPendingMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -145,8 +146,10 @@ export function OrderDashboard({
 
   useEffect(() => {
     const syncViewFromUrl = () => {
-      const view = new URLSearchParams(window.location.search).get("view");
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get("view");
       setActiveView(isActiveView(view) ? view : DEFAULT_VIEW);
+      setSupplierHubAddWineSupplier(view === "supplier-hub" ? params.get("addWineSupplier") : null);
     };
 
     syncViewFromUrl();
@@ -201,12 +204,23 @@ export function OrderDashboard({
 
   function selectView(view: ActiveView) {
     setActiveView(view);
+    setSupplierHubAddWineSupplier(null);
     const url = new URL(window.location.href);
+    url.searchParams.delete("addWineSupplier");
     if (view === DEFAULT_VIEW) {
       url.searchParams.delete("view");
     } else {
       url.searchParams.set("view", view);
     }
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function openSupplierAddWine(supplierName: string) {
+    setActiveView("supplier-hub");
+    setSupplierHubAddWineSupplier(supplierName);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "supplier-hub");
+    url.searchParams.set("addWineSupplier", supplierName);
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
   }
 
@@ -744,6 +758,7 @@ export function OrderDashboard({
           onRestoreInactiveWine={restoreInactiveWine}
           onSaveCatalogWine={saveCatalogWine}
           onDeleteCatalogWine={deleteCatalogWine}
+          onAddWine={openSupplierAddWine}
           isPending={isPending}
         />
       ) : null}
@@ -752,6 +767,7 @@ export function OrderDashboard({
 
       {activeView === "supplier-hub" ? (
         <SupplierHubView
+          addWineSupplierName={supplierHubAddWineSupplier}
           suppliers={suppliers}
           supplierCatalogWines={supplierCatalogWines}
           wineRequests={wineRequests}
