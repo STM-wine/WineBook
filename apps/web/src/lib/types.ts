@@ -7,8 +7,10 @@ export type AppProfile = {
 
 export type ReportRun = {
   id: string;
+  run_type?: "manual_upload" | "scheduled_email" | "quickbooks_sync" | string;
   report_date: string | null;
   completed_at: string | null;
+  source_file_ids?: string[];
   diagnostics?: Record<string, unknown> | null;
   configuration_version_id?: string | null;
   configuration_snapshot?: Record<string, unknown> | null;
@@ -56,6 +58,7 @@ export type Recommendation = {
   is_new_item?: boolean | null;
   new_item_warning?: string | null;
   free_goods?: SupplierCatalogFreeGood[];
+  diagnostics?: Record<string, unknown> | null;
 };
 
 export type SupplierGroup = {

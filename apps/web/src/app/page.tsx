@@ -1,4 +1,5 @@
 import { OrderDashboard } from "@/components/order-dashboard";
+import { refreshOrderingDataFromForm } from "@/app/actions";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { fetchCompanyDashboardData, unavailableCompanyDashboardData, type CompanyDashboardData } from "@/lib/company-dashboard-data";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
@@ -22,6 +23,7 @@ import type {
 } from "@/lib/types";
 import { applyVinosmithAvailability, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { fetchActiveOrderingRun, orderingSourceMode } from "@/lib/source-backed-ordering-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,8 +43,11 @@ export default async function HomePage() {
       <main className="empty-state">
         <section>
           <p className="eyebrow">Stem Intelligence</p>
-          <h1>No completed reports yet</h1>
-          <p className="muted">The app is connected, but Supabase does not have a completed report run to display.</p>
+          <h1>No completed ordering data yet</h1>
+          <p className="muted">Generate a source-backed ordering run from QuickBooks, Vinosmith Available, and Stem data.</p>
+          <form action={refreshOrderingDataFromForm}>
+            <button className="button" type="submit">Generate Ordering Data</button>
+          </form>
         </section>
       </main>
     );
@@ -64,6 +69,7 @@ export default async function HomePage() {
       companyDashboard={data.companyDashboard}
       quickBooksLastSyncAt={data.quickBooksLastSyncAt}
       vinosmithLastSyncAt={data.vinosmithLastSyncAt}
+      orderingDataWarning={data.orderingDataWarning}
       canViewSettings={hasPermission(permissions, "view_settings")}
     />
   );
@@ -82,13 +88,14 @@ type HomePageData = {
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
+  orderingDataWarning: string | null;
 };
 
 async function loadHomePageData(): Promise<HomePageData> {
   const serviceRoleSupabase = createServiceRoleClient();
   const reportRunsPromise = serviceRoleSupabase
     .from("report_runs")
-    .select("id,report_date,completed_at,diagnostics")
+    .select("id,run_type,report_date,completed_at,diagnostics,configuration_version_id,configuration_snapshot,source_file_ids")
     .eq("status", "completed")
     .order("completed_at", { ascending: false })
     .limit(10)
@@ -136,7 +143,11 @@ async function loadHomePageData(): Promise<HomePageData> {
   })();
 
   const vinosmithLastSyncPromise = fetchLatestVinosmithPullAt(serviceRoleSupabase);
-  const vinosmithAvailabilityPromise = fetchLiveVinosmithAvailability();
+  const configuredOrderingSourceMode = orderingSourceMode(process.env.ORDERING_SOURCE_MODE);
+  const activeOrderingRunPromise = fetchActiveOrderingRun(serviceRoleSupabase, configuredOrderingSourceMode);
+  const vinosmithAvailabilityPromise = fetchLiveVinosmithAvailability()
+    .then((data) => ({ data, error: null as string | null }))
+    .catch((error) => ({ data: null, error: error instanceof Error ? error.message : "Vinosmith Get Available failed." }));
 
   const companyDashboardPromise = (() => {
     try {
@@ -155,7 +166,8 @@ async function loadHomePageData(): Promise<HomePageData> {
     { data: priceChangeEvents },
     companyDashboard,
     quickBooksLastSyncAt,
-    vinosmithLastSyncAt
+    vinosmithLastSyncAt,
+    activeOrderingRun
   ] = await Promise.all([
     reportRunsPromise,
     supplierCatalogPromise,
@@ -163,9 +175,10 @@ async function loadHomePageData(): Promise<HomePageData> {
     priceChangeEventsPromise,
     companyDashboardPromise,
     quickBooksLastSyncPromise,
-    vinosmithLastSyncPromise
+    vinosmithLastSyncPromise,
+    activeOrderingRunPromise
   ]);
-  const latestRun = reportRuns?.[0] || null;
+  const latestRun = activeOrderingRun || reportRuns?.[0] || null;
 
   if (!latestRun) {
     return {
@@ -180,7 +193,8 @@ async function loadHomePageData(): Promise<HomePageData> {
       quickBooksSupplierMatches: [],
       companyDashboard,
       quickBooksLastSyncAt,
-      vinosmithLastSyncAt
+      vinosmithLastSyncAt,
+      orderingDataWarning: null
     };
   }
 
@@ -250,7 +264,7 @@ async function loadHomePageData(): Promise<HomePageData> {
     { data: suppliers },
     quickBooksSupplierMatches,
     quickBooksOnOrderItems,
-    vinosmithAvailability
+    vinosmithAvailabilityResult
   ] = await Promise.all([
     reportRecommendationsPromise,
     poDraftRowsPromise,
@@ -262,14 +276,28 @@ async function loadHomePageData(): Promise<HomePageData> {
 
   const recommendations = applyQuickBooksOnOrderToRecommendations(
     mergeSupplierCatalogRows(
-      vinosmithAvailability
-        ? applyVinosmithAvailability(reportRecommendations || [], vinosmithAvailability.byProductCode)
+      vinosmithAvailabilityResult.data
+        ? applyVinosmithAvailability(reportRecommendations || [], vinosmithAvailabilityResult.data.byProductCode)
         : reportRecommendations || [],
       supplierCatalogWines || [],
       latestRun.id
     ),
     quickBooksOnOrderItems
   ).sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0));
+  const orderingWarnings = [
+    configuredOrderingSourceMode === "legacy"
+      ? "Order Summary is intentionally pinned to the legacy RB6/RADs rollback path by ORDERING_SOURCE_MODE."
+      : null,
+    latestRun.run_type !== "quickbooks_sync"
+      ? "Ordering data is using the legacy RB6/RADs fallback because no completed source-backed run is available."
+      : null,
+    vinosmithAvailabilityResult.error
+      ? `Vinosmith Get Available could not be refreshed. Ordering data is showing the saved availability snapshot from the active run. ${vinosmithAvailabilityResult.error}`
+      : null,
+    latestRun.run_type === "quickbooks_sync" && latestRun.diagnostics?.quickbooks_fresh === false
+      ? `QuickBooks source data was stale when this ordering run was generated (${Math.round(Number(latestRun.diagnostics.quickbooks_freshness_hours) || 0)} hours old). Refresh the QuickBooks mirror before relying on quantities, costs, or sales.`
+      : null
+  ].filter((warning): warning is string => Boolean(warning));
 
   return {
     reportRuns: reportRuns || [],
@@ -283,7 +311,8 @@ async function loadHomePageData(): Promise<HomePageData> {
     quickBooksSupplierMatches,
     companyDashboard,
     quickBooksLastSyncAt,
-    vinosmithLastSyncAt: vinosmithAvailability?.snapshotAt || vinosmithLastSyncAt
+    vinosmithLastSyncAt: vinosmithAvailabilityResult.data?.snapshotAt || vinosmithLastSyncAt,
+    orderingDataWarning: orderingWarnings.join(" ") || null
   };
 }
 

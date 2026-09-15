@@ -1,0 +1,162 @@
+import "server-only";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { DEFAULT_ORDERING_LOGIC_SETTINGS, normalizeOrderingLogicSettings, type OrderingLogicSettings } from "./ordering-logic";
+import {
+  buildSourceBackedOrderingRows,
+  normalizeOrderingItemCode,
+  type SourceBackedOrderingData,
+  type SourceOrderingMarker,
+  type SourceQuickBooksItem,
+  type SourceQuickBooksVendor,
+  type SourceSalesWindows,
+  type SourceSupplier,
+  type SourceVendorMapping,
+  type SourceVinosmithWine
+} from "./source-backed-ordering";
+import { fetchQuickBooksItemSalesWindows } from "./supabase/quickbooks-item-sales-windows";
+import { fetchLiveVinosmithAvailability, type LatestVinosmithAvailability } from "./supabase/vinosmith-availability";
+
+type SourceClient = SupabaseClient<any, "public", any>;
+
+export type PublishedOrderingConfiguration = {
+  id: string | null;
+  values: OrderingLogicSettings;
+};
+
+const PAGE_SIZE = 1000;
+export const ORDERING_TIMEZONE = "America/Denver";
+
+export function orderingBusinessDate(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ORDERING_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(value);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
+}
+
+export async function fetchSourceBackedOrderingData(
+  supabase: SourceClient,
+  options: {
+    referenceDate?: string;
+    liveAvailability?: LatestVinosmithAvailability;
+  } = {}
+): Promise<SourceBackedOrderingData & { configuration: PublishedOrderingConfiguration }> {
+  const referenceDate = options.referenceDate || orderingBusinessDate();
+  const [configuration, quickBooksItems, vinosmithWines, suppliers, quickBooksVendors, vendorMappings, markers, availability] = await Promise.all([
+    fetchPublishedOrderingConfiguration(supabase),
+    fetchAll<SourceQuickBooksItem>(supabase, "quickbooks_items", "list_id,name,full_name,sales_desc,purchase_desc,is_active,item_type,quantity_on_hand,quantity_on_order,purchase_cost,average_cost,custom_fields,raw_data,last_seen_at", "list_id"),
+    fetchAll<SourceVinosmithWine>(supabase, "vinosmith_wines", "wine_id,code,name,importer_name", "wine_id"),
+    fetchAll<SourceSupplier>(supabase, "suppliers", "id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,active", "name"),
+    fetchAll<SourceQuickBooksVendor>(supabase, "quickbooks_vendors", "list_id,name,full_name", "list_id"),
+    fetchAll<SourceVendorMapping>(supabase, "quickbooks_vendor_mappings", "quickbooks_vendor_list_id,supplier_id,vendor_classification", "quickbooks_vendor_list_id"),
+    fetchOrderingMarkers(supabase),
+    options.liveAvailability ? Promise.resolve(options.liveAvailability) : fetchLiveVinosmithAvailability()
+  ]);
+
+  const itemCodeByListId = new Map(quickBooksItems.map((item) => [item.list_id, normalizeOrderingItemCode(itemCode(item))]));
+  const salesRows = await fetchQuickBooksItemSalesWindows(supabase, referenceDate);
+  const salesByCode = new Map<string, SourceSalesWindows>();
+  for (const row of salesRows) {
+    const code = normalizeOrderingItemCode(itemCodeByListId.get(row.item_list_id || "") || row.item_full_name || "");
+    if (!code) continue;
+    const current = salesByCode.get(code) || emptySales();
+    current.last30 += numeric(row.last_30_quantity);
+    current.last60 += numeric(row.last_60_quantity);
+    current.last90 += numeric(row.last_90_quantity);
+    current.prior30 += numeric(row.prior_30_quantity);
+    current.next30Ly += numeric(row.last_year_next_30_quantity);
+    current.next60Ly += numeric(row.last_year_next_60_quantity);
+    current.next90Ly += numeric(row.last_year_next_90_quantity);
+    salesByCode.set(code, current);
+  }
+
+  const quickBooksAsOf = quickBooksItems
+    .map((item) => item.last_seen_at || null)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) || null;
+  const built = buildSourceBackedOrderingRows({
+    quickBooksItems,
+    vinosmithWines,
+    vinosmithAvailableByCode: availability.byProductCode,
+    vinosmithAvailableAsOf: availability.snapshotAt,
+    quickBooksAsOf,
+    suppliers,
+    quickBooksVendors,
+    vendorMappings,
+    markers,
+    salesByCode,
+    settings: configuration.values,
+    referenceDate
+  });
+
+  return { ...built, configuration };
+}
+
+export async function fetchPublishedOrderingConfiguration(supabase: SourceClient): Promise<PublishedOrderingConfiguration> {
+  const { data, error } = await supabase
+    .from("configuration_versions")
+    .select("id,values")
+    .eq("domain", "ordering_logic")
+    .eq("status", "published")
+    .maybeSingle<{ id: string; values: Partial<OrderingLogicSettings> | null }>();
+  if (error) throw new Error(error.message);
+  return {
+    id: data?.id || null,
+    values: normalizeOrderingLogicSettings(data?.values || DEFAULT_ORDERING_LOGIC_SETTINGS)
+  };
+}
+
+async function fetchOrderingMarkers(supabase: SourceClient) {
+  try {
+    return await fetchAll<SourceOrderingMarker>(supabase, "ordering_item_markers", "item_code,quickbooks_item_list_id,is_btg,is_core", "item_code");
+  } catch (error) {
+    if (error instanceof Error && error.message.toLowerCase().includes("ordering_item_markers")) return [];
+    throw error;
+  }
+}
+
+async function fetchAll<Row>(supabase: SourceClient, table: string, columns: string, orderBy: string) {
+  const rows: Row[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .order(orderBy, { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+      .returns<Row[]>();
+    if (error) throw new Error(error.message);
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return rows;
+  }
+}
+
+function itemCode(item: SourceQuickBooksItem) {
+  const fields = item.custom_fields || {};
+  const normalized = new Map(Object.entries(fields).map(([key, value]) => [key.toLowerCase().replace(/[^a-z0-9]+/g, "_"), value]));
+  for (const key of ["item_number", "sku", "product_code"]) {
+    const value = fields[key] ?? normalized.get(key);
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      const nested = record.value ?? record.Value ?? record.DataExtValue;
+      if (typeof nested === "string" && nested.trim()) return nested.trim();
+    }
+  }
+  return item.name || item.full_name || item.list_id;
+}
+
+function emptySales(): SourceSalesWindows {
+  return { last30: 0, last60: 0, last90: 0, prior30: 0, next30Ly: 0, next60Ly: 0, next90Ly: 0 };
+}
+
+function numeric(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}

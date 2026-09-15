@@ -143,7 +143,7 @@ export function AppTopbar({
         ) : null}
         {onRefreshReports ? (
           <button className="button button-small button-outline" onClick={onRefreshReports} disabled={isPending} type="button">
-            Refresh Reports
+            Refresh Ordering Data
           </button>
         ) : null}
         {onCreateDrafts ? (

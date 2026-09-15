@@ -6,7 +6,7 @@ import {
   createSupplierWineRequest,
   deletePendingSupplierCatalogWine,
   deletePurchaseOrderLine,
-  refreshVinosmithReports,
+  refreshOrderingData,
   restoreInactiveQuickBooksItemToWorkbench,
   saveSupplierCatalogWine,
   saveSupplierLogisticsBatch,
@@ -71,6 +71,7 @@ type Props = {
   companyDashboard: CompanyDashboardData;
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
+  orderingDataWarning?: string | null;
   canViewSettings?: boolean;
 };
 
@@ -102,6 +103,7 @@ export function OrderDashboard({
   companyDashboard,
   quickBooksLastSyncAt,
   vinosmithLastSyncAt,
+  orderingDataWarning,
   canViewSettings
 }: Props) {
   const router = useRouter();
@@ -190,11 +192,12 @@ export function OrderDashboard({
   );
   const allSupplierGroups = useMemo(() => buildSupplierGroups(displayRows), [displayRows]);
   const dataUpdatedAt = formatSourceUpdatedAt(vinosmithLastSyncAt || reportRun.completed_at);
-  const dataLabel = dataUpdatedAt ? `VS Updated ${dataUpdatedAt}` : `VS Date ${reportRun.report_date || "Latest run"}`;
+  const sourceBacked = reportRun.run_type === "quickbooks_sync" && reportRun.diagnostics?.ordering_source === "quickbooks_vinosmith_stem";
+  const dataLabel = dataUpdatedAt ? `Vinosmith Available ${dataUpdatedAt}` : `Ordering data ${reportRun.report_date || "Latest"}`;
   const dataTitle = vinosmithLastSyncAt
     ? `Vinosmith Get Available inventory fetched ${dataUpdatedAt}.`
     : reportRun.report_date
-      ? `Report date ${reportRun.report_date}${dataUpdatedAt ? `, completed ${dataUpdatedAt}` : ""}`
+      ? `${sourceBacked ? "Source-backed ordering date" : "Legacy fallback report date"} ${reportRun.report_date}${dataUpdatedAt ? `, completed ${dataUpdatedAt}` : ""}`
       : undefined;
   const qbUpdatedAt = formatSourceUpdatedAt(quickBooksLastSyncAt);
   const qbDataLabel = qbUpdatedAt ? `QB Updated ${qbUpdatedAt}` : null;
@@ -528,24 +531,24 @@ export function OrderDashboard({
   }
 
   function refreshReports() {
-    setPendingMessage("Queueing Vinosmith report refresh...");
+    setPendingMessage("Building ordering data from QuickBooks, Vinosmith Available, and Stem...");
     setErrorMessage("");
 
     startTransition(async () => {
       try {
         await flushApprovalQueue();
-        const result = await refreshVinosmithReports();
+        const result = await refreshOrderingData();
         if (!result.ok) {
           setErrorMessage(result.error);
           setPendingMessage("");
           return;
         }
-        setPendingMessage(
-          `Refresh queued for ${result.reportDate}. New report emails will be ingested as soon as GitHub Actions runs.`
-        );
+        setPendingMessage(result.reused
+          ? `Ordering data for ${result.reportDate} is already current (${result.rowCount.toLocaleString()} rows).`
+          : `Ordering data refreshed for ${result.reportDate} (${result.rowCount.toLocaleString()} rows). Buyer work was carried forward safely.`);
         router.refresh();
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Could not queue Vinosmith report refresh.");
+        setErrorMessage(error instanceof Error ? error.message : "Could not refresh ordering data.");
         setPendingMessage("");
       }
     });
@@ -711,7 +714,7 @@ export function OrderDashboard({
         onSelectView={selectView}
       />
 
-      <StatusMessages errorMessage={errorMessage} pendingMessage={isPending ? pendingMessage || "Working..." : pendingMessage} />
+      <StatusMessages errorMessage={errorMessage || orderingDataWarning || ""} pendingMessage={isPending ? pendingMessage || "Working..." : pendingMessage} />
       {showPoDraftProgress ? (
         <div className="processing-modal" role="status" aria-live="assertive">
           <div className="processing-modal-panel">
