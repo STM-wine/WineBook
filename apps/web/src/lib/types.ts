@@ -2,6 +2,7 @@ export type AppProfile = {
   id: string;
   email: string;
   full_name: string | null;
+  position: string | null;
   role: "viewer" | "buyer" | "admin";
 };
 

@@ -137,7 +137,7 @@ export async function fetchSettingsOverview(
     options.includeProfiles
       ? supabase
           .from("app_profiles")
-          .select("id,email,full_name,role")
+          .select("id,email,full_name,position,role")
           .order("email", { ascending: true })
           .returns<AppProfile[]>()
       : Promise.resolve({ data: [] as AppProfile[], error: null }),

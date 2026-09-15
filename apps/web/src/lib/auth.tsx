@@ -62,7 +62,7 @@ export async function getAppContext(): Promise<AppContext | { pendingEmail: stri
 
   const { data: profile } = await supabase
     .from("app_profiles")
-    .select("id,email,full_name,role")
+    .select("id,email,full_name,position,role")
     .eq("id", user.id)
     .maybeSingle<AppProfile>();
 

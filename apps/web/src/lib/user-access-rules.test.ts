@@ -16,22 +16,25 @@ describe("user access rules", () => {
   });
 
   it("validates invitation fields", () => {
-    expect(validateInviteInput({ email: "buyer@example.com", fullName: "Stem Buyer", role: "buyer" })).toBeNull();
-    expect(validateInviteInput({ email: "not-an-email", fullName: "Stem Buyer", role: "buyer" })).toBe(
+    expect(validateInviteInput({ email: "buyer@example.com", fullName: "Stem Buyer", position: "Buyer", role: "buyer" })).toBeNull();
+    expect(validateInviteInput({ email: "not-an-email", fullName: "Stem Buyer", position: "Buyer", role: "buyer" })).toBe(
       "Enter a valid email address."
     );
-    expect(validateInviteInput({ email: "buyer@example.com", fullName: "", role: "buyer" })).toBe(
+    expect(validateInviteInput({ email: "buyer@example.com", fullName: "", position: "Buyer", role: "buyer" })).toBe(
       "Full name is required."
     );
-    expect(validateInviteInput({ email: "buyer@example.com", fullName: "Stem Buyer", role: "owner" })).toBe(
+    expect(validateInviteInput({ email: "buyer@example.com", fullName: "Stem Buyer", position: "", role: "buyer" })).toBe(
+      "Position is required."
+    );
+    expect(validateInviteInput({ email: "buyer@example.com", fullName: "Stem Buyer", position: "Buyer", role: "owner" })).toBe(
       "Choose a valid role."
     );
   });
 
   it("validates profile updates", () => {
-    expect(validateProfileUpdate({ profileId: "profile-1", fullName: "Stem Buyer", role: "viewer" })).toBeNull();
-    expect(validateProfileUpdate({ profileId: "", fullName: "Stem Buyer", role: "viewer" })).toBe(
-      "User and full name are required."
+    expect(validateProfileUpdate({ profileId: "profile-1", fullName: "Stem Buyer", position: "Buyer", role: "viewer" })).toBeNull();
+    expect(validateProfileUpdate({ profileId: "", fullName: "Stem Buyer", position: "Buyer", role: "viewer" })).toBe(
+      "User, full name, and position are required."
     );
   });
 

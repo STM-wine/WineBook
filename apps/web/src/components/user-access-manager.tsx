@@ -66,7 +66,11 @@ export function UserAccessManager({ canManage, currentUserId, profiles }: Props)
                 <input name="email" type="email" autoComplete="email" required />
               </label>
               <label>
-                Role
+                Position
+                <input name="position" autoComplete="organization-title" placeholder="Sales Representative" required />
+              </label>
+              <label>
+                Access level
                 <select name="role" defaultValue="buyer">
                   <option value="viewer">Viewer</option>
                   <option value="buyer">Buyer</option>
@@ -94,7 +98,8 @@ export function UserAccessManager({ canManage, currentUserId, profiles }: Props)
             <thead>
               <tr>
                 <th>User</th>
-                <th>Role</th>
+                <th>Position</th>
+                <th>Access</th>
                 <th>Profile</th>
               </tr>
             </thead>
@@ -105,6 +110,7 @@ export function UserAccessManager({ canManage, currentUserId, profiles }: Props)
                     <strong>{profile.full_name || profile.email}</strong>
                     <small>{profile.email}{profile.id === currentUserId ? " · You" : ""}</small>
                   </td>
+                  <td>{profile.position || "—"}</td>
                   <td><span className={`user-role-badge role-${profile.role}`}>{profile.role}</span></td>
                   <td>
                     {canManage ? (
@@ -117,6 +123,7 @@ export function UserAccessManager({ canManage, currentUserId, profiles }: Props)
                       >
                         <input name="profile_id" type="hidden" value={profile.id} />
                         <input aria-label={`Full name for ${profile.email}`} name="full_name" defaultValue={profile.full_name || ""} required />
+                        <input aria-label={`Position for ${profile.email}`} name="position" defaultValue={profile.position || ""} placeholder="Position" required />
                         <select
                           aria-label={`Role for ${profile.email}`}
                           name="role"

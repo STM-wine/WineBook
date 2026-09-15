@@ -8,17 +8,20 @@ export function isAppRole(value: string): value is AppRole {
   return APP_ROLES.includes(value as AppRole);
 }
 
-export function validateInviteInput(input: { email: string; fullName: string; role: string }) {
+export function validateInviteInput(input: { email: string; fullName: string; position: string; role: string }) {
   if (!input.email || !/^\S+@\S+\.\S+$/.test(input.email)) return "Enter a valid email address.";
   if (!input.fullName) return "Full name is required.";
-  if (input.email.length > 320 || input.fullName.length > 120) return "Name or email is too long.";
+  if (!input.position) return "Position is required.";
+  if (input.email.length > 320 || input.fullName.length > 120 || input.position.length > 120) {
+    return "Name, email, or position is too long.";
+  }
   if (!isAppRole(input.role)) return "Choose a valid role.";
   return null;
 }
 
-export function validateProfileUpdate(input: { profileId: string; fullName: string; role: string }) {
-  if (!input.profileId || !input.fullName) return "User and full name are required.";
-  if (input.fullName.length > 120) return "Full name is too long.";
+export function validateProfileUpdate(input: { profileId: string; fullName: string; position: string; role: string }) {
+  if (!input.profileId || !input.fullName || !input.position) return "User, full name, and position are required.";
+  if (input.fullName.length > 120 || input.position.length > 120) return "Full name or position is too long.";
   if (!isAppRole(input.role)) return "Choose a valid role.";
   return null;
 }

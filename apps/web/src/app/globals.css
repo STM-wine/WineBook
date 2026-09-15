@@ -5867,7 +5867,7 @@ tr.has-recommendation .sticky-name {
 
 .user-access-form-grid {
   align-items: end;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr) minmax(130px, 0.55fr) auto;
+  grid-template-columns: minmax(170px, 1fr) minmax(210px, 1.25fr) minmax(180px, 1fr) minmax(130px, 0.55fr) auto;
 }
 
 .user-access-submit {
@@ -5875,14 +5875,14 @@ tr.has-recommendation .sticky-name {
 }
 
 .user-access-table {
-  min-width: 760px;
+  min-width: 920px;
 }
 
 .user-profile-form {
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(180px, 1fr) 120px auto;
+  grid-template-columns: minmax(170px, 1fr) minmax(160px, 0.8fr) 120px auto;
 }
 
 .user-profile-form input,

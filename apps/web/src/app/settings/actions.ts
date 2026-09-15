@@ -292,8 +292,9 @@ export async function inviteAppUser(formData: FormData): Promise<UserAccessActio
 
     const email = getString(formData, "email").toLowerCase();
     const fullName = getString(formData, "full_name");
+    const position = getString(formData, "position");
     const role = getString(formData, "role");
-    const validationError = validateInviteInput({ email, fullName, role });
+    const validationError = validateInviteInput({ email, fullName, position, role });
     if (validationError) return { ok: false, message: validationError };
 
     const supabase = serviceSettingsClient();
@@ -312,7 +313,7 @@ export async function inviteAppUser(formData: FormData): Promise<UserAccessActio
     if (!userId) {
       const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "");
       const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
-        data: { full_name: fullName },
+        data: { full_name: fullName, position },
         ...(siteUrl ? { redirectTo: `${siteUrl}/auth/accept-invite` } : {})
       });
       if (error) throw error;
@@ -325,6 +326,7 @@ export async function inviteAppUser(formData: FormData): Promise<UserAccessActio
       id: userId,
       email,
       full_name: fullName,
+      position,
       role
     });
     if (insertError) {
@@ -337,7 +339,7 @@ export async function inviteAppUser(formData: FormData): Promise<UserAccessActio
       event_type: invited ? "app_user_invited" : "app_user_enabled",
       entity_type: "app_profile",
       entity_id: userId,
-      details: { email, full_name: fullName, role }
+      details: { email, full_name: fullName, position, role }
     });
     revalidatePath("/settings/access");
     return {
@@ -357,8 +359,9 @@ export async function updateAppUser(formData: FormData): Promise<UserAccessActio
     requirePermission(context, "manage_user_access");
     const profileId = getString(formData, "profile_id");
     const fullName = getString(formData, "full_name");
+    const position = getString(formData, "position");
     const role = getString(formData, "role");
-    const validationError = validateProfileUpdate({ profileId, fullName, role });
+    const validationError = validateProfileUpdate({ profileId, fullName, position, role });
     if (validationError) return { ok: false, message: validationError };
     if (!canChangeProfileRole({
       actorId: context.user.id,
@@ -372,7 +375,7 @@ export async function updateAppUser(formData: FormData): Promise<UserAccessActio
     const supabase = serviceSettingsClient();
     const { data: updatedProfile, error } = await supabase
       .from("app_profiles")
-      .update({ full_name: fullName, role, updated_at: new Date().toISOString() })
+      .update({ full_name: fullName, position, role, updated_at: new Date().toISOString() })
       .eq("id", profileId)
       .select("id")
       .maybeSingle<{ id: string }>();
@@ -384,7 +387,7 @@ export async function updateAppUser(formData: FormData): Promise<UserAccessActio
       event_type: "app_user_updated",
       entity_type: "app_profile",
       entity_id: profileId,
-      details: { full_name: fullName, role }
+      details: { full_name: fullName, position, role }
     });
     revalidatePath("/settings/access");
     return { ok: true, message: "User details updated." };
