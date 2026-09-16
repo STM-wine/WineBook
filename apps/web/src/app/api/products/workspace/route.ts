@@ -162,14 +162,10 @@ export async function GET(request: Request) {
     const baseFetchMs = performance.now() - startedAt;
 
     const matchedWineIds = new Set<string>();
-    // The default workspace only shows active QuickBooks rows plus inactive rows
-    // that still match an active/orderable Vinosmith wine. The active Vinosmith
-    // fetch already contains every possible match for that view. Re-querying by
-    // every QuickBooks code and name added dozens of sequential requests without
-    // changing the result.
-    const additionalVinosmithWines = includeInactive
-      ? await fetchVinosmithWines(supabase, quickBooksItems)
-      : [];
+    // Vinosmith active/orderable flags are not complete enough to be the only
+    // matching source. Keep code/name matching for correctness, but execute all
+    // independent batches concurrently below.
+    const additionalVinosmithWines = await fetchVinosmithWines(supabase, quickBooksItems);
     const vinosmithWines = mergeVinosmithWines([
       ...additionalVinosmithWines,
       ...activeVinosmithWines
@@ -453,8 +449,10 @@ async function fetchVinosmithWines(supabase: ProductWorkspaceClient, quickBooksI
     quickBooksItems.flatMap((item) => [item.full_name, item.name])
   );
 
-  await fetchVinosmithWineBatch(supabase, "code", itemCodes, byWineId);
-  await fetchVinosmithWineBatch(supabase, "name", itemNames, byWineId);
+  await Promise.all([
+    fetchVinosmithWineBatch(supabase, "code", itemCodes, byWineId),
+    fetchVinosmithWineBatch(supabase, "name", itemNames, byWineId)
+  ]);
 
   return Array.from(byWineId.values());
 }
