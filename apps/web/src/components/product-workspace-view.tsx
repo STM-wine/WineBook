@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { dateTimeLabel } from "@/lib/date-labels";
-import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
+import { asNumber, formatCurrency, formatInteger, rowReplenishmentPolicy } from "@/lib/order-data";
+import type { Recommendation } from "@/lib/types";
 import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
 import {
   REPLENISHMENT_POLICIES,
@@ -68,7 +69,13 @@ const STATUS_FILTERS: Array<{ label: string; value: StatusFilter }> = [
   { label: "Inactive match", value: "inactive_match" }
 ];
 
-export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers?: boolean }) {
+export function ProductWorkspaceView({
+  canManageMarkers,
+  previewRows = []
+}: {
+  canManageMarkers?: boolean;
+  previewRows?: Recommendation[];
+}) {
   const [includeInactive, setIncludeInactive] = useState(false);
   const [state, setState] = useState<LoadState>({ status: "loading", data: null, error: null });
   const [cacheMeta, setCacheMeta] = useState<{ cachedAt: string; fromCache: boolean } | null>(null);
@@ -120,6 +127,9 @@ export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers?: 
   }, [loadWorkspace]);
 
   if (state.status === "loading") {
+    if (previewRows.length > 0) {
+      return <ProductWorkspaceLoadingPreview rows={previewRows} />;
+    }
     return (
       <section className="panel product-workspace-header">
         <div className="section-heading">
@@ -200,6 +210,69 @@ export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers?: 
       onReload={() => loadWorkspace({ force: true })}
       onSetIncludeInactive={setIncludeInactive}
     />
+  );
+}
+
+function ProductWorkspaceLoadingPreview({ rows }: { rows: Recommendation[] }) {
+  const [search, setSearch] = useState("");
+  const visibleRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return rows
+      .filter((row) => {
+        if (!query) return true;
+        return [row.product_code, row.planning_sku, row.product_name, row.supplier_name]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query));
+      })
+      .sort((left, right) => String(left.product_name || left.planning_sku || "").localeCompare(String(right.product_name || right.planning_sku || "")))
+      .slice(0, INITIAL_RENDERED_ROWS);
+  }, [rows, search]);
+
+  return (
+    <section className="panel product-workspace-header product-workspace-preview">
+      <div className="section-heading product-workspace-titlebar">
+        <div>
+          <p className="eyebrow">Products / Items</p>
+          <h1>Product Workspace</h1>
+          <p>Items are ready. Loading source status, pricing, and GP details in the background...</p>
+        </div>
+        <div className="product-workspace-preview-spinner" aria-label="Loading full product details" role="status" />
+      </div>
+      <label className="product-workspace-preview-search">
+        Search items
+        <input
+          autoFocus
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Wine, supplier, item #"
+          value={search}
+        />
+      </label>
+      <div className="table-shell product-workspace-preview-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Item #</th>
+              <th>Wine</th>
+              <th>Supplier</th>
+              <th>Replenishment</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row) => (
+              <tr key={row.id}>
+                <td className="mono-cell">{row.product_code || row.planning_sku || "-"}</td>
+                <td>{row.product_name || row.planning_sku || "Unnamed wine"}</td>
+                <td>{row.supplier_name || "Unmatched"}</td>
+                <td>{replenishmentPolicyLabel(rowReplenishmentPolicy(row))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <small className="product-workspace-cache-note">
+        Showing {formatInteger(visibleRows.length)} items while full details load.
+      </small>
+    </section>
   );
 }
 

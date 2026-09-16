@@ -800,7 +800,9 @@ export function OrderDashboard({
         </div>
       ) : null}
 
-      {activeView === "product-workspace" ? <ProductWorkspaceView canManageMarkers={canViewSettings} /> : null}
+      {activeView === "product-workspace" ? (
+        <ProductWorkspaceView canManageMarkers={canViewSettings} previewRows={displayRows} />
+      ) : null}
 
       {activeView === "order-review" ? (
         <OrderReviewView
