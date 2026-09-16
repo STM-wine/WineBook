@@ -57,6 +57,10 @@ export type SystemTag = (typeof SYSTEM_TAGS)[number];
 export type SolveForMode = (typeof SOLVE_FOR_MODES)[number];
 export type PriceApprovalDecision = (typeof PRICE_APPROVAL_DECISIONS)[number];
 
+export function systemTagLabel(tag: string) {
+  return tag === "Limited Core" ? "Select" : tag;
+}
+
 export function hasOfficialQuickBooksProduct(
   wine: Pick<
     SupplierCatalogWine,
@@ -526,7 +530,10 @@ export function calculatePricing(input: {
 
 export function normalizeSystemTags(tags: string[] = []) {
   const valid = new Set<string>(SYSTEM_TAGS);
-  return Array.from(new Set(tags.map(normalizeSpaces).filter((tag) => valid.has(tag))));
+  return Array.from(new Set(tags
+    .map(normalizeSpaces)
+    .map((tag) => tag === "Select" ? "Limited Core" : tag)
+    .filter((tag) => valid.has(tag))));
 }
 
 export function findDuplicateActivePriceLevels(levels: SupplierCatalogPriceLevelInput[] = []) {

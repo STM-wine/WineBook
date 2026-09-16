@@ -29,7 +29,7 @@ from stem_order.supabase_repository import load_dotenv
 from stem_order.vinosmith_api import VinosmithDistributorClient, records_for_resource
 
 
-POLICIES = {"Core", "Limited Core", "Limited", "Allocated", "Special Order"}
+POLICIES = {"Core", "Select", "Limited Core", "Limited", "Allocated", "Special Order"}
 POLICY_PRECEDENCE = {"Core": 5, "Limited Core": 4, "Limited": 3, "Special Order": 2, "Allocated": 1}
 REST_PAGE_SIZE = 1000
 WRITE_BATCH_SIZE = 200
@@ -139,6 +139,8 @@ def read_policy_workbook(path: Path, sheet: str) -> pd.DataFrame:
     invalid = frame.loc[~frame["Tag"].isin(POLICIES), ["Name", "Tag"]]
     if not invalid.empty:
         raise ValueError(f"Workbook contains invalid policies: {invalid.to_dict(orient='records')[:10]}")
+    # The database keeps the original value for compatibility; Select is its user-facing name.
+    frame["Tag"] = frame["Tag"].replace({"Select": "Limited Core"})
     duplicate_names = frame.assign(_key=frame["Name"].map(normalized_name)).groupby("_key").filter(lambda group: len(group) > 1)
     if not duplicate_names.empty:
         raise ValueError(f"Workbook contains duplicate wine names: {duplicate_names[['Name', 'Tag']].to_dict(orient='records')[:10]}")

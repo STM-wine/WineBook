@@ -9,6 +9,10 @@ export const REPLENISHMENT_POLICIES = [
 export type ReplenishmentPolicy = (typeof REPLENISHMENT_POLICIES)[number];
 export type ReplenishmentPolicyFilter = "All" | ReplenishmentPolicy;
 
+export function replenishmentPolicyLabel(value: ReplenishmentPolicy | null | undefined) {
+  return value === "Limited Core" ? "Select" : value || "Limited";
+}
+
 export function replenishmentPolicy(value: unknown): ReplenishmentPolicy {
   return REPLENISHMENT_POLICIES.includes(value as ReplenishmentPolicy)
     ? value as ReplenishmentPolicy

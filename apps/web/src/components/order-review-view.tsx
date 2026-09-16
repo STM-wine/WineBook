@@ -17,7 +17,11 @@ import {
 import { MetricCard } from "./metric-card";
 import { WorkbenchGrid } from "./workbench-grid";
 import { supplierCatalogWineToInput, type SupplierCatalogWineInput } from "@/lib/supplier-catalog";
-import { REPLENISHMENT_POLICIES, type ReplenishmentPolicyFilter } from "@/lib/replenishment-policy";
+import {
+  REPLENISHMENT_POLICIES,
+  replenishmentPolicyLabel,
+  type ReplenishmentPolicyFilter
+} from "@/lib/replenishment-policy";
 
 type SaveCatalogWineInput = SupplierCatalogWineInput & {
   existingCatalogWineId?: string | null;
@@ -181,7 +185,9 @@ export function OrderReviewView({
               onChange={(event) => setReplenishmentPolicyFilter(event.target.value as ReplenishmentPolicyFilter)}
             >
               <option value="All">All policies</option>
-              {REPLENISHMENT_POLICIES.map((policy) => <option key={policy}>{policy}</option>)}
+              {REPLENISHMENT_POLICIES.map((policy) => (
+                <option key={policy} value={policy}>{replenishmentPolicyLabel(policy)}</option>
+              ))}
             </select>
           </label>
         </div>

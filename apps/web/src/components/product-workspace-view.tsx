@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { dateTimeLabel } from "@/lib/date-labels";
 import { asNumber, formatCurrency, formatInteger } from "@/lib/order-data";
 import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
-import { REPLENISHMENT_POLICIES, type ReplenishmentPolicy } from "@/lib/replenishment-policy";
+import {
+  REPLENISHMENT_POLICIES,
+  replenishmentPolicyLabel,
+  type ReplenishmentPolicy
+} from "@/lib/replenishment-policy";
 import { MetricCard } from "./metric-card";
 
 type LoadState =
@@ -590,7 +594,7 @@ function ProductWorkspaceDrawer({ row }: { row: ProductWorkspaceRow | null }) {
       <div className="drawer-section">
         <h3>Replenishment</h3>
         <dl>
-          <div><dt>Policy</dt><dd>{row.orderingMarker.replenishmentPolicy}</dd></div>
+          <div><dt>Policy</dt><dd>{replenishmentPolicyLabel(row.orderingMarker.replenishmentPolicy)}</dd></div>
           <div><dt>Family</dt><dd>{row.orderingMarker.policyFamilyName || "Item only"}</dd></div>
           <div><dt>Recommendation</dt><dd>{recommendationModeLabel(row.orderingMarker)}</dd></div>
           <div><dt>Updated</dt><dd>{dateTimeLabel(row.orderingMarker.updatedAt)} <small>{row.orderingMarker.noteSource || "No marker row"}</small></dd></div>
@@ -662,7 +666,9 @@ function PolicySelect({
       value={policy}
       onChange={(event) => onChange(event.target.value as ReplenishmentPolicy)}
     >
-      {REPLENISHMENT_POLICIES.map((option) => <option key={option}>{option}</option>)}
+      {REPLENISHMENT_POLICIES.map((option) => (
+        <option key={option} value={option}>{replenishmentPolicyLabel(option)}</option>
+      ))}
     </select>
   );
 }

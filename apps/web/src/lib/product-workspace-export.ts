@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import type { ProductWorkspaceRow } from "./product-workspace-types";
+import { replenishmentPolicyLabel } from "./replenishment-policy";
 
 const headers = [
   "Item #", "Product", "Brand", "Supplier", "Revenue", "Replenishment", "Auto reorder", "FOB", "Laid-in",
@@ -47,7 +48,7 @@ export function buildProductWorkspaceWorkbook(rows: ProductWorkspaceRow[], gener
     ].filter(Boolean).join(" ");
     const row = sheet.addRow([
       product.itemCode, product.productName, product.brand, product.supplierName, product.revenueCenter,
-      product.orderingMarker.replenishmentPolicy,
+      replenishmentPolicyLabel(product.orderingMarker.replenishmentPolicy),
       product.orderingMarker.replenishmentPolicy === "Allocated" || product.orderingMarker.replenishmentPolicy === "Special Order"
         ? "Manual only"
         : product.orderingMarker.recommendationsSuppressed ? "Paused" : "Automatic",

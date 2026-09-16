@@ -26,6 +26,7 @@ import {
   rowApprovedEstimate,
   rowRecommendedQty
 } from "@/lib/order-data";
+import { replenishmentPolicyLabel } from "@/lib/replenishment-policy";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -66,7 +67,7 @@ const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
         onClick={(event) => event.stopPropagation()}
         title="Open this wine in Items to edit its replenishment policy"
       >
-        {rowReplenishmentPolicy(params.data)}
+        {replenishmentPolicyLabel(rowReplenishmentPolicy(params.data))}
       </a>
     ) : null}
     {params.data?.is_new_item ? <span className="new-item-badge">New Item</span> : null}

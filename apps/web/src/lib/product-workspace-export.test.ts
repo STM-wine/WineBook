@@ -29,6 +29,12 @@ describe("pricing model export", () => {
     expect(sheet.getCell("W2").font.bold).not.toBe(true);
     expect(JSON.stringify(sheet.autoFilter)).toContain("AI2");
   });
+  it("exports the Limited Core policy under its user-facing Select name", () => {
+    const row = product();
+    row.orderingMarker.replenishmentPolicy = "Limited Core";
+    const sheet = buildProductWorkspaceWorkbook([row], "now").getWorksheet("Pricing model")!;
+    expect(sheet.getCell("F2").value).toBe("Select");
+  });
   it("derives landed cost from editable FOB and laid-in instead of a stale source total", () => {
     const sheet = buildProductWorkspaceWorkbook([product({ fob: 35, laidIn: 0.54, landedCost: null, frontline: 52 })], "now").getWorksheet("Pricing model")!;
     expect(sheet.getCell("Q2").value).toEqual({ formula: 'IF(COUNT(H2:I2)=2,ROUND(H2+I2,2),"")', result: 35.54 });

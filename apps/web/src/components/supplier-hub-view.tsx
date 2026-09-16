@@ -16,6 +16,7 @@ import {
   PLACEMENT_TYPES,
   SOLVE_FOR_MODES,
   SYSTEM_TAGS,
+  systemTagLabel,
   balancePriceLevel,
   buildSupplierCatalogWine,
   calculateGpMargin,
@@ -873,7 +874,7 @@ function AddWinePanel({
         {SYSTEM_TAGS.map((tag) => (
           <label className="check-control" key={tag}>
             <input type="checkbox" checked={systemTags.includes(tag)} onChange={() => toggleSystemTag(tag)} />
-            {tag}
+            {systemTagLabel(tag)}
           </label>
         ))}
       </div>
