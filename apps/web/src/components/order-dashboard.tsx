@@ -30,7 +30,7 @@ import type {
   SupplierLogistics
 } from "@/lib/types";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
-import type { ReplenishmentPolicyFilter } from "@/lib/replenishment-policy";
+import type { ReplenishmentPolicy, ReplenishmentPolicyFilter } from "@/lib/replenishment-policy";
 import {
   applySupplierTargetWeeks,
   applySupplierTdmAssignments,
@@ -242,6 +242,45 @@ export function OrderDashboard({
 
   function patchRow(id: string, patch: Partial<Recommendation>) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  }
+
+  async function saveReplenishmentPolicy(
+    row: Recommendation,
+    policy: ReplenishmentPolicy,
+    recommendationsSuppressed: boolean
+  ) {
+    const itemCode = row.product_code?.trim() || row.planning_sku?.trim();
+    if (!itemCode) throw new Error("This wine does not have an item number to update.");
+
+    const response = await fetch("/api/products/workspace/markers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        itemCode,
+        replenishmentPolicy: policy,
+        recommendationsSuppressed: policy === "Limited" && recommendationsSuppressed,
+        suppressionReason: policy === "Limited" && recommendationsSuppressed ? "Temporarily unavailable" : null,
+        suppressedUntil: null,
+        note: "Manual Order Summary replenishment update"
+      })
+    });
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    if (!response.ok) {
+      throw new Error(body?.error || "Could not save the replenishment policy.");
+    }
+
+    setRows((current) => current.map((candidate) => {
+      const sameItem = candidate.id === row.id;
+      const sameFamily = Boolean(row.policy_family_key && candidate.policy_family_key === row.policy_family_key);
+      if (!sameItem && !sameFamily) return candidate;
+      return {
+        ...candidate,
+        is_btg: false,
+        is_core: policy === "Core",
+        replenishment_policy: policy,
+        recommendations_suppressed: policy === "Limited" && recommendationsSuppressed
+      };
+    }));
   }
 
   async function flushApprovalQueue() {
@@ -796,6 +835,8 @@ export function OrderDashboard({
           onSaveCatalogWine={saveCatalogWine}
           onDeleteCatalogWine={deleteCatalogWine}
           onAddWine={openSupplierAddWine}
+          onSaveReplenishmentPolicy={saveReplenishmentPolicy}
+          canManageMarkers={canViewSettings}
           isPending={isPending}
         />
       ) : null}

@@ -1825,6 +1825,24 @@ td {
   background: #f7f3ec;
 }
 
+.product-workspace-table-footer {
+  align-items: center;
+  background: #fcfaf6;
+  border-top: 1px solid var(--line);
+  bottom: 0;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+  position: sticky;
+}
+
+.product-workspace-table-footer span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .product-workspace-table td:nth-child(2) {
   text-align: left;
   white-space: normal;
@@ -3009,6 +3027,75 @@ th:nth-child(12) .table-sort-button {
   padding-top: 18px;
 }
 
+.replenishment-edit-dialog {
+  max-width: 580px;
+}
+
+.replenishment-edit-fields {
+  display: grid;
+  gap: 18px;
+  margin: 24px 0;
+}
+
+.replenishment-edit-fields > label:not(.replenishment-auto-toggle) {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 7px;
+  text-transform: uppercase;
+}
+
+.replenishment-edit-fields select {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font: inherit;
+  padding: 11px;
+  text-transform: none;
+}
+
+.replenishment-auto-toggle {
+  align-items: flex-start;
+  background: #f8f5ed;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 11px;
+  padding: 14px;
+}
+
+.replenishment-auto-toggle input {
+  height: 18px;
+  margin-top: 1px;
+  width: 18px;
+}
+
+.replenishment-auto-toggle span,
+.replenishment-auto-toggle small {
+  display: block;
+}
+
+.replenishment-auto-toggle strong {
+  font-size: 14px;
+}
+
+.replenishment-auto-toggle small,
+.replenishment-family-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.replenishment-auto-toggle small {
+  margin-top: 3px;
+}
+
+.replenishment-family-note {
+  margin: 0;
+}
+
 @media (max-width: 680px) {
   .new-item-edit-grid {
     grid-template-columns: 1fr;
@@ -3981,11 +4068,14 @@ th:nth-child(12) .table-sort-button {
 }
 
 .replenishment-policy-link {
+  appearance: none;
   background: #edf4ef;
   border: 1px solid #b9cdbc;
   border-radius: 999px;
   color: #315b3e;
+  cursor: pointer;
   display: inline-flex;
+  font-family: inherit;
   font-size: 10px;
   font-weight: 850;
   letter-spacing: 0.03em;

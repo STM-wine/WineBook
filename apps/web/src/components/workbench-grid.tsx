@@ -38,6 +38,7 @@ type WorkbenchGridProps = {
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
+  onEditReplenishment: (row: Recommendation) => void;
   onEditNewItem: (row: Recommendation) => void;
   onDeleteNewItem: (row: Recommendation) => void;
 };
@@ -61,14 +62,17 @@ const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
   <span className="wine-cell-value">
     <span>{params.valueFormatted ?? params.value ?? ""}</span>
     {params.data && !params.data.is_new_item ? (
-      <a
+      <button
         className="replenishment-policy-link"
-        href={`/?view=product-workspace&item=${encodeURIComponent(params.data.product_code || params.data.planning_sku || "")}`}
-        onClick={(event) => event.stopPropagation()}
-        title="Open this wine in Items to edit its replenishment policy"
+        onClick={(event) => {
+          event.stopPropagation();
+          params.context.onEditReplenishment(params.data);
+        }}
+        title="Edit this wine without leaving Order Summary"
+        type="button"
       >
         {replenishmentPolicyLabel(rowReplenishmentPolicy(params.data))}
-      </a>
+      </button>
     ) : null}
     {params.data?.is_new_item ? <span className="new-item-badge">New Item</span> : null}
     {params.data && activeFreeGoodsForRow(params.data).length > 0 ? <span className="free-goods-badge">Free Goods</span> : null}
@@ -182,6 +186,7 @@ export function WorkbenchGrid({
   onSaveOrderPath,
   onSetWorkingQty,
   onSaveWorkingQty,
+  onEditReplenishment,
   onEditNewItem,
   onDeleteNewItem
 }: WorkbenchGridProps) {
@@ -556,7 +561,7 @@ export function WorkbenchGrid({
         animateRows={false}
         enableBrowserTooltips
         tooltipShowDelay={0}
-        context={{ onDeleteNewItem, onEditNewItem, onSaveOrderPath }}
+        context={{ onDeleteNewItem, onEditNewItem, onEditReplenishment, onSaveOrderPath }}
       />
     </div>
   );

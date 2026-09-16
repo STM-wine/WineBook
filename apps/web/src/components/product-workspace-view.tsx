@@ -52,6 +52,8 @@ type ProductWorkspaceCacheEntry = {
 
 const productWorkspaceCache = new Map<string, ProductWorkspaceCacheEntry>();
 const productWorkspaceRequests = new Map<string, Promise<ProductWorkspaceCacheEntry>>();
+const INITIAL_RENDERED_ROWS = 200;
+const RENDERED_ROW_STEP = 200;
 
 const STATUS_FILTERS: Array<{ label: string; value: StatusFilter }> = [
   { label: "All", value: "All" },
@@ -254,6 +256,7 @@ function ProductWorkspaceTable({
   const [markerError, setMarkerError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [renderedRowLimit, setRenderedRowLimit] = useState(INITIAL_RENDERED_ROWS);
   useEffect(() => {
     const linkedItem = new URLSearchParams(window.location.search).get("item")?.trim();
     if (!linkedItem) return;
@@ -289,6 +292,10 @@ function ProductWorkspaceTable({
       })
       .sort((a, b) => compareRows(a, b, sort.key, sort.direction));
   }, [data.rows, health, search, sort, statusFilter, supplier]);
+  const renderedRows = visibleRows.slice(0, renderedRowLimit);
+  useEffect(() => {
+    setRenderedRowLimit(INITIAL_RENDERED_ROWS);
+  }, [health, search, sort, statusFilter, supplier]);
   const statusGapCount = useMemo(
     () => data.rows.filter((row) => isLifecycleMismatch(row.statusKey)).length,
     [data.rows]
@@ -496,7 +503,7 @@ function ProductWorkspaceTable({
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map((row) => (
+                {renderedRows.map((row) => (
                   <tr
                     key={row.id}
                     className={selectedRow?.id === row.id ? "selected" : ""}
@@ -550,6 +557,18 @@ function ProductWorkspaceTable({
                 ))}
               </tbody>
             </table>
+            <div className="product-workspace-table-footer">
+              <span>Showing {formatInteger(renderedRows.length)} of {formatInteger(visibleRows.length)} items</span>
+              {renderedRows.length < visibleRows.length ? (
+                <button
+                  className="ghost-button"
+                  onClick={() => setRenderedRowLimit((current) => Math.min(current + RENDERED_ROW_STEP, visibleRows.length))}
+                  type="button"
+                >
+                  Load next {formatInteger(Math.min(RENDERED_ROW_STEP, visibleRows.length - renderedRows.length))}
+                </button>
+              ) : null}
+            </div>
           </div>
           <ProductWorkspaceDrawer row={selectedRow} />
         </div>

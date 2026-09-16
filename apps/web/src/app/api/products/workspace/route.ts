@@ -149,6 +149,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const includeInactive = url.searchParams.get("includeInactive") === "true";
+    const startedAt = performance.now();
     const [quickBooksItems, suppliers, supplierCatalogWines, supplierCatalogPriceLevels, vinosmithSupplierHints, activeVinosmithWines, orderingItemMarkers] = await Promise.all([
       fetchQuickBooksItems(supabase),
       fetchSuppliers(supabase),
@@ -158,10 +159,19 @@ export async function GET(request: Request) {
       fetchActiveVinosmithWines(supabase),
       fetchOrderingItemMarkers(supabase)
     ]);
+    const baseFetchMs = performance.now() - startedAt;
 
     const matchedWineIds = new Set<string>();
+    // The default workspace only shows active QuickBooks rows plus inactive rows
+    // that still match an active/orderable Vinosmith wine. The active Vinosmith
+    // fetch already contains every possible match for that view. Re-querying by
+    // every QuickBooks code and name added dozens of sequential requests without
+    // changing the result.
+    const additionalVinosmithWines = includeInactive
+      ? await fetchVinosmithWines(supabase, quickBooksItems)
+      : [];
     const vinosmithWines = mergeVinosmithWines([
-      ...(await fetchVinosmithWines(supabase, quickBooksItems)),
+      ...additionalVinosmithWines,
       ...activeVinosmithWines
     ]);
     const supplierByName = mapSuppliersByName(suppliers);
@@ -223,7 +233,9 @@ export async function GET(request: Request) {
     const vinosmithOnlyRows = activeVinosmithWines.filter((wine) => !resolveQuickBooksItem(wine, quickBooksLookup));
     vinosmithOnlyRows.forEach((wine) => matchedWineIds.add(wine.wine_id));
 
+    const priceFetchStartedAt = performance.now();
     const vinosmithPrices = await fetchVinosmithPrices(supabase, Array.from(matchedWineIds));
+    const priceFetchMs = performance.now() - priceFetchStartedAt;
     const vinosmithPricesByWine = groupVinosmithPrices(vinosmithPrices);
     const rows = provisionalRows.map<ProductWorkspaceRow>((row) => {
       const priceLevels = [
@@ -306,10 +318,17 @@ export async function GET(request: Request) {
       )
     )));
 
+    const countStartedAt = performance.now();
+    const [totalCount, activeCount, inactiveCount] = await Promise.all([
+      countRows(supabase, "quickbooks_items"),
+      countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", true)),
+      countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", false))
+    ]);
+    const countMs = performance.now() - countStartedAt;
     const summary = {
-      total: await countRows(supabase, "quickbooks_items"),
-      active: await countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", true)),
-      inactive: await countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", false)),
+      total: totalCount,
+      active: activeCount,
+      inactive: inactiveCount,
       visible: rows.length,
       ready: rows.filter((row) => row.sourceHealth === "ready").length,
       partial: rows.filter((row) => row.sourceHealth === "partial").length,
@@ -337,7 +356,19 @@ export async function GET(request: Request) {
       generatedAt: new Date().toISOString()
     };
 
-    return NextResponse.json(response);
+    const totalMs = performance.now() - startedAt;
+    return NextResponse.json(response, {
+      headers: {
+        "Cache-Control": "private, max-age=30, stale-while-revalidate=120",
+        "Server-Timing": [
+          `base;dur=${baseFetchMs.toFixed(1)}`,
+          `prices;dur=${priceFetchMs.toFixed(1)}`,
+          `counts;dur=${countMs.toFixed(1)}`,
+          `total;dur=${totalMs.toFixed(1)}`
+        ].join(", "),
+        "X-Product-Workspace-Rows": String(rows.length)
+      }
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load Product Workspace.";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -434,9 +465,11 @@ async function fetchVinosmithWineBatch(
   values: string[],
   byWineId: Map<string, VinosmithWineRow>
 ) {
+  const batches: string[][] = [];
   for (let index = 0; index < values.length; index += 200) {
-    const batch = values.slice(index, index + 200);
-    if (batch.length === 0) continue;
+    batches.push(values.slice(index, index + 200));
+  }
+  const pages = await Promise.all(batches.map(async (batch) => {
     const { data, error } = await supabase
       .from("vinosmith_wines")
       .select(`
@@ -457,11 +490,10 @@ async function fetchVinosmithWineBatch(
       .returns<VinosmithWineRow[]>();
 
     if (error) throw new Error(error.message);
+    return data || [];
+  }));
 
-    for (const row of data || []) {
-      byWineId.set(row.wine_id, row);
-    }
-  }
+  pages.flat().forEach((row) => byWineId.set(row.wine_id, row));
 }
 
 async function fetchVinosmithSupplierHints(supabase: ProductWorkspaceClient) {
@@ -579,10 +611,11 @@ async function fetchOrderingItemMarkers(supabase: ProductWorkspaceClient) {
 
 async function fetchVinosmithPrices(supabase: ProductWorkspaceClient, wineIds: string[]) {
   if (wineIds.length === 0) return [];
-  const rows: VinosmithPriceRow[] = [];
-
+  const batches: string[][] = [];
   for (let index = 0; index < wineIds.length; index += 200) {
-    const batch = wineIds.slice(index, index + 200);
+    batches.push(wineIds.slice(index, index + 200));
+  }
+  const pages = await Promise.all(batches.map(async (batch) => {
     const { data, error } = await supabase
       .from("vinosmith_prices")
       .select("price_id,wine_id,label,price_cents,bill_back_price_cents,active,disabled,is_default")
@@ -592,10 +625,10 @@ async function fetchVinosmithPrices(supabase: ProductWorkspaceClient, wineIds: s
       .returns<VinosmithPriceRow[]>();
 
     if (error) throw new Error(error.message);
-    rows.push(...(data || []));
-  }
+    return data || [];
+  }));
 
-  return rows;
+  return pages.flat();
 }
 
 async function countRows(

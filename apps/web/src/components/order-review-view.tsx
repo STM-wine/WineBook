@@ -12,6 +12,7 @@ import {
   formatCurrency,
   formatInteger,
   freeGoodsSummary,
+  rowReplenishmentPolicy,
   type SupplierGroupSortMode
 } from "@/lib/order-data";
 import { MetricCard } from "./metric-card";
@@ -20,6 +21,7 @@ import { supplierCatalogWineToInput, type SupplierCatalogWineInput } from "@/lib
 import {
   REPLENISHMENT_POLICIES,
   replenishmentPolicyLabel,
+  type ReplenishmentPolicy,
   type ReplenishmentPolicyFilter
 } from "@/lib/replenishment-policy";
 
@@ -60,6 +62,8 @@ export function OrderReviewView({
   onSaveCatalogWine,
   onDeleteCatalogWine,
   onAddWine,
+  onSaveReplenishmentPolicy,
+  canManageMarkers,
   isPending
 }: {
   brandManager: string;
@@ -93,9 +97,12 @@ export function OrderReviewView({
   onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
   onDeleteCatalogWine: (input: { id: string }) => void;
   onAddWine: (supplierName: string) => void;
+  onSaveReplenishmentPolicy: (row: Recommendation, policy: ReplenishmentPolicy, recommendationsSuppressed: boolean) => Promise<void>;
+  canManageMarkers?: boolean;
   isPending: boolean;
 }) {
   const [editingWine, setEditingWine] = useState<SupplierCatalogWine | null>(null);
+  const [editingReplenishment, setEditingReplenishment] = useState<Recommendation | null>(null);
 
   function editNewItem(row: Recommendation) {
     const wine = supplierCatalogWines.find((candidate) => candidate.id === row.supplier_catalog_wine_id);
@@ -208,6 +215,7 @@ export function OrderReviewView({
             targetWeeks={supplierTargetWeeks[group.supplier] ?? String(DEFAULT_SUPPLIER_TARGET_WEEKS)}
             onSetTargetWeeks={(value) => onSetSupplierTargetWeeks(group.supplier, value)}
             onRestoreInactiveWine={onRestoreInactiveWine}
+            onEditReplenishment={setEditingReplenishment}
             onEditNewItem={editNewItem}
             onDeleteNewItem={deleteNewItem}
             onAddWine={onAddWine}
@@ -223,6 +231,17 @@ export function OrderReviewView({
           onSave={(input) => {
             onSaveCatalogWine(input);
             setEditingWine(null);
+          }}
+        />
+      ) : null}
+      {editingReplenishment ? (
+        <ReplenishmentEditDialog
+          canManage={canManageMarkers === true}
+          row={editingReplenishment}
+          onClose={() => setEditingReplenishment(null)}
+          onSave={async (policy, recommendationsSuppressed) => {
+            await onSaveReplenishmentPolicy(editingReplenishment, policy, recommendationsSuppressed);
+            setEditingReplenishment(null);
           }}
         />
       ) : null}
@@ -301,6 +320,7 @@ function SupplierSection({
   targetWeeks,
   onSetTargetWeeks,
   onRestoreInactiveWine,
+  onEditReplenishment,
   onEditNewItem,
   onDeleteNewItem,
   onAddWine,
@@ -316,6 +336,7 @@ function SupplierSection({
   targetWeeks: string;
   onSetTargetWeeks: (value: string) => void;
   onRestoreInactiveWine: (listId: string) => void;
+  onEditReplenishment: (row: Recommendation) => void;
   onEditNewItem: (row: Recommendation) => void;
   onDeleteNewItem: (row: Recommendation) => void;
   onAddWine: (supplierName: string) => void;
@@ -444,6 +465,7 @@ function SupplierSection({
             onSaveOrderPath={onSaveOrderPath}
             onSetWorkingQty={onSetWorkingQty}
             onSaveWorkingQty={onSaveWorkingQty}
+            onEditReplenishment={onEditReplenishment}
             onEditNewItem={onEditNewItem}
             onDeleteNewItem={onDeleteNewItem}
           />
@@ -533,6 +555,101 @@ function NewItemEditDialog({
         <div className="new-item-edit-footer">
           <button className="ghost-button" disabled={isPending} type="button" onClick={onClose}>Cancel</button>
           <button className="primary-button" disabled={isPending} type="submit">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ReplenishmentEditDialog({
+  row,
+  canManage,
+  onClose,
+  onSave
+}: {
+  row: Recommendation;
+  canManage: boolean;
+  onClose: () => void;
+  onSave: (policy: ReplenishmentPolicy, recommendationsSuppressed: boolean) => Promise<void>;
+}) {
+  const [policy, setPolicy] = useState<ReplenishmentPolicy>(rowReplenishmentPolicy(row));
+  const [recommendationsSuppressed, setRecommendationsSuppressed] = useState(row.recommendations_suppressed === true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+  const itemCode = row.product_code?.trim() || row.planning_sku?.trim() || "No item number";
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !isSaving) onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isSaving, onClose]);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canManage) return;
+    setIsSaving(true);
+    setError("");
+    try {
+      await onSave(policy, policy === "Limited" && recommendationsSuppressed);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save the replenishment policy.");
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="new-item-edit-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !isSaving && onClose()}>
+      <form className="new-item-edit-dialog replenishment-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="replenishment-edit-title" onSubmit={submit}>
+        <div className="new-item-edit-header">
+          <div>
+            <p className="eyebrow">Order Summary</p>
+            <h2 id="replenishment-edit-title">Edit Replenishment</h2>
+            <p>{row.product_name || row.planning_sku || "Unnamed wine"} · {itemCode}</p>
+          </div>
+          <button aria-label="Close replenishment dialog" className="ghost-button" disabled={isSaving} type="button" onClick={onClose}>Close</button>
+        </div>
+
+        <div className="replenishment-edit-fields">
+          <label>
+            Replenishment policy
+            <select disabled={!canManage || isSaving} value={policy} onChange={(event) => setPolicy(event.target.value as ReplenishmentPolicy)}>
+              {REPLENISHMENT_POLICIES.map((option) => (
+                <option key={option} value={option}>{replenishmentPolicyLabel(option)}</option>
+              ))}
+            </select>
+          </label>
+
+          {policy === "Limited" ? (
+            <label className="replenishment-auto-toggle">
+              <input
+                checked={!recommendationsSuppressed}
+                disabled={!canManage || isSaving}
+                onChange={(event) => setRecommendationsSuppressed(!event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>Automatic reorder recommendations</strong>
+                <small>Turn this off when the wine will be unavailable for a while.</small>
+              </span>
+            </label>
+          ) : null}
+
+          <p className="replenishment-family-note">
+            {row.policy_family_key
+              ? "This change applies to every vintage in this wine family."
+              : "This change applies to this item only."}
+          </p>
+          {!canManage ? <p className="form-error">You do not have permission to change replenishment policies.</p> : null}
+          {error ? <p className="form-error" role="alert">{error}</p> : null}
+        </div>
+
+        <div className="new-item-edit-footer">
+          <button className="ghost-button" disabled={isSaving} type="button" onClick={onClose}>Cancel</button>
+          <button className="primary-button" disabled={!canManage || isSaving} type="submit">
+            {isSaving ? "Saving..." : "Save Policy"}
+          </button>
         </div>
       </form>
     </div>
