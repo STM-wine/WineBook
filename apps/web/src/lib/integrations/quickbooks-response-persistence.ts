@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import type { QuickBooksDesktopQbxmlRequest, QuickBooksQbxmlResponseStatus } from "@/lib/integrations/quickbooks-desktop";
+import { decodeXmlText } from "@/lib/integrations/xml-text";
 
 type QbRef = {
   ListID?: string | null;
@@ -782,10 +783,5 @@ function extractBlocks(xml: string, tagName: string) {
 }
 
 function decodeXml(value: string) {
-  return value
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&gt;/g, ">")
-    .replace(/&lt;/g, "<")
-    .replace(/&amp;/g, "&");
+  return decodeXmlText(value);
 }
