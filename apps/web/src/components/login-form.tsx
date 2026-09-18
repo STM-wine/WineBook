@@ -23,28 +23,32 @@ export function LoginForm() {
     window.location.href = "/";
   }
 
-  async function signInWithGoogle() {
+  async function sendSignInLink() {
+    if (!email) {
+      setMessage("Enter your email address first.");
+      return;
+    }
+
     setLoading(true);
     setMessage("");
     const origin = window.location.origin;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
       options: {
-        redirectTo: `${origin}/auth/callback`
+        emailRedirectTo: `${origin}/auth/callback`,
+        shouldCreateUser: false
       }
     });
+    setLoading(false);
     if (error) {
-      setLoading(false);
       setMessage(error.message);
+      return;
     }
+    setMessage("Check your email for a fresh sign-in link.");
   }
 
   return (
     <div className="auth-card">
-      <button className="button button-secondary" onClick={signInWithGoogle} disabled={loading}>
-        Continue with Google
-      </button>
-      <div className="divider">or</div>
       <form onSubmit={signInWithPassword} className="login-form">
         <label>
           Email
@@ -61,6 +65,10 @@ export function LoginForm() {
         </label>
         <button className="button" disabled={loading}>
           {loading ? "Signing in..." : "Sign in"}
+        </button>
+        <div className="divider">or</div>
+        <button className="button button-secondary" disabled={loading} onClick={sendSignInLink} type="button">
+          Email me a sign-in link
         </button>
       </form>
       {message ? <p className="form-message">{message}</p> : null}
