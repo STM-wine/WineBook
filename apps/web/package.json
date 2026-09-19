@@ -19,12 +19,14 @@
   "dependencies": {
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.45.4",
+    "@tesseract.js-data/eng": "^1.0.0",
     "ag-grid-community": "^35.3.0",
     "ag-grid-react": "^35.3.0",
     "exceljs": "^4.4.0",
     "next": "^15.5.21",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

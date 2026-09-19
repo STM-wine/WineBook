@@ -1028,6 +1028,9 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
         expected_subtotal = invoice_summary.get("subtotal")
         if expected_subtotal is None:
             expected_subtotal = sum(item.get("ext_cost", 0) for item in priced_items)
+        else:
+            # Shipping is an invoice charge, not a wine inventory line.
+            expected_subtotal -= invoice_summary.get("shipping_amount") or 0
         validation_result = validate_invoice(priced_items, expected_subtotal)
 
         status.text("Preparing Excel output")

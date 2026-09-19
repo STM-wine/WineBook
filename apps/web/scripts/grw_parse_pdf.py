@@ -13,13 +13,15 @@ import re
 import sys
 from pathlib import Path
 
-import pdfplumber
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from modules.po_tools.grw_invoice_converter.grw_converter import extract_order_number  # noqa: E402
-from modules.po_tools.grw_invoice_converter.parser import extract_invoice_summary, parse_grw_pdf  # noqa: E402
+from modules.po_tools.grw_invoice_converter.parser import (  # noqa: E402
+    extract_invoice_summary,
+    extract_pdf_text_pages,
+    parse_grw_pdf,
+)
 from modules.po_tools.grw_invoice_converter.pricing import apply_pricing  # noqa: E402
 
 
@@ -42,12 +44,7 @@ def as_int(value):
 
 
 def extract_pdf_text(pdf_path):
-    page_text = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                page_text.append(text)
+    page_text, _ = extract_pdf_text_pages(pdf_path)
     return "\n".join(page_text)
 
 
@@ -63,6 +60,12 @@ def extract_order_date(text, order_number):
             return match.group(1)
 
     match = re.search(r"Order\s*#\s+Date\s+(?:S\d+\s+)?(\d{2}/\d{2}/\d{4})", compact_text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    # Image-only invoices can lose the table relationship during OCR. The first
+    # date on a GRW sales order is the order date; the print timestamp is later.
+    match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", compact_text)
     if match:
         return match.group(1)
 
@@ -147,7 +150,18 @@ def main() -> int:
         print(json.dumps({"error": f"PDF not found: {pdf_path}"}), file=sys.stderr)
         return 2
 
-    items, pages_parsed, debug_info = parse_grw_pdf(str(pdf_path), debug=True)
+    try:
+        items, pages_parsed, debug_info = parse_grw_pdf(str(pdf_path), debug=True)
+    except Exception as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return 1
+    if not items:
+        source = " after OCR" if debug_info.get("ocr_used") else ""
+        print(
+            json.dumps({"error": f"No wine line items were found{source}. Check that this is a GRW sales order."}),
+            file=sys.stderr,
+        )
+        return 1
     priced_items = apply_pricing(items)
     summary = extract_invoice_summary(str(pdf_path))
     order_number = extract_order_number(str(pdf_path))
@@ -166,6 +180,7 @@ def main() -> int:
             "itemNumbers": debug_info.get("item_numbers", []),
             "missingItemNumbers": debug_info.get("missing_item_numbers", []),
             "unparsedBlocksCount": debug_info.get("unparsed_blocks_count", 0),
+            "ocrUsed": bool(debug_info.get("ocr_used")),
             "warnings": duplicate_warnings,
             "invoiceSummary": invoice_summary,
         },

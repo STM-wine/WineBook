@@ -50,7 +50,14 @@ async function parseWithPython(pdfPath: string) {
   });
 
   if (exitCode !== 0) {
-    throw new Error(stderr.trim() || `Parser exited with status ${exitCode}.`);
+    let errorMessage = stderr.trim() || `Parser exited with status ${exitCode}.`;
+    try {
+      const parsed = JSON.parse(stderr) as { error?: string };
+      errorMessage = parsed.error || errorMessage;
+    } catch {
+      // Use raw stderr when the parser did not return a structured error.
+    }
+    throw new Error(errorMessage);
   }
 
   try {

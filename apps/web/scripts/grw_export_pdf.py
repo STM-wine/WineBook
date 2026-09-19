@@ -263,6 +263,9 @@ def build_export(
     expected_subtotal = invoice_summary.get("subtotal")
     if expected_subtotal is None:
         expected_subtotal = sum(item.get("ext_cost", 0) for item in priced_items)
+    else:
+        # Shipping is an invoice charge, not a wine inventory line.
+        expected_subtotal -= invoice_summary.get("shipping_amount") or 0
     validation_result = validate_invoice_for_export(priced_items, expected_subtotal)
 
     resolution = resolve_file_details(pdf_path, original_filename)

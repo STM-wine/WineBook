@@ -146,6 +146,7 @@ Current Next.js UI flow:
 Implemented features:
 
 - Auto-convert on upload.
+- OCR fallback for image-only/scanned GRW PDFs.
 - Parsed line-item display with wine name, vintage, pack, quantity, FOB bottle/case, frontline, ext cost, markup, and ext price.
 - Invoice summary / credits & balance display when those values are present in the PDF.
 - Editable Item Number values in the app table.

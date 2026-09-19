@@ -6,9 +6,30 @@ Extracts structured line items from GRW invoice PDFs.
 
 import re
 import os
+import sys
 import pdfplumber
 from pathlib import Path
 from typing import List, Dict, Any
+
+try:
+    from .ocr import extract_text_with_ocr
+except ImportError:  # Support direct execution during local debugging.
+    from ocr import extract_text_with_ocr
+
+
+# GRW repeats the line-item table on continuation pages, but those pages do not
+# always include the word "Sale".  Keep one definition of a row start so the
+# block scanner and the item parser cannot silently disagree about valid rows.
+ITEM_START_RE = re.compile(
+    r'^\s*(?P<line_number>\d+)\s+'
+    r'(?:(?:Sale)\s+)?'
+    r'(?P<sku_prefix>[A-Z][A-Z0-9]{1,4}):'
+    r'(?P<item_code>\S+)\s+',
+    re.IGNORECASE,
+)
+
+CURRENCY_RE = re.compile(r'\$\s*([\d,]+\.\d{2})')
+GRW_TRAILER_PATTERN = r'F[0O]L[0O]C[0O]?'
 
 
 def parse_currency_value(value: str | None) -> float | None:
@@ -35,6 +56,22 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
+def extract_pdf_text_pages(pdf_path: str | Path) -> tuple[list[str], bool]:
+    """Extract PDF text, falling back to OCR when every page is image-only."""
+    pdf_path_obj = Path(pdf_path)
+    page_text: list[str] = []
+    with pdfplumber.open(pdf_path_obj) as pdf:
+        for page in pdf.pages:
+            page_text.append(page.extract_text() or "")
+
+    if any(text.strip() for text in page_text):
+        return page_text, False
+
+    ocr_text = extract_text_with_ocr(pdf_path_obj)
+    ocr_pages = [text.strip() for text in ocr_text.split("\f")]
+    return ocr_pages or [ocr_text], True
+
+
 def extract_invoice_summary_from_text(text: str) -> Dict[str, Any]:
     """Extract invoice-level payment/credit summary values from raw PDF text."""
     summary: Dict[str, Any] = {}
@@ -55,9 +92,10 @@ def extract_invoice_summary_from_text(text: str) -> Dict[str, Any]:
     currency_patterns = {
         "subtotal": r'Subtotal:\s*\$?\s*([\d,]+\.\d{2})',
         "sales_tax": r'Sales Tax:\s*\$?\s*([\d,]+\.\d{2})',
-        "total": r'Total:\s*\$?\s*([\d,]+\.\d{2})',
+        "total": r'\bTotal:\s*\$?\s*([\d,]+\.\d{2})',
         "paid_amount": r'Paid:\s*\$?\s*([\d,]+\.\d{2})',
         "balance_due": r'Balance Due:\s*\$?\s*([\d,]+\.\d{2})',
+        "shipping_amount": r'Shipping Charge\s*\$?\s*([\d,]+\.\d{2})',
     }
     for key, pattern in currency_patterns.items():
         match = re.search(pattern, compact_text, re.IGNORECASE)
@@ -73,12 +111,7 @@ def extract_invoice_summary(pdf_path: str) -> Dict[str, Any]:
     if not pdf_path_obj.exists():
         raise FileNotFoundError(f"PDF not found: {pdf_path_obj}")
 
-    page_text: list[str] = []
-    with pdfplumber.open(pdf_path_obj) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                page_text.append(text)
+    page_text, _ = extract_pdf_text_pages(pdf_path_obj)
 
     return extract_invoice_summary_from_text("\n".join(page_text))
 
@@ -171,9 +204,9 @@ def clean_description(description: str, sku_prefix: str) -> str:
     cleaned = re.sub(r'GRW\s*Wine\s*Collection,?\s*Inc\.?', '', cleaned, flags=re.IGNORECASE)
 
     # Remove GRW code fragments that can leak into wrapped descriptions.
-    cleaned = re.sub(r'\b[A-Z0-9]{2,}-\d{4}-F0L0C0?\b', ' ', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\b(?:0?375|0?750|1500|3000)-\d{4}-F0L0C0?\b', ' ', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'(?<![A-Z0-9])[-–—]*F0L0C0?\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(rf'\b[A-Z0-9]{{2,}}-\d{{4}}-{GRW_TRAILER_PATTERN}\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(rf'\b(?:0?375|0?750|1500|3000)-\d{{4}}-{GRW_TRAILER_PATTERN}\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(rf'(?<![A-Z0-9])[-–—]*{GRW_TRAILER_PATTERN}\b', ' ', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'\s*--+\s*', ' ', cleaned)
     cleaned = re.sub(r'\s*[-–—]+\s*(?=\d{4}\b)', ' ', cleaned)
     
@@ -279,22 +312,13 @@ def is_item_start(line: str) -> bool:
     - '17 BDX:' (page 2 continuation without 'Sale')
     - '25 ITY:' (page 2 continuation without 'Sale')
     """
-    line = line.strip()
-    # Standard format: "1 Sale BDX:"
-    if re.match(r'^\d+\s+Sale\s+[A-Z]{3}:', line):
-        return True
-    # Page 2 format without "Sale": "17 BDX:" (digits + space + 3-letter code + colon)
-    if re.match(r'^\d+\s+[A-Z]{3}:', line):
-        return True
-    return False
+    return ITEM_START_RE.match(line.strip()) is not None
 
 
 def extract_item_number_from_start(line: str) -> int | None:
     """Extract the leading GRW item number when a line starts a new item."""
-    match = re.match(r'^\s*(\d+)\s+Sale\s+[A-Z]{3}:', line.strip())
-    if match:
-        return int(match.group(1))
-    return None
+    match = ITEM_START_RE.match(line.strip())
+    return int(match.group('line_number')) if match else None
 
 
 def is_description_continuation_line(line: str) -> bool:
@@ -309,6 +333,8 @@ def is_description_continuation_line(line: str) -> bool:
     if not candidate:
         return False
     if is_item_start(candidate):
+        return False
+    if re.match(r'^\s*\d+\s+(?:Shipping|Freight|Handling|Discount|Credit|Tax)\b', candidate, re.IGNORECASE):
         return False
     if re.match(r'^\s*Order\s*#', candidate, re.IGNORECASE):
         return False
@@ -338,15 +364,15 @@ def extract_description_fragment_from_line(line: str) -> str:
     # If a GRW code prefix appears at the start of the wrapped line, strip only that
     # prefix and keep any descriptive text that follows.
     candidate = re.sub(
-        r'^\s*(?:[A-Z0-9]{2,}|0?375|0?750|1500|3000)-\d{4}-F0L0C0?\b\s*',
+        rf'^\s*(?:[A-Z0-9]{{2,}}|0?375|0?750|1500|3000)-\d{{4}}-{GRW_TRAILER_PATTERN}\b\s*',
         '',
         candidate,
         flags=re.IGNORECASE,
     )
 
     # Remove remaining PDF row metadata/code fragments that are not part of the wine name.
-    candidate = re.sub(r'\b(?:[A-Z0-9]{2,}|0?375|0?750|1500|3000)-\d{4}-F0L0C0?\b', ' ', candidate, flags=re.IGNORECASE)
-    candidate = re.sub(r'(?<![A-Z0-9])[-–—]*F0L0C0?\b', ' ', candidate, flags=re.IGNORECASE)
+    candidate = re.sub(rf'\b(?:[A-Z0-9]{{2,}}|0?375|0?750|1500|3000)-\d{{4}}-{GRW_TRAILER_PATTERN}\b', ' ', candidate, flags=re.IGNORECASE)
+    candidate = re.sub(rf'(?<![A-Z0-9])[-–—]*{GRW_TRAILER_PATTERN}\b', ' ', candidate, flags=re.IGNORECASE)
     candidate = re.sub(r'\$[\d,]+\.\d{2}', ' ', candidate)
     candidate = re.sub(r'\b\d+\s+(?=(?:750|375|1500|3000|1\.5L|PK\d|\d+-Pack)\b)', ' ', candidate, flags=re.IGNORECASE)
     candidate = re.sub(r'\b(?:PK\d+|\d+-Pack)\b', ' ', candidate, flags=re.IGNORECASE)
@@ -386,18 +412,15 @@ def parse_item_block(block: str) -> Dict[str, Any]:
         if not is_item_start(first_line):
             return None
         
-        # Extract item number from start of first line
-        item_match = re.match(r'^\s*(\d+)\s+Sale', first_line)
+        # Extract the row metadata once. Continuation pages may omit "Sale".
+        item_match = ITEM_START_RE.match(first_line)
         if not item_match:
             return None
-        line_number = int(item_match.group(1))
-        
-        # Extract SKU prefix from after "Sale" - first 3-letter code
-        sku_match = re.search(r'Sale\s+([A-Z]{3}):', first_line)
-        sku_prefix = sku_match.group(1) if sku_match else ''
+        line_number = int(item_match.group('line_number'))
+        sku_prefix = item_match.group('sku_prefix').upper()
         
         # Extract all dollar amounts from the entire block
-        dollar_amounts = re.findall(r'\$([\d,]+\.\d{2})', block)
+        dollar_amounts = CURRENCY_RE.findall(block)
         if len(dollar_amounts) < 1:
             return None
         
@@ -407,10 +430,27 @@ def parse_item_block(block: str) -> Dict[str, Any]:
         
         # Extract quantity - the number between first price and bottle size or before last price
         # Pattern: $price qty 750 or similar
-        qty_match = re.search(r'\$[\d,]+\.\d{2}\s+(\d+)\s+(?:750|375|1500|1\.5L|3000|PK\d|\d+-Pack)', block, re.IGNORECASE)
+        qty_match = re.search(
+            r'\$\s*[\d,]+\.\d{2}\s+(\d+)\s+'
+            r'(?:0?750|0?375|1500|1\.5L|3000|PK\d+|\d+-Pack)',
+            block,
+            re.IGNORECASE,
+        )
+        if not qty_match:
+            # OCR can collapse the ordered quantity and size columns ("1 750" -> "1750").
+            qty_match = re.search(
+                r'\$\s*[\d,]+\.\d{2}\s+(\d+?)(?:0?750|0?375|1500|3000)\s+\$\s*[\d,]+\.\d{2}',
+                block,
+                re.IGNORECASE,
+            )
         if not qty_match:
             # Try alternative: number before bottle size marker
-            qty_match = re.search(r'\$[\d,]+\.\d{2}[^\n]*\n.*?(\d+)\s+(?:750|375|1500|1\.5L)m?L?', block, re.IGNORECASE | re.DOTALL)
+            qty_match = re.search(
+                r'\$\s*[\d,]+\.\d{2}[^\n]*\n.*?(\d+)\s+'
+                r'(?:0?750|0?375|1500|1\.5L|3000)m?L?',
+                block,
+                re.IGNORECASE | re.DOTALL,
+            )
         ordered_qty = int(qty_match.group(1)) if qty_match else 1
         
         # Extract pack size (default 1 for single bottles)
@@ -421,21 +461,25 @@ def parse_item_block(block: str) -> Dict[str, Any]:
         quantity = ordered_qty * pack_size
         
         # Extract vintage from code line (e.g., "0750-2001-F0L0C0")
-        vintage_match = re.search(r'\d{4}-(\d{4})-F0L0C0', block)
-        vintage = vintage_match.group(1) if vintage_match else extract_vintage(block)
+        vintage_match = re.search(
+            rf'(?:PK\d+|0?375|0?750|1500|3000|[A-Z0-9]+)-(19\d{{2}}|20\d{{2}})-{GRW_TRAILER_PATTERN}',
+            block,
+            re.IGNORECASE,
+        )
+        vintage = int(vintage_match.group(1)) if vintage_match else extract_vintage(block)
         
         # Extract bottle size
-        size_match = re.search(r'(750|375|1500|3000|1\.5L)m?L?', block, re.IGNORECASE)
-        size = size_match.group(1) if size_match else '750'
+        size_match = re.search(
+            r'(?<!\d)(0?750|0?375|1500|3000|1\.5L)(?:mL)?(?!\d)',
+            block,
+            re.IGNORECASE,
+        )
+        size = size_match.group(1).lstrip('0') if size_match else '750'
         
-        # Build description from first line (between Sale and first $)
-        desc_match = re.search(r'Sale\s+[A-Z]{3}:[A-Z:]+-\s*([^$]+)', first_line)
-        if desc_match:
-            raw_description = desc_match.group(1).strip()
-        else:
-            # Fallback: everything after Sale prefix until $
-            desc_fallback = re.search(r'Sale\s+[A-Z]{3}:\S+\s+([^$]+)', first_line)
-            raw_description = desc_fallback.group(1).strip() if desc_fallback else ''
+        # The match ends immediately before the human-readable description.
+        # Split on a currency token that permits both "$12.00" and "$ 12.00".
+        description_and_prices = first_line[item_match.end():]
+        raw_description = re.split(r'\$\s*[\d,]+\.\d{2}', description_and_prices, maxsplit=1)[0].strip()
 
         continuation_lines = []
         for line in lines[1:]:
@@ -446,8 +490,8 @@ def parse_item_block(block: str) -> Dict[str, Any]:
             raw_description = clean_text(" ".join([raw_description, *continuation_lines]))
         
         # Clean up description: remove qty/price fragments
-        raw_description = re.sub(r'\$[\d,]+\.\d{2}', '', raw_description).strip()
-        raw_description = re.sub(r'\d+\s+(?:750|375|1500|3000|1\.5L)m?L?', '', raw_description, flags=re.IGNORECASE).strip()
+        raw_description = re.sub(r'\$\s*[\d,]+\.\d{2}', '', raw_description).strip()
+        raw_description = re.sub(r'\d+\s+(?:0?750|0?375|1500|3000|1\.5L)m?L?', '', raw_description, flags=re.IGNORECASE).strip()
         
         # If vintage is in code line but not in description, add it
         # Convert vintage to string for comparison
@@ -483,8 +527,8 @@ def parse_item_block(block: str) -> Dict[str, Any]:
         }
     
     except Exception as e:
-        print(f"PARSE ITEM BLOCK ERROR: {e}")
-        print(f"BLOCK: {block[:200]}")
+        print(f"PARSE ITEM BLOCK ERROR: {e}", file=sys.stderr)
+        print(f"BLOCK: {block[:200]}", file=sys.stderr)
         raise
 
 
@@ -520,16 +564,12 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
     # Header markers
     header_markers = ['Sales Order', 'GRW Wine Collection', 'Order # Date']
     
-    # Pattern to find item starts: number + Sale + SKU code
-    # Examples: "12 Sale RHN:RAY:RAYA", "20 Sale USP:BEA:FRER"
-    item_start_pattern = r'^\s*(\d+)\s+Sale\s+[A-Z]{3}:[A-Z]{3,}:[A-Z]+'
     trace_lines = debug and os.getenv("GRW_PDF_TRACE", "").strip() == "1"
     
-    with pdfplumber.open(pdf_path) as pdf:
-        pdf_page_count = len(pdf.pages)
-        
-        for page_num, page in enumerate(pdf.pages, 1):
-            text = page.extract_text()
+    page_text, ocr_used = extract_pdf_text_pages(pdf_path)
+    pdf_page_count = len(page_text)
+
+    for page_num, text in enumerate(page_text, 1):
             pages_parsed += 1
             page_items = []
             
@@ -541,10 +581,10 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
             lines = text.split('\n')
 
             if trace_lines:
-                print(f"GRW PAGE TRACE START page={page_num}")
+                print(f"GRW PAGE TRACE START page={page_num}", file=sys.stderr)
                 for idx, raw_line in enumerate(lines, 1):
-                    print(f"PDF TEXT LINE {idx:03d}: {raw_line}")
-                print(f"GRW PAGE TRACE END page={page_num}")
+                    print(f"PDF TEXT LINE {idx:03d}: {raw_line}", file=sys.stderr)
+                print(f"GRW PAGE TRACE END page={page_num}", file=sys.stderr)
             
             # First pass: identify item boundaries and extract blocks
             item_blocks = []
@@ -559,7 +599,8 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
                     if trace_lines and current_block_item_number in {5, 6}:
                         print(
                             f"TRACE page={page_num} line={line_idx + 1:03d} "
-                            f"classified=ignored_blank current_item={current_block_item_number}"
+                            f"classified=ignored_blank current_item={current_block_item_number}",
+                            file=sys.stderr,
                         )
                     continue
                 
@@ -574,7 +615,8 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
                     if trace_current_context:
                         print(
                             f"TRACE page={page_num} line={line_idx + 1:03d} "
-                            f"classified=footer current_item={current_block_item_number} text={line_stripped}"
+                            f"classified=footer current_item={current_block_item_number} text={line_stripped}",
+                            file=sys.stderr,
                         )
                     # Save current block if exists
                     if current_block_lines:
@@ -590,16 +632,18 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
                     if trace_current_context:
                         print(
                             f"TRACE page={page_num} line={line_idx + 1:03d} "
-                            f"classified=header current_item={current_block_item_number} text={line_stripped}"
+                            f"classified=header current_item={current_block_item_number} text={line_stripped}",
+                            file=sys.stderr,
                         )
                     continue
                 
                 # Check if this line starts a new item
-                if re.match(item_start_pattern, line_stripped):
+                if is_item_start(line_stripped):
                     if trace_lines and line_item_number in traced_item_numbers:
                         print(
                             f"TRACE ITEM START page={page_num} line={line_idx + 1:03d} "
-                            f"item={line_item_number} text={line_stripped}"
+                            f"item={line_item_number} text={line_stripped}",
+                            file=sys.stderr,
                         )
                     # Save previous block if exists
                     if current_block_lines:
@@ -609,6 +653,19 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
                     current_block_lines = [line_stripped]
                     current_block_start = line_idx
                     current_block_item_number = line_item_number
+                elif re.match(
+                    r'^\s*\d+\s+(?:Shipping|Freight|Handling|Discount|Credit|Tax)\b',
+                    line_stripped,
+                    re.IGNORECASE,
+                ):
+                    # Non-wine charges occupy the same table but must not be appended
+                    # to the preceding wine's wrapped description.
+                    if current_block_lines:
+                        block_text = '\n'.join(current_block_lines)
+                        item_blocks.append((current_block_start, block_text))
+                    current_block_lines = []
+                    current_block_start = None
+                    current_block_item_number = None
                 elif current_block_lines:
                     # Continue current block
                     current_block_lines.append(line_stripped)
@@ -620,12 +677,14 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
                         )
                         print(
                             f"TRACE page={page_num} line={line_idx + 1:03d} "
-                            f"classified={classification} current_item={current_block_item_number} text={line_stripped}"
+                            f"classified={classification} current_item={current_block_item_number} text={line_stripped}",
+                            file=sys.stderr,
                         )
                 elif trace_current_context:
                     print(
                         f"TRACE page={page_num} line={line_idx + 1:03d} "
-                        f"classified=ignored_outside_block current_item={current_block_item_number} text={line_stripped}"
+                        f"classified=ignored_outside_block current_item={current_block_item_number} text={line_stripped}",
+                        file=sys.stderr,
                     )
             
             # Don't forget the last block
@@ -639,7 +698,8 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
                 if trace_lines and block_item_number in traced_item_numbers:
                     print(
                         f"TRACE BLOCK page={page_num} item={block_item_number} start_line={block_start + 1:03d}\n"
-                        f"{block_text}\nEND TRACE BLOCK"
+                        f"{block_text}\nEND TRACE BLOCK",
+                        file=sys.stderr,
                     )
                 # Try to parse as item
                 item = parse_item_block(block_text)
@@ -655,9 +715,11 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
     
     # Debug output for unparsed blocks
     if debug and unparsed_blocks:
-        print(f"⚠️ UNPARSED BLOCKS: {len(unparsed_blocks)}")
+        # stdout is a machine-readable JSON channel for the Next.js bridge.
+        # Diagnostics must stay on stderr or one bad row breaks the whole upload.
+        print(f"⚠️ UNPARSED BLOCKS: {len(unparsed_blocks)}", file=sys.stderr)
         for i, block in enumerate(unparsed_blocks[:3]):  # Show first 3
-            print(f"UNPARSED BLOCK {i+1}:\n{block}\n")
+            print(f"UNPARSED BLOCK {i+1}:\n{block}\n", file=sys.stderr)
     
     # Build debug info
     debug_info = {
@@ -669,6 +731,7 @@ def parse_grw_pdf(pdf_path: str, debug: bool = False) -> tuple[List[Dict[str, An
         'first_item_number': min(all_item_numbers) if all_item_numbers else None,
         'last_item_number': max(all_item_numbers) if all_item_numbers else None,
         'unparsed_blocks_count': len(unparsed_blocks),
+        'ocr_used': ocr_used,
     }
     
     # Check for missing item numbers

@@ -18,12 +18,12 @@ from openpyxl.utils import get_column_letter
 if __name__ == '__main__':
     # Direct execution - add parent to path
     sys.path.insert(0, str(Path(__file__).parent))
-    from parser import parse_grw_pdf, clean_text
+    from parser import parse_grw_pdf, clean_text, extract_pdf_text_pages
     from pricing import apply_pricing
     from validator import validate_invoice, ValidationError
 else:
     # Module import
-    from .parser import parse_grw_pdf, clean_text
+    from .parser import parse_grw_pdf, clean_text, extract_pdf_text_pages
     from .pricing import apply_pricing
     from .validator import validate_invoice, ValidationError
 
@@ -65,9 +65,29 @@ def generate_unique_filename(output_path: Path) -> Path:
 
 
 def extract_customer_name(pdf_path: str) -> str:
-    """Extract customer name from PDF (placeholder - can be enhanced)."""
-    # Default customer name - in production, extract from PDF
-    return "Cafe Monarch"
+    """Extract the billed customer name from text or image-only GRW PDFs."""
+    try:
+        page_text, _ = extract_pdf_text_pages(pdf_path)
+        text = "\n".join(page_text)
+
+        customer_match = re.search(
+            r'^\s*Customer:\s*(.+?)(?:\s+Contact:|$)',
+            text,
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if customer_match:
+            customer_name = customer_match.group(1).strip()
+        else:
+            bill_to_match = re.search(r'^\s*Bill To:\s*\n\s*([^\n]+)', text, re.IGNORECASE | re.MULTILINE)
+            customer_name = bill_to_match.group(1).strip() if bill_to_match else ""
+
+        customer_name = re.sub(r'\s*-\s*STEM\s*$', '', customer_name, flags=re.IGNORECASE).strip()
+        if customer_name:
+            return customer_name
+    except Exception as exc:
+        print(f"⚠️ Error reading PDF for customer name: {exc}", file=sys.stderr)
+
+    return ""
 
 
 def extract_order_number(pdf_path: str) -> str:
@@ -102,6 +122,15 @@ def extract_order_number(pdf_path: str) -> str:
                 match = re.search(r'Order\s*#.*?(?:Date)?\s*\n\s*(S\d+)', text, re.IGNORECASE | re.DOTALL)
                 if match:
                     return match.group(1)
+
+                # OCR commonly reads the leading "S" in an order number as "5".
+                ocr_match = re.search(
+                    r'Order\s*#.*?\b[S5](\d{4,})\b\s+\d{2}/\d{2}/\d{4}',
+                    text,
+                    re.IGNORECASE | re.DOTALL,
+                )
+                if ocr_match:
+                    return f"S{ocr_match.group(1)}"
                 
                 # Pattern 3: Order # on one line, S-number on next
                 lines = text.split('\n')
@@ -121,9 +150,14 @@ def extract_order_number(pdf_path: str) -> str:
         print(f"⚠️ Error reading PDF for order number: {e}")
     
     # Fallback: try to extract from filename (e.g., S58672.pdf)
-    match = re.search(r'S(\d+)', pdf_path.stem)
+    match = re.search(r'S(\d+)', pdf_path.stem, re.IGNORECASE)
     if match:
         return f"S{match.group(1)}"
+
+    # Uploaded files are often named "Invoice 63547.pdf" rather than S63547.pdf.
+    number_match = re.search(r'(?<!\d)(\d{4,})(?!\d)', pdf_path.stem)
+    if number_match:
+        return f"S{number_match.group(1)}"
     
     return pdf_path.stem
 

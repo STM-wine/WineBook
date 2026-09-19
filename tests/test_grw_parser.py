@@ -1,6 +1,10 @@
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from openpyxl import load_workbook
 
@@ -14,12 +18,116 @@ from modules.po_tools.grw_invoice_converter.parser import (
     extract_description_fragment_from_line,
     extract_invoice_summary_from_text,
     format_item_description,
+    parse_grw_pdf,
     parse_item_block,
 )
 from modules.po_tools.grw_invoice_converter.validator import validate_no_duplicate_skus
 
 
 class GrwParserTests(unittest.TestCase):
+    def test_image_only_invoice_uses_ocr_and_keeps_shipping_out_of_wine_name(self):
+        blank_page = SimpleNamespace(extract_text=lambda: "")
+        fake_pdf = MagicMock()
+        fake_pdf.pages = [blank_page]
+        fake_pdf.__enter__.return_value = fake_pdf
+        ocr_text = (
+            "1 Sale USR:DUN:DUNN- Dunn Howell Mountain 1999 750mL $225.75 1750 $225.75\n"
+            "0750-1999-FOLOCO\n"
+            "2 Shipping Shipping Shipping Charge $25.68 1ea $25.68\n"
+            "Subtotal: $251.43"
+        )
+
+        with patch(
+            "modules.po_tools.grw_invoice_converter.parser.pdfplumber.open",
+            return_value=fake_pdf,
+        ), patch(
+            "modules.po_tools.grw_invoice_converter.parser.extract_text_with_ocr",
+            return_value=ocr_text,
+        ):
+            items, _, debug_info = parse_grw_pdf(
+                "modules/po_tools/grw_invoice_converter/test_data/S58672.pdf",
+                debug=True,
+            )
+
+        self.assertTrue(debug_info["ocr_used"])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["description"], "Dunn Howell Mountain 1999 1/750ml")
+        self.assertEqual(items[0]["ordered_qty"], 1)
+        self.assertNotIn("Shipping", items[0]["description"])
+
+    def test_continuation_page_row_without_sale_is_parsed(self):
+        block = (
+            "17 BUR:DOM2:VIG- Domaine Test Vieilles Vignes 2021 750mL "
+            "$ 149.00 2 0750 $ 298.00\n"
+            "0750-2021-F0L0C0"
+        )
+
+        item = parse_item_block(block)
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["line_number"], 17)
+        self.assertEqual(item["sku_prefix"], "BUR")
+        self.assertEqual(item["description"], "Domaine Test Vieilles Vignes 2021 1/750ml")
+        self.assertEqual(item["ordered_qty"], 2)
+        self.assertEqual(item["quantity"], 2)
+        self.assertEqual(item["unit_price"], 149.0)
+        self.assertEqual(item["ext_cost"], 298.0)
+
+    def test_pdf_scanner_and_item_parser_accept_the_same_row_shapes(self):
+        page_one = SimpleNamespace(
+            extract_text=lambda: (
+                "1 Sale BDX:ABC:ONE- Chateau One 2018 750mL $100.00 1 750 $ 100.00\n"
+                "0750-2018-F0L0C0\nSubtotal: $100.00"
+            )
+        )
+        page_two = SimpleNamespace(
+            extract_text=lambda: (
+                "2 BUR:AB12:TWO- Domaine Two 2020 750mL $ 80.00 2 750 $ 160.00\n"
+                "0750-2020-F0L0C0\nSubtotal: $160.00"
+            )
+        )
+        fake_pdf = MagicMock()
+        fake_pdf.pages = [page_one, page_two]
+        fake_pdf.__enter__.return_value = fake_pdf
+
+        with patch(
+            "modules.po_tools.grw_invoice_converter.parser.pdfplumber.open",
+            return_value=fake_pdf,
+        ):
+            items, pages_parsed, debug_info = parse_grw_pdf(
+                "modules/po_tools/grw_invoice_converter/test_data/S58672.pdf",
+                debug=True,
+            )
+
+        self.assertEqual(pages_parsed, 2)
+        self.assertEqual([item["line_number"] for item in items], [1, 2])
+        self.assertEqual(debug_info["items_per_page"], {1: 1, 2: 1})
+        self.assertEqual(debug_info["missing_item_numbers"], [])
+
+    def test_debug_diagnostics_do_not_corrupt_stdout_json_channel(self):
+        malformed_page = SimpleNamespace(
+            extract_text=lambda: "1 Sale BDX:ABC:ONE- Missing prices\nSubtotal: $0.00"
+        )
+        fake_pdf = MagicMock()
+        fake_pdf.pages = [malformed_page]
+        fake_pdf.__enter__.return_value = fake_pdf
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with patch(
+            "modules.po_tools.grw_invoice_converter.parser.pdfplumber.open",
+            return_value=fake_pdf,
+        ), redirect_stdout(stdout), redirect_stderr(stderr):
+            items, _, debug_info = parse_grw_pdf(
+                "modules/po_tools/grw_invoice_converter/test_data/S58672.pdf",
+                debug=True,
+            )
+
+        self.assertEqual(items, [])
+        self.assertEqual(debug_info["unparsed_blocks_count"], 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("UNPARSED BLOCKS: 1", stderr.getvalue())
+
     def test_wrapped_descriptions_remain_distinct_for_duplicate_validation(self):
         block_one = (
             "5 Sale BUR:VIN:DANC- Vincent Dancer Chassagne Montrachet $149.00 1 750mL $149.00\n"
@@ -214,6 +322,7 @@ class GrwParserTests(unittest.TestCase):
         Total: $1,700.00
         Paid: $1,553.75
         Balance Due: $146.25
+        2 Shipping Shipping Shipping Charge $25.68 1ea $25.68
         """
 
         summary = extract_invoice_summary_from_text(text)
@@ -223,6 +332,7 @@ class GrwParserTests(unittest.TestCase):
         self.assertEqual(summary["subtotal"], 1700.00)
         self.assertEqual(summary["paid_amount"], 1553.75)
         self.assertEqual(summary["balance_due"], 146.25)
+        self.assertEqual(summary["shipping_amount"], 25.68)
 
     def test_credit_footer_lines_do_not_pollute_last_item_description(self):
         block = (

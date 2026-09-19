@@ -49,6 +49,7 @@ type ParseMetadata = {
   itemNumbers?: number[];
   missingItemNumbers?: number[];
   unparsedBlocksCount?: number;
+  ocrUsed?: boolean;
   warnings?: ParseWarning[];
   invoiceSummary?: InvoiceSummary;
 };
@@ -68,6 +69,7 @@ type InvoiceSummary = {
   credit_amount?: number | null;
   credit_date?: string | null;
   balance_due?: number | null;
+  shipping_amount?: number | null;
   payment_rows?: PaymentRow[];
 };
 
@@ -366,6 +368,10 @@ export function GrwConverterUploader() {
             <div>
               <span>Sales Tax</span>
               <strong>{formatMoney(invoiceSummary?.sales_tax)}</strong>
+            </div>
+            <div>
+              <span>Shipping</span>
+              <strong>{formatMoney(invoiceSummary?.shipping_amount)}</strong>
             </div>
             <div>
               <span>Total</span>
