@@ -5,7 +5,12 @@ import { mkdir, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import path from "path";
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import {
+  applyGrwItemNumberMatches,
+  type GrwInvoiceLineForLookup,
+  type GrwQuickBooksItemForLookup
+} from "@/lib/grw-item-number-lookup";
+import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -67,6 +72,19 @@ async function parseWithPython(pdfPath: string) {
   }
 }
 
+async function fetchGrwQuickBooksItems() {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("quickbooks_items")
+    .select("name,sales_desc,purchase_desc,is_active,time_modified")
+    .ilike("name", "GRW%")
+    .limit(1000)
+    .returns<GrwQuickBooksItemForLookup[]>();
+
+  if (error) throw new Error(`Could not look up GRW item numbers: ${error.message}`);
+  return data || [];
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -98,7 +116,9 @@ export async function POST(request: Request) {
   try {
     await mkdir(tempDir, { recursive: true });
     await writeFile(pdfPath, Buffer.from(await file.arrayBuffer()));
-    const payload = await parseWithPython(pdfPath);
+    const payload = await parseWithPython(pdfPath) as { items?: GrwInvoiceLineForLookup[] };
+    const grwQuickBooksItems = await fetchGrwQuickBooksItems();
+    payload.items = applyGrwItemNumberMatches(payload.items || [], grwQuickBooksItems);
     return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json(
