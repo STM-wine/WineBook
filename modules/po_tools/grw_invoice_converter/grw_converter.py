@@ -246,10 +246,53 @@ def write_to_updated_template(
     if total_section_start_row is None:
         total_section_start_row = item_start_row + 10
     
-    def build_invoice_summary_rows(summary: Dict[str, Any] | None) -> list[tuple[str, str]]:
+    def build_invoice_summary_rows(summary: Dict[str, Any] | None) -> list[tuple[str, Any]]:
         if not summary:
             return []
-        rows: list[tuple[str, str]] = []
+
+        rows: list[tuple[str, Any]] = []
+        shipping_amount = summary.get("shipping_amount") or 0
+
+        if isinstance(shipping_amount, (int, float)) and shipping_amount > 0:
+            wine_subtotal = round(
+                sum(
+                    item.get("Ext Cost", item.get("ext_cost", 0)) or 0
+                    for item in items
+                ),
+                2,
+            )
+            invoice_total = summary.get("total")
+            if invoice_total is None:
+                invoice_total = summary.get("subtotal")
+            if invoice_total is None:
+                invoice_total = round(wine_subtotal + shipping_amount, 2)
+
+            rows.extend(
+                [
+                    ("Subtotal", wine_subtotal),
+                    ("Shipping", shipping_amount),
+                    ("Total", invoice_total),
+                ]
+            )
+
+            # A balance-due row is only useful when a credit or payment changes
+            # what remains due. Otherwise it merely duplicates the invoice total.
+            if summary.get("credit_amount") not in (None, "", 0.0):
+                rows.append(("Credit Applied", summary["credit_amount"]))
+            if summary.get("credit_date") not in (None, ""):
+                rows.append(("Credit Date", str(summary["credit_date"])))
+            if summary.get("paid_amount") not in (None, "", 0.0):
+                rows.append(("Paid", summary["paid_amount"]))
+            if (
+                summary.get("balance_due") not in (None, "")
+                and (
+                    summary.get("credit_amount") not in (None, "", 0.0)
+                    or summary.get("paid_amount") not in (None, "", 0.0)
+                )
+            ):
+                rows.append(("Balance Due", summary["balance_due"]))
+            return rows
+
         ordered_fields = [
             ("Subtotal", summary.get("subtotal")),
             ("Credit Applied", summary.get("credit_amount")),
@@ -397,7 +440,13 @@ def write_to_updated_template(
         title_cell.value = "Invoice adjustments"
         for offset, (label, value) in enumerate(summary_rows, start=1):
             sheet.cell(row=summary_start_row + offset, column=1).value = label
-            sheet.cell(row=summary_start_row + offset, column=2).value = value
+            value_cell = sheet.cell(row=summary_start_row + offset, column=2)
+            value_cell.value = value
+            if isinstance(value, (int, float)):
+                value_cell.number_format = '$#,##0.00'
+                value_alignment = copy(value_cell.alignment)
+                value_alignment.horizontal = "left"
+                value_cell.alignment = value_alignment
 
     # Update total formulas to include all written items
     # Calculate the last item row for dynamic SUM ranges

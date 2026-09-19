@@ -402,6 +402,60 @@ class GrwParserTests(unittest.TestCase):
             self.assertIn("Balance Due", values.values())
             self.assertIn("$146.25", values.values())
 
+    def test_excel_export_breaks_shipping_out_from_wine_subtotal(self):
+        items = [
+            {
+                "Item Number": "GRW000082",
+                "Item Description": "Dunn Howell Mountain 1999 1/750ml",
+                "PK": 1,
+                "Quantity": 1,
+                "FOB Btl": 225.75,
+                "Frontline": 248,
+                "Account": "Vinum55",
+                "FOB Case": 225.75,
+                "Ext Cost": 225.75,
+                "Ext Price": 248,
+                "SKU": "USR",
+                "STM Markup %": 0.10,
+            }
+        ]
+        invoice_summary = {
+            "subtotal": 251.43,
+            "shipping_amount": 25.68,
+            "total": 251.43,
+            "balance_due": 251.43,
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "test.xlsx"
+            workbook_path = write_to_updated_template(
+                items,
+                "modules/po_tools/grw_invoice_converter/templates/GRW_Template_Updated.xlsx",
+                str(output_path),
+                "S63547",
+                "Vinum55",
+                invoice_summary=invoice_summary,
+            )
+            workbook = load_workbook(workbook_path)
+            sheet = workbook.active
+
+            heading_row = next(
+                row
+                for row in range(1, 20)
+                if sheet.cell(row=row, column=1).value == "Invoice adjustments"
+            )
+            adjustment_values = {
+                sheet.cell(row=row, column=1).value: sheet.cell(row=row, column=2).value
+                for row in range(heading_row + 1, heading_row + 4)
+            }
+
+            self.assertEqual(adjustment_values["Subtotal"], 225.75)
+            self.assertEqual(adjustment_values["Shipping"], 25.68)
+            self.assertEqual(adjustment_values["Total"], 251.43)
+            self.assertNotIn("Balance Due", adjustment_values)
+            for row in range(heading_row + 1, heading_row + 4):
+                self.assertEqual(sheet.cell(row=row, column=2).alignment.horizontal, "left")
+
 
 if __name__ == "__main__":
     unittest.main()
