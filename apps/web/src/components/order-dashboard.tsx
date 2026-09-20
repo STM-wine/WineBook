@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   cancelPurchaseOrderDrafts,
+  clearAllOrderApprovals,
   createSupplierWineRequest,
   deletePendingSupplierCatalogWine,
   deletePurchaseOrderLine,
@@ -450,6 +451,37 @@ export function OrderDashboard({
     }
   }
 
+  function clearAllApprovals() {
+    const approvedRows = rows.filter(
+      (row) => row.recommendation_status === "approved" || row.recommendation_status === "edited"
+    );
+    if (approvedRows.length === 0) return;
+
+    setPendingMessage("Clearing all approved orders...");
+    setErrorMessage("");
+
+    startTransition(async () => {
+      try {
+        await flushApprovalQueue();
+        await flushCatalogWorkbenchSaves();
+        const result = await clearAllOrderApprovals({ reportRunId: reportRun.id });
+        setRows((current) =>
+          current.map((row) =>
+            row.recommendation_status === "approved" || row.recommendation_status === "edited"
+              ? { ...row, recommendation_status: "rejected", approved_qty: 0 }
+              : row
+          )
+        );
+        setPendingMessage(
+          `Cleared ${result.cleared.toLocaleString()} approved order line${result.cleared === 1 ? "" : "s"}.`
+        );
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Could not clear all approved orders.");
+        setPendingMessage("");
+      }
+    });
+  }
+
   function setWorkingQty(row: Recommendation, qty: number) {
     patchRow(row.id, { approved_qty: Math.max(0, Math.round(qty)) });
   }
@@ -827,7 +859,11 @@ export function OrderDashboard({
           supplierCatalogWines={supplierCatalogWines}
           supplierTargetWeeks={supplierTargetWeeks}
           visibleCount={visibleRecommendations.length}
+          hasApprovedOrders={rows.some(
+            (row) => row.recommendation_status === "approved" || row.recommendation_status === "edited"
+          )}
           onSaveApproval={saveApproval}
+          onClearAllApprovals={clearAllApprovals}
           onClearSupplierApprovals={clearSupplierApprovals}
           onSaveOrderPath={saveOrderPath}
           onSaveWorkingQty={saveWorkingQty}

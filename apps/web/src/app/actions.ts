@@ -245,6 +245,46 @@ export async function updateRecommendationApprovals(input: {
   revalidateDashboardData();
 }
 
+export async function clearAllOrderApprovals(input: { reportRunId: string }) {
+  if (!input.reportRunId) {
+    throw new Error("Missing report run id.");
+  }
+
+  const { supabase } = await requireWriteAccess();
+  const { data: recommendationRows, error: recommendationError } = await supabase
+    .from("reorder_recommendations")
+    .update({
+      recommendation_status: "rejected",
+      approved_qty: 0
+    })
+    .eq("report_run_id", input.reportRunId)
+    .in("recommendation_status", ["approved", "edited"])
+    .select("id");
+
+  if (recommendationError) {
+    throw new Error(recommendationError.message);
+  }
+
+  const { data: catalogRows, error: catalogError } = await supabase
+    .from("supplier_catalog_workbench_items")
+    .update({
+      recommendation_status: "rejected",
+      approved_qty: 0,
+      updated_at: new Date().toISOString()
+    })
+    .eq("report_run_id", input.reportRunId)
+    .in("recommendation_status", ["approved", "edited"])
+    .select("id");
+
+  if (catalogError) {
+    throw new Error(catalogError.message);
+  }
+
+  revalidateSupplierCatalogData();
+  revalidatePath("/");
+  return { cleared: (recommendationRows?.length || 0) + (catalogRows?.length || 0) };
+}
+
 export async function updateRecommendationOrderPath(input: {
   id: string;
   orderPath: "stateside" | "di";

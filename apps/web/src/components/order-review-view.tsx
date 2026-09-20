@@ -52,7 +52,9 @@ export function OrderReviewView({
   supplierCatalogWines,
   supplierTargetWeeks,
   visibleCount,
+  hasApprovedOrders,
   onSaveApproval,
+  onClearAllApprovals,
   onClearSupplierApprovals,
   onSaveOrderPath,
   onSaveWorkingQty,
@@ -87,7 +89,9 @@ export function OrderReviewView({
   supplierCatalogWines: SupplierCatalogWine[];
   supplierTargetWeeks: Record<string, string>;
   visibleCount: number;
+  hasApprovedOrders: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
+  onClearAllApprovals: () => void;
   onClearSupplierApprovals: (supplierName: string) => void;
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
@@ -133,6 +137,19 @@ export function OrderReviewView({
             <h1>Order Summary</h1>
             <p>Supplier groups sorted by suggested order value. Rows are live from the latest completed report run.</p>
           </div>
+          <button
+            className="ghost-button clear-approvals-button"
+            disabled={!hasApprovedOrders || isPending}
+            onClick={() => {
+              if (!window.confirm(
+                "Clear all approved orders across every supplier? This includes orders hidden by the current filters."
+              )) return;
+              onClearAllApprovals();
+            }}
+            type="button"
+          >
+            Clear All Approved Orders
+          </button>
         </div>
         <div className="filter-bar">
           <label>
