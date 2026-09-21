@@ -7,7 +7,7 @@ import {
 } from "./replenishment-policy";
 
 export const ORDERING_SOURCE = "quickbooks_vinosmith_stem";
-export const ORDERING_BUILDER_VERSION = 2;
+export const ORDERING_BUILDER_VERSION = 3;
 
 export type SourceQuickBooksItem = {
   list_id: string;

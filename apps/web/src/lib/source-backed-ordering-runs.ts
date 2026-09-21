@@ -1,10 +1,11 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Recommendation, ReportRun } from "./types";
+import type { ReportRun } from "./types";
 import { fetchAllRecommendationsForRun } from "./supabase/recommendations";
-import { carryForwardBuyerState, normalizeOrderingItemCode, ORDERING_BUILDER_VERSION, ORDERING_SOURCE } from "./source-backed-ordering";
+import { carryForwardBuyerState, normalizeOrderingItemCode, ORDERING_BUILDER_VERSION } from "./source-backed-ordering";
 import { fetchSourceBackedOrderingData, orderingBusinessDate } from "./source-backed-ordering-server";
+export { isSourceBackedRun, overlayCurrentSourceRows, sourceRunNeedsCurrentOverlay } from "./ordering-run-overlay";
 
 type OrderingClient = SupabaseClient<any, "public", any>;
 
@@ -115,10 +116,6 @@ export async function createSourceBackedOrderingRun(supabase: OrderingClient, cr
   }
 }
 
-export function isSourceBackedRun(run: Pick<OrderingRun, "run_type" | "diagnostics"> | null | undefined) {
-  return run?.run_type === "quickbooks_sync" && run.diagnostics?.ordering_source === ORDERING_SOURCE;
-}
-
 async function fetchLatestCompletedRun(supabase: OrderingClient, runType?: OrderingRun["run_type"], excludeSource = false) {
   let query = supabase
     .from("report_runs")
@@ -163,21 +160,4 @@ async function carryForwardWorkbenchItems(supabase: OrderingClient, previousRunI
   );
   if (insertError) throw new Error(insertError.message);
   return rows.length;
-}
-
-export function overlayCurrentSourceRows(recommendations: Recommendation[], currentRows: Array<Record<string, any>>) {
-  const currentByCode = new Map(currentRows.map((row) => [normalizeOrderingItemCode(row.product_code), row]));
-  return recommendations.map((recommendation) => {
-    const current = currentByCode.get(normalizeOrderingItemCode(recommendation.product_code));
-    if (!current) return recommendation;
-    return {
-      ...recommendation,
-      ...current,
-      id: recommendation.id,
-      report_run_id: recommendation.report_run_id,
-      recommendation_status: recommendation.recommendation_status,
-      approved_qty: recommendation.approved_qty,
-      order_path: recommendation.order_path
-    } as Recommendation;
-  });
 }

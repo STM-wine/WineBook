@@ -26,7 +26,13 @@ import type {
 } from "@/lib/types";
 import { applyVinosmithAvailability, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { fetchActiveOrderingRun, orderingSourceMode } from "@/lib/source-backed-ordering-runs";
+import { fetchSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
+import {
+  fetchActiveOrderingRun,
+  orderingSourceMode,
+  overlayCurrentSourceRows,
+  sourceRunNeedsCurrentOverlay
+} from "@/lib/source-backed-ordering-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -187,7 +193,8 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     { data: priceChangeEvents },
     quickBooksLastSyncAt,
     vinosmithLastSyncAt,
-    activeOrderingRun
+    activeOrderingRun,
+    vinosmithAvailabilityResult
   ] = await Promise.all([
     reportRunsPromise,
     supplierCatalogPromise,
@@ -195,7 +202,8 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     priceChangeEventsPromise,
     quickBooksLastSyncPromise,
     vinosmithLastSyncPromise,
-    activeOrderingRunPromise
+    activeOrderingRunPromise,
+    vinosmithAvailabilityPromise
   ]);
   const latestRun = activeOrderingRun || reportRuns?.[0] || null;
 
@@ -218,6 +226,17 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
 
   const reportRecommendationsPromise = fetchAllRecommendationsForRun(serviceRoleSupabase, latestRun.id);
   const quickBooksOnOrderItemsPromise = fetchQuickBooksOnOrderItems(serviceRoleSupabase);
+  const currentSourceOverlayPromise = sourceRunNeedsCurrentOverlay(latestRun) && vinosmithAvailabilityResult.data
+    ? fetchSourceBackedOrderingData(serviceRoleSupabase, {
+        referenceDate: latestRun.report_date || undefined,
+        liveAvailability: vinosmithAvailabilityResult.data
+      })
+        .then((data) => ({ rows: data.rows, error: null as string | null }))
+        .catch((error) => ({
+          rows: null,
+          error: error instanceof Error ? error.message : "Current QuickBooks sales could not be loaded."
+        }))
+    : Promise.resolve({ rows: null, error: null as string | null });
 
   const poDraftRowsPromise = serviceRoleSupabase
     .from("purchase_order_drafts")
@@ -282,21 +301,24 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     { data: suppliers },
     quickBooksSupplierMatches,
     quickBooksOnOrderItems,
-    vinosmithAvailabilityResult
+    currentSourceOverlayResult
   ] = await Promise.all([
     reportRecommendationsPromise,
     poDraftRowsPromise,
     suppliersPromise,
     fetchQuickBooksSupplierMatches(serviceRoleSupabase),
     quickBooksOnOrderItemsPromise,
-    vinosmithAvailabilityPromise
+    currentSourceOverlayPromise
   ]);
+  const sourceRecommendations = currentSourceOverlayResult.rows
+    ? overlayCurrentSourceRows(reportRecommendations || [], currentSourceOverlayResult.rows)
+    : vinosmithAvailabilityResult.data
+      ? applyVinosmithAvailability(reportRecommendations || [], vinosmithAvailabilityResult.data.byProductCode)
+      : reportRecommendations || [];
 
   const recommendations = applyQuickBooksOnOrderToRecommendations(
     mergeSupplierCatalogRows(
-      vinosmithAvailabilityResult.data
-        ? applyVinosmithAvailability(reportRecommendations || [], vinosmithAvailabilityResult.data.byProductCode)
-        : reportRecommendations || [],
+      sourceRecommendations,
       supplierCatalogWines || [],
       latestRun.id
     ),
@@ -311,6 +333,9 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
       : null,
     vinosmithAvailabilityResult.error
       ? `Vinosmith Get Available could not be refreshed. Ordering data is showing the saved availability snapshot from the active run. ${vinosmithAvailabilityResult.error}`
+      : null,
+    currentSourceOverlayResult.error
+      ? `This ordering run predates the complete QuickBooks sales pagination fix, and its corrected sales could not be reloaded. Refresh Ordering Data before relying on sales or suggested quantities. ${currentSourceOverlayResult.error}`
       : null,
     latestRun.run_type === "quickbooks_sync" && latestRun.diagnostics?.quickbooks_fresh === false
       ? `QuickBooks source data was stale when this ordering run was generated (${Math.round(Number(latestRun.diagnostics.quickbooks_freshness_hours) || 0)} hours old). Refresh the QuickBooks mirror before relying on quantities, costs, or sales.`
