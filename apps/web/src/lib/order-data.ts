@@ -82,12 +82,33 @@ function recommendationForTargetWeeks(row: Recommendation, targetWeeks: number):
   return roundUpToPack(rawQty, asNumber(row.pack_size) || 1);
 }
 
+export function isOlderVintageSuppressed(
+  row: Pick<Recommendation, "diagnostics">
+): boolean {
+  return row.diagnostics?.older_vintage_suppressed === true;
+}
+
+export function suppressOlderVintageRecommendation(row: Recommendation): Recommendation {
+  if (!isOlderVintageSuppressed(row)) return row;
+  return {
+    ...row,
+    recommended_qty_rounded: 0,
+    order_cost: 0,
+    landed_cost: 0
+  };
+}
+
 export function applySupplierTargetWeeks(
   rows: Recommendation[],
   supplierTargetWeeks: Record<string, number>,
   defaultTargetWeeks = DEFAULT_SUPPLIER_TARGET_WEEKS
 ): Recommendation[] {
   return rows.map((row) => {
+    // The source builder is authoritative about vintage eligibility. Target-week
+    // overrides are presentation-time calculations and must never resurrect an
+    // older vintage that the builder intentionally suppressed.
+    if (isOlderVintageSuppressed(row)) return suppressOlderVintageRecommendation(row);
+
     const supplier = row.supplier_name?.trim() || "Unknown Supplier";
     const targetWeeks = supplierTargetWeeks[supplier] ?? defaultTargetWeeks;
     const policy = rowReplenishmentPolicy(row);

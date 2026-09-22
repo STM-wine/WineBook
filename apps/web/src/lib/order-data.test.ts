@@ -260,6 +260,34 @@ describe("live Order Review inventory and target weeks", () => {
     expect(applySupplierTargetWeeks([row], { Stateside: 0 })[0].recommended_qty_rounded).toBe(0);
   });
 
+  it("never restores an older vintage suppressed by the source builder", () => {
+    const olderVintage = recommendation({
+      product_name: "Averaen Willamette Valley Pinot Noir 2023 12/750ml",
+      weekly_velocity: 23.5,
+      true_available: 0,
+      on_order: 0,
+      pack_size: 12,
+      fob: 11.2,
+      trucking_cost_per_bottle: 1,
+      recommended_qty_rounded: 120,
+      order_cost: 1344,
+      landed_cost: 1464,
+      diagnostics: {
+        vintage: 2023,
+        latest_active_vintage: 2024,
+        is_latest_active_vintage: false,
+        older_vintage_suppressed: true,
+        automatic_recommendation: false
+      }
+    });
+
+    expect(applySupplierTargetWeeks([olderVintage], {})[0]).toMatchObject({
+      recommended_qty_rounded: 0,
+      order_cost: 0,
+      landed_cost: 0
+    });
+  });
+
   it("preserves the saved one-case quantity for a new workbench wine without sales velocity", () => {
     const newWine = recommendation({
       supplier_catalog_wine_id: "catalog-1",
