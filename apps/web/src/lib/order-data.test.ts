@@ -8,7 +8,8 @@ import {
   mergeSupplierCatalogRows,
   removeSupplierCatalogWineFromWorkbench,
   replaceSupplierCatalogWineInWorkbench,
-  recommendationMatchesCatalogWine
+  recommendationMatchesCatalogWine,
+  sortSupplierGroups
 } from "./order-data";
 import type { Recommendation, SupplierCatalogWine } from "./types";
 
@@ -211,6 +212,33 @@ describe("order summary display and filters", () => {
       suggestedOnly: false,
       replenishmentPolicy: "Limited"
     }).map((row) => row.id)).toEqual(["limited"]);
+  });
+
+  it("sorts suggested orders by bottle quantity and offers value as a separate sort", () => {
+    const groups = [
+      { supplier: "North Berkeley", recommendedBottles: 726, suggestedValue: 13662.52 },
+      { supplier: "Broadbent Selections", recommendedBottles: 996, suggestedValue: 8512.51 },
+      { supplier: "VINTUS LLC", recommendedBottles: 684, suggestedValue: 10363.67 }
+    ].map((group) => ({
+      ...group,
+      rows: [],
+      skuCount: 0,
+      urgentCount: 0,
+      freeGoodProgramCount: 0,
+      approvedBottles: 0,
+      approvedValue: 0
+    }));
+
+    expect(sortSupplierGroups(groups, "default").map((group) => group.supplier)).toEqual([
+      "Broadbent Selections",
+      "North Berkeley",
+      "VINTUS LLC"
+    ]);
+    expect(sortSupplierGroups(groups, "value").map((group) => group.supplier)).toEqual([
+      "North Berkeley",
+      "VINTUS LLC",
+      "Broadbent Selections"
+    ]);
   });
 });
 

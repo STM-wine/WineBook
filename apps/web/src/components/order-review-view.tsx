@@ -135,7 +135,7 @@ export function OrderReviewView({
         <div className="section-heading">
           <div>
             <h1>Order Summary</h1>
-            <p>Supplier groups sorted by suggested order value. Rows are live from the latest completed report run.</p>
+            <p>Supplier groups sorted by suggested bottles by default. Rows are live from the latest completed report run.</p>
           </div>
           <button
             className="ghost-button clear-approvals-button"
@@ -197,7 +197,8 @@ export function OrderReviewView({
           <label className="compact-select-control">
             Sort
             <select value={supplierSort} onChange={(event) => setSupplierSort(event.target.value as SupplierGroupSortMode)}>
-              <option value="default">Supplier Suggested Orders</option>
+              <option value="default">Suggested Bottles: High to Low</option>
+              <option value="value">Suggested Value: High to Low</option>
               <option value="az">A-Z</option>
               <option value="za">Z-A</option>
             </select>

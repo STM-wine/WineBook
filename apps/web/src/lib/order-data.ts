@@ -9,7 +9,7 @@ import type {
 } from "./types";
 import { replenishmentPolicy, type ReplenishmentPolicy } from "./replenishment-policy";
 
-export type SupplierGroupSortMode = "default" | "az" | "za";
+export type SupplierGroupSortMode = "default" | "value" | "az" | "za";
 export const DEFAULT_SUPPLIER_TARGET_WEEKS = 5;
 
 export function asNumber(value: number | string | null | undefined): number {
@@ -611,5 +611,17 @@ export function sortSupplierGroups(groups: SupplierGroup[], sortMode: SupplierGr
     return sorted.sort((a, b) => b.supplier.localeCompare(a.supplier));
   }
 
-  return sorted.sort((a, b) => b.suggestedValue - a.suggestedValue || a.supplier.localeCompare(b.supplier));
+  if (sortMode === "value") {
+    return sorted.sort((a, b) =>
+      b.suggestedValue - a.suggestedValue ||
+      b.recommendedBottles - a.recommendedBottles ||
+      a.supplier.localeCompare(b.supplier)
+    );
+  }
+
+  return sorted.sort((a, b) =>
+    b.recommendedBottles - a.recommendedBottles ||
+    b.suggestedValue - a.suggestedValue ||
+    a.supplier.localeCompare(b.supplier)
+  );
 }
