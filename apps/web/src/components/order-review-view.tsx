@@ -20,6 +20,7 @@ import { WorkbenchGrid } from "./workbench-grid";
 import { supplierCatalogWineToInput, type SupplierCatalogWineInput } from "@/lib/supplier-catalog";
 import {
   REPLENISHMENT_POLICIES,
+  policySupportsAutomaticRecommendations,
   replenishmentPolicyLabel,
   type ReplenishmentPolicy,
   type ReplenishmentPolicyFilter
@@ -644,7 +645,7 @@ function ReplenishmentEditDialog({
     setIsSaving(true);
     setError("");
     try {
-      await onSave(policy, policy === "Limited" && recommendationsSuppressed);
+      await onSave(policy, policySupportsAutomaticRecommendations(policy) && recommendationsSuppressed);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the replenishment policy.");
       setIsSaving(false);
@@ -673,7 +674,7 @@ function ReplenishmentEditDialog({
             </select>
           </label>
 
-          {policy === "Limited" ? (
+          {policySupportsAutomaticRecommendations(policy) ? (
             <label className="replenishment-auto-toggle">
               <input
                 checked={!recommendationsSuppressed}
@@ -683,15 +684,14 @@ function ReplenishmentEditDialog({
               />
               <span>
                 <strong>Automatic reorder recommendations</strong>
-                <small>Turn this off when the wine will be unavailable for a while.</small>
+                <small>Turn this off when this exact item or vintage cannot be reordered.</small>
               </span>
             </label>
           ) : null}
 
           <p className="replenishment-family-note">
-            {row.policy_family_key
-              ? "This change applies to every vintage in this wine family."
-              : "This change applies to this item only."}
+            The automatic-reorder switch applies only to this item number. It stays off until manually restored;
+            a new vintage with a new item number starts eligible for recommendations.
           </p>
           {!canManage ? <p className="form-error">You do not have permission to change replenishment policies.</p> : null}
           {error ? <p className="form-error" role="alert">{error}</p> : null}

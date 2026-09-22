@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_ORDERING_LOGIC_SETTINGS } from "./ordering-logic";
+import { MANUAL_RECOMMENDATION_PAUSE_REASON } from "./replenishment-policy";
 import {
   buildSourceBackedOrderingRows,
   calculateSourceRecommendation,
@@ -222,15 +223,81 @@ describe("source-backed ordering rows", () => {
     }
   });
 
-  it("allows Limited recommendations to be paused without disabling manual ordering", () => {
+  it("allows every automatic policy to be paused without disabling manual ordering", () => {
+    for (const policy of ["Core", "Limited Core", "Limited"] as const) {
+      const result = build({
+        markers: [{
+          item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: policy === "Core",
+          replenishment_policy: policy, recommendations_suppressed: true, note_source: "manual"
+        }],
+        salesByCode: new Map([["AB12345", sales({ last30: 100 })]])
+      });
+      expect(result.rows[0]).toMatchObject({
+        replenishment_policy: policy,
+        recommendations_suppressed: true,
+        recommended_qty_rounded: 0
+      });
+    }
+  });
+
+  it("recognizes the compatibility pause stored in the suppression reason", () => {
     const result = build({
       markers: [{
         item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: false,
-        replenishment_policy: "Limited", recommendations_suppressed: true
+        replenishment_policy: "Limited Core", recommendations_suppressed: false,
+        suppression_reason: MANUAL_RECOMMENDATION_PAUSE_REASON, note_source: "manual"
       }],
       salesByCode: new Map([["AB12345", sales({ last30: 100 })]])
     });
-    expect(result.rows[0]).toMatchObject({ replenishment_policy: "Limited", recommendations_suppressed: true, recommended_qty_rounded: 0 });
+
+    expect(result.rows[0]).toMatchObject({
+      replenishment_policy: "Limited Core",
+      recommendations_suppressed: true,
+      recommended_qty_rounded: 0
+    });
+  });
+
+  it("does not carry an unavailable item's pause onto the next vintage", () => {
+    const result = build({
+      quickBooksItems: [
+        qb({
+          list_id: "qb-2025",
+          name: "SAN000025",
+          sales_desc: "Domaine Test Sancerre 2025 12/750ml",
+          custom_fields: { "PACK SIZE": "12", item_number: "SAN000025", Vintage: "2025" }
+        }),
+        qb({
+          list_id: "qb-2026",
+          name: "SAN000026",
+          sales_desc: "Domaine Test Sancerre 2026 12/750ml",
+          custom_fields: { "PACK SIZE": "12", item_number: "SAN000026", Vintage: "2026" }
+        })
+      ],
+      vinosmithWines: [
+        { wine_id: "wine-2025", code: "SAN000025", name: "Domaine Test Sancerre 2025 12/750ml", vintage: "2025", importer_name: "Fallback Supplier" },
+        { wine_id: "wine-2026", code: "SAN000026", name: "Domaine Test Sancerre 2026 12/750ml", vintage: "2026", importer_name: "Fallback Supplier" }
+      ],
+      vinosmithAvailableByCode: new Map([["SAN000025", 0], ["SAN000026", 0]]),
+      markers: [{
+        item_code: "SAN000025", quickbooks_item_list_id: "qb-2025", is_btg: false, is_core: false,
+        replenishment_policy: "Limited Core", policy_family_key: "domaine test sancerre",
+        family_default_policy: "Limited Core", recommendations_suppressed: true, note_source: "manual"
+      }],
+      salesByCode: new Map([
+        ["SAN000025", sales({ last30: 100 })],
+        ["SAN000026", sales({ last30: 100 })]
+      ])
+    });
+
+    expect(result.rows.find((row) => row.product_code === "SAN000025")).toMatchObject({
+      recommendations_suppressed: true,
+      recommended_qty_rounded: 0
+    });
+    expect(result.rows.find((row) => row.product_code === "SAN000026")).toMatchObject({
+      replenishment_policy: "Limited Core",
+      recommendations_suppressed: false
+    });
+    expect(result.rows.find((row) => row.product_code === "SAN000026")!.recommended_qty_rounded).toBeGreaterThan(0);
   });
 });
 

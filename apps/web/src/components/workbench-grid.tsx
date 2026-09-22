@@ -75,6 +75,7 @@ const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
       </button>
     ) : null}
     {params.data?.is_new_item ? <span className="new-item-badge">New Item</span> : null}
+    {params.data?.recommendations_suppressed ? <span className="recommendation-off-badge">Reorder Off</span> : null}
     {params.data && activeFreeGoodsForRow(params.data).length > 0 ? <span className="free-goods-badge">Free Goods</span> : null}
     {params.data && isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}
   </span>
@@ -138,6 +139,7 @@ const wineBadgeCount = (row?: Recommendation | null) => {
   if (!row) return 0;
   return 1 +
     (activeFreeGoodsForRow(row).length > 0 ? 1 : 0) +
+    (row.recommendations_suppressed ? 1 : 0) +
     (isDiOpportunity(row) ? 1 : 0);
 };
 const rowHeightForWine = (row?: WorkbenchRow | null) => {

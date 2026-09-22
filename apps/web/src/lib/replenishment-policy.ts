@@ -8,6 +8,7 @@ export const REPLENISHMENT_POLICIES = [
 
 export type ReplenishmentPolicy = (typeof REPLENISHMENT_POLICIES)[number];
 export type ReplenishmentPolicyFilter = "All" | ReplenishmentPolicy;
+export const MANUAL_RECOMMENDATION_PAUSE_REASON = "Manually paused until restored";
 
 export function replenishmentPolicyLabel(value: ReplenishmentPolicy | null | undefined) {
   return value === "Limited Core" ? "Select" : value || "Limited";
@@ -20,9 +21,18 @@ export function replenishmentPolicy(value: unknown): ReplenishmentPolicy {
 }
 
 export function recommendationIsAutomatic(policy: ReplenishmentPolicy, suppressed: boolean) {
-  if (policy === "Allocated" || policy === "Special Order") return false;
-  if (policy === "Limited" && suppressed) return false;
-  return true;
+  return policySupportsAutomaticRecommendations(policy) && !suppressed;
+}
+
+export function policySupportsAutomaticRecommendations(policy: ReplenishmentPolicy) {
+  return policy !== "Allocated" && policy !== "Special Order";
+}
+
+export function recommendationsAreSuppressed(
+  suppressed: boolean | null | undefined,
+  reason: string | null | undefined
+) {
+  return suppressed === true || reason === MANUAL_RECOMMENDATION_PAUSE_REASON;
 }
 
 export function replenishmentPolicyFamilyKey(name: string | null | undefined, vintage?: string | number | null) {

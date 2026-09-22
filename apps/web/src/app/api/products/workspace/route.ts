@@ -8,7 +8,7 @@ import type {
   ProductWorkspaceSource,
   ProductWorkspaceStatusKey
 } from "@/lib/product-workspace-types";
-import { replenishmentPolicy } from "@/lib/replenishment-policy";
+import { recommendationsAreSuppressed, replenishmentPolicy } from "@/lib/replenishment-policy";
 
 type ProductWorkspaceClient = SupabaseClient<any, "public", any>;
 
@@ -910,7 +910,10 @@ function productWorkspaceMarker(marker: OrderingItemMarkerRow | null): ProductWo
     policyFamilyKey: marker?.policy_family_key || null,
     policyFamilyName: marker?.policy_family_name || null,
     familyDefaultPolicy: replenishmentPolicy(marker?.family_default_policy || policy),
-    recommendationsSuppressed: policy === "Limited" && marker?.recommendations_suppressed === true,
+    recommendationsSuppressed: recommendationsAreSuppressed(
+      marker?.recommendations_suppressed,
+      marker?.suppression_reason
+    ),
     suppressionReason: marker?.suppression_reason || null,
     suppressedUntil: marker?.suppressed_until || null,
     markerNote: marker?.marker_note || null,

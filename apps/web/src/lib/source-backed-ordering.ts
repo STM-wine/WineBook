@@ -1,13 +1,14 @@
 import type { OrderingLogicSettings } from "./ordering-logic";
 import {
   recommendationIsAutomatic,
+  recommendationsAreSuppressed,
   replenishmentPolicy,
   replenishmentPolicyFamilyKey,
   type ReplenishmentPolicy
 } from "./replenishment-policy";
 
 export const ORDERING_SOURCE = "quickbooks_vinosmith_stem";
-export const ORDERING_BUILDER_VERSION = 5;
+export const ORDERING_BUILDER_VERSION = 6;
 
 export type SourceQuickBooksItem = {
   list_id: string;
@@ -56,6 +57,7 @@ export type SourceOrderingMarker = {
   policy_family_name?: string | null;
   family_default_policy?: string | null;
   recommendations_suppressed?: boolean | null;
+  suppression_reason?: string | null;
   note_source?: string | null;
 };
 
@@ -272,7 +274,12 @@ export function buildSourceBackedOrderingRows(input: {
     const policy = replenishmentPolicy(
       hasManualPolicyOverride ? exactPolicy : familyPolicy || exactPolicy
     );
-    const recommendationsSuppressed = policy === "Limited" && exactMarker?.recommendations_suppressed === true;
+    // Suppression is deliberately exact-item only. A replacement vintage gets a
+    // different item code, inherits the family policy, and resumes automatically.
+    const recommendationsSuppressed = recommendationsAreSuppressed(
+      exactMarker?.recommendations_suppressed,
+      exactMarker?.suppression_reason
+    );
     const vintageIdentity = orderingVintageIdentity(item, wine);
     const latestActiveVintage = vintageIdentity.familyKey
       ? latestActiveVintageByFamily.get(vintageIdentity.familyKey) ?? null

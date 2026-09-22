@@ -2,6 +2,7 @@ import {
   asNumber,
   formatInteger,
   isOlderVintageSuppressed,
+  suppressRecommendation,
   suppressOlderVintageRecommendation
 } from "./order-data";
 import type { Recommendation } from "./types";
@@ -96,7 +97,7 @@ export function weeksSupply(row: Recommendation) {
 }
 
 export function isDiOpportunity(row: Recommendation) {
-  if (isOlderVintageSuppressed(row)) return false;
+  if (isOlderVintageSuppressed(row) || row.recommendations_suppressed === true) return false;
   const eligibility = diEligibility(row);
   return eligibility.eligible && weeksSupply(row) < eligibility.triggerWeeks;
 }
@@ -137,7 +138,10 @@ export function buildDiContainerPlans(rows: Recommendation[]): DiContainerPlan[]
   const selected = rows
     .map((row) => ({ row, eligibility: diEligibility(row) }))
     .filter(({ row, eligibility }) =>
-      !isOlderVintageSuppressed(row) && eligibility.eligible && orderPath(row) === "di"
+      !isOlderVintageSuppressed(row) &&
+      row.recommendations_suppressed !== true &&
+      eligibility.eligible &&
+      orderPath(row) === "di"
     );
   const grouped = new Map<"NZ_AKL" | "IT_LIV", Array<{ row: Recommendation; eligibility: DiEligibility }>>();
 
@@ -199,7 +203,11 @@ export function buildDiAllocationMap(rows: Recommendation[]) {
 }
 
 export function applyDiContainerRecommendations(rows: Recommendation[]): Recommendation[] {
-  const eligibleRows = rows.map(suppressOlderVintageRecommendation);
+  const eligibleRows = rows.map((row) =>
+    row.recommendations_suppressed === true
+      ? suppressRecommendation(row)
+      : suppressOlderVintageRecommendation(row)
+  );
   const allocations = buildDiAllocationMap(eligibleRows);
   if (allocations.size === 0) return eligibleRows;
 

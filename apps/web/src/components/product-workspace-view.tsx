@@ -7,6 +7,7 @@ import type { Recommendation } from "@/lib/types";
 import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
 import {
   REPLENISHMENT_POLICIES,
+  policySupportsAutomaticRecommendations,
   replenishmentPolicyLabel,
   type ReplenishmentPolicy
 } from "@/lib/replenishment-policy";
@@ -598,9 +599,15 @@ function ProductWorkspaceTable({
                           familyDefaultPolicy: policy,
                           isCore: policy === "Core",
                           isBtg: false,
-                          recommendationsSuppressed: policy === "Limited" ? row.orderingMarker.recommendationsSuppressed : false,
-                          suppressionReason: policy === "Limited" ? row.orderingMarker.suppressionReason : null,
-                          suppressedUntil: policy === "Limited" ? row.orderingMarker.suppressedUntil : null
+                          recommendationsSuppressed: policySupportsAutomaticRecommendations(policy)
+                            ? row.orderingMarker.recommendationsSuppressed
+                            : false,
+                          suppressionReason: policySupportsAutomaticRecommendations(policy)
+                            ? row.orderingMarker.suppressionReason
+                            : null,
+                          suppressedUntil: policySupportsAutomaticRecommendations(policy)
+                            ? row.orderingMarker.suppressedUntil
+                            : null
                         })}
                       />
                     </td>
@@ -773,14 +780,11 @@ function RecommendationModeControl({
   disabled: boolean;
   onChange: (suppressed: boolean) => void;
 }) {
-  if (marker.replenishmentPolicy === "Allocated" || marker.replenishmentPolicy === "Special Order") {
+  if (!policySupportsAutomaticRecommendations(marker.replenishmentPolicy)) {
     return <span className="policy-mode-static">Manual</span>;
   }
-  if (marker.replenishmentPolicy !== "Limited") {
-    return <span className="policy-mode-static">Automatic</span>;
-  }
   return (
-    <label className={`marker-toggle${marker.recommendationsSuppressed ? "" : " marker-toggle-on"}${disabled ? " marker-toggle-disabled" : ""}`} title="Toggle automatic reorder recommendations for this Limited wine family">
+    <label className={`marker-toggle${marker.recommendationsSuppressed ? "" : " marker-toggle-on"}${disabled ? " marker-toggle-disabled" : ""}`} title="Toggle automatic reorder recommendations for this exact item number">
       <input
         aria-label="Automatic reorder"
         checked={!marker.recommendationsSuppressed}

@@ -31,7 +31,11 @@ import type {
   SupplierLogistics
 } from "@/lib/types";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
-import type { ReplenishmentPolicy, ReplenishmentPolicyFilter } from "@/lib/replenishment-policy";
+import {
+  MANUAL_RECOMMENDATION_PAUSE_REASON,
+  type ReplenishmentPolicy,
+  type ReplenishmentPolicyFilter
+} from "@/lib/replenishment-policy";
 import {
   applySupplierTargetWeeks,
   applySupplierTdmAssignments,
@@ -270,8 +274,8 @@ export function OrderDashboard({
       body: JSON.stringify({
         itemCode,
         replenishmentPolicy: policy,
-        recommendationsSuppressed: policy === "Limited" && recommendationsSuppressed,
-        suppressionReason: policy === "Limited" && recommendationsSuppressed ? "Temporarily unavailable" : null,
+        recommendationsSuppressed,
+        suppressionReason: recommendationsSuppressed ? MANUAL_RECOMMENDATION_PAUSE_REASON : null,
         suppressedUntil: null,
         note: "Manual Order Summary replenishment update"
       })
@@ -289,7 +293,7 @@ export function OrderDashboard({
         is_btg: false,
         is_core: policy === "Core",
         replenishment_policy: policy,
-        recommendations_suppressed: policy === "Limited" && recommendationsSuppressed
+        recommendations_suppressed: recommendationsSuppressed
       };
     }));
   }

@@ -7,7 +7,11 @@ import type {
   SupplierLogistics,
   SupplierGroup
 } from "./types";
-import { replenishmentPolicy, type ReplenishmentPolicy } from "./replenishment-policy";
+import {
+  recommendationIsAutomatic,
+  replenishmentPolicy,
+  type ReplenishmentPolicy
+} from "./replenishment-policy";
 
 export type SupplierGroupSortMode = "default" | "value" | "az" | "za";
 export const DEFAULT_SUPPLIER_TARGET_WEEKS = 5;
@@ -88,14 +92,18 @@ export function isOlderVintageSuppressed(
   return row.diagnostics?.older_vintage_suppressed === true;
 }
 
-export function suppressOlderVintageRecommendation(row: Recommendation): Recommendation {
-  if (!isOlderVintageSuppressed(row)) return row;
+export function suppressRecommendation(row: Recommendation): Recommendation {
   return {
     ...row,
     recommended_qty_rounded: 0,
     order_cost: 0,
     landed_cost: 0
   };
+}
+
+export function suppressOlderVintageRecommendation(row: Recommendation): Recommendation {
+  if (!isOlderVintageSuppressed(row)) return row;
+  return suppressRecommendation(row);
 }
 
 export function applySupplierTargetWeeks(
@@ -113,7 +121,10 @@ export function applySupplierTargetWeeks(
     const supplier = row.supplier_name?.trim() || "Unknown Supplier";
     const targetWeeks = globalTargetWeeks ?? supplierTargetWeeks[supplier] ?? defaultTargetWeeks;
     const policy = rowReplenishmentPolicy(row);
-    const automatic = policy !== "Allocated" && policy !== "Special Order" && !(policy === "Limited" && row.recommendations_suppressed === true);
+    const automatic = recommendationIsAutomatic(policy, row.recommendations_suppressed === true);
+    if (row.recommendations_suppressed === true) {
+      return suppressRecommendation(row);
+    }
     if (!automatic) return row;
     if (targetWeeks < 0 || (row.order_path === "di" && globalTargetWeeks === undefined)) return row;
     if (row.supplier_catalog_workbench_item_id && asNumber(row.weekly_velocity) <= 0) return row;

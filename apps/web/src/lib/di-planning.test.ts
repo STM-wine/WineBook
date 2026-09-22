@@ -64,4 +64,19 @@ describe("DI vintage eligibility", () => {
       landed_cost: 0
     });
   });
+
+  it("excludes an item whose automatic recommendations were manually turned off", () => {
+    const suppressed = recommendation({
+      id: "suppressed",
+      product_name: "Ant Moore Sauvignon Blanc 2025 12/750ml",
+      order_path: "di",
+      recommendations_suppressed: true,
+      last_30_day_sales: 120,
+      recommended_qty_rounded: 120
+    });
+
+    expect(isDiOpportunity(suppressed)).toBe(false);
+    expect(buildDiContainerPlans([suppressed])).toEqual([]);
+    expect(applyDiContainerRecommendations([suppressed])[0].recommended_qty_rounded).toBe(0);
+  });
 });

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
-import { replenishmentPolicy } from "@/lib/replenishment-policy";
+import {
+  MANUAL_RECOMMENDATION_PAUSE_REASON,
+  recommendationsAreSuppressed,
+  replenishmentPolicy
+} from "@/lib/replenishment-policy";
 
 type PermissionRow = {
   permission: string;
@@ -61,8 +65,10 @@ export async function POST(request: Request) {
   }
 
   const policy = replenishmentPolicy(body?.replenishmentPolicy);
-  const recommendationsSuppressed = policy === "Limited" && body?.recommendationsSuppressed === true;
-  const suppressionReason = recommendationsSuppressed ? stringOrNull(body?.suppressionReason) : null;
+  const recommendationsSuppressed = body?.recommendationsSuppressed === true && policy !== "Allocated" && policy !== "Special Order";
+  const suppressionReason = recommendationsSuppressed
+    ? stringOrNull(body?.suppressionReason) || MANUAL_RECOMMENDATION_PAUSE_REASON
+    : null;
   const suppressedUntil = recommendationsSuppressed ? dateOrNull(body?.suppressedUntil) : null;
   const quickbooksItemListId = stringOrNull(body?.quickbooksItemListId);
   const note = stringOrNull(body?.note) || "Manual Product Workspace marker update";
@@ -86,11 +92,31 @@ export async function POST(request: Request) {
     note_source: "manual",
     updated_by: user.id
   };
-  const { error: upsertError } = await supabase.from("ordering_item_markers").upsert({
+  const markerValues = {
     item_code: itemCode,
     ...(quickbooksItemListId ? { quickbooks_item_list_id: quickbooksItemListId } : {}),
     ...update
-  }, { onConflict: "item_code" });
+  };
+  let { error: upsertError } = await supabase.from("ordering_item_markers").upsert(
+    markerValues,
+    { onConflict: "item_code" }
+  );
+
+  // Older production schemas allowed the boolean only for Limited wines. Keep
+  // the item pause operational during rollout by storing the same state in the
+  // existing suppression reason until the widened constraint is applied.
+  if (
+    upsertError?.message.includes("ordering_item_markers_suppression_policy_check") &&
+    recommendationsSuppressed &&
+    policy !== "Limited"
+  ) {
+    const fallback = await supabase.from("ordering_item_markers").upsert({
+      ...markerValues,
+      recommendations_suppressed: false,
+      suppression_reason: MANUAL_RECOMMENDATION_PAUSE_REASON
+    }, { onConflict: "item_code" });
+    upsertError = fallback.error;
+  }
 
   if (upsertError) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
@@ -130,7 +156,10 @@ export async function POST(request: Request) {
       policyFamilyKey: marker?.policy_family_key || null,
       policyFamilyName: marker?.policy_family_name || null,
       familyDefaultPolicy: replenishmentPolicy(marker?.family_default_policy || marker?.replenishment_policy),
-      recommendationsSuppressed: marker?.recommendations_suppressed === true,
+      recommendationsSuppressed: recommendationsAreSuppressed(
+        marker?.recommendations_suppressed,
+        marker?.suppression_reason
+      ),
       suppressionReason: marker?.suppression_reason || null,
       suppressedUntil: marker?.suppressed_until || null,
       markerNote: marker?.marker_note || null,
