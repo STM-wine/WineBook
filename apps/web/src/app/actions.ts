@@ -435,6 +435,15 @@ export async function saveSupplierLogistics(input: {
     throw new Error(error.message);
   }
 
+  if (input.id) {
+    const { error: catalogError } = await supabase
+      .from("supplier_catalog_wines")
+      .update({ supplier_name: name, updated_at: new Date().toISOString() })
+      .eq("supplier_id", input.id)
+      .neq("supplier_name", name);
+    if (catalogError) throw new Error(catalogError.message);
+  }
+
   revalidateSupplierData();
   revalidatePath("/");
 }
@@ -509,6 +518,18 @@ export async function saveSupplierLogisticsBatch(input: {
   if (failed?.error) {
     throw new Error(failed.error.message);
   }
+
+  const catalogNameUpdates = await Promise.all(
+    suppliers
+      .filter((supplier): supplier is typeof supplier & { id: string } => Boolean(supplier.id))
+      .map((supplier) => supabase
+        .from("supplier_catalog_wines")
+        .update({ supplier_name: supplier.name, updated_at: new Date().toISOString() })
+        .eq("supplier_id", supplier.id)
+        .neq("supplier_name", supplier.name))
+  );
+  const failedCatalogUpdate = catalogNameUpdates.find((result) => result.error);
+  if (failedCatalogUpdate?.error) throw new Error(failedCatalogUpdate.error.message);
 
   revalidateSupplierData();
   revalidatePath("/");
@@ -681,9 +702,19 @@ export async function saveSupplierCatalogWine(input: {
   }
 
   const { supabase } = await requireWriteAccess();
+  let canonicalSupplierName = input.supplierName;
+  if (input.supplierId) {
+    const { data: supplier, error: supplierError } = await supabase
+      .from("suppliers")
+      .select("name")
+      .eq("id", input.supplierId)
+      .maybeSingle<{ name: string }>();
+    if (supplierError) throw new Error(supplierError.message);
+    if (supplier?.name) canonicalSupplierName = supplier.name;
+  }
   const payload = buildSupplierCatalogWine({
     supplierId: input.supplierId || null,
-    supplierName: input.supplierName,
+    supplierName: canonicalSupplierName,
     producer: input.producer,
     wineName: input.wineName,
     vintage: input.vintage || "NV",

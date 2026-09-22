@@ -5,6 +5,7 @@ import type { ReportRun } from "./types";
 import { fetchAllRecommendationsForRun } from "./supabase/recommendations";
 import { carryForwardBuyerState, normalizeOrderingItemCode, ORDERING_BUILDER_VERSION } from "./source-backed-ordering";
 import { fetchSourceBackedOrderingData, orderingBusinessDate } from "./source-backed-ordering-server";
+import { catalogReconciliationUpdates, missingSourceRowsForRun } from "./ordering-run-overlay";
 export { isSourceBackedRun, overlayCurrentSourceRows, sourceRunNeedsCurrentOverlay } from "./ordering-run-overlay";
 
 type OrderingClient = SupabaseClient<any, "public", any>;
@@ -30,6 +31,7 @@ export async function fetchActiveOrderingRun(supabase: OrderingClient, mode: Ord
 export async function createSourceBackedOrderingRun(supabase: OrderingClient, createdBy: string | null) {
   const referenceDate = orderingBusinessDate();
   const built = await fetchSourceBackedOrderingData(supabase, { referenceDate });
+  await reconcileSupplierCatalog(supabase, built.rows);
   const sourceFingerprint = [
     referenceDate,
     built.diagnostics.quickbooks_as_of || "unknown-qb",
@@ -61,7 +63,20 @@ export async function createSourceBackedOrderingRun(supabase: OrderingClient, cr
       .in("status", ["draft", "ready_for_entry"]);
     if (error) throw new Error(error.message);
     if ((count || 0) > 0) {
-      throw new Error(`Ordering refresh is locked because ${count} active PO draft${count === 1 ? "" : "s"} still belong to the current run. Enter or cancel those drafts before refreshing source data.`);
+      const previousRows = await fetchAllRecommendationsForRun(supabase, previousRun.id);
+      const missingRows = missingSourceRowsForRun(previousRows, built.rows);
+      await insertRecommendationRows(supabase, previousRun.id, missingRows);
+      return {
+        run: previousRun,
+        diagnostics: {
+          ...(previousRun.diagnostics || {}),
+          live_source_row_count: built.rows.length,
+          newly_discovered_rows_added: missingRows.length,
+          active_po_draft_lock_count: count
+        },
+        rowCount: previousRows.length + missingRows.length,
+        reused: true
+      };
     }
   }
   const previousRows = previousRun ? await fetchAllRecommendationsForRun(supabase, previousRun.id) : [];
@@ -93,11 +108,7 @@ export async function createSourceBackedOrderingRun(supabase: OrderingClient, cr
   if (runError || !run) throw new Error(runError?.message || "Could not create the ordering run.");
 
   try {
-    for (let start = 0; start < carry.rows.length; start += 250) {
-      const payload = carry.rows.slice(start, start + 250).map((row) => ({ ...row, report_run_id: run.id }));
-      const { error } = await supabase.from("reorder_recommendations").insert(payload);
-      if (error) throw new Error(error.message);
-    }
+    await insertRecommendationRows(supabase, run.id, carry.rows);
     const workbenchCount = previousRun ? await carryForwardWorkbenchItems(supabase, previousRun.id, run.id, entered.catalogWineIds) : 0;
     const completedAt = new Date().toISOString();
     const completedDiagnostics = { ...diagnostics, supplier_hub_workbench_carry_forward_count: workbenchCount };
@@ -113,6 +124,54 @@ export async function createSourceBackedOrderingRun(supabase: OrderingClient, cr
     const message = error instanceof Error ? error.message : "Source-backed ordering run failed.";
     await supabase.from("report_runs").update({ status: "failed", completed_at: new Date().toISOString(), error_message: message }).eq("id", run.id);
     throw error;
+  }
+}
+
+async function insertRecommendationRows(
+  supabase: OrderingClient,
+  reportRunId: string,
+  rows: Array<Record<string, any>>
+) {
+  for (let start = 0; start < rows.length; start += 250) {
+    const payload = rows.slice(start, start + 250).map((row) => ({ ...row, report_run_id: reportRunId }));
+    const { error } = await supabase.from("reorder_recommendations").insert(payload);
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function reconcileSupplierCatalog(
+  supabase: OrderingClient,
+  currentRows: Array<Record<string, any>>
+) {
+  const [{ data: suppliers, error: supplierError }, { data: catalogRows, error: catalogError }] = await Promise.all([
+    supabase.from("suppliers").select("id,name"),
+    supabase
+      .from("supplier_catalog_wines")
+      .select("id,supplier_id,supplier_name,display_name,planning_sku,quickbooks_sync_status")
+  ]);
+  if (supplierError) throw new Error(supplierError.message);
+  if (catalogError) throw new Error(catalogError.message);
+
+  const canonicalSupplierNames = new Map(
+    (suppliers || []).map((supplier: { id: string; name: string }) => [supplier.id, supplier.name])
+  );
+  const updates = catalogReconciliationUpdates(
+    (catalogRows || []),
+    currentRows,
+    canonicalSupplierNames
+  );
+
+  for (let start = 0; start < updates.length; start += 50) {
+    const results = await Promise.all(
+      updates.slice(start, start + 50).map((update) =>
+        supabase
+          .from("supplier_catalog_wines")
+          .update({ ...update.values, updated_at: new Date().toISOString() })
+          .eq("id", update.id)
+      )
+    );
+    const failed = results.find((result) => result.error);
+    if (failed?.error) throw new Error(failed.error.message);
   }
 }
 
