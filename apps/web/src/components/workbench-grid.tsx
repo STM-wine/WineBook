@@ -372,6 +372,7 @@ export function WorkbenchGrid({
       {
         headerName: "30d Sales",
         field: "last_30_day_sales",
+        sort: "desc",
         width: 96,
         headerTooltip: "Trailing 30-day bottle sales anchored to the latest RADs sales date.",
         headerClass: "number-header",
