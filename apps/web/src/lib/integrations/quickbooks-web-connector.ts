@@ -142,6 +142,10 @@ export async function buildQuickBooksWebConnectorStatus() {
   ];
   return {
     service: "Stem Intelligence QuickBooks Desktop Web Connector",
+    deployment: {
+      gitCommit: process.env.RENDER_GIT_COMMIT || null,
+      syncProtocol: "complete-pagination-snapshots-v1"
+    },
     mode: recoveryQueue.pending || recoveryQueue.running ? "operational-refresh-with-recovery-queue" : "operational-refresh",
     configuration: {
       appUrlConfigured: Boolean(process.env.QUICKBOOKS_DESKTOP_APP_URL),
