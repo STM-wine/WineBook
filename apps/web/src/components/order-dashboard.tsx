@@ -272,8 +272,7 @@ export function OrderDashboard({
 
     setRows((current) => current.map((candidate) => {
       const sameItem = candidate.id === row.id;
-      const sameFamily = Boolean(row.policy_family_key && candidate.policy_family_key === row.policy_family_key);
-      if (!sameItem && !sameFamily) return candidate;
+      if (!sameItem) return candidate;
       return {
         ...candidate,
         is_btg: false,

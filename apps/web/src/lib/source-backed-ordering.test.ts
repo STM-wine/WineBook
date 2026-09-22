@@ -127,6 +127,81 @@ describe("source-backed ordering rows", () => {
     expect(result.rows[0].diagnostics).toMatchObject({ policy_source: "family_inherited" });
   });
 
+  it("recommends only the newest active vintage and carries the family Core policy forward", () => {
+    const quickBooksItems = [
+      qb({
+        list_id: "qb-2024",
+        name: "PAV000023",
+        full_name: "PAV000023",
+        sales_desc: "Pavette Pinot Noir 2024 12/750ml",
+        quantity_on_hand: 10,
+        quantity_on_order: 0,
+        custom_fields: { "PACK SIZE": "12", item_number: "PAV000023", Vintage: "2024" }
+      }),
+      qb({
+        list_id: "qb-2025",
+        name: "PAV000029",
+        full_name: "PAV000029",
+        sales_desc: "Pavette Pinot Noir 2025 12/750ml",
+        quantity_on_hand: 496,
+        quantity_on_order: 0,
+        custom_fields: { "PACK SIZE": "12", item_number: "PAV000029", Vintage: "2025" }
+      })
+    ];
+    const vinosmithWines = [
+      { wine_id: "wine-2024", code: "PAV000023", name: "Pavette Pinot Noir 2024 12/750ml", vintage: "2024", importer_name: "Fallback Supplier" },
+      { wine_id: "wine-2025", code: "PAV000029", name: "Pavette Pinot Noir 2025 12/750ml", vintage: "2025", importer_name: "Fallback Supplier" }
+    ];
+    const markers = [
+      {
+        item_code: "PAV000023", quickbooks_item_list_id: "qb-2024", is_btg: false, is_core: true,
+        replenishment_policy: "Core", policy_family_key: "pavette pinot noir", family_default_policy: "Core",
+        note_source: "initial_upload"
+      },
+      {
+        item_code: "PAV000029", quickbooks_item_list_id: "qb-2025", is_btg: false, is_core: false,
+        replenishment_policy: "Limited Core", policy_family_key: "pavette pinot noir", family_default_policy: "Core",
+        note_source: "initial_upload"
+      }
+    ];
+    const common = {
+      quickBooksItems,
+      vinosmithWines,
+      vinosmithAvailableByCode: new Map([["PAV000023", 10], ["PAV000029", 0]]),
+      markers,
+      salesByCode: new Map([["PAV000023", sales({ last30: 100 })], ["PAV000029", sales({ last30: 100 })]])
+    };
+
+    const inherited = build(common);
+    const older = inherited.rows.find((row) => row.product_code === "PAV000023")!;
+    const newest = inherited.rows.find((row) => row.product_code === "PAV000029")!;
+    expect(inherited.rows).toHaveLength(2);
+    expect(older).toMatchObject({ replenishment_policy: "Core", recommended_qty_rounded: 0 });
+    expect(older.diagnostics).toMatchObject({ older_vintage_suppressed: true, latest_active_vintage: 2025 });
+    expect(newest.replenishment_policy).toBe("Core");
+    expect(newest.recommended_qty_rounded).toBeGreaterThan(0);
+    expect(newest.diagnostics).toMatchObject({ policy_source: "family_inherited", is_latest_active_vintage: true });
+
+    const manual = build({
+      ...common,
+      markers: markers.map((marker) => marker.item_code === "PAV000029"
+        ? { ...marker, replenishment_policy: "Limited Core", note_source: "manual" }
+        : marker)
+    });
+    expect(manual.rows.find((row) => row.product_code === "PAV000029")!).toMatchObject({
+      replenishment_policy: "Limited Core",
+      diagnostics: expect.objectContaining({ policy_source: "item_manual_override" })
+    });
+
+    const inactiveNewest = build({
+      ...common,
+      quickBooksItems: quickBooksItems.map((item) => item.name === "PAV000029" ? { ...item, is_active: false } : item)
+    });
+    expect(inactiveNewest.rows).toHaveLength(1);
+    expect(inactiveNewest.rows[0].recommended_qty_rounded).toBeGreaterThan(0);
+    expect(inactiveNewest.rows[0].diagnostics).toMatchObject({ is_latest_active_vintage: true, latest_active_vintage: 2024 });
+  });
+
   it("keeps legacy Core and BTG markers compatible during rollback", () => {
     for (const marker of [
       { item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: true },

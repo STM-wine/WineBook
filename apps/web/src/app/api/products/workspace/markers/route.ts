@@ -75,20 +75,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  const { data: currentMarker, error: currentMarkerError } = await supabase
-    .from("ordering_item_markers")
-    .select("policy_family_key")
-    .eq("item_code", itemCode)
-    .maybeSingle<{ policy_family_key: string | null }>();
-  if (currentMarkerError) {
-    return NextResponse.json({ error: currentMarkerError.message }, { status: 500 });
-  }
-
   const update = {
     is_btg: false,
     is_core: policy === "Core",
     replenishment_policy: policy,
-    family_default_policy: policy,
     recommendations_suppressed: recommendationsSuppressed,
     suppression_reason: suppressionReason,
     suppressed_until: suppressedUntil,
@@ -96,15 +86,11 @@ export async function POST(request: Request) {
     note_source: "manual",
     updated_by: user.id
   };
-  const familyKey = currentMarker?.policy_family_key || null;
-  const write = familyKey
-    ? supabase.from("ordering_item_markers").update(update).eq("policy_family_key", familyKey)
-    : supabase.from("ordering_item_markers").upsert({
-        item_code: itemCode,
-        quickbooks_item_list_id: quickbooksItemListId,
-        ...update
-      }, { onConflict: "item_code" });
-  const { error: upsertError } = await write;
+  const { error: upsertError } = await supabase.from("ordering_item_markers").upsert({
+    item_code: itemCode,
+    ...(quickbooksItemListId ? { quickbooks_item_list_id: quickbooksItemListId } : {}),
+    ...update
+  }, { onConflict: "item_code" });
 
   if (upsertError) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });

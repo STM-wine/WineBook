@@ -7,7 +7,7 @@ import {
 } from "./replenishment-policy";
 
 export const ORDERING_SOURCE = "quickbooks_vinosmith_stem";
-export const ORDERING_BUILDER_VERSION = 4;
+export const ORDERING_BUILDER_VERSION = 5;
 
 export type SourceQuickBooksItem = {
   list_id: string;
@@ -56,6 +56,7 @@ export type SourceOrderingMarker = {
   policy_family_name?: string | null;
   family_default_policy?: string | null;
   recommendations_suppressed?: boolean | null;
+  note_source?: string | null;
 };
 
 export type SourceVendorMapping = {
@@ -220,16 +221,26 @@ export function buildSourceBackedOrderingRows(input: {
   const vendorsById = new Map(input.quickBooksVendors.map((vendor) => [vendor.list_id, vendor]));
   const mappingsByVendorId = new Map(input.vendorMappings.map((mapping) => [mapping.quickbooks_vendor_list_id, mapping]));
   const markersByCode = new Map(input.markers.map((marker) => [normalizeOrderingItemCode(marker.item_code), marker]));
-  const familyDefaults = new Map(
-    input.markers
-      .filter((marker) => marker.policy_family_key)
-      .map((marker) => [marker.policy_family_key!, replenishmentPolicy(marker.family_default_policy || marker.replenishment_policy)])
-  );
+  const familyDefaults = new Map<string, ReplenishmentPolicy>();
+  for (const marker of input.markers) {
+    if (!marker.policy_family_key || familyDefaults.has(marker.policy_family_key)) continue;
+    familyDefaults.set(marker.policy_family_key, replenishmentPolicy(marker.family_default_policy || marker.replenishment_policy));
+  }
 
   const activeItems = input.quickBooksItems.filter((item) => {
     const code = normalizeOrderingItemCode(quickBooksItemCode(item));
     return item.is_active !== false && item.item_type?.toLowerCase() === "inventory" && isLikelyOrderingItemCode(code);
   });
+  const latestActiveVintageByFamily = new Map<string, number>();
+  for (const item of activeItems) {
+    const productCode = normalizeOrderingItemCode(quickBooksItemCode(item));
+    const identity = orderingVintageIdentity(item, winesByCode.get(productCode) || null);
+    if (!identity.familyKey || identity.vintage === null) continue;
+    const current = latestActiveVintageByFamily.get(identity.familyKey);
+    if (current === undefined || identity.vintage > current) {
+      latestActiveVintageByFamily.set(identity.familyKey, identity.vintage);
+    }
+  }
 
   const rows = activeItems.map((item) => {
     const productCode = normalizeOrderingItemCode(quickBooksItemCode(item));
@@ -255,11 +266,22 @@ export function buildSourceBackedOrderingRows(input: {
     const exactMarker = markersByCode.get(productCode) || null;
     const policyFamilyKey = wine?.name ? replenishmentPolicyFamilyKey(wine.name, wine.vintage) : "";
     const legacyPolicy = exactMarker?.is_core === true || exactMarker?.is_btg === true ? "Core" : null;
+    const exactPolicy = exactMarker?.replenishment_policy || legacyPolicy;
+    const familyPolicy = exactMarker?.family_default_policy || (policyFamilyKey ? familyDefaults.get(policyFamilyKey) : null);
+    const hasManualPolicyOverride = exactMarker?.note_source === "manual";
     const policy = replenishmentPolicy(
-      exactMarker?.replenishment_policy || legacyPolicy || (policyFamilyKey ? familyDefaults.get(policyFamilyKey) : null)
+      hasManualPolicyOverride ? exactPolicy : familyPolicy || exactPolicy
     );
     const recommendationsSuppressed = policy === "Limited" && exactMarker?.recommendations_suppressed === true;
-    const automaticRecommendation = recommendationIsAutomatic(policy, recommendationsSuppressed);
+    const vintageIdentity = orderingVintageIdentity(item, wine);
+    const latestActiveVintage = vintageIdentity.familyKey
+      ? latestActiveVintageByFamily.get(vintageIdentity.familyKey) ?? null
+      : null;
+    const isLatestActiveVintage = vintageIdentity.vintage === null || latestActiveVintage === null
+      ? true
+      : vintageIdentity.vintage === latestActiveVintage;
+    const olderVintageSuppressed = !isLatestActiveVintage;
+    const automaticRecommendation = recommendationIsAutomatic(policy, recommendationsSuppressed) && isLatestActiveVintage;
     const sales = input.salesByCode.get(productCode) || emptySalesWindows();
     const pack = quickBooksPackSize(item, input.settings.default_pack_size);
     const purchaseCost = nullableNumber(item.purchase_cost);
@@ -350,9 +372,19 @@ export function buildSourceBackedOrderingRows(input: {
         pack_size_source: pack.source,
         fob_source: fobSource,
         replenishment_policy: policy,
-        policy_source: exactMarker ? "item" : policyFamilyKey && familyDefaults.has(policyFamilyKey) ? "family_inherited" : "default_limited",
+        policy_source: hasManualPolicyOverride
+          ? "item_manual_override"
+          : familyPolicy
+            ? "family_inherited"
+            : exactMarker
+              ? "item"
+              : "default_limited",
         automatic_recommendation: automaticRecommendation,
         recommendations_suppressed: recommendationsSuppressed,
+        vintage: vintageIdentity.vintage,
+        latest_active_vintage: latestActiveVintage,
+        is_latest_active_vintage: isLatestActiveVintage,
+        older_vintage_suppressed: olderVintageSuppressed,
         blockers
       }
     } satisfies SourceBackedRecommendationRow;
@@ -385,6 +417,30 @@ export function buildSourceBackedOrderingRows(input: {
       core_btg_rows: rows.filter((row) => row.is_core || row.is_btg).length,
       suggested_bottles: rows.reduce((sum, row) => sum + row.recommended_qty_rounded, 0)
     }
+  };
+}
+
+function orderingVintageIdentity(item: SourceQuickBooksItem, wine: SourceVinosmithWine | null) {
+  const name = wine?.name?.trim()
+    || item.sales_desc?.trim()
+    || item.purchase_desc?.trim()
+    || item.full_name?.trim()
+    || item.name?.trim()
+    || "";
+  const vintageText = String(
+    wine?.vintage
+      || customFieldText(item.custom_fields, ["Vintage", "vintage"])
+      || name.match(/\b(?:19|20)\d{2}\b/)?.[0]
+      || ""
+  ).trim();
+  const vintage = /^(?:19|20)\d{2}$/.test(vintageText) ? Number(vintageText) : null;
+  const policyFamilyKey = replenishmentPolicyFamilyKey(name, vintageText);
+  const format = name.match(/\b\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*(?:ml|l)\s*$/i)?.[0]
+    ?.toLowerCase()
+    .replace(/\s+/g, "") || "";
+  return {
+    vintage,
+    familyKey: policyFamilyKey ? `${policyFamilyKey}|${format}` : ""
   };
 }
 

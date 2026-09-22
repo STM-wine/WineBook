@@ -164,8 +164,7 @@ export function ProductWorkspaceView({
       if (current.status !== "loaded") return current;
       const rows = current.data.rows.map((row) => {
         const sameItem = normalizeCode(row.itemCode) === normalizedItemCode;
-        const sameFamily = Boolean(marker.policyFamilyKey && row.orderingMarker.policyFamilyKey === marker.policyFamilyKey);
-        if (!sameItem && !sameFamily) return row;
+        if (!sameItem) return row;
         return {
           ...row,
           orderingMarker: marker,
