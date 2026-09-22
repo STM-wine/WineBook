@@ -1427,6 +1427,27 @@ textarea {
   padding: 8px 10px;
 }
 
+.global-target-weeks-control input {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  height: 40px;
+  padding: 8px 10px;
+  width: 118px;
+}
+
+.global-target-reset {
+  font-size: 12px;
+  padding: 10px 0;
+}
+
+.target-weeks-control input:disabled {
+  background: var(--surface-soft);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .supplier-board-panel {
   margin-top: 28px;
 }

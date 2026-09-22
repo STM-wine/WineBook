@@ -271,7 +271,7 @@ describe("live Order Review inventory and target weeks", () => {
     expect(updated.weeks_on_hand).toBe(-3);
   });
 
-  it("uses five target weeks by default and keeps supplier overrides", () => {
+  it("uses five target weeks by default, keeps supplier overrides, and lets a global override win", () => {
     const row = recommendation({
       supplier_name: "Stateside",
       weekly_velocity: 10,
@@ -279,13 +279,26 @@ describe("live Order Review inventory and target weeks", () => {
       on_order: 0,
       pack_size: 12,
       fob: 10,
-      trucking_cost_per_bottle: 1
+      trucking_cost_per_bottle: 1,
+      recommended_qty_rounded: 96
     });
 
     expect(DEFAULT_SUPPLIER_TARGET_WEEKS).toBe(5);
     expect(applySupplierTargetWeeks([row], {})[0].recommended_qty_rounded).toBe(36);
     expect(applySupplierTargetWeeks([row], { Stateside: 6 })[0].recommended_qty_rounded).toBe(48);
     expect(applySupplierTargetWeeks([row], { Stateside: 0 })[0].recommended_qty_rounded).toBe(0);
+    expect(applySupplierTargetWeeks([row], { Stateside: 8 }, DEFAULT_SUPPLIER_TARGET_WEEKS, 2)[0].recommended_qty_rounded).toBe(0);
+  });
+
+  it("sets every automatic supplier recommendation from the same global target", () => {
+    const rows = [
+      recommendation({ id: "stateside", supplier_name: "Stateside", weekly_velocity: 10, true_available: 0, pack_size: 12 }),
+      recommendation({ id: "valkyrie", supplier_name: "Valkyrie", weekly_velocity: 4, true_available: 0, pack_size: 6 })
+    ];
+
+    const updated = applySupplierTargetWeeks(rows, { Stateside: 8, Valkyrie: 9 }, DEFAULT_SUPPLIER_TARGET_WEEKS, 2);
+
+    expect(updated.map((row) => row.recommended_qty_rounded)).toEqual([24, 12]);
   });
 
   it("never restores an older vintage suppressed by the source builder", () => {

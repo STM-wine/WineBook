@@ -51,6 +51,7 @@ export function OrderReviewView({
   supplierOptions,
   supplierCatalogWines,
   supplierTargetWeeks,
+  globalTargetWeeks,
   visibleCount,
   hasApprovedOrders,
   onSaveApproval,
@@ -60,6 +61,7 @@ export function OrderReviewView({
   onSaveWorkingQty,
   onSetWorkingQty,
   onSetSupplierTargetWeeks,
+  onSetGlobalTargetWeeks,
   onRestoreInactiveWine,
   onSaveCatalogWine,
   onDeleteCatalogWine,
@@ -88,6 +90,7 @@ export function OrderReviewView({
   supplierOptions: string[];
   supplierCatalogWines: SupplierCatalogWine[];
   supplierTargetWeeks: Record<string, string>;
+  globalTargetWeeks: string;
   visibleCount: number;
   hasApprovedOrders: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
@@ -97,6 +100,7 @@ export function OrderReviewView({
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSetSupplierTargetWeeks: (supplierName: string, value: string) => void;
+  onSetGlobalTargetWeeks: (value: string) => void;
   onRestoreInactiveWine: (listId: string) => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
   onDeleteCatalogWine: (input: { id: string }) => void;
@@ -107,6 +111,9 @@ export function OrderReviewView({
 }) {
   const [editingWine, setEditingWine] = useState<SupplierCatalogWine | null>(null);
   const [editingReplenishment, setEditingReplenishment] = useState<Recommendation | null>(null);
+  const parsedGlobalTargetWeeks = Number(globalTargetWeeks);
+  const hasGlobalTargetWeeks =
+    globalTargetWeeks.trim() !== "" && Number.isFinite(parsedGlobalTargetWeeks) && parsedGlobalTargetWeeks >= 0;
 
   function editNewItem(row: Recommendation) {
     const wine = supplierCatalogWines.find((candidate) => candidate.id === row.supplier_catalog_wine_id);
@@ -203,6 +210,24 @@ export function OrderReviewView({
               <option value="za">Z-A</option>
             </select>
           </label>
+          <label className="compact-select-control global-target-weeks-control">
+            Global target weeks
+            <input
+              aria-label="Global target weeks"
+              min="0"
+              step="0.1"
+              inputMode="decimal"
+              type="number"
+              value={globalTargetWeeks}
+              onChange={(event) => onSetGlobalTargetWeeks(event.target.value)}
+              placeholder="Per supplier"
+            />
+          </label>
+          {hasGlobalTargetWeeks ? (
+            <button className="ghost-button global-target-reset" onClick={() => onSetGlobalTargetWeeks("")} type="button">
+              Use supplier targets
+            </button>
+          ) : null}
           <label className="compact-select-control">
             Replenishment
             <select
@@ -230,8 +255,13 @@ export function OrderReviewView({
             onSaveOrderPath={onSaveOrderPath}
             onSetWorkingQty={onSetWorkingQty}
             onSaveWorkingQty={onSaveWorkingQty}
-            targetWeeks={supplierTargetWeeks[group.supplier] ?? String(DEFAULT_SUPPLIER_TARGET_WEEKS)}
+            targetWeeks={
+              hasGlobalTargetWeeks
+                ? globalTargetWeeks
+                : (supplierTargetWeeks[group.supplier] ?? String(DEFAULT_SUPPLIER_TARGET_WEEKS))
+            }
             onSetTargetWeeks={(value) => onSetSupplierTargetWeeks(group.supplier, value)}
+            targetWeeksOverridden={hasGlobalTargetWeeks}
             onRestoreInactiveWine={onRestoreInactiveWine}
             onEditReplenishment={setEditingReplenishment}
             onEditNewItem={editNewItem}
@@ -336,6 +366,7 @@ function SupplierSection({
   onSetWorkingQty,
   onSaveWorkingQty,
   targetWeeks,
+  targetWeeksOverridden,
   onSetTargetWeeks,
   onRestoreInactiveWine,
   onEditReplenishment,
@@ -352,6 +383,7 @@ function SupplierSection({
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
   targetWeeks: string;
+  targetWeeksOverridden: boolean;
   onSetTargetWeeks: (value: string) => void;
   onRestoreInactiveWine: (listId: string) => void;
   onEditReplenishment: (row: Recommendation) => void;
@@ -448,12 +480,14 @@ function SupplierSection({
             <label className="target-weeks-control">
               Target weeks
               <input
+                disabled={targetWeeksOverridden}
                 min="0"
                 step="0.1"
                 inputMode="decimal"
                 value={targetWeeks}
                 onChange={(event) => onSetTargetWeeks(event.target.value)}
                 placeholder="Default"
+                title={targetWeeksOverridden ? "Controlled by the global target-weeks override" : undefined}
               />
             </label>
             <label className="check-control">

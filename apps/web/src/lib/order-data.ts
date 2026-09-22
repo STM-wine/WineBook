@@ -101,7 +101,8 @@ export function suppressOlderVintageRecommendation(row: Recommendation): Recomme
 export function applySupplierTargetWeeks(
   rows: Recommendation[],
   supplierTargetWeeks: Record<string, number>,
-  defaultTargetWeeks = DEFAULT_SUPPLIER_TARGET_WEEKS
+  defaultTargetWeeks = DEFAULT_SUPPLIER_TARGET_WEEKS,
+  globalTargetWeeks?: number
 ): Recommendation[] {
   return rows.map((row) => {
     // The source builder is authoritative about vintage eligibility. Target-week
@@ -110,11 +111,11 @@ export function applySupplierTargetWeeks(
     if (isOlderVintageSuppressed(row)) return suppressOlderVintageRecommendation(row);
 
     const supplier = row.supplier_name?.trim() || "Unknown Supplier";
-    const targetWeeks = supplierTargetWeeks[supplier] ?? defaultTargetWeeks;
+    const targetWeeks = globalTargetWeeks ?? supplierTargetWeeks[supplier] ?? defaultTargetWeeks;
     const policy = rowReplenishmentPolicy(row);
     const automatic = policy !== "Allocated" && policy !== "Special Order" && !(policy === "Limited" && row.recommendations_suppressed === true);
     if (!automatic) return row;
-    if (!targetWeeks || targetWeeks <= 0 || row.order_path === "di") return row;
+    if (targetWeeks < 0 || row.order_path === "di") return row;
     if (row.supplier_catalog_workbench_item_id && asNumber(row.weekly_velocity) <= 0) return row;
 
     const qty = recommendationForTargetWeeks(row, targetWeeks);

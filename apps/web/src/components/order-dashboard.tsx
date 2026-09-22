@@ -139,6 +139,7 @@ export function OrderDashboard({
   const [replenishmentPolicyFilter, setReplenishmentPolicyFilter] = useState<ReplenishmentPolicyFilter>("All");
   const [supplierHubAddWineSupplier, setSupplierHubAddWineSupplier] = useState<string | null>(null);
   const [supplierTargetWeeks, setSupplierTargetWeeks] = useState<Record<string, string>>({});
+  const [globalTargetWeeks, setGlobalTargetWeeks] = useState("");
   const [pendingMessage, setPendingMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [showPoDraftProgress, setShowPoDraftProgress] = useState(false);
@@ -179,9 +180,19 @@ export function OrderDashboard({
       ),
     [supplierTargetWeeks]
   );
+  const parsedGlobalTargetWeeks = useMemo(() => {
+    if (!globalTargetWeeks.trim()) return undefined;
+    const value = Number(globalTargetWeeks);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  }, [globalTargetWeeks]);
   const displayRows = useMemo(
-    () => applySupplierTargetWeeks(applyDiContainerRecommendations(rows), parsedSupplierTargetWeeks),
-    [parsedSupplierTargetWeeks, rows]
+    () => applySupplierTargetWeeks(
+      applyDiContainerRecommendations(rows),
+      parsedSupplierTargetWeeks,
+      undefined,
+      parsedGlobalTargetWeeks
+    ),
+    [parsedGlobalTargetWeeks, parsedSupplierTargetWeeks, rows]
   );
   const supplierOptions = useMemo(
     () => ["All", ...uniqueSorted(displayRows.map((row) => row.supplier_name || "Unknown Supplier"))],
@@ -857,6 +868,7 @@ export function OrderDashboard({
           supplierOptions={supplierOptions}
           supplierCatalogWines={supplierCatalogWines}
           supplierTargetWeeks={supplierTargetWeeks}
+          globalTargetWeeks={globalTargetWeeks}
           visibleCount={visibleRecommendations.length}
           hasApprovedOrders={rows.some(
             (row) => row.recommendation_status === "approved" || row.recommendation_status === "edited"
@@ -868,6 +880,7 @@ export function OrderDashboard({
           onSaveWorkingQty={saveWorkingQty}
           onSetWorkingQty={setWorkingQty}
           onSetSupplierTargetWeeks={setSupplierTargetWeeksValue}
+          onSetGlobalTargetWeeks={setGlobalTargetWeeks}
           onRestoreInactiveWine={restoreInactiveWine}
           onSaveCatalogWine={saveCatalogWine}
           onDeleteCatalogWine={deleteCatalogWine}
