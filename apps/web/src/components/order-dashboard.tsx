@@ -212,7 +212,7 @@ export function OrderDashboard({
   const qbUpdatedAt = formatSourceUpdatedAt(quickBooksLastSyncAt);
   const qbDataLabel = qbUpdatedAt ? `QB Updated ${qbUpdatedAt}` : null;
   const qbDataTitle = qbUpdatedAt
-    ? `Last QuickBooks invoice or credit memo mirror response received ${qbUpdatedAt}.`
+    ? `Last complete QuickBooks Items, purchase orders, invoices, and credits refresh finished ${qbUpdatedAt}.`
     : undefined;
 
   function selectView(view: ActiveView) {

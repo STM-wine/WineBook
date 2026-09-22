@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { asNumber } from "@/lib/order-data";
 import { fetchQuickBooksItemSalesWindows } from "@/lib/supabase/quickbooks-item-sales-windows";
+import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import type { Recommendation, ReportRun } from "@/lib/types";
 
 type BridgeClient = SupabaseClient<any, "public", any>;
@@ -332,21 +333,15 @@ async function fetchAll<Row>(
   orderBy: string,
   refine?: (query: any) => any
 ) {
-  const rows: Row[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
+  return fetchAllExact<Row>(table, (from, to) => {
     let query = supabase
       .from(table)
-      .select(columns)
+      .select(columns, { count: "exact" })
       .order(orderBy, { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
+      .range(from, to);
     if (refine) query = refine(query);
-    const { data, error } = await query.returns<Row[]>();
-    if (error) throw new Error(error.message);
-    const page = data || [];
-    rows.push(...page);
-    if (page.length < PAGE_SIZE) break;
-  }
-  return rows;
+    return query.returns<Row[]>() as never;
+  }, PAGE_SIZE);
 }
 
 function firstByCode(rows: VinosmithWineRow[]) {

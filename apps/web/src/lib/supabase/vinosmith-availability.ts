@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createVinosmithDistributorClient } from "@/lib/integrations/vinosmith";
 import { aggregateVinosmithAvailable } from "@/lib/vinosmith-availability-data";
+import { fetchAllExact } from "./fetch-all-exact";
 
 type InventoryRow = {
   wine_id: string;
@@ -51,33 +52,27 @@ export async function fetchLiveVinosmithAvailability(options: {
 export async function fetchLatestVinosmithAvailability(
   supabase: SupabaseClient
 ): Promise<LatestVinosmithAvailability | null> {
-  const { data: firstPage, error: firstPageError } = await supabase
+  const { data: latest, error: latestError } = await supabase
     .from("vinosmith_inventory_snapshots")
-    .select("wine_id,snapshot_at,available,wine_code:raw_data->wine->>code")
+    .select("snapshot_at")
     .not("snapshot_at", "is", null)
     .order("snapshot_at", { ascending: false })
-    .order("wine_id", { ascending: true })
-    .range(0, PAGE_SIZE - 1)
-    .returns<InventoryRow[]>();
+    .limit(1)
+    .maybeSingle<{ snapshot_at: string }>();
 
-  if (firstPageError) throw new Error(firstPageError.message);
-  const snapshotAt = firstPage?.[0]?.snapshot_at;
+  if (latestError) throw new Error(latestError.message);
+  const snapshotAt = latest?.snapshot_at;
   if (!snapshotAt) return null;
 
-  const rows = (firstPage || []).filter((row) => row.snapshot_at === snapshotAt);
-  for (let from = PAGE_SIZE; rows.length === from; from += PAGE_SIZE) {
-    const { data, error } = await supabase
+  const rows = await fetchAllExact<InventoryRow>("Vinosmith inventory snapshot", (from, to) => supabase
       .from("vinosmith_inventory_snapshots")
-      .select("wine_id,snapshot_at,available,wine_code:raw_data->wine->>code")
+      .select("wine_id,snapshot_at,available,wine_code:raw_data->wine->>code", { count: "exact" })
       .eq("snapshot_at", snapshotAt)
       .order("wine_id", { ascending: true })
-      .range(from, from + PAGE_SIZE - 1)
-      .returns<InventoryRow[]>();
-    if (error) throw new Error(error.message);
-    const page = data || [];
-    rows.push(...page);
-    if (page.length < PAGE_SIZE) break;
-  }
+      .range(from, to)
+      .returns<InventoryRow[]>() as never,
+    PAGE_SIZE
+  );
 
   const byProductCode = aggregateVinosmithAvailable(rows.map((row) => ({
     wineCode: row.wine_code,

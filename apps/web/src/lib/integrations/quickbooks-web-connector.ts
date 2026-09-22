@@ -14,12 +14,14 @@ import {
 } from "@/lib/integrations/quickbooks-recovery-queue";
 import {
   assertQuickBooksReadOnlyQbxml,
+  buildQuickBooksOperationalRefreshRequests,
   buildQuickBooksSalesDashboardDiscoveryRequests,
-  createQuickBooksDesktopReadOnlyClient,
   parseQbxmlResponseStatuses,
   type QuickBooksDateRange,
   type QuickBooksQbxmlResponseStatus
 } from "@/lib/integrations/quickbooks-desktop";
+import { nextQuickBooksPage } from "@/lib/integrations/quickbooks-pagination";
+import { createServiceRoleClient } from "@/lib/supabase/server";
 
 const SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/";
 const QBWC_NS = "http://developer.intuit.com/";
@@ -51,6 +53,7 @@ type QuickBooksWebConnectorSession = {
   createdAt: string;
   requestIndex: number;
   requests: QuickBooksRecoveryRequest[];
+  sourceSyncRunId: string | null;
   lastError: string;
   responses: Array<{
     requestType: string;
@@ -119,9 +122,9 @@ export async function handleQuickBooksWebConnectorSoapRequest(soapRequest: strin
       case "getLastError":
         return soapOk(method, scalarResult("getLastErrorResult", getLastError(soapRequest)));
       case "closeConnection":
-        return soapOk(method, scalarResult("closeConnectionResult", closeConnection(soapRequest)));
+        return soapOk(method, scalarResult("closeConnectionResult", await closeConnection(soapRequest)));
       case "connectionError":
-        return soapOk(method, scalarResult("connectionErrorResult", connectionError(soapRequest)));
+        return soapOk(method, scalarResult("connectionErrorResult", await connectionError(soapRequest)));
       default:
         return soapFault("Client", "Unsupported QuickBooks Web Connector SOAP method.");
     }
@@ -167,12 +170,16 @@ async function authenticate(soapRequest: string) {
   }
 
   const ticket = randomUUID();
+  const createdAt = new Date().toISOString();
+  const requests = await buildQuickBooksSessionRequests();
+  const sourceSyncRunId = await startQuickBooksSyncRun(username, createdAt, requests.length);
   sessionStore.set(ticket, {
     ticket,
     username,
-    createdAt: new Date().toISOString(),
+    createdAt,
     requestIndex: 0,
-    requests: await buildQuickBooksSessionRequests(),
+    requests,
+    sourceSyncRunId,
     lastError: "",
     responses: []
   });
@@ -209,6 +216,7 @@ async function receiveResponseXML(soapRequest: string) {
     if (failedJob) {
       await failQuickBooksRecoveryJob(failedJob, session.lastError);
     }
+    await finishQuickBooksSyncRun(session, "failed", session.lastError);
     rememberSession(session);
     return -1;
   }
@@ -244,22 +252,39 @@ async function receiveResponseXML(soapRequest: string) {
       response,
       status,
       responseChecksum,
-      receivedAt
+      receivedAt,
+      sourceSyncRunId: session.sourceSyncRunId
     });
+    const errorStatus = status.find(isQuickBooksErrorStatus);
+    if (errorStatus) {
+      throw new Error(errorStatus.statusMessage || `QuickBooks ${request.requestType} returned an error.`);
+    }
     if (request.recoveryJob) {
       const completion = await completeQuickBooksRecoveryJob(request.recoveryJob, status, recordCount, responseChecksum, receivedAt);
       queueContinuationRequest(session, completion);
+    } else {
+      const continuationRequest = nextQuickBooksPage(request, status, recordCount);
+      if (continuationRequest) {
+        session.requests.splice(session.requestIndex + 1, 0, continuationRequest);
+      }
     }
   } catch (error) {
-    session.lastError = "QuickBooks response persistence failed: " + (error instanceof Error ? error.message : "unknown persistence error");
+    session.lastError = "QuickBooks response processing failed: " + (error instanceof Error ? error.message : "unknown processing error");
     if (request.recoveryJob) {
       await failQuickBooksRecoveryJob(request.recoveryJob, session.lastError);
     }
+    await finishQuickBooksSyncRun(session, "failed", session.lastError);
+    rememberSession(session);
+    return -1;
   }
 
   session.requestIndex += 1;
   rememberSession(session);
   return Math.min(100, Math.round((session.requestIndex / session.requests.length) * 100));
+}
+
+function isQuickBooksErrorStatus(status: QuickBooksQbxmlResponseStatus) {
+  return status.statusSeverity === "Error" || Boolean(status.statusCode && status.statusCode >= 3000);
 }
 
 function queueContinuationRequest(session: QuickBooksWebConnectorSession, completion: QuickBooksRecoveryCompletion) {
@@ -272,23 +297,101 @@ function getLastError(soapRequest: string) {
   return session?.lastError || "No error recorded by Stem Intelligence.";
 }
 
-function closeConnection(soapRequest: string) {
+async function closeConnection(soapRequest: string) {
   const ticket = extractSoapValue(soapRequest, "ticket");
   const session = getSession(ticket);
-  if (session) rememberSession(session, new Date().toISOString());
+  if (session) {
+    const complete = session.requestIndex >= session.requests.length && !session.lastError;
+    await finishQuickBooksSyncRun(
+      session,
+      complete ? "completed" : "failed",
+      complete ? null : session.lastError || "QuickBooks Web Connector session closed before every request completed."
+    );
+    rememberSession(session, new Date().toISOString());
+  }
   sessionStore.delete(ticket);
   return "Stem Intelligence QuickBooks Desktop discovery session closed.";
 }
 
-function connectionError(soapRequest: string) {
+async function connectionError(soapRequest: string) {
   const session = getSession(extractSoapValue(soapRequest, "ticket"));
   const hresult = extractSoapValue(soapRequest, "hresult");
   const message = extractSoapValue(soapRequest, "message");
   if (session) {
     session.lastError = [hresult, message].filter(Boolean).join(": ");
+    await finishQuickBooksSyncRun(session, "failed", session.lastError || "QuickBooks connection error.");
     rememberSession(session);
   }
   return "done";
+}
+
+async function startQuickBooksSyncRun(username: string, startedAt: string, requestCount: number) {
+  const supabase = createServiceRoleClient();
+  const staleBefore = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const { error: staleError } = await supabase
+    .from("source_sync_runs")
+    .update({
+      status: "failed",
+      completed_at: startedAt,
+      error_message: "QuickBooks Web Connector session did not close within two hours."
+    })
+    .eq("source_system", "quickbooks_desktop")
+    .eq("worker_name", "quickbooks_web_connector")
+    .eq("status", "running")
+    .lt("started_at", staleBefore);
+  if (staleError) throw new Error(staleError.message);
+
+  const { data, error } = await supabase
+    .from("source_sync_runs")
+    .insert({
+      source_system: "quickbooks_desktop",
+      sync_type: "daily_refresh",
+      status: "running",
+      started_at: startedAt,
+      worker_name: "quickbooks_web_connector",
+      parameters: { username, request_count: requestCount },
+      diagnostics: { request_count: requestCount, completed_request_count: 0 }
+    })
+    .select("id")
+    .single<{ id: string }>();
+  if (error || !data) throw new Error(error?.message || "Could not start the QuickBooks sync run.");
+  return data.id;
+}
+
+async function finishQuickBooksSyncRun(
+  session: QuickBooksWebConnectorSession,
+  status: "completed" | "failed",
+  errorMessage: string | null
+) {
+  if (!session.sourceSyncRunId) return;
+  const { error } = await createServiceRoleClient()
+    .from("source_sync_runs")
+    .update({
+      status,
+      completed_at: new Date().toISOString(),
+      error_message: errorMessage,
+      diagnostics: {
+        request_count: session.requests.length,
+        completed_request_count: session.responses.length,
+        complete: status === "completed",
+        resources: summarizeSessionResources(session.responses)
+      }
+    })
+    .eq("id", session.sourceSyncRunId)
+    .eq("status", "running");
+  if (error) throw new Error(error.message);
+}
+
+function summarizeSessionResources(responses: QuickBooksWebConnectorSession["responses"]) {
+  const resources: Record<string, { pages: number; rows: number }> = {};
+  for (const response of responses) {
+    const resource = response.requestId || response.requestType;
+    const current = resources[resource] || { pages: 0, rows: 0 };
+    current.pages += 1;
+    current.rows += response.recordCount || 0;
+    resources[resource] = current;
+  }
+  return resources;
 }
 
 function countReturnedRecords(requestType: string, response: string) {
@@ -370,62 +473,16 @@ function buildSalesDashboardRequests() {
 }
 
 function buildOperationalRefreshRequests() {
-  const client = createQuickBooksDesktopReadOnlyClient();
   const maxReturned = getDiscoveryMaxReturned();
   const listMaxReturned = getListRefreshMaxReturned(maxReturned);
   const txnDateWindows = getOperationalTxnDateWindows();
   const modifiedDateRange = getOperationalModifiedDateRange();
-
-  const requests: QuickBooksRecoveryRequest[] = [
-    client.buildSalesRepQuery(),
-    client.buildCustomerQuery({
-      requestId: "operational-customers",
-      maxReturned: listMaxReturned,
-      activeStatus: "All",
-      modifiedDateRange
-    }),
-    client.buildVendorQuery({
-      requestId: "operational-vendors",
-      maxReturned: listMaxReturned,
-      activeStatus: "All",
-      modifiedDateRange
-    }),
-    client.buildItemQuery({
-      requestId: "operational-items",
-      maxReturned: listMaxReturned,
-      activeStatus: "All",
-      modifiedDateRange
-    })
-  ];
-
-  for (const window of txnDateWindows) {
-    const suffix = `${window.from || "open"}:${window.to || "open"}`;
-    requests.push(
-      client.buildInvoiceQuery({
-        requestId: `operational-invoices:${suffix}`,
-        maxReturned,
-        txnDateRange: window,
-        includeLineItems: true,
-        includeLinkedTxns: true
-      }),
-      client.buildCreditMemoQuery({
-        requestId: `operational-credit-memos:${suffix}`,
-        maxReturned,
-        txnDateRange: window,
-        includeLineItems: true,
-        includeLinkedTxns: true
-      }),
-      client.buildPurchaseOrderQuery({
-        requestId: `operational-purchase-orders:${suffix}`,
-        maxReturned,
-        txnDateRange: window,
-        includeLineItems: true,
-        includeLinkedTxns: true
-      })
-    );
-  }
-
-  return requests;
+  return buildQuickBooksOperationalRefreshRequests({
+    maxReturned,
+    listMaxReturned,
+    txnDateWindows,
+    modifiedDateRange
+  });
 }
 
 function mergeSessionRequests(

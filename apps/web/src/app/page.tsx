@@ -164,6 +164,17 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
 
   const quickBooksLastSyncPromise = (async () => {
     try {
+      const { data: completedRun, error: runError } = await serviceRoleSupabase
+        .from("source_sync_runs")
+        .select("completed_at")
+        .eq("source_system", "quickbooks_desktop")
+        .eq("worker_name", "quickbooks_web_connector")
+        .eq("status", "completed")
+        .order("completed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{ completed_at: string | null }>();
+      if (!runError && completedRun?.completed_at) return completedRun.completed_at;
+
       const { data, error } = await serviceRoleSupabase
         .from("source_api_responses")
         .select("fetched_at")
@@ -174,6 +185,25 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
         .maybeSingle<{ fetched_at: string | null }>();
       if (error) return null;
       return data?.fetched_at || null;
+    } catch {
+      return null;
+    }
+  })();
+  const quickBooksSyncWarningPromise = (async () => {
+    try {
+      const { data, error } = await serviceRoleSupabase
+        .from("source_sync_runs")
+        .select("status,started_at,completed_at,error_message")
+        .eq("source_system", "quickbooks_desktop")
+        .eq("worker_name", "quickbooks_web_connector")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{ status: string; started_at: string; completed_at: string | null; error_message: string | null }>();
+      if (error || !data || data.status === "completed") return null;
+      if (data.status === "running") {
+        return "QuickBooks refresh is still in progress. Items and purchase orders are not considered current until every page finishes.";
+      }
+      return `The latest QuickBooks refresh ${data.status}. The last complete item and purchase-order data remains in use. ${data.error_message || "Run Web Connector again before relying on On Order."}`;
     } catch {
       return null;
     }
@@ -192,6 +222,7 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     { data: wineRequests },
     { data: priceChangeEvents },
     quickBooksLastSyncAt,
+    quickBooksSyncWarning,
     vinosmithLastSyncAt,
     activeOrderingRun,
     vinosmithAvailabilityResult
@@ -201,6 +232,7 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     wineRequestsPromise,
     priceChangeEventsPromise,
     quickBooksLastSyncPromise,
+    quickBooksSyncWarningPromise,
     vinosmithLastSyncPromise,
     activeOrderingRunPromise,
     vinosmithAvailabilityPromise
@@ -337,6 +369,7 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     currentSourceOverlayResult.error
       ? `This ordering run predates the complete QuickBooks sales pagination fix, and its corrected sales could not be reloaded. Refresh Ordering Data before relying on sales or suggested quantities. ${currentSourceOverlayResult.error}`
       : null,
+    quickBooksSyncWarning,
     latestRun.run_type === "quickbooks_sync" && latestRun.diagnostics?.quickbooks_fresh === false
       ? `QuickBooks source data was stale when this ordering run was generated (${Math.round(Number(latestRun.diagnostics.quickbooks_freshness_hours) || 0)} hours old). Refresh the QuickBooks mirror before relying on quantities, costs, or sales.`
       : null

@@ -16,6 +16,9 @@ import {
 } from "./source-backed-ordering";
 import { fetchQuickBooksItemSalesWindows } from "./supabase/quickbooks-item-sales-windows";
 import { fetchLiveVinosmithAvailability, type LatestVinosmithAvailability } from "./supabase/vinosmith-availability";
+import { fetchAllExact } from "./supabase/fetch-all-exact";
+import { fetchLatestCompletedQuickBooksOnOrderSnapshot } from "./supabase/recommendations";
+import { applyCompletedQuickBooksOnOrderSnapshot } from "./quickbooks-on-order-snapshot";
 
 type SourceClient = SupabaseClient<any, "public", any>;
 
@@ -46,9 +49,11 @@ export async function fetchSourceBackedOrderingData(
   } = {}
 ): Promise<SourceBackedOrderingData & { configuration: PublishedOrderingConfiguration }> {
   const referenceDate = options.referenceDate || orderingBusinessDate();
-  const [configuration, quickBooksItems, vinosmithWines, suppliers, quickBooksVendors, vendorMappings, markers, availability] = await Promise.all([
+  await assertLatestQuickBooksSyncComplete(supabase);
+  const [configuration, liveQuickBooksItems, completedItemSnapshot, vinosmithWines, suppliers, quickBooksVendors, vendorMappings, markers, availability] = await Promise.all([
     fetchPublishedOrderingConfiguration(supabase),
     fetchAll<SourceQuickBooksItem>(supabase, "quickbooks_items", "list_id,name,full_name,sales_desc,purchase_desc,is_active,item_type,quantity_on_hand,quantity_on_order,purchase_cost,average_cost,custom_fields,raw_data,last_seen_at", "list_id"),
+    fetchLatestCompletedQuickBooksOnOrderSnapshot(supabase),
     fetchAll<SourceVinosmithWine>(supabase, "vinosmith_wines", "wine_id,code,name,vintage,importer_name", "wine_id"),
     fetchAll<SourceSupplier>(supabase, "suppliers", "id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,active", "name"),
     fetchAll<SourceQuickBooksVendor>(supabase, "quickbooks_vendors", "list_id,name,full_name", "list_id"),
@@ -56,6 +61,9 @@ export async function fetchSourceBackedOrderingData(
     fetchOrderingMarkers(supabase),
     options.liveAvailability ? Promise.resolve(options.liveAvailability) : fetchLiveVinosmithAvailability()
   ]);
+  const quickBooksItems = completedItemSnapshot === null
+    ? liveQuickBooksItems
+    : applyCompletedQuickBooksOnOrderSnapshot(liveQuickBooksItems, completedItemSnapshot);
 
   const itemCodeByListId = new Map(quickBooksItems.map((item) => [item.list_id, normalizeOrderingItemCode(itemCode(item))]));
   const salesRows = await fetchQuickBooksItemSalesWindows(supabase, referenceDate);
@@ -97,6 +105,23 @@ export async function fetchSourceBackedOrderingData(
   return { ...built, configuration };
 }
 
+async function assertLatestQuickBooksSyncComplete(supabase: SourceClient) {
+  const { data, error } = await supabase
+    .from("source_sync_runs")
+    .select("status,started_at,error_message")
+    .eq("source_system", "quickbooks_desktop")
+    .eq("worker_name", "quickbooks_web_connector")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ status: string; started_at: string; error_message: string | null }>();
+  if (error) throw new Error(error.message);
+  if (data && data.status !== "completed") {
+    throw new Error(
+      `The latest QuickBooks Web Connector refresh is ${data.status}, not complete. ${data.error_message || "Finish a successful Web Connector pull before refreshing ordering data."}`
+    );
+  }
+}
+
 export async function fetchPublishedOrderingConfiguration(supabase: SourceClient): Promise<PublishedOrderingConfiguration> {
   const { data, error } = await supabase
     .from("configuration_versions")
@@ -126,19 +151,14 @@ async function fetchOrderingMarkers(supabase: SourceClient) {
 }
 
 async function fetchAll<Row>(supabase: SourceClient, table: string, columns: string, orderBy: string) {
-  const rows: Row[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase
+  return fetchAllExact<Row>(table, (from, to) => supabase
       .from(table)
-      .select(columns)
+      .select(columns, { count: "exact" })
       .order(orderBy, { ascending: true })
-      .range(from, from + PAGE_SIZE - 1)
-      .returns<Row[]>();
-    if (error) throw new Error(error.message);
-    const page = data || [];
-    rows.push(...page);
-    if (page.length < PAGE_SIZE) return rows;
-  }
+      .range(from, to)
+      .returns<Row[]>() as never,
+    PAGE_SIZE
+  );
 }
 
 function itemCode(item: SourceQuickBooksItem) {

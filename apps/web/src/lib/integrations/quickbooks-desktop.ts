@@ -86,6 +86,10 @@ export type QuickBooksDesktopQbxmlRequest = {
   requestId?: string;
   qbxmlVersion: string;
   qbxml: string;
+  pagination?: {
+    maxReturned: number;
+    iteratorMode: QuickBooksIteratorMode;
+  };
 };
 
 export type QuickBooksSalesDashboardDiscoveryOptions = {
@@ -94,9 +98,17 @@ export type QuickBooksSalesDashboardDiscoveryOptions = {
   txnDateRange?: QuickBooksDateRange;
 };
 
+export type QuickBooksOperationalRefreshOptions = {
+  maxReturned: number;
+  listMaxReturned: number;
+  modifiedDateRange: QuickBooksDateRange;
+  txnDateWindows: QuickBooksDateRange[];
+};
+
 type QuickBooksRequestBuildParts = {
   requestId?: string;
   iterator?: QuickBooksIteratorOptions;
+  maxReturned?: number;
   body: string[];
 };
 
@@ -183,6 +195,7 @@ export function buildQuickBooksSalesDashboardDiscoveryRequests(
     client.buildInvoiceQuery({
       requestId: "sales-dashboard-invoices",
       maxReturned,
+      iterator: { mode: "Start" },
       txnDateRange,
       includeLineItems: false,
       includeLinkedTxns: false
@@ -190,11 +203,73 @@ export function buildQuickBooksSalesDashboardDiscoveryRequests(
     client.buildCreditMemoQuery({
       requestId: "sales-dashboard-credit-memos",
       maxReturned,
+      iterator: { mode: "Start" },
       txnDateRange,
       includeLineItems: false,
       includeLinkedTxns: false
     })
   ];
+}
+
+export function buildQuickBooksOperationalRefreshRequests(
+  options: QuickBooksOperationalRefreshOptions
+): QuickBooksDesktopQbxmlRequest[] {
+  const client = createQuickBooksDesktopReadOnlyClient();
+  const requests: QuickBooksDesktopQbxmlRequest[] = [
+    client.buildSalesRepQuery(),
+    client.buildCustomerQuery({
+      requestId: "operational-customers",
+      maxReturned: options.listMaxReturned,
+      iterator: { mode: "Start" },
+      activeStatus: "All",
+      modifiedDateRange: options.modifiedDateRange
+    }),
+    client.buildVendorQuery({
+      requestId: "operational-vendors",
+      maxReturned: options.listMaxReturned,
+      iterator: { mode: "Start" },
+      activeStatus: "All",
+      modifiedDateRange: options.modifiedDateRange
+    }),
+    client.buildItemQuery({
+      requestId: "operational-items",
+      maxReturned: options.listMaxReturned,
+      iterator: { mode: "Start" },
+      activeStatus: "All"
+    })
+  ];
+
+  for (const window of options.txnDateWindows) {
+    const suffix = `${window.from || "open"}:${window.to || "open"}`;
+    requests.push(
+      client.buildInvoiceQuery({
+        requestId: `operational-invoices:${suffix}`,
+        maxReturned: options.maxReturned,
+        iterator: { mode: "Start" },
+        txnDateRange: window,
+        includeLineItems: true,
+        includeLinkedTxns: true
+      }),
+      client.buildCreditMemoQuery({
+        requestId: `operational-credit-memos:${suffix}`,
+        maxReturned: options.maxReturned,
+        iterator: { mode: "Start" },
+        txnDateRange: window,
+        includeLineItems: true,
+        includeLinkedTxns: true
+      }),
+      client.buildPurchaseOrderQuery({
+        requestId: `operational-purchase-orders:${suffix}`,
+        maxReturned: options.maxReturned,
+        iterator: { mode: "Start" },
+        txnDateRange: window,
+        includeLineItems: true,
+        includeLinkedTxns: true
+      })
+    );
+  }
+
+  return requests;
 }
 
 export function buildQuickBooksDesktopQwcFile(options: QuickBooksQwcFileOptions) {
@@ -283,6 +358,42 @@ export function parseQbxmlResponseStatuses(qbxmlResponse: string): QuickBooksQbx
   return statuses;
 }
 
+export function continueQuickBooksRequest(
+  request: QuickBooksDesktopQbxmlRequest,
+  iteratorId: string
+): QuickBooksDesktopQbxmlRequest {
+  if (!request.pagination || !iteratorId.trim()) {
+    throw new QuickBooksDesktopClientError("QuickBooks continuation requires an iterator-enabled request and iterator ID.");
+  }
+
+  const requestTag = new RegExp(`<${request.requestType}\\b[^>]*>`);
+  const openTag = request.qbxml.match(requestTag)?.[0];
+  if (!openTag) throw new QuickBooksDesktopClientError(`QuickBooks request ${request.requestType} has no request element.`);
+
+  const cleanTag = openTag
+    .replace(/\siterator="[^"]*"/gi, "")
+    .replace(/\siteratorID="[^"]*"/gi, "")
+    .replace(/>$/, ` iterator="Continue" iteratorID="${escapeXmlAttribute(iteratorId)}">`);
+  const qbxml = stripInitialIteratorFilters(request.qbxml.replace(openTag, cleanTag));
+  assertQuickBooksReadOnlyQbxml(qbxml);
+
+  return {
+    ...request,
+    qbxml,
+    pagination: { ...request.pagination, iteratorMode: "Continue" }
+  };
+}
+
+function stripInitialIteratorFilters(qbxml: string) {
+  return qbxml
+    .replace(/\s*<TxnDateRangeFilter>[\s\S]*?<\/TxnDateRangeFilter>/gi, "")
+    .replace(/\s*<ModifiedDateRangeFilter>[\s\S]*?<\/ModifiedDateRangeFilter>/gi, "")
+    .replace(/\s*<EntityFilter>[\s\S]*?<\/EntityFilter>/gi, "")
+    .replace(/\s*<FromModifiedDate>[^<]*<\/FromModifiedDate>/gi, "")
+    .replace(/\s*<ToModifiedDate>[^<]*<\/ToModifiedDate>/gi, "")
+    .replace(/\s*<PaidStatus>[^<]*<\/PaidStatus>/gi, "");
+}
+
 function buildQueryRequest(
   qbxmlVersion: string,
   requestType: QuickBooksReadOnlyRequestType,
@@ -294,7 +405,10 @@ function buildQueryRequest(
     requestType,
     requestId: parts.requestId,
     qbxmlVersion,
-    qbxml
+    qbxml,
+    ...(parts.iterator?.mode && parts.maxReturned
+      ? { pagination: { maxReturned: parts.maxReturned, iteratorMode: parts.iterator.mode } }
+      : {})
   };
 }
 
@@ -339,7 +453,7 @@ function buildListQueryBody(params: QuickBooksListQueryOptions) {
 
   pushIncludeRetElements(body, params.includeRetElements);
   pushOwnerIds(body, params.ownerIds);
-  return { requestId: params.requestId, iterator: params.iterator, body };
+  return { requestId: params.requestId, iterator: params.iterator, maxReturned: params.maxReturned, body };
 }
 
 function buildTransactionQueryBody(
@@ -370,7 +484,7 @@ function buildTransactionQueryBody(
   }
   pushIncludeRetElements(body, params.includeRetElements);
   pushOwnerIds(body, params.ownerIds);
-  return { requestId: params.requestId, iterator: params.iterator, body };
+  return { requestId: params.requestId, iterator: params.iterator, maxReturned: params.maxReturned, body };
 }
 
 
@@ -386,7 +500,7 @@ function buildTxnDeletedQueryBody(params: QuickBooksTxnDeletedQueryOptions) {
     if (params.deletedDateRange.to) range.push(xmlElement("ToDeletedDate", params.deletedDateRange.to));
     body.push(xmlAggregate("DeletedDateRangeFilter", range));
   }
-  return { requestId: params.requestId, iterator: params.iterator, body };
+  return { requestId: params.requestId, iterator: params.iterator, maxReturned: params.maxReturned, body };
 }
 
 function pushCommonQueryParts(body: string[], params: QuickBooksQueryOptions) {

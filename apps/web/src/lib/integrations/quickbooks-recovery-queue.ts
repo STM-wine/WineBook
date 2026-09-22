@@ -181,6 +181,18 @@ export async function completeQuickBooksRecoveryJob(
 
   const iteratorId = firstStatus?.iteratorId || null;
   const remaining = firstStatus?.iteratorRemainingCount ?? null;
+  const expectsIteratorMetadata = job.resourceName !== "quickbooks_sales_reps";
+  const isCompleteEmptyResult = firstStatus?.statusCode === 1 && (recordCount || 0) === 0;
+  if (expectsIteratorMetadata && remaining === null && !isCompleteEmptyResult) {
+    const message = `QuickBooks ${job.resourceName} did not confirm pagination completeness after returning ${recordCount || 0} rows.`;
+    await failQuickBooksRecoveryJob(job, message);
+    throw new Error(message);
+  }
+  if (remaining !== null && remaining > 0 && !iteratorId) {
+    const message = `QuickBooks ${job.resourceName} has ${remaining} remaining rows but returned no iterator ID.`;
+    await failQuickBooksRecoveryJob(job, message);
+    throw new Error(message);
+  }
   const priorRecordCount = numberValue(job.diagnostics.recordCount);
   const totalRecordCount = priorRecordCount + (recordCount || 0);
   const diagnostics = {

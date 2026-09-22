@@ -16,6 +16,7 @@ type PersistQuickBooksResponseInput = {
   status: QuickBooksQbxmlResponseStatus[];
   responseChecksum: string;
   receivedAt: string;
+  sourceSyncRunId?: string | null;
   rawStoragePath?: string | null;
 };
 
@@ -60,7 +61,7 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
   } else if (input.request.requestType === "VendorQueryRq") {
     await persistVendors(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "ItemQueryRq" || input.request.requestType === "ItemInventoryQueryRq") {
-    await persistItems(supabase, input.response, rawResponse.id);
+    await persistItems(supabase, input.response, rawResponse.id, input.sourceSyncRunId || null);
   } else if (input.request.requestType === "InvoiceQueryRq") {
     await persistInvoices(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "CreditMemoQueryRq") {
@@ -92,6 +93,7 @@ async function recordRawResponse(supabase: SupabaseClient, input: PersistQuickBo
   const { data, error } = await supabase
     .from("source_api_responses")
     .insert({
+      source_sync_run_id: input.sourceSyncRunId || null,
       source_system: "quickbooks_desktop",
       endpoint: input.request.requestType,
       request_method: "QBXML",
@@ -221,7 +223,12 @@ async function persistVendors(supabase: SupabaseClient, response: string, rawRes
   await upsertRows(supabase, "quickbooks_vendors", rows, "list_id");
 }
 
-async function persistItems(supabase: SupabaseClient, response: string, rawResponseId: string) {
+async function persistItems(
+  supabase: SupabaseClient,
+  response: string,
+  rawResponseId: string,
+  sourceSyncRunId: string | null
+) {
   const now = new Date().toISOString();
   const rows: Record<string, unknown>[] = [];
   for (const itemType of itemRetTypes()) {
@@ -262,6 +269,22 @@ async function persistItems(supabase: SupabaseClient, response: string, rawRespo
     }
   }
   await upsertRows(supabase, "quickbooks_items", rows, "list_id");
+  if (sourceSyncRunId && rows.length > 0) {
+    const snapshotAt = new Date().toISOString();
+    const snapshots = rows.map((row) => ({
+      source_sync_run_id: sourceSyncRunId,
+      raw_response_id: rawResponseId,
+      snapshot_at: snapshotAt,
+      snapshot_date: snapshotAt.slice(0, 10),
+      item_list_id: row.list_id,
+      quantity_on_hand: row.quantity_on_hand,
+      quantity_on_order: row.quantity_on_order,
+      quantity_on_sales_order: row.quantity_on_sales_order,
+      average_cost: row.average_cost,
+      raw_data: { item_type: row.item_type, full_name: row.full_name }
+    }));
+    await upsertRows(supabase, "quickbooks_inventory_snapshots", snapshots, "source_sync_run_id,item_list_id");
+  }
 }
 
 async function persistInvoices(supabase: SupabaseClient, response: string, rawResponseId: string) {
