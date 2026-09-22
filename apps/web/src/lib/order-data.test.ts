@@ -293,12 +293,21 @@ describe("live Order Review inventory and target weeks", () => {
   it("sets every automatic supplier recommendation from the same global target", () => {
     const rows = [
       recommendation({ id: "stateside", supplier_name: "Stateside", weekly_velocity: 10, true_available: 0, pack_size: 12 }),
-      recommendation({ id: "valkyrie", supplier_name: "Valkyrie", weekly_velocity: 4, true_available: 0, pack_size: 6 })
+      recommendation({ id: "valkyrie", supplier_name: "Valkyrie", weekly_velocity: 4, true_available: 0, pack_size: 6 }),
+      recommendation({
+        id: "direct-import",
+        supplier_name: "Direct Import",
+        order_path: "di",
+        weekly_velocity: 10,
+        true_available: 0,
+        pack_size: 12,
+        recommended_qty_rounded: 13440
+      })
     ];
 
     const updated = applySupplierTargetWeeks(rows, { Stateside: 8, Valkyrie: 9 }, DEFAULT_SUPPLIER_TARGET_WEEKS, 2);
 
-    expect(updated.map((row) => row.recommended_qty_rounded)).toEqual([24, 12]);
+    expect(updated.map((row) => row.recommended_qty_rounded)).toEqual([24, 12, 24]);
   });
 
   it("never restores an older vintage suppressed by the source builder", () => {

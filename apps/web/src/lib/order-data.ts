@@ -115,7 +115,7 @@ export function applySupplierTargetWeeks(
     const policy = rowReplenishmentPolicy(row);
     const automatic = policy !== "Allocated" && policy !== "Special Order" && !(policy === "Limited" && row.recommendations_suppressed === true);
     if (!automatic) return row;
-    if (targetWeeks < 0 || row.order_path === "di") return row;
+    if (targetWeeks < 0 || (row.order_path === "di" && globalTargetWeeks === undefined)) return row;
     if (row.supplier_catalog_workbench_item_id && asNumber(row.weekly_velocity) <= 0) return row;
 
     const qty = recommendationForTargetWeeks(row, targetWeeks);
