@@ -3,6 +3,7 @@ import { normalizeOrderingItemCode, ORDERING_BUILDER_VERSION, ORDERING_SOURCE } 
 
 type OrderingRunLike = {
   run_type?: string | null;
+  report_date?: string | null;
   diagnostics?: Record<string, any> | null;
 };
 
@@ -92,10 +93,26 @@ export function isSourceBackedRun(run: OrderingRunLike | null | undefined) {
   return run?.run_type === "quickbooks_sync" && run.diagnostics?.ordering_source === ORDERING_SOURCE;
 }
 
-export function sourceRunNeedsCurrentOverlay(run: OrderingRunLike | null | undefined) {
+export function sourceRunNeedsCurrentOverlay(
+  run: OrderingRunLike | null | undefined,
+  businessDate = phoenixBusinessDate()
+) {
   if (!isSourceBackedRun(run)) return false;
   const builderVersion = Number(run?.diagnostics?.builder_version);
-  return !Number.isFinite(builderVersion) || builderVersion < ORDERING_BUILDER_VERSION;
+  return !Number.isFinite(builderVersion) ||
+    builderVersion < ORDERING_BUILDER_VERSION ||
+    Boolean(run?.report_date && run.report_date < businessDate);
+}
+
+function phoenixBusinessDate(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Phoenix",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(value);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
 }
 
 export function overlayCurrentSourceRows(recommendations: Recommendation[], currentRows: Array<Record<string, any>>) {

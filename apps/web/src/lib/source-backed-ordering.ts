@@ -8,7 +8,7 @@ import {
 } from "./replenishment-policy";
 
 export const ORDERING_SOURCE = "quickbooks_vinosmith_stem";
-export const ORDERING_BUILDER_VERSION = 6;
+export const ORDERING_BUILDER_VERSION = 7;
 
 export type SourceQuickBooksItem = {
   list_id: string;
@@ -58,6 +58,9 @@ export type SourceOrderingMarker = {
   family_default_policy?: string | null;
   recommendations_suppressed?: boolean | null;
   suppression_reason?: string | null;
+  suppressed_until?: string | null;
+  suppression_changed_at?: string | null;
+  suppression_changed_by?: string | null;
   note_source?: string | null;
 };
 
@@ -94,6 +97,10 @@ export type SourceBackedRecommendationRow = {
   replenishment_policy: ReplenishmentPolicy;
   policy_family_key: string | null;
   recommendations_suppressed: boolean;
+  suppression_reason: string | null;
+  suppressed_until: string | null;
+  suppression_changed_at: string | null;
+  suppression_changed_by: string | null;
   last_30_day_sales: number;
   last_60_day_sales: number;
   last_90_day_sales: number;
@@ -278,7 +285,9 @@ export function buildSourceBackedOrderingRows(input: {
     // different item code, inherits the family policy, and resumes automatically.
     const recommendationsSuppressed = recommendationsAreSuppressed(
       exactMarker?.recommendations_suppressed,
-      exactMarker?.suppression_reason
+      exactMarker?.suppression_reason,
+      exactMarker?.suppressed_until,
+      input.referenceDate
     );
     const vintageIdentity = orderingVintageIdentity(item, wine);
     const latestActiveVintage = vintageIdentity.familyKey
@@ -332,6 +341,10 @@ export function buildSourceBackedOrderingRows(input: {
       replenishment_policy: policy,
       policy_family_key: policyFamilyKey || exactMarker?.policy_family_key || null,
       recommendations_suppressed: recommendationsSuppressed,
+      suppression_reason: exactMarker?.suppression_reason || null,
+      suppressed_until: exactMarker?.suppressed_until || null,
+      suppression_changed_at: exactMarker?.suppression_changed_at || null,
+      suppression_changed_by: exactMarker?.suppression_changed_by || null,
       last_30_day_sales: sales.last30,
       last_60_day_sales: sales.last60,
       last_90_day_sales: sales.last90,

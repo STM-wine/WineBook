@@ -257,6 +257,21 @@ describe("source-backed ordering rows", () => {
     });
   });
 
+  it("restores Supplier OOS recommendations on the selected resume date", () => {
+    const result = build({
+      referenceDate: "2026-10-15",
+      markers: [{
+        item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: true,
+        replenishment_policy: "Core", recommendations_suppressed: true,
+        suppression_reason: "Supplier OOS", suppressed_until: "2026-10-15", note_source: "manual"
+      }],
+      salesByCode: new Map([["AB12345", sales({ last30: 100 })]])
+    });
+
+    expect(result.rows[0].recommendations_suppressed).toBe(false);
+    expect(result.rows[0].recommended_qty_rounded).toBeGreaterThan(0);
+  });
+
   it("does not carry an unavailable item's pause onto the next vintage", () => {
     const result = build({
       quickBooksItems: [

@@ -21,11 +21,15 @@ import { WorkbenchGrid } from "./workbench-grid";
 import { supplierCatalogWineToInput, type SupplierCatalogWineInput } from "@/lib/supplier-catalog";
 import {
   REPLENISHMENT_POLICIES,
+  REORDER_SUPPRESSION_REASONS,
   policySupportsAutomaticRecommendations,
+  reorderSuppressionReason,
   replenishmentPolicyLabel,
   type ReplenishmentPolicy,
-  type ReplenishmentPolicyFilter
+  type ReplenishmentPolicyFilter,
+  type ReorderSuppressionReason
 } from "@/lib/replenishment-policy";
+import { auditActorName, formatAuditTimestamp } from "@/lib/audit-trail";
 
 type SaveCatalogWineInput = SupplierCatalogWineInput & {
   existingCatalogWineId?: string | null;
@@ -103,7 +107,13 @@ export function OrderReviewView({
   onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
   onDeleteCatalogWine: (input: { id: string }) => void;
   onAddWine: (supplierName: string) => void;
-  onSaveReplenishmentPolicy: (row: Recommendation, policy: ReplenishmentPolicy, recommendationsSuppressed: boolean) => Promise<void>;
+  onSaveReplenishmentPolicy: (
+    row: Recommendation,
+    policy: ReplenishmentPolicy,
+    recommendationsSuppressed: boolean,
+    suppressionReason: ReorderSuppressionReason | null,
+    suppressedUntil: string | null
+  ) => Promise<void>;
   canManageMarkers?: boolean;
   approvalEvents: ApprovalEvent[];
   auditActorNames: Record<string, string>;
@@ -274,9 +284,16 @@ export function OrderReviewView({
         <ReplenishmentEditDialog
           canManage={canManageMarkers === true}
           row={editingReplenishment}
+          auditActorNames={auditActorNames}
           onClose={() => setEditingReplenishment(null)}
-          onSave={async (policy, recommendationsSuppressed) => {
-            await onSaveReplenishmentPolicy(editingReplenishment, policy, recommendationsSuppressed);
+          onSave={async (policy, recommendationsSuppressed, suppressionReason, suppressedUntil) => {
+            await onSaveReplenishmentPolicy(
+              editingReplenishment,
+              policy,
+              recommendationsSuppressed,
+              suppressionReason,
+              suppressedUntil
+            );
             setEditingReplenishment(null);
           }}
         />
@@ -596,19 +613,31 @@ function NewItemEditDialog({
 function ReplenishmentEditDialog({
   row,
   canManage,
+  auditActorNames,
   onClose,
   onSave
 }: {
   row: Recommendation;
   canManage: boolean;
+  auditActorNames: Record<string, string>;
   onClose: () => void;
-  onSave: (policy: ReplenishmentPolicy, recommendationsSuppressed: boolean) => Promise<void>;
+  onSave: (
+    policy: ReplenishmentPolicy,
+    recommendationsSuppressed: boolean,
+    suppressionReason: ReorderSuppressionReason | null,
+    suppressedUntil: string | null
+  ) => Promise<void>;
 }) {
   const [policy, setPolicy] = useState<ReplenishmentPolicy>(rowReplenishmentPolicy(row));
   const [recommendationsSuppressed, setRecommendationsSuppressed] = useState(row.recommendations_suppressed === true);
+  const [suppressionReason, setSuppressionReason] = useState<ReorderSuppressionReason | "">(
+    reorderSuppressionReason(row.suppression_reason) || ""
+  );
+  const [suppressedUntil, setSuppressedUntil] = useState(row.suppressed_until || "");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const itemCode = row.product_code?.trim() || row.planning_sku?.trim() || "No item number";
+  const tomorrow = addPhoenixDays(1);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -621,10 +650,24 @@ function ReplenishmentEditDialog({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canManage) return;
+    const suppressionEnabled = policySupportsAutomaticRecommendations(policy) && recommendationsSuppressed;
+    if (suppressionEnabled && !suppressionReason) {
+      setError("Choose why automatic reorder recommendations are being turned off.");
+      return;
+    }
+    if (suppressionEnabled && suppressionReason === "Supplier OOS" && (!suppressedUntil || suppressedUntil < tomorrow)) {
+      setError("Choose a future date when Supplier OOS recommendations should resume.");
+      return;
+    }
     setIsSaving(true);
     setError("");
     try {
-      await onSave(policy, policySupportsAutomaticRecommendations(policy) && recommendationsSuppressed);
+      await onSave(
+        policy,
+        suppressionEnabled,
+        suppressionEnabled ? suppressionReason || null : null,
+        suppressionEnabled && suppressionReason === "Supplier OOS" ? suppressedUntil : null
+      );
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the replenishment policy.");
       setIsSaving(false);
@@ -671,10 +714,65 @@ function ReplenishmentEditDialog({
             </label>
           ) : null}
 
+          {policySupportsAutomaticRecommendations(policy) && recommendationsSuppressed ? (
+            <div className="replenishment-suppression-fields">
+              <label>
+                <span>
+                  <strong>Reason automatic reorders are off</strong>
+                  <small>This is required and retained with the user and timestamp.</small>
+                </span>
+                <select
+                  aria-label="Reason automatic reorders are off"
+                  disabled={!canManage || isSaving}
+                  required
+                  value={suppressionReason}
+                  onChange={(event) => {
+                    const reason = reorderSuppressionReason(event.target.value) || "";
+                    setSuppressionReason(reason);
+                    if (reason !== "Supplier OOS") setSuppressedUntil("");
+                  }}
+                >
+                  <option value="">Choose a reason</option>
+                  {REORDER_SUPPRESSION_REASONS.map((reason) => <option key={reason} value={reason}>{reason}</option>)}
+                </select>
+              </label>
+
+              {suppressionReason === "Supplier OOS" ? (
+                <label>
+                  <span>
+                    <strong>Resume automatic reorders on</strong>
+                    <small>The item becomes recommendation-eligible again on this date.</small>
+                  </span>
+                  <input
+                    aria-label="Resume automatic reorders on"
+                    disabled={!canManage || isSaving}
+                    min={tomorrow}
+                    required
+                    type="date"
+                    value={suppressedUntil}
+                    onChange={(event) => setSuppressedUntil(event.target.value)}
+                  />
+                </label>
+              ) : null}
+            </div>
+          ) : null}
+
           <p className="replenishment-family-note">
-            The automatic-reorder switch applies only to this item number. It stays off until manually restored;
-            a new vintage with a new item number starts eligible for recommendations.
+            The automatic-reorder switch applies only to this item number. End of Vintage and End of Allocation stay off until manually restored;
+            Supplier OOS resumes on the selected date. A new vintage with a new item number starts eligible for recommendations.
           </p>
+          {row.suppression_changed_at ? (
+            <div className="replenishment-audit-note">
+              <strong>{row.recommendations_suppressed ? "Automatic reorders turned off" : "Automatic reorder setting changed"}</strong>
+              <span>
+                {formatAuditTimestamp(row.suppression_changed_at)} · {auditActorName(row.suppression_changed_by, auditActorNames)}
+              </span>
+              {row.suppression_reason ? <span>Reason: {row.suppression_reason}</span> : null}
+              {row.suppression_reason === "Supplier OOS" && row.suppressed_until
+                ? <span>Automatic resume: {formatCalendarDate(row.suppressed_until)}</span>
+                : null}
+            </div>
+          ) : null}
           {!canManage ? <p className="form-error">You do not have permission to change replenishment policies.</p> : null}
           {error ? <p className="form-error" role="alert">{error}</p> : null}
         </div>
@@ -688,6 +786,25 @@ function ReplenishmentEditDialog({
       </form>
     </div>
   );
+}
+
+function addPhoenixDays(days: number) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Phoenix",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+  const values = new Map(parts.map((part) => [part.type, Number(part.value)]));
+  const date = new Date(Date.UTC(values.get("year") || 1970, (values.get("month") || 1) - 1, values.get("day") || 1));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatCalendarDate(value: string) {
+  const date = new Date(`${value}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date);
 }
 
 function InactiveWineSearch({

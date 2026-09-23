@@ -141,7 +141,7 @@ async function fetchOrderingMarkers(supabase: SourceClient) {
     return await fetchAll<SourceOrderingMarker>(
       supabase,
       "ordering_item_markers",
-      "item_code,quickbooks_item_list_id,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,note_source",
+      "item_code,quickbooks_item_list_id,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,suppressed_until,suppression_changed_at,suppression_changed_by,note_source",
       "item_code"
     );
   } catch (error) {

@@ -19,13 +19,22 @@ describe("source-backed ordering run compatibility", () => {
 
     expect(sourceRunNeedsCurrentOverlay({
       run_type: "quickbooks_sync",
+      report_date: "2026-09-23",
       diagnostics: { ordering_source: ORDERING_SOURCE, builder_version: ORDERING_BUILDER_VERSION }
-    })).toBe(false);
+    }, "2026-09-23")).toBe(false);
 
     expect(sourceRunNeedsCurrentOverlay({
       run_type: "manual_upload",
       diagnostics: { ordering_source: ORDERING_SOURCE, builder_version: 1 }
     })).toBe(false);
+  });
+
+  it("rehydrates a prior-day source run so dated suppressions resume automatically", () => {
+    expect(sourceRunNeedsCurrentOverlay({
+      run_type: "quickbooks_sync",
+      report_date: "2026-09-22",
+      diagnostics: { ordering_source: ORDERING_SOURCE, builder_version: ORDERING_BUILDER_VERSION }
+    }, "2026-09-23")).toBe(true);
   });
 
   it("replaces stale source calculations while preserving buyer state and row identity", () => {

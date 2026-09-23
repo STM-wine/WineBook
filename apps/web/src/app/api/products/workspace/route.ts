@@ -106,6 +106,8 @@ type OrderingItemMarkerRow = {
   recommendations_suppressed: boolean | null;
   suppression_reason: string | null;
   suppressed_until: string | null;
+  suppression_changed_at: string | null;
+  suppression_changed_by: string | null;
   marker_note: string | null;
   note_source: string | null;
   updated_at: string | null;
@@ -586,7 +588,7 @@ async function fetchOrderingItemMarkers(supabase: ProductWorkspaceClient) {
   while (true) {
     const { data, error } = await supabase
       .from("ordering_item_markers")
-      .select("item_code,quickbooks_item_list_id,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,suppressed_until,marker_note,note_source,updated_at,updated_by")
+      .select("item_code,quickbooks_item_list_id,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,suppressed_until,suppression_changed_at,suppression_changed_by,marker_note,note_source,updated_at,updated_by")
       .order("item_code", { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
       .returns<OrderingItemMarkerRow[]>();
@@ -912,10 +914,13 @@ function productWorkspaceMarker(marker: OrderingItemMarkerRow | null): ProductWo
     familyDefaultPolicy: replenishmentPolicy(marker?.family_default_policy || policy),
     recommendationsSuppressed: recommendationsAreSuppressed(
       marker?.recommendations_suppressed,
-      marker?.suppression_reason
+      marker?.suppression_reason,
+      marker?.suppressed_until
     ),
     suppressionReason: marker?.suppression_reason || null,
     suppressedUntil: marker?.suppressed_until || null,
+    suppressionChangedAt: marker?.suppression_changed_at || null,
+    suppressionChangedBy: marker?.suppression_changed_by || null,
     markerNote: marker?.marker_note || null,
     noteSource: marker?.note_source || null,
     updatedAt: marker?.updated_at || null,

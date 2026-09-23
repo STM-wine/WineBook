@@ -32,6 +32,10 @@ export type Recommendation = {
   replenishment_policy?: "Core" | "Limited Core" | "Limited" | "Allocated" | "Special Order" | null;
   policy_family_key?: string | null;
   recommendations_suppressed?: boolean | null;
+  suppression_reason?: string | null;
+  suppressed_until?: string | null;
+  suppression_changed_at?: string | null;
+  suppression_changed_by?: string | null;
   last_30_day_sales: number | string | null;
   last_60_day_sales: number | string | null;
   last_90_day_sales: number | string | null;

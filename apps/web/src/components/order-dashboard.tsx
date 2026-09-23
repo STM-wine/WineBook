@@ -33,9 +33,9 @@ import type {
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
 import {
-  MANUAL_RECOMMENDATION_PAUSE_REASON,
   type ReplenishmentPolicy,
-  type ReplenishmentPolicyFilter
+  type ReplenishmentPolicyFilter,
+  type ReorderSuppressionReason
 } from "@/lib/replenishment-policy";
 import {
   applySupplierTargetWeeks,
@@ -408,7 +408,9 @@ export function OrderDashboard({
   async function saveReplenishmentPolicy(
     row: Recommendation,
     policy: ReplenishmentPolicy,
-    recommendationsSuppressed: boolean
+    recommendationsSuppressed: boolean,
+    suppressionReason: ReorderSuppressionReason | null,
+    suppressedUntil: string | null
   ) {
     const itemCode = row.product_code?.trim() || row.planning_sku?.trim();
     if (!itemCode) throw new Error("This wine does not have an item number to update.");
@@ -420,12 +422,21 @@ export function OrderDashboard({
         itemCode,
         replenishmentPolicy: policy,
         recommendationsSuppressed,
-        suppressionReason: recommendationsSuppressed ? MANUAL_RECOMMENDATION_PAUSE_REASON : null,
-        suppressedUntil: null,
+        suppressionReason,
+        suppressedUntil,
         note: "Manual Order Summary replenishment update"
       })
     });
-    const body = await response.json().catch(() => null) as { error?: string } | null;
+    const body = await response.json().catch(() => null) as {
+      error?: string;
+      orderingMarker?: {
+        recommendationsSuppressed: boolean;
+        suppressionReason: string | null;
+        suppressedUntil: string | null;
+        suppressionChangedAt: string | null;
+        suppressionChangedBy: string | null;
+      };
+    } | null;
     if (!response.ok) {
       throw new Error(body?.error || "Could not save the replenishment policy.");
     }
@@ -438,7 +449,11 @@ export function OrderDashboard({
         is_btg: false,
         is_core: policy === "Core",
         replenishment_policy: policy,
-        recommendations_suppressed: recommendationsSuppressed
+        recommendations_suppressed: body?.orderingMarker?.recommendationsSuppressed ?? recommendationsSuppressed,
+        suppression_reason: body?.orderingMarker?.suppressionReason ?? suppressionReason,
+        suppressed_until: body?.orderingMarker?.suppressedUntil ?? suppressedUntil,
+        suppression_changed_at: body?.orderingMarker?.suppressionChangedAt || candidate.suppression_changed_at || null,
+        suppression_changed_by: body?.orderingMarker?.suppressionChangedBy || candidate.suppression_changed_by || null
       };
     }));
   }

@@ -3189,7 +3189,8 @@ th:nth-child(12) .table-sort-button {
   margin-top: 3px;
 }
 
-.replenishment-edit-fields select {
+.replenishment-edit-fields select,
+.replenishment-edit-fields input[type="date"] {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -3197,6 +3198,36 @@ th:nth-child(12) .table-sort-button {
   font: inherit;
   padding: 11px;
   text-transform: none;
+}
+
+.replenishment-suppression-fields {
+  background: #fff8e7;
+  border: 1px solid #d9b768;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.replenishment-suppression-fields label,
+.replenishment-suppression-fields span,
+.replenishment-suppression-fields small {
+  display: grid;
+  gap: 4px;
+}
+
+.replenishment-suppression-fields label {
+  gap: 9px;
+}
+
+.replenishment-suppression-fields strong {
+  font-size: 14px;
+}
+
+.replenishment-suppression-fields small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .replenishment-auto-toggle {
@@ -3237,6 +3268,25 @@ th:nth-child(12) .table-sort-button {
 
 .replenishment-family-note {
   margin: 0;
+}
+
+.replenishment-audit-note {
+  background: #f3f6f0;
+  border: 1px solid #c8d2c4;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.replenishment-audit-note strong {
+  font-size: 13px;
+}
+
+.replenishment-audit-note span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 @media (max-width: 680px) {

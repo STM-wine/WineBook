@@ -59,6 +59,8 @@ export type ProductWorkspaceRow = {
     recommendationsSuppressed: boolean;
     suppressionReason: string | null;
     suppressedUntil: string | null;
+    suppressionChangedAt: string | null;
+    suppressionChangedBy: string | null;
     markerNote: string | null;
     noteSource: string | null;
     updatedAt: string | null;

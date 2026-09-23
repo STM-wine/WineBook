@@ -615,12 +615,18 @@ function ProductWorkspaceTable({
                       <RecommendationModeControl
                         marker={row.orderingMarker}
                         disabled={!canManageMarkers || updatingMarkerCode === row.itemCode}
-                        onChange={(suppressed) => saveOrderingMarker(row, {
-                          ...row.orderingMarker,
-                          recommendationsSuppressed: suppressed,
-                          suppressionReason: suppressed ? row.orderingMarker.suppressionReason || "Temporarily unavailable" : null,
-                          suppressedUntil: suppressed ? row.orderingMarker.suppressedUntil : null
-                        })}
+                        onChange={(suppressed) => {
+                          if (suppressed) {
+                            setMarkerError("Turn off automatic reorders from the wine's Edit Replenishment popup in Order Summary so the reason is recorded.");
+                            return;
+                          }
+                          saveOrderingMarker(row, {
+                            ...row.orderingMarker,
+                            recommendationsSuppressed: false,
+                            suppressionReason: null,
+                            suppressedUntil: null
+                          });
+                        }}
                       />
                     </td>
                     <td title={row.fobSource || "Missing QuickBooks FOB"}>{moneyOrDash(row.fob)}</td>

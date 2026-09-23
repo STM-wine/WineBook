@@ -3,6 +3,7 @@ import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import {
   MANUAL_RECOMMENDATION_PAUSE_REASON,
   recommendationsAreSuppressed,
+  reorderSuppressionReason,
   replenishmentPolicy
 } from "@/lib/replenishment-policy";
 
@@ -67,9 +68,20 @@ export async function POST(request: Request) {
   const policy = replenishmentPolicy(body?.replenishmentPolicy);
   const recommendationsSuppressed = body?.recommendationsSuppressed === true && policy !== "Allocated" && policy !== "Special Order";
   const suppressionReason = recommendationsSuppressed
-    ? stringOrNull(body?.suppressionReason) || MANUAL_RECOMMENDATION_PAUSE_REASON
+    ? reorderSuppressionReason(body?.suppressionReason)
     : null;
-  const suppressedUntil = recommendationsSuppressed ? dateOrNull(body?.suppressedUntil) : null;
+  if (recommendationsSuppressed && !suppressionReason) {
+    return NextResponse.json({ error: "Choose why automatic reorder recommendations are being turned off." }, { status: 400 });
+  }
+  const suppressedUntil = recommendationsSuppressed && suppressionReason === "Supplier OOS"
+    ? dateOrNull(body?.suppressedUntil)
+    : null;
+  if (recommendationsSuppressed && suppressionReason === "Supplier OOS" && !suppressedUntil) {
+    return NextResponse.json({ error: "Choose the date when Supplier OOS recommendations should resume." }, { status: 400 });
+  }
+  if (suppressedUntil && suppressedUntil <= phoenixBusinessDate()) {
+    return NextResponse.json({ error: "The automatic-reorder resume date must be after today." }, { status: 400 });
+  }
   const quickbooksItemListId = stringOrNull(body?.quickbooksItemListId);
   const note = stringOrNull(body?.note) || "Manual Product Workspace marker update";
 
@@ -81,6 +93,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
+  const { data: existingMarker, error: existingMarkerError } = await supabase
+    .from("ordering_item_markers")
+    .select("recommendations_suppressed,suppression_reason,suppressed_until,suppression_changed_at,suppression_changed_by")
+    .eq("item_code", itemCode)
+    .maybeSingle<{
+      recommendations_suppressed: boolean | null;
+      suppression_reason: string | null;
+      suppressed_until: string | null;
+      suppression_changed_at: string | null;
+      suppression_changed_by: string | null;
+    }>();
+  if (existingMarkerError) {
+    return NextResponse.json({ error: existingMarkerError.message }, { status: 500 });
+  }
+  const suppressionChanged = existingMarker
+    ? existingMarker.recommendations_suppressed !== recommendationsSuppressed ||
+      existingMarker.suppression_reason !== suppressionReason ||
+      existingMarker.suppressed_until !== suppressedUntil
+    : recommendationsSuppressed;
+
   const update = {
     is_btg: false,
     is_core: policy === "Core",
@@ -90,7 +122,11 @@ export async function POST(request: Request) {
     suppressed_until: suppressedUntil,
     marker_note: note,
     note_source: "manual",
-    updated_by: user.id
+    updated_by: user.id,
+    ...(suppressionChanged ? {
+      suppression_changed_at: new Date().toISOString(),
+      suppression_changed_by: user.id
+    } : {})
   };
   const markerValues = {
     item_code: itemCode,
@@ -124,7 +160,7 @@ export async function POST(request: Request) {
 
   const { data: marker, error: markerError } = await supabase
     .from("ordering_item_markers")
-    .select("item_code,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,suppressed_until,marker_note,note_source,updated_at,updated_by")
+    .select("item_code,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,suppressed_until,suppression_changed_at,suppression_changed_by,marker_note,note_source,updated_at,updated_by")
     .eq("item_code", itemCode)
     .maybeSingle<{
       item_code: string;
@@ -137,6 +173,8 @@ export async function POST(request: Request) {
       recommendations_suppressed: boolean | null;
       suppression_reason: string | null;
       suppressed_until: string | null;
+      suppression_changed_at: string | null;
+      suppression_changed_by: string | null;
       marker_note: string | null;
       note_source: string | null;
       updated_at: string | null;
@@ -158,10 +196,13 @@ export async function POST(request: Request) {
       familyDefaultPolicy: replenishmentPolicy(marker?.family_default_policy || marker?.replenishment_policy),
       recommendationsSuppressed: recommendationsAreSuppressed(
         marker?.recommendations_suppressed,
-        marker?.suppression_reason
+        marker?.suppression_reason,
+        marker?.suppressed_until
       ),
       suppressionReason: marker?.suppression_reason || null,
       suppressedUntil: marker?.suppressed_until || null,
+      suppressionChangedAt: marker?.suppression_changed_at || null,
+      suppressionChangedBy: marker?.suppression_changed_by || null,
       markerNote: marker?.marker_note || null,
       noteSource: marker?.note_source || null,
       updatedAt: marker?.updated_at || null,
@@ -186,4 +227,15 @@ function stringOrNull(value: unknown) {
 function dateOrNull(value: unknown) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return null;
   return value.trim();
+}
+
+function phoenixBusinessDate(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Phoenix",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(value);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
 }
