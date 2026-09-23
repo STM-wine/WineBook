@@ -1,12 +1,11 @@
 import { quickBooksProducer, type QuickBooksItemIdentityRow } from "./quickbooks-item-fields";
 import { hydratePoLineProducers, poLinePriceKey, type PoExportPriceLookup } from "./po-utils";
 import type { PurchaseOrderDraftWithLines } from "./types";
-import type { createClient, createServiceRoleClient } from "./supabase/server";
+import type { createServiceRoleClient } from "./supabase/server";
 
-type UserClient = Awaited<ReturnType<typeof createClient>>;
 type ServiceClient = ReturnType<typeof createServiceRoleClient>;
 
-export async function hydratePoExportProducers(supabase: UserClient, drafts: PurchaseOrderDraftWithLines[]) {
+export async function hydratePoExportProducers(supabase: ServiceClient, drafts: PurchaseOrderDraftWithLines[]) {
   const missing = drafts.flatMap((draft) => draft.lines || []).filter((line) => !line.producer_name?.trim());
   const catalogIds = Array.from(new Set(missing.map((line) => line.supplier_catalog_wine_id).filter(Boolean))) as string[];
   const codes = Array.from(new Set(missing.map((line) => line.product_code?.trim()).filter(Boolean))) as string[];

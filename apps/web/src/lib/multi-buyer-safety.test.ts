@@ -8,6 +8,10 @@ const migrationPath = path.resolve(
   process.cwd(),
   "../../supabase/migrations/20260922233000_multi_buyer_po_integrity.sql"
 );
+const poExportRoutePath = path.resolve(
+  process.cwd(),
+  "src/app/api/po-drafts/export/route.ts"
+);
 
 describe("multi-buyer database safety contract", () => {
   it("requires versioned, atomic approval writes", async () => {
@@ -40,6 +44,12 @@ describe("multi-buyer database safety contract", () => {
 });
 
 describe("server CSV export", () => {
+  it("uses the server-only integration client for export enrichment", async () => {
+    const route = await readFile(poExportRoutePath, "utf8");
+    expect(route).toContain("const integrationSupabase = createServiceRoleClient()");
+    expect(route).toContain("hydratePoExportProducers(integrationSupabase, exportDrafts)");
+  });
+
   it("generates the audited artifact from the supplied immutable revision lines", () => {
     const draft: PurchaseOrderDraftWithLines = {
       id: "draft-1",

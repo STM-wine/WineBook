@@ -109,7 +109,7 @@ export async function POST(request: Request) {
   })));
 
   try {
-    exportDrafts = await hydratePoExportProducers(supabase, exportDrafts);
+    exportDrafts = await hydratePoExportProducers(integrationSupabase, exportDrafts);
     const { data: suppliers, error: supplierError } = await supabase
       .from("suppliers")
       .select("id,importer_id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,notes,active")
