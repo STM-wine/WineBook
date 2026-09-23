@@ -11,7 +11,14 @@ import {
   type ICellRendererParams,
   type ValueFormatterParams
 } from "ag-grid-community";
-import type { Recommendation } from "@/lib/types";
+import type { ApprovalEvent, Recommendation } from "@/lib/types";
+import {
+  approvalEventForRow,
+  approvalEventLabel,
+  auditActorName,
+  formatAuditTimestamp,
+  latestApprovalEvents
+} from "@/lib/audit-trail";
 import { diEligibility, isDiOpportunity, orderPath } from "@/lib/di-planning";
 import {
   activeFreeGoodsForRow,
@@ -41,6 +48,8 @@ type WorkbenchGridProps = {
   onEditReplenishment: (row: Recommendation) => void;
   onEditNewItem: (row: Recommendation) => void;
   onDeleteNewItem: (row: Recommendation) => void;
+  approvalEvents: ApprovalEvent[];
+  auditActorNames: Record<string, string>;
 };
 
 type WorkbenchRow = Recommendation & {
@@ -51,6 +60,7 @@ type WorkbenchRow = Recommendation & {
   approved: boolean;
   estimated_cost: number;
   free_goods_summary: string;
+  approval_activity: { label: string; actor: string; at: string } | null;
 };
 
 type ManualEditState = Record<string, { qty?: boolean; weeks?: boolean }>;
@@ -92,6 +102,11 @@ const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
         ) : null}
         {activeFreeGoodsForRow(params.data).length > 0 ? <span className="free-goods-badge">Free Goods</span> : null}
         {isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}
+      </span>
+    ) : null}
+    {params.data?.approval_activity ? (
+      <span className="buyer-activity-line" title={new Date(params.data.approval_activity.at).toISOString()}>
+        {params.data.approval_activity.label} · {formatAuditTimestamp(params.data.approval_activity.at)} · {params.data.approval_activity.actor}
       </span>
     ) : null}
   </span>
@@ -163,7 +178,8 @@ const rowHeightForWine = (row?: WorkbenchRow | null) => {
   const name = row?.wine_display ?? "";
   const lines = Math.max(1, Math.ceil(name.length / 42));
   const badgeSpace = Math.ceil(wineBadgeCount(row) / 2) * 22;
-  return Math.max(56, Math.min(140, 16 + lines * 17 + badgeSpace));
+  const activitySpace = row?.approval_activity ? 20 : 0;
+  return Math.max(56, Math.min(160, 16 + lines * 17 + badgeSpace + activitySpace));
 };
 const roundUpToPack = (qty: number, packSize: number) => {
   const pack = Math.max(1, Math.round(packSize || 1));
@@ -207,7 +223,9 @@ export function WorkbenchGrid({
   onSaveWorkingQty,
   onEditReplenishment,
   onEditNewItem,
-  onDeleteNewItem
+  onDeleteNewItem,
+  approvalEvents,
+  auditActorNames
 }: WorkbenchGridProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [manualEditedCells, setManualEditedCells] = useState<ManualEditState>({});
@@ -216,22 +234,31 @@ export function WorkbenchGrid({
     setIsMounted(true);
   }, []);
 
+  const approvalEventsBySource = useMemo(() => latestApprovalEvents(approvalEvents), [approvalEvents]);
   const rowData = useMemo<WorkbenchRow[]>(
     () => {
       const sortedRankValues = Array.from(new Set(rows.map(rankBasis))).sort((a, b) => b - a);
 
-      return rows.map((row) => ({
-        ...row,
-        importer_rank: Math.max(1, sortedRankValues.indexOf(rankBasis(row)) + 1),
-        wine_display: displayWineName(row),
-        working_qty: rowRecommendedQty(row),
-        working_weeks: weeksFromQty(row, rowRecommendedQty(row)),
-        approved: row.recommendation_status === "approved" || row.recommendation_status === "edited",
-        estimated_cost: rowApprovedEstimate(row),
-        free_goods_summary: freeGoodsSummary(activeFreeGoodsForRow(row))
-      }));
+      return rows.map((row) => {
+        const event = approvalEventForRow(row, approvalEventsBySource);
+        return {
+          ...row,
+          importer_rank: Math.max(1, sortedRankValues.indexOf(rankBasis(row)) + 1),
+          wine_display: displayWineName(row),
+          working_qty: rowRecommendedQty(row),
+          working_weeks: weeksFromQty(row, rowRecommendedQty(row)),
+          approved: row.recommendation_status === "approved" || row.recommendation_status === "edited",
+          estimated_cost: rowApprovedEstimate(row),
+          free_goods_summary: freeGoodsSummary(activeFreeGoodsForRow(row)),
+          approval_activity: event?.actor_id ? {
+            label: approvalEventLabel(event),
+            actor: auditActorName(event.actor_id, auditActorNames),
+            at: event.created_at
+          } : null
+        };
+      });
     },
-    [rows]
+    [approvalEventsBySource, auditActorNames, rows]
   );
 
   const columnDefs = useMemo<ColDef<WorkbenchRow>[]>(

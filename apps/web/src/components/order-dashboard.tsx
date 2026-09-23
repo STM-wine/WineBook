@@ -19,6 +19,7 @@ import {
 import type {
   ApprovalCommitment,
   ApprovalConflict,
+  ApprovalEvent,
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
   Recommendation,
@@ -76,6 +77,8 @@ function ViewLoading() {
 type Props = {
   reportRun: ReportRun;
   recommendations: Recommendation[];
+  approvalEvents: ApprovalEvent[];
+  auditActorNames: Record<string, string>;
   approvalCommitments: ApprovalCommitment[];
   poDrafts: PurchaseOrderDraftWithLines[];
   suppliers: SupplierLogistics[];
@@ -134,6 +137,8 @@ function formatSourceUpdatedAt(value: string | null) {
 export function OrderDashboard({
   reportRun,
   recommendations,
+  approvalEvents,
+  auditActorNames,
   approvalCommitments,
   poDrafts,
   suppliers,
@@ -276,6 +281,11 @@ export function OrderDashboard({
             };
           }));
         }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "approval_events", filter: `report_run_id=eq.${reportRun.id}` },
+        scheduleDraftRefresh
       )
       .on(
         "postgres_changes",
@@ -721,22 +731,13 @@ export function OrderDashboard({
   function changeDraftStatus(draftId: string, status: string) {
     setPendingMessage("Updating PO draft...");
     setErrorMessage("");
-    const previousDraft = draftRows.find((draft) => draft.id === draftId);
-
-    setDraftRows((current) =>
-      current.map((draft) =>
-        draft.id === draftId ? { ...draft, status, updated_at: new Date().toISOString() } : draft
-      )
-    );
 
     startTransition(async () => {
       try {
         await updatePurchaseOrderDraftStatus({ id: draftId, status });
         setPendingMessage("PO draft updated");
+        router.refresh();
       } catch (error) {
-        if (previousDraft) {
-          setDraftRows((current) => current.map((draft) => (draft.id === draftId ? previousDraft : draft)));
-        }
         setErrorMessage(error instanceof Error ? error.message : "Could not update PO draft.");
         setPendingMessage("");
       }
@@ -748,9 +749,6 @@ export function OrderDashboard({
     if (ids.length === 0) return;
     setPendingMessage(`Cancelling ${ids.length.toLocaleString()} PO draft${ids.length === 1 ? "" : "s"}...`);
     setErrorMessage("");
-    const previousDrafts = draftRows;
-    const selected = new Set(ids);
-    setDraftRows((current) => current.map((draft) => selected.has(draft.id) ? { ...draft, status: "cancelled", updated_at: new Date().toISOString() } : draft));
 
     startTransition(async () => {
       try {
@@ -758,7 +756,6 @@ export function OrderDashboard({
         setPendingMessage(`${result.cancelled.toLocaleString()} active PO draft${result.cancelled === 1 ? "" : "s"} cancelled.`);
         router.refresh();
       } catch (error) {
-        setDraftRows(previousDrafts);
         setErrorMessage(error instanceof Error ? error.message : "Could not cancel PO drafts.");
         setPendingMessage("");
       }
@@ -954,6 +951,8 @@ export function OrderDashboard({
           onSaveReplenishmentPolicy={saveReplenishmentPolicy}
           canManageMarkers={canViewSettings}
           isPending={isPending}
+          approvalEvents={approvalEvents}
+          auditActorNames={auditActorNames}
         />
       ) : null}
 
@@ -986,6 +985,7 @@ export function OrderDashboard({
           isPending={isPending}
           reportRunId={reportRun.id}
           suppliers={suppliers}
+          auditActorNames={auditActorNames}
           onCancelDrafts={cancelDrafts}
           onDeleteLine={removeDraftLine}
           onStatusChange={changeDraftStatus}

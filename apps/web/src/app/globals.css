@@ -2437,6 +2437,26 @@ th:nth-child(12) .table-sort-button {
   text-transform: capitalize;
 }
 
+.po-draft-summary-meta {
+  align-items: flex-end;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 3px;
+  text-align: right;
+}
+
+.po-draft-summary-meta > span {
+  text-transform: capitalize;
+}
+
+.po-draft-summary-meta small {
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .po-draft-actions {
   display: flex;
   gap: 12px;
@@ -2453,6 +2473,32 @@ th:nth-child(12) .table-sort-button {
   align-items: center;
   display: inline-flex;
   justify-content: center;
+}
+
+.po-draft-activity {
+  background: #f8f6f2;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+}
+
+.po-draft-activity span {
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  gap: 2px;
+}
+
+.po-draft-activity strong {
+  color: var(--ink);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .po-lines-shell {
@@ -4176,6 +4222,13 @@ th:nth-child(12) .table-sort-button {
 .wine-marker-row .free-goods-badge,
 .wine-marker-row .new-item-badge {
   margin-left: 0;
+}
+
+.buyer-activity-line {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .replenishment-policy-link {

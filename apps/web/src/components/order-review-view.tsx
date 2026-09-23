@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+  ApprovalEvent,
   DashboardMetrics,
   InactiveQuickBooksItem,
   Recommendation,
@@ -66,6 +67,8 @@ export function OrderReviewView({
   onAddWine,
   onSaveReplenishmentPolicy,
   canManageMarkers,
+  approvalEvents,
+  auditActorNames,
   isPending
 }: {
   brandManager: string;
@@ -102,6 +105,8 @@ export function OrderReviewView({
   onAddWine: (supplierName: string) => void;
   onSaveReplenishmentPolicy: (row: Recommendation, policy: ReplenishmentPolicy, recommendationsSuppressed: boolean) => Promise<void>;
   canManageMarkers?: boolean;
+  approvalEvents: ApprovalEvent[];
+  auditActorNames: Record<string, string>;
   isPending: boolean;
 }) {
   const [editingWine, setEditingWine] = useState<SupplierCatalogWine | null>(null);
@@ -248,6 +253,8 @@ export function OrderReviewView({
             onEditNewItem={editNewItem}
             onDeleteNewItem={deleteNewItem}
             onAddWine={onAddWine}
+            approvalEvents={approvalEvents}
+            auditActorNames={auditActorNames}
             isPending={isPending}
           />
         ))}
@@ -353,6 +360,8 @@ function SupplierSection({
   onEditNewItem,
   onDeleteNewItem,
   onAddWine,
+  approvalEvents,
+  auditActorNames,
   isPending
 }: {
   group: SupplierGroup;
@@ -369,6 +378,8 @@ function SupplierSection({
   onEditNewItem: (row: Recommendation) => void;
   onDeleteNewItem: (row: Recommendation) => void;
   onAddWine: (supplierName: string) => void;
+  approvalEvents: ApprovalEvent[];
+  auditActorNames: Record<string, string>;
   isPending: boolean;
 }) {
   const [showHistory, setShowHistory] = useState(false);
@@ -487,6 +498,8 @@ function SupplierSection({
             onEditReplenishment={onEditReplenishment}
             onEditNewItem={onEditNewItem}
             onDeleteNewItem={onDeleteNewItem}
+            approvalEvents={approvalEvents}
+            auditActorNames={auditActorNames}
           />
         </>
       ) : null}

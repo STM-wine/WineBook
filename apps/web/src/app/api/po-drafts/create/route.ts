@@ -74,7 +74,10 @@ async function loadDrafts(
     .select(`
       id, report_run_id, ordering_source, source_snapshot, supplier_name, order_path,
       status, po_number, notes, revision_no, content_hash, last_exported_at,
-      last_exported_by, created_at, updated_at,
+      last_exported_by, created_by, reviewed_by, created_at, updated_at,
+      revisions:purchase_order_draft_revisions (
+        id, purchase_order_draft_id, revision_no, created_by, created_at
+      ),
       lines:purchase_order_lines (
         id, purchase_order_draft_id, recommendation_id, supplier_catalog_wine_id,
         producer_name, product_name, product_code, planning_sku, recommended_qty,

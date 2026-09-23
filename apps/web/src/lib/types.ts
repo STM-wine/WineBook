@@ -71,6 +71,18 @@ export type Recommendation = {
   approval_processing_status?: "unprocessed" | "partially_committed" | "committed" | "correction" | string | null;
 };
 
+export type ApprovalEvent = {
+  id: string;
+  report_run_id: string;
+  source_type: "recommendation" | "catalog_workbench" | string;
+  source_id: string;
+  recommendation_status: string;
+  approved_qty: number | string;
+  source_lock_version: number | string;
+  actor_id: string | null;
+  created_at: string;
+};
+
 export type ApprovalCommitment = {
   id: string;
   report_run_id: string;
@@ -332,8 +344,18 @@ export type PurchaseOrderDraft = {
   content_hash?: string | null;
   last_exported_at?: string | null;
   last_exported_by?: string | null;
+  created_by?: string | null;
+  reviewed_by?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type PurchaseOrderDraftRevision = {
+  id: string;
+  purchase_order_draft_id: string;
+  revision_no: number | string;
+  created_by: string | null;
+  created_at: string;
 };
 
 export type PurchaseOrderLine = {
@@ -363,6 +385,7 @@ export type PurchaseOrderLine = {
 
 export type PurchaseOrderDraftWithLines = PurchaseOrderDraft & {
   lines: PurchaseOrderLine[];
+  revisions?: PurchaseOrderDraftRevision[];
 };
 
 export type ApprovalConflict = {

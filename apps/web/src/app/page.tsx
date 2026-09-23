@@ -13,7 +13,9 @@ import {
   fetchQuickBooksOnOrderItems
 } from "@/lib/supabase/recommendations";
 import type {
+  AppProfile,
   ApprovalCommitment,
+  ApprovalEvent,
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
   Recommendation,
@@ -25,6 +27,7 @@ import type {
   QuickBooksVendor,
   QuickBooksVendorMapping
 } from "@/lib/types";
+import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import { applyVinosmithAvailability, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
@@ -98,6 +101,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     <OrderDashboard
       reportRun={latestRun}
       recommendations={data.recommendations}
+      approvalEvents={data.approvalEvents}
+      auditActorNames={data.auditActorNames}
       approvalCommitments={data.approvalCommitments}
       poDrafts={data.poDraftRows}
       suppliers={data.suppliers}
@@ -119,6 +124,8 @@ type OrderingPageData = {
   reportRuns: ReportRun[];
   latestRun: ReportRun | null;
   recommendations: Recommendation[];
+  approvalEvents: ApprovalEvent[];
+  auditActorNames: Record<string, string>;
   approvalCommitments: ApprovalCommitment[];
   poDraftRows: PurchaseOrderDraftWithLines[];
   suppliers: SupplierLogistics[];
@@ -133,6 +140,11 @@ type OrderingPageData = {
 
 async function loadOrderingPageData(): Promise<OrderingPageData> {
   const serviceRoleSupabase = createServiceRoleClient();
+  const appProfilesPromise = serviceRoleSupabase
+    .from("app_profiles")
+    .select("id,email,full_name,position,role")
+    .order("email", { ascending: true })
+    .returns<AppProfile[]>();
   const reportRunsPromise = serviceRoleSupabase
     .from("report_runs")
     .select("id,run_type,report_date,completed_at,diagnostics,configuration_version_id,configuration_snapshot,source_file_ids")
@@ -247,6 +259,8 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
       reportRuns: reportRuns || [],
       latestRun: null,
       recommendations: [],
+      approvalEvents: [],
+      auditActorNames: {},
       approvalCommitments: [],
       poDraftRows: [],
       suppliers: [],
@@ -261,6 +275,14 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
   }
 
   const reportRecommendationsPromise = fetchAllRecommendationsForRun(serviceRoleSupabase, latestRun.id);
+  const approvalEventsPromise = fetchAllExact<ApprovalEvent>("approval events", (from, to) => serviceRoleSupabase
+    .from("approval_events")
+    .select("id,report_run_id,source_type,source_id,recommendation_status,approved_qty,source_lock_version,actor_id,created_at", { count: "exact" })
+    .eq("report_run_id", latestRun.id)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, to)
+    .returns<ApprovalEvent[]>() as never);
   const quickBooksOnOrderItemsPromise = fetchQuickBooksOnOrderItems(serviceRoleSupabase);
   const currentSourceOverlayPromise = sourceRunNeedsCurrentOverlay(latestRun) && vinosmithAvailabilityResult.data
     ? fetchSourceBackedOrderingData(serviceRoleSupabase, {
@@ -290,8 +312,17 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
         content_hash,
         last_exported_at,
         last_exported_by,
+        created_by,
+        reviewed_by,
         created_at,
         updated_at,
+        revisions:purchase_order_draft_revisions (
+          id,
+          purchase_order_draft_id,
+          revision_no,
+          created_by,
+          created_at
+        ),
         lines:purchase_order_lines (
           id,
           purchase_order_draft_id,
@@ -346,6 +377,8 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
 
   const [
     reportRecommendations,
+    approvalEvents,
+    { data: appProfiles },
     { data: poDraftRows },
     { data: suppliers },
     quickBooksSupplierMatches,
@@ -354,6 +387,8 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     { data: approvalCommitments }
   ] = await Promise.all([
     reportRecommendationsPromise,
+    approvalEventsPromise,
+    appProfilesPromise,
     poDraftRowsPromise,
     suppliersPromise,
     fetchQuickBooksSupplierMatches(serviceRoleSupabase),
@@ -398,6 +433,11 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     reportRuns: reportRuns || [],
     latestRun,
     recommendations,
+    approvalEvents,
+    auditActorNames: Object.fromEntries((appProfiles || []).map((profile) => [
+      profile.id,
+      profile.full_name?.trim() || profile.email
+    ])),
     approvalCommitments: approvalCommitments || [],
     poDraftRows: poDraftRows || [],
     suppliers: suppliers || [],

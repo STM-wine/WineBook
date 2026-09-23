@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
+import { formatAuditTimestamp, poDraftAuditTrail } from "@/lib/audit-trail";
 import { asNumber, formatCurrency, formatCurrencyCents, formatInteger } from "@/lib/order-data";
 import { isActivePoStatus } from "@/lib/po-status";
 import {
@@ -15,6 +17,7 @@ export function PoDraftsView({
   isPending,
   reportRunId,
   suppliers,
+  auditActorNames,
   onCancelDrafts,
   onDeleteLine,
   onStatusChange
@@ -23,10 +26,12 @@ export function PoDraftsView({
   isPending: boolean;
   reportRunId: string;
   suppliers: SupplierLogistics[];
+  auditActorNames: Record<string, string>;
   onCancelDrafts: (draftIds: string[]) => void;
   onDeleteLine: (lineId: string, draftId: string) => void;
   onStatusChange: (draftId: string, status: string) => void;
 }) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
@@ -158,6 +163,7 @@ export function PoDraftsView({
       link.remove();
       URL.revokeObjectURL(url);
       setExportStatus(`Generated ${filename}. The exact draft revision was recorded.`);
+      router.refresh();
     } catch (error) {
       setExportStatus(error instanceof Error ? error.message : "PO export failed.");
     } finally {
@@ -283,6 +289,7 @@ export function PoDraftsView({
         <div className="po-draft-stack">
           {filteredSummaries.map(({ draft, lineCount, approvedQty, wineCost, laidInCost, estimatedCost }) => {
             const isExportable = isActivePoStatus(draft.status);
+            const activity = poDraftAuditTrail(draft, auditActorNames);
 
             return (
             <details className="po-draft-card" key={draft.id}>
@@ -303,10 +310,10 @@ export function PoDraftsView({
                   <strong>{formatInteger(approvedQty)} bottles</strong>
                   <span>{formatCurrency(estimatedCost || wineCost + laidInCost)} estimated</span>
                 </div>
-                <span>
-                  {draft.status.replaceAll("_", " ")} | revision {formatInteger(Number(draft.revision_no) || 1)} | {formatInteger(lineCount)} lines
-                  {draft.last_exported_at ? ` | generated ${new Date(draft.last_exported_at).toLocaleString()}` : ""}
-                </span>
+                <div className="po-draft-summary-meta">
+                  <span>{draft.status.replaceAll("_", " ")} · revision {formatInteger(Number(draft.revision_no) || 1)} · {formatInteger(lineCount)} lines</span>
+                  <small>{activity[0]?.label} {formatAuditTimestamp(activity[0]?.at || draft.created_at)} by {activity[0]?.actor}</small>
+                </div>
               </summary>
               <div className="po-draft-actions">
                 <DraftStatusActions draft={draft} disabled={isPending} onStatusChange={onStatusChange} />
@@ -330,6 +337,14 @@ export function PoDraftsView({
                     </button>
                   </>
                 ) : null}
+              </div>
+              <div className="po-draft-activity" aria-label="PO draft activity">
+                {activity.map((item) => (
+                  <span key={item.key} title={item.at}>
+                    <strong>{item.label}</strong>
+                    {formatAuditTimestamp(item.at)} by {item.actor}
+                  </span>
+                ))}
               </div>
               <SupplierDraftMetadata supplier={supplierMetadata.get((draft.supplier_name || "").trim().toLowerCase())} />
               <PoDraftLinesTable
