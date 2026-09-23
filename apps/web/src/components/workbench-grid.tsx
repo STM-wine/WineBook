@@ -90,16 +90,6 @@ const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
         ) : null}
         {params.data.is_new_item ? <span className="new-item-badge">New Item</span> : null}
         {params.data.recommendations_suppressed ? <span className="recommendation-off-badge">Reorder Off</span> : null}
-        {asNumber(params.data.committed_qty) !== 0 ? (
-          <span
-            className={params.data.approval_processing_status === "correction"
-              ? "approval-processing-badge is-correction"
-              : "approval-processing-badge"}
-            title="Quantity already entered in QuickBooks and the net quantity still eligible for a new PO draft"
-          >
-            Entered {formatInteger(asNumber(params.data.committed_qty))} · Outstanding {formatInteger(asNumber(params.data.outstanding_approved_qty))}
-          </span>
-        ) : null}
         {activeFreeGoodsForRow(params.data).length > 0 ? <span className="free-goods-badge">Free Goods</span> : null}
         {isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}
       </span>
@@ -171,7 +161,6 @@ const wineBadgeCount = (row?: Recommendation | null) => {
   return 1 +
     (activeFreeGoodsForRow(row).length > 0 ? 1 : 0) +
     (row.recommendations_suppressed ? 1 : 0) +
-    (asNumber(row.committed_qty) !== 0 ? 1 : 0) +
     (isDiOpportunity(row) ? 1 : 0);
 };
 const rowHeightForWine = (row?: WorkbenchRow | null) => {

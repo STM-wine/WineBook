@@ -312,7 +312,9 @@ export function PoDraftsView({
                 </div>
                 <div className="po-draft-summary-meta">
                   <span>{draft.status.replaceAll("_", " ")} · revision {formatInteger(Number(draft.revision_no) || 1)} · {formatInteger(lineCount)} lines</span>
-                  <small>{activity[0]?.label} {formatAuditTimestamp(activity[0]?.at || draft.created_at)} by {activity[0]?.actor}</small>
+                  <small className="buyer-activity-line">
+                    {activity[0]?.label} · {formatAuditTimestamp(activity[0]?.at || draft.created_at)} · {activity[0]?.actor}
+                  </small>
                 </div>
               </summary>
               <div className="po-draft-actions">
@@ -340,9 +342,8 @@ export function PoDraftsView({
               </div>
               <div className="po-draft-activity" aria-label="PO draft activity">
                 {activity.map((item) => (
-                  <span key={item.key} title={item.at}>
-                    <strong>{item.label}</strong>
-                    {formatAuditTimestamp(item.at)} by {item.actor}
+                  <span className="buyer-activity-line" key={item.key} title={item.at}>
+                    {item.label} · {formatAuditTimestamp(item.at)} · {item.actor}
                   </span>
                 ))}
               </div>

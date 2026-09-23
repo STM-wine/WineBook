@@ -632,7 +632,8 @@ begin
             from public.approval_commitments
             where report_run_id = p_report_run_id
               and source_type = v_source_type
-              and source_id = v_source_id;
+              and source_id = v_source_id
+              and source_lock_version = (v_line->>'sourceLockVersion')::bigint;
             v_delta_qty := (v_line->>'approvedQty')::integer - v_committed_qty;
             if v_delta_qty <> 0 then
                 v_fob := coalesce((v_line->>'fob')::numeric, 0);

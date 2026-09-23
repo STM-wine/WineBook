@@ -44,7 +44,7 @@ window is required.
 
 - A batch of approval updates is one `save_order_approvals` transaction. Every source row is locked and checked before any approval changes or approval events are written.
 - Live QuickBooks/Vinosmith data is prepared by the server outside PostgreSQL. `create_purchase_order_drafts_atomic` then locks the report run, validates the complete approval manifest, and creates or revises every draft and line in one transaction.
-- Marking a draft `entered_in_quickbooks` and recording its immutable approval commitments is one transaction.
+- Marking a draft `entered_in_quickbooks` and recording its immutable approval commitments is one transaction. A commitment applies only to that exact approval lock version, so clearing or editing the approval starts a fresh order cycle without generating a negative correction.
 - Removing a draft line creates a new immutable draft revision in the same transaction.
 - File generation occurs from an immutable revision. A successful artifact is released only after its export event is inserted.
 

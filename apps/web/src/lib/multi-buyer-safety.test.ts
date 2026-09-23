@@ -40,6 +40,7 @@ describe("multi-buyer database safety contract", () => {
     expect(sql).toContain("create table if not exists public.approval_commitments");
     expect(sql).toContain("create table if not exists public.purchase_order_export_events");
     expect(sql).toContain("prevent_immutable_business_event_change");
+    expect(sql).toContain("and source_lock_version = (v_line->>'sourceLockVersion')::bigint");
   });
 });
 

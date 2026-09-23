@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { approvalEventForRow, latestApprovalEvents, poDraftAuditTrail } from "./audit-trail";
+import { approvalEventForRow, auditActorName, latestApprovalEvents, poDraftAuditTrail } from "./audit-trail";
 import type { ApprovalEvent, PurchaseOrderDraftWithLines, Recommendation } from "./types";
 
 describe("buyer activity audit trail", () => {
+  it("hides staging-only buyer qualifiers from the user-facing name", () => {
+    expect(auditActorName("buyer-a", { "buyer-a": "Mark Yaeger (Staging Buyer 2)" })).toBe("Mark Yaeger");
+    expect(auditActorName("buyer-b", { "buyer-b": "Alex Smith (Purchasing)" })).toBe("Alex Smith (Purchasing)");
+  });
+
   it("selects the latest immutable approval event for a recommendation", () => {
     const events: ApprovalEvent[] = [
       { id: "a", report_run_id: "run", source_type: "recommendation", source_id: "rec", recommendation_status: "approved", approved_qty: 12, source_lock_version: 2, actor_id: "buyer-a", created_at: "2026-09-22T20:00:00Z" },

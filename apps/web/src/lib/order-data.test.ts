@@ -193,7 +193,7 @@ describe("supplier catalog recommendation merge", () => {
 });
 
 describe("order summary display and filters", () => {
-  it("shows only the net unprocessed quantity after QuickBooks commitments", () => {
+  it("suppresses only the exact approval version already entered in QuickBooks", () => {
     const baseCommitment: ApprovalCommitment = {
       id: "commitment-1",
       report_run_id: "run-1",
@@ -208,7 +208,7 @@ describe("order summary display and filters", () => {
     };
 
     const [processed] = applyApprovalCommitments([
-      recommendation({ recommendation_status: "approved", approved_qty: 12 })
+      recommendation({ recommendation_status: "approved", approved_qty: 12, lock_version: 1 })
     ], [baseCommitment]);
     expect(processed).toMatchObject({
       committed_qty: 12,
@@ -217,7 +217,7 @@ describe("order summary display and filters", () => {
     });
 
     const [increased] = applyApprovalCommitments([
-      recommendation({ recommendation_status: "edited", approved_qty: 18 })
+      recommendation({ recommendation_status: "edited", approved_qty: 18, lock_version: 1 })
     ], [baseCommitment]);
     expect(increased).toMatchObject({
       committed_qty: 12,
@@ -225,13 +225,13 @@ describe("order summary display and filters", () => {
       approval_processing_status: "partially_committed"
     });
 
-    const [corrected] = applyApprovalCommitments([
-      recommendation({ recommendation_status: "rejected", approved_qty: 0 })
+    const [freshDecision] = applyApprovalCommitments([
+      recommendation({ recommendation_status: "edited", approved_qty: 18, lock_version: 2 })
     ], [baseCommitment]);
-    expect(corrected).toMatchObject({
-      committed_qty: 12,
-      outstanding_approved_qty: -12,
-      approval_processing_status: "correction"
+    expect(freshDecision).toMatchObject({
+      committed_qty: 0,
+      outstanding_approved_qty: 18,
+      approval_processing_status: "unprocessed"
     });
   });
 

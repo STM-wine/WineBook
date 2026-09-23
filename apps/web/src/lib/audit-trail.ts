@@ -23,7 +23,9 @@ export function formatAuditTimestamp(value: string) {
 }
 
 export function auditActorName(actorId: string | null | undefined, actorNames: AuditActorNames) {
-  return actorId ? actorNames[actorId] || "Unknown user" : "Unknown user";
+  if (!actorId) return "Unknown user";
+  const name = actorNames[actorId] || "Unknown user";
+  return name.replace(/\s+\(staging buyer \d+\)$/i, "");
 }
 
 export function latestApprovalEvents(events: ApprovalEvent[]) {

@@ -228,14 +228,15 @@ export function approvalProcessingPatch(
 export function applyApprovalCommitments(rows: Recommendation[], commitments: ApprovalCommitment[]): Recommendation[] {
   const committedBySource = new Map<string, number>();
   for (const commitment of commitments) {
-    const key = `${commitment.source_type}:${commitment.source_id}`;
+    const key = `${commitment.source_type}:${commitment.source_id}:${Math.max(0, Math.round(asNumber(commitment.source_lock_version)))}`;
     committedBySource.set(key, (committedBySource.get(key) || 0) + asNumber(commitment.quantity));
   }
 
   return rows.map((row) => {
     const sourceType = row.supplier_catalog_wine_id ? "catalog_workbench" : "recommendation";
     const sourceId = row.supplier_catalog_wine_id ? row.supplier_catalog_workbench_item_id : row.id;
-    const committedQty = sourceId ? committedBySource.get(`${sourceType}:${sourceId}`) || 0 : 0;
+    const sourceVersion = Math.max(0, Math.round(asNumber(row.lock_version)));
+    const committedQty = sourceId ? committedBySource.get(`${sourceType}:${sourceId}:${sourceVersion}`) || 0 : 0;
     const processing = approvalProcessingPatch(
       { ...row, committed_qty: committedQty },
       row.recommendation_status,
