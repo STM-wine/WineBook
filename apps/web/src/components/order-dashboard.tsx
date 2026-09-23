@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
@@ -32,6 +32,11 @@ import type {
 } from "@/lib/types";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
+import {
+  LOCAL_DRAFT_MUTATION_SETTLE_MS,
+  REALTIME_REFRESH_DEBOUNCE_MS,
+  nextRealtimeRefreshDelay
+} from "@/lib/realtime-refresh";
 import {
   type ReplenishmentPolicy,
   type ReplenishmentPolicyFilter,
@@ -190,7 +195,56 @@ export function OrderDashboard({
   const approvalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const approvalFlushRef = useRef<Promise<void> | null>(null);
   const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftMutationDepthRef = useRef(0);
+  const draftRefreshQueuedRef = useRef(false);
+  const draftRefreshBlockedUntilRef = useRef(0);
   const [isPending, startTransition] = useTransition();
+
+  const scheduleDraftRefresh = useCallback((requestedDelayMs = REALTIME_REFRESH_DEBOUNCE_MS) => {
+    draftRefreshQueuedRef.current = true;
+    if (realtimeRefreshTimerRef.current) {
+      clearTimeout(realtimeRefreshTimerRef.current);
+      realtimeRefreshTimerRef.current = null;
+    }
+
+    const delay = nextRealtimeRefreshDelay({
+      now: Date.now(),
+      requestedDelayMs,
+      blockedUntil: draftRefreshBlockedUntilRef.current,
+      mutationDepth: draftMutationDepthRef.current
+    });
+    if (delay === null) return;
+
+    realtimeRefreshTimerRef.current = setTimeout(() => {
+      realtimeRefreshTimerRef.current = null;
+      if (draftMutationDepthRef.current > 0) return;
+      draftRefreshQueuedRef.current = false;
+      router.refresh();
+    }, delay);
+  }, [router]);
+
+  function beginDraftMutation() {
+    draftMutationDepthRef.current += 1;
+    draftRefreshBlockedUntilRef.current = Math.max(
+      draftRefreshBlockedUntilRef.current,
+      Date.now() + LOCAL_DRAFT_MUTATION_SETTLE_MS
+    );
+    if (realtimeRefreshTimerRef.current) {
+      clearTimeout(realtimeRefreshTimerRef.current);
+      realtimeRefreshTimerRef.current = null;
+    }
+  }
+
+  function finishDraftMutation(refreshAfterMutation: boolean) {
+    draftMutationDepthRef.current = Math.max(0, draftMutationDepthRef.current - 1);
+    draftRefreshBlockedUntilRef.current = Math.max(
+      draftRefreshBlockedUntilRef.current,
+      Date.now() + LOCAL_DRAFT_MUTATION_SETTLE_MS
+    );
+    if (draftMutationDepthRef.current === 0 && (refreshAfterMutation || draftRefreshQueuedRef.current)) {
+      scheduleDraftRefresh(LOCAL_DRAFT_MUTATION_SETTLE_MS);
+    }
+  }
 
   useEffect(() => {
     setRows((current) => combinedRecommendations.map((incoming) => {
@@ -220,11 +274,6 @@ export function OrderDashboard({
   }, [poDrafts]);
 
   useEffect(() => {
-    function scheduleDraftRefresh() {
-      if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current);
-      realtimeRefreshTimerRef.current = setTimeout(() => router.refresh(), 250);
-    }
-
     const channel = realtimeSupabase
       .channel(`ordering-run:${reportRun.id}`)
       .on(
@@ -285,18 +334,18 @@ export function OrderDashboard({
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "approval_events", filter: `report_run_id=eq.${reportRun.id}` },
-        scheduleDraftRefresh
+        () => scheduleDraftRefresh()
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "purchase_order_drafts", filter: `report_run_id=eq.${reportRun.id}` },
-        scheduleDraftRefresh
+        () => scheduleDraftRefresh()
       )
-      .on("postgres_changes", { event: "*", schema: "public", table: "purchase_order_lines" }, scheduleDraftRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "purchase_order_lines" }, () => scheduleDraftRefresh())
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "purchase_order_export_events", filter: `report_run_id=eq.${reportRun.id}` },
-        scheduleDraftRefresh
+        () => scheduleDraftRefresh()
       )
       .subscribe();
 
@@ -304,7 +353,7 @@ export function OrderDashboard({
       if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current);
       void realtimeSupabase.removeChannel(channel);
     };
-  }, [realtimeSupabase, reportRun.id, router]);
+  }, [realtimeSupabase, reportRun.id, scheduleDraftRefresh]);
 
   useEffect(() => {
     const syncViewFromUrl = () => {
@@ -664,8 +713,10 @@ export function OrderDashboard({
     setPendingMessage("Creating PO drafts...");
     setErrorMessage("");
     setShowPoDraftProgress(true);
+    beginDraftMutation();
 
     startTransition(async () => {
+      let refreshAfterMutation = false;
       try {
         await flushApprovalQueue();
         const response = await fetch("/api/po-drafts/create", {
@@ -710,11 +761,13 @@ export function OrderDashboard({
         }
         setDraftRows(result.drafts || []);
         selectView("po-drafts");
+        refreshAfterMutation = true;
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not create PO drafts.");
         setPendingMessage("");
       } finally {
         setShowPoDraftProgress(false);
+        finishDraftMutation(refreshAfterMutation);
       }
     });
   }
@@ -746,15 +799,19 @@ export function OrderDashboard({
   function changeDraftStatus(draftId: string, status: string) {
     setPendingMessage("Updating PO draft...");
     setErrorMessage("");
+    beginDraftMutation();
 
     startTransition(async () => {
+      let refreshAfterMutation = false;
       try {
         await updatePurchaseOrderDraftStatus({ id: draftId, status });
         setPendingMessage("PO draft updated");
-        router.refresh();
+        refreshAfterMutation = true;
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not update PO draft.");
         setPendingMessage("");
+      } finally {
+        finishDraftMutation(refreshAfterMutation);
       }
     });
   }
@@ -764,15 +821,19 @@ export function OrderDashboard({
     if (ids.length === 0) return;
     setPendingMessage(`Cancelling ${ids.length.toLocaleString()} PO draft${ids.length === 1 ? "" : "s"}...`);
     setErrorMessage("");
+    beginDraftMutation();
 
     startTransition(async () => {
+      let refreshAfterMutation = false;
       try {
         const result = await cancelPurchaseOrderDrafts({ ids });
         setPendingMessage(`${result.cancelled.toLocaleString()} active PO draft${result.cancelled === 1 ? "" : "s"} cancelled.`);
-        router.refresh();
+        refreshAfterMutation = true;
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not cancel PO drafts.");
         setPendingMessage("");
+      } finally {
+        finishDraftMutation(refreshAfterMutation);
       }
     });
   }
@@ -780,15 +841,19 @@ export function OrderDashboard({
   function removeDraftLine(lineId: string, draftId: string) {
     setPendingMessage("Removing PO draft line...");
     setErrorMessage("");
+    beginDraftMutation();
 
     startTransition(async () => {
+      let refreshAfterMutation = false;
       try {
         await deletePurchaseOrderLine({ id: lineId, draftId });
         setPendingMessage("PO draft line removed");
-        router.refresh();
+        refreshAfterMutation = true;
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not remove PO draft line.");
         setPendingMessage("");
+      } finally {
+        finishDraftMutation(refreshAfterMutation);
       }
     });
   }
