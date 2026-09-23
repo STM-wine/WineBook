@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { fetchAllExact } from "./fetch-all-exact";
 
 export type QuickBooksItemSalesWindowRow = {
   item_list_id: string | null;
@@ -16,9 +15,14 @@ export type QuickBooksItemSalesWindowRow = {
 };
 
 export async function fetchQuickBooksItemSalesWindows(supabase: SupabaseClient, referenceDate: string) {
-  return fetchAllExact<QuickBooksItemSalesWindowRow>("QuickBooks sales windows", (from, to) => supabase
-      .rpc("quickbooks_item_sales_windows", { p_reference_date: referenceDate }, { count: "exact" })
-      .range(from, to)
-      .returns<QuickBooksItemSalesWindowRow[]>() as never
-  );
+  const { data, error } = await supabase
+    .rpc("quickbooks_item_sales_windows_payload", { p_reference_date: referenceDate })
+    .returns<QuickBooksItemSalesWindowRow[]>();
+
+  if (error) throw new Error(error.message);
+  if (!Array.isArray(data)) {
+    throw new Error("QuickBooks sales windows did not return a complete payload.");
+  }
+
+  return data;
 }

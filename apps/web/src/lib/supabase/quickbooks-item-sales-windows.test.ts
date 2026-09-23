@@ -19,77 +19,42 @@ function salesRow(index: number): QuickBooksItemSalesWindowRow {
 }
 
 describe("fetchQuickBooksItemSalesWindows", () => {
-  it("fetches every RPC page instead of stopping at Supabase's 1,000-row response limit", async () => {
+  it("fetches every sales row in one scalar payload instead of recomputing the RPC for each 1,000-row page", async () => {
     const allRows = Array.from({ length: 2456 }, (_, index) => salesRow(index));
-    const ranges: Array<[number, number]> = [];
     const supabase = {
-      rpc: vi.fn((_name, _args, options) => ({
-        range: (from: number, to: number) => {
-          ranges.push([from, to]);
-          return {
-            returns: async () => ({ data: allRows.slice(from, to + 1), error: null, count: allRows.length })
-          };
-        }
+      rpc: vi.fn(() => ({
+        returns: async () => ({ data: allRows, error: null })
       }))
     };
 
     const rows = await fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-15");
 
     expect(rows).toHaveLength(2456);
-    expect(ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999]]);
-    expect(supabase.rpc).toHaveBeenCalledTimes(3);
+    expect(supabase.rpc).toHaveBeenCalledTimes(1);
     expect(supabase.rpc).toHaveBeenCalledWith(
-      "quickbooks_item_sales_windows",
-      { p_reference_date: "2026-09-15" },
-      { count: "exact" }
+      "quickbooks_item_sales_windows_payload",
+      { p_reference_date: "2026-09-15" }
     );
   });
 
-  it("surfaces an error from a later page", async () => {
-    let page = 0;
+  it("surfaces an RPC error", async () => {
     const supabase = {
       rpc: vi.fn(() => ({
-        range: () => ({
-          returns: async () => page++ === 0
-            ? { data: Array.from({ length: 1000 }, (_, index) => salesRow(index)), error: null, count: 1500 }
-            : { data: null, error: { message: "page failed" }, count: 1500 }
-        })
+        returns: async () => ({ data: null, error: { message: "payload failed" } })
       }))
     };
 
-    await expect(fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-15")).rejects.toThrow("page failed");
+    await expect(fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-15")).rejects.toThrow("payload failed");
   });
 
-  it("refuses to return a silently truncated result", async () => {
-    let page = 0;
+  it("fails closed when the database does not provide an array payload", async () => {
     const supabase = {
       rpc: vi.fn(() => ({
-        range: () => ({
-          returns: async () => ({
-            data: page++ === 0
-              ? Array.from({ length: 1000 }, (_, index) => salesRow(index))
-              : Array.from({ length: 900 }, (_, index) => salesRow(index + 1000)),
-            error: null,
-            count: 2456
-          })
-        })
+        returns: async () => ({ data: null, error: null })
       }))
     };
 
     await expect(fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-15"))
-      .rejects.toThrow("QuickBooks sales windows was incomplete (expected 2456 rows, received 1900).");
-  });
-
-  it("fails closed when the database does not provide a completeness count", async () => {
-    const supabase = {
-      rpc: vi.fn(() => ({
-        range: () => ({
-          returns: async () => ({ data: [salesRow(1)], error: null, count: null })
-        })
-      }))
-    };
-
-    await expect(fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-15"))
-      .rejects.toThrow("QuickBooks sales windows did not return a completeness count.");
+      .rejects.toThrow("QuickBooks sales windows did not return a complete payload.");
   });
 });
