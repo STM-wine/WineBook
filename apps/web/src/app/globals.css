@@ -3120,13 +3120,29 @@ th:nth-child(12) .table-sort-button {
   margin: 24px 0;
 }
 
-.replenishment-edit-fields > label:not(.replenishment-auto-toggle) {
-  color: var(--muted);
+.replenishment-policy-control {
+  background: #f8f5ed;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   display: grid;
+  gap: 11px;
+  padding: 14px;
+}
+
+.replenishment-policy-control span,
+.replenishment-policy-control small {
+  display: block;
+}
+
+.replenishment-policy-control strong {
+  font-size: 14px;
+}
+
+.replenishment-policy-control small {
+  color: var(--muted);
   font-size: 12px;
-  font-weight: 800;
-  gap: 7px;
-  text-transform: uppercase;
+  line-height: 1.4;
+  margin-top: 3px;
 }
 
 .replenishment-edit-fields select {

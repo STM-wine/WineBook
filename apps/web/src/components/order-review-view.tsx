@@ -665,8 +665,11 @@ function ReplenishmentEditDialog({
         </div>
 
         <div className="replenishment-edit-fields">
-          <label>
-            Replenishment policy
+          <label className="replenishment-policy-control">
+            <span>
+              <strong>Replenishment policy</strong>
+              <small>Choose how this wine should be replenished.</small>
+            </span>
             <select disabled={!canManage || isSaving} value={policy} onChange={(event) => setPolicy(event.target.value as ReplenishmentPolicy)}>
               {REPLENISHMENT_POLICIES.map((option) => (
                 <option key={option} value={option}>{replenishmentPolicyLabel(option)}</option>
