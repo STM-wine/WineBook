@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyApprovalCommitments,
   applySupplierTargetWeeks,
   applyVinosmithAvailability,
   DEFAULT_SUPPLIER_TARGET_WEEKS,
@@ -11,7 +12,7 @@ import {
   recommendationMatchesCatalogWine,
   sortSupplierGroups
 } from "./order-data";
-import type { Recommendation, SupplierCatalogWine } from "./types";
+import type { ApprovalCommitment, Recommendation, SupplierCatalogWine } from "./types";
 
 function recommendation(overrides: Partial<Recommendation> = {}): Recommendation {
   return {
@@ -192,6 +193,48 @@ describe("supplier catalog recommendation merge", () => {
 });
 
 describe("order summary display and filters", () => {
+  it("shows only the net unprocessed quantity after QuickBooks commitments", () => {
+    const baseCommitment: ApprovalCommitment = {
+      id: "commitment-1",
+      report_run_id: "run-1",
+      source_type: "recommendation",
+      source_id: "rec-1",
+      source_lock_version: 1,
+      purchase_order_draft_id: "draft-1",
+      draft_revision_no: 1,
+      quantity: 12,
+      actor_id: "buyer-1",
+      created_at: "2026-09-22T00:00:00Z"
+    };
+
+    const [processed] = applyApprovalCommitments([
+      recommendation({ recommendation_status: "approved", approved_qty: 12 })
+    ], [baseCommitment]);
+    expect(processed).toMatchObject({
+      committed_qty: 12,
+      outstanding_approved_qty: 0,
+      approval_processing_status: "committed"
+    });
+
+    const [increased] = applyApprovalCommitments([
+      recommendation({ recommendation_status: "edited", approved_qty: 18 })
+    ], [baseCommitment]);
+    expect(increased).toMatchObject({
+      committed_qty: 12,
+      outstanding_approved_qty: 6,
+      approval_processing_status: "partially_committed"
+    });
+
+    const [corrected] = applyApprovalCommitments([
+      recommendation({ recommendation_status: "rejected", approved_qty: 0 })
+    ], [baseCommitment]);
+    expect(corrected).toMatchObject({
+      committed_qty: 12,
+      outstanding_approved_qty: -12,
+      approval_processing_status: "correction"
+    });
+  });
+
   it("formats velocity direction as a signed percentage while preserving non-computable labels", () => {
     expect(formatVelocityTrend(recommendation({ velocity_trend_pct: 100, velocity_trend_label: "Up" }))).toBe("+100%");
     expect(formatVelocityTrend(recommendation({ velocity_trend_pct: -50, velocity_trend_label: "Down" }))).toBe("-50%");

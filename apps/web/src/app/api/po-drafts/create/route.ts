@@ -1,35 +1,30 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from "@/lib/di-planning";
 import { CACHE_TAGS } from "@/lib/cache-tags";
-import { applyVinosmithAvailability, asNumber, mergeSupplierCatalogRows } from "@/lib/order-data";
-import { formatInteger } from "@/lib/order-data";
-import { ACTIVE_PO_STATUSES } from "@/lib/po-status";
-import {
-  fetchAllRecommendationsForRun,
-  fetchQuickBooksOnOrderItems
-} from "@/lib/supabase/recommendations";
+import { applyVinosmithAvailability, asNumber, formatInteger, mergeSupplierCatalogRows } from "@/lib/order-data";
+import { fetchAllRecommendationsForRun, fetchQuickBooksOnOrderItems } from "@/lib/supabase/recommendations";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchLiveVinosmithAvailability } from "@/lib/supabase/vinosmith-availability";
 import { fetchSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
 import { isSourceBackedRun, overlayCurrentSourceRows, type OrderingRun } from "@/lib/source-backed-ordering-runs";
 import { buildOrderingDraftSourceSnapshot, buildOrderingLineSourceSnapshot } from "@/lib/po-source-snapshot";
-import type {
-  PurchaseOrderDraftWithLines,
-  Recommendation,
-  SupplierCatalogWine,
-  SupplierLogistics
-} from "@/lib/types";
+import type { ApprovalConflict, PurchaseOrderDraftWithLines, Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 
+type DraftRpcResult = {
+  ok: boolean;
+  created?: string[];
+  updated?: string[];
+  skipped?: string[];
+  conflicts?: ApprovalConflict[];
+};
+
 function normalizeSupplier(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
-}
-
-function draftOrderPathFromNotes(notes: string | null | undefined) {
-  return /order path:\s*(direct import|di)/i.test(notes || "") ? "di" : "stateside";
 }
 
 function draftGroupKey(supplier: string, path: "stateside" | "di") {
@@ -40,44 +35,75 @@ function orderPathLabel(path: "stateside" | "di") {
   return path === "di" ? "Direct Import" : "Stateside";
 }
 
+function stableHash(value: unknown) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
 async function requireWriteAccess() {
   const supabase = await createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "Sign in required.", status: 401 as const };
-  }
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Sign in required.", status: 401 as const };
 
   const { data: profile } = await supabase
     .from("app_profiles")
     .select("role")
     .eq("id", user.id)
     .maybeSingle<{ role: string }>();
-
   if (!profile || !WRITE_ROLES.has(profile.role)) {
     return { error: "Buyer or admin access required.", status: 403 as const };
   }
-
   return { supabase, user };
 }
 
-export async function POST(request: Request) {
-  const body = (await request.json().catch(() => null)) as { reportRunId?: string } | null;
-  const reportRunId = body?.reportRunId;
+function approvalSource(row: Recommendation) {
+  if (row.supplier_catalog_wine_id) {
+    if (!row.supplier_catalog_workbench_item_id) {
+      throw new Error(`${row.product_name || row.supplier_catalog_wine_id} has not finished saving. Wait a moment and retry.`);
+    }
+    return { sourceType: "catalog_workbench" as const, sourceId: row.supplier_catalog_workbench_item_id };
+  }
+  return { sourceType: "recommendation" as const, sourceId: row.id };
+}
 
-  if (!reportRunId) {
-    return NextResponse.json({ error: "Missing report run id." }, { status: 400 });
+async function loadDrafts(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  reportRunId: string
+) {
+  return supabase
+    .from("purchase_order_drafts")
+    .select(`
+      id, report_run_id, ordering_source, source_snapshot, supplier_name, order_path,
+      status, po_number, notes, revision_no, content_hash, last_exported_at,
+      last_exported_by, created_at, updated_at,
+      lines:purchase_order_lines (
+        id, purchase_order_draft_id, recommendation_id, supplier_catalog_wine_id,
+        producer_name, product_name, product_code, planning_sku, recommended_qty,
+        approved_qty, fob, line_cost, trucking_cost_per_bottle, wine_cost,
+        laid_in_cost, landed_cost, is_new_item, new_item_warning, source_snapshot,
+        source_type, source_id, source_lock_version
+      )
+    `)
+    .eq("report_run_id", reportRunId)
+    .order("created_at", { ascending: false })
+    .returns<PurchaseOrderDraftWithLines[]>();
+}
+
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => null)) as {
+    reportRunId?: string;
+    idempotencyKey?: string;
+  } | null;
+  const reportRunId = body?.reportRunId;
+  const idempotencyKey = body?.idempotencyKey;
+  if (!reportRunId || !idempotencyKey) {
+    return NextResponse.json({ error: "Report run and idempotency key are required." }, { status: 400 });
   }
 
   const access = await requireWriteAccess();
-  if ("error" in access) {
-    return NextResponse.json({ error: access.error }, { status: access.status });
-  }
-
-  const { supabase, user } = access;
+  if ("error" in access) return NextResponse.json({ error: access.error }, { status: access.status });
+  const { supabase } = access;
   const integrationSupabase = createServiceRoleClient();
+
   const { data: orderingRun, error: orderingRunError } = await integrationSupabase
     .from("report_runs")
     .select("id,run_type,report_date,completed_at,diagnostics,configuration_version_id,configuration_snapshot,source_file_ids")
@@ -86,92 +112,29 @@ export async function POST(request: Request) {
   if (orderingRunError || !orderingRun) {
     return NextResponse.json({ error: orderingRunError?.message || "Ordering run not found." }, { status: 404 });
   }
+
   const sourceBacked = isSourceBackedRun(orderingRun);
   const orderingSource = sourceBacked ? "database" as const : "report" as const;
-
-  const { data: activeDrafts, error: activeDraftsError } = await supabase
-    .from("purchase_order_drafts")
-    .select("id,supplier_name,notes")
-    .eq("report_run_id", reportRunId)
-    .in("status", [...ACTIVE_PO_STATUSES]);
-
-  if (activeDraftsError) {
-    return NextResponse.json({ error: activeDraftsError.message }, { status: 500 });
-  }
-
-  const { data: enteredDrafts, error: enteredDraftsError } = await supabase
-    .from("purchase_order_drafts")
-    .select(`
-      id,
-      lines:purchase_order_lines (
-        recommendation_id,
-        supplier_catalog_wine_id,
-        product_code
-      )
-    `)
-    .in("report_run_id", [reportRunId, String(orderingRun.diagnostics?.previous_ordering_run_id || "")].filter(Boolean))
-    .eq("status", "entered_in_quickbooks")
-    .returns<Array<{ id: string; lines: Array<{ recommendation_id: string | null; supplier_catalog_wine_id: string | null; product_code: string | null }> }>>();
-
-  if (enteredDraftsError) {
-    return NextResponse.json({ error: enteredDraftsError.message }, { status: 500 });
-  }
-
-  const enteredRecommendationIds = new Set(
-    (enteredDrafts || []).flatMap((draft) =>
-      (draft.lines || [])
-        .map((line) => line.recommendation_id)
-        .filter((id): id is string => typeof id === "string" && id.length > 0)
-    )
-  );
-  const enteredCatalogWineIds = new Set(
-    (enteredDrafts || []).flatMap((draft) =>
-      (draft.lines || [])
-        .map((line) => line.supplier_catalog_wine_id)
-        .filter((id): id is string => typeof id === "string" && id.length > 0)
-    )
-  );
-  const enteredProductCodes = new Set(
-    (enteredDrafts || []).flatMap((draft) => (draft.lines || []).map((line) => line.product_code?.trim().toUpperCase()).filter(Boolean))
-  );
-
-  const activeDraftsBySupplierPath = new Map(
-    (activeDrafts || []).map((draft) => [
-      draftGroupKey(draft.supplier_name?.trim() || "Unassigned", draftOrderPathFromNotes(draft.notes)),
-      draft.id as string
-    ])
-  );
-
   let recommendations: Recommendation[];
-  let supplierCatalogWines: SupplierCatalogWine[] = [];
+  let supplierCatalogWines: SupplierCatalogWine[];
   try {
-    const [fetchedRecommendations, quickBooksOnOrderItems, liveAvailability] = await Promise.all([
+    const [fetchedRecommendations, quickBooksOnOrderItems, liveAvailability, catalogResult] = await Promise.all([
       fetchAllRecommendationsForRun(supabase, reportRunId),
       fetchQuickBooksOnOrderItems(integrationSupabase),
-      fetchLiveVinosmithAvailability()
+      fetchLiveVinosmithAvailability(),
+      supabase.from("supplier_catalog_wines").select(`*, workbench_items:supplier_catalog_workbench_items (*)`).returns<SupplierCatalogWine[]>()
     ]);
-    const { data: catalogWines, error: catalogError } = await supabase
-      .from("supplier_catalog_wines")
-      .select(`
-        *,
-        workbench_items:supplier_catalog_workbench_items (*)
-      `)
-      .returns<SupplierCatalogWine[]>();
+    if (catalogResult.error) throw new Error(catalogResult.error.message);
+    supplierCatalogWines = catalogResult.data || [];
 
-    if (catalogError) {
-      throw new Error(catalogError.message);
-    }
-
-    supplierCatalogWines = catalogWines || [];
     const currentSourceData = sourceBacked
       ? await fetchSourceBackedOrderingData(integrationSupabase, {
           referenceDate: orderingRun.report_date || undefined,
           liveAvailability
         })
       : null;
-    const currentRows = currentSourceData?.rows || [];
     const currentRecommendations = sourceBacked
-      ? overlayCurrentSourceRows(fetchedRecommendations, currentRows)
+      ? overlayCurrentSourceRows(fetchedRecommendations, currentSourceData?.rows || [])
       : applyVinosmithAvailability(fetchedRecommendations, liveAvailability.byProductCode);
     recommendations = applyQuickBooksOnOrderToRecommendations(
       mergeSupplierCatalogRows(currentRecommendations, supplierCatalogWines, reportRunId),
@@ -183,271 +146,153 @@ export async function POST(request: Request) {
       quickbooks_as_of: currentSourceData?.diagnostics.quickbooks_as_of || orderingRun.diagnostics?.quickbooks_as_of || null
     };
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not load recommendations." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load recommendations." }, { status: 500 });
   }
 
-  const poRows = applyDiContainerRecommendations(recommendations).filter(
-    (row) => {
-      if (!["approved", "edited"].includes(row.recommendation_status || "")) return false;
-      if (Math.round(asNumber(row.approved_qty)) <= 0) return false;
-      if (row.supplier_catalog_wine_id) {
-        return !enteredCatalogWineIds.has(row.supplier_catalog_wine_id);
-      }
-      return !enteredRecommendationIds.has(row.id) && !enteredProductCodes.has(row.product_code?.trim().toUpperCase() || "");
+  const { data: commitmentRows, error: commitmentError } = await supabase
+    .from("approval_commitments")
+    .select("source_type,source_id")
+    .eq("report_run_id", reportRunId)
+    .returns<Array<{ source_type: string; source_id: string }>>();
+  if (commitmentError) return NextResponse.json({ error: commitmentError.message }, { status: 500 });
+  const committedSources = new Set((commitmentRows || []).map((row) => `${row.source_type}:${row.source_id}`));
+  const poRows = applyDiContainerRecommendations(recommendations).filter((row) => {
+    let source;
+    try {
+      source = approvalSource(row);
+    } catch {
+      return false;
     }
-  );
-  const capacityViolations = diCapacityViolations(poRows);
+    const currentlyApproved = ["approved", "edited"].includes(row.recommendation_status || "") && Math.round(asNumber(row.approved_qty)) > 0;
+    return currentlyApproved || committedSources.has(`${source.sourceType}:${source.sourceId}`);
+  });
+  const capacityViolations = diCapacityViolations(poRows.filter(
+    (row) => ["approved", "edited"].includes(row.recommendation_status || "") && asNumber(row.approved_qty) > 0
+  ));
   if (capacityViolations.length > 0) {
-    return NextResponse.json(
-      {
-        error: capacityViolations
-          .map(
-            (violation) =>
-              `Unable to submit ${violation.containerGroup} / ${violation.originPort}: ${formatInteger(violation.totalBottles)} bottles exceeds ${formatInteger(violation.capacityBottles)} bottle container capacity by ${formatInteger(violation.overByBottles)}.`
-          )
-          .join(" ")
-      },
-      { status: 400 }
-    );
+    return NextResponse.json({
+      error: capacityViolations.map((violation) =>
+        `Unable to submit ${violation.containerGroup} / ${violation.originPort}: ${formatInteger(violation.totalBottles)} bottles exceeds ${formatInteger(violation.capacityBottles)} bottle container capacity by ${formatInteger(violation.overByBottles)}.`
+      ).join(" ")
+    }, { status: 400 });
   }
 
-  const grouped = new Map<string, { supplier: string; orderPath: "stateside" | "di"; rows: Recommendation[] }>();
+  const { data: supplierRows, error: supplierError } = await supabase
+    .from("suppliers")
+    .select("name,trucking_cost_per_bottle,pick_up_location,eta_days,freight_forwarder,notes")
+    .returns<SupplierLogistics[]>();
+  if (supplierError) return NextResponse.json({ error: supplierError.message }, { status: 500 });
+  const supplierMetadata = new Map((supplierRows || []).map((row) => [normalizeSupplier(row.name), row]));
+  const catalogProducersById = new Map(supplierCatalogWines.map((wine) => [wine.id, wine.producer?.trim() || null]));
+
+  let approvalManifest: Array<Record<string, unknown>>;
+  try {
+    approvalManifest = poRows.map((row) => {
+      const source = approvalSource(row);
+      return {
+        ...source,
+        recommendationStatus: row.recommendation_status,
+        approvedQty: Math.max(0, Math.round(asNumber(row.approved_qty))),
+        lockVersion: Math.max(0, Math.round(asNumber(row.lock_version)))
+      };
+    }).sort((a, b) => `${a.sourceType}:${a.sourceId}`.localeCompare(`${b.sourceType}:${b.sourceId}`));
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "An approval is still saving." }, { status: 409 });
+  }
+
+  const grouped = new Map<string, { supplier: string; path: "stateside" | "di"; rows: Recommendation[] }>();
   for (const row of poRows) {
     const supplier = row.supplier_name?.trim() || "Unassigned";
     const path = orderPath(row);
     const key = draftGroupKey(supplier, path);
-    const group = grouped.get(key) || { supplier, orderPath: path, rows: [] };
+    const group = grouped.get(key) || { supplier, path, rows: [] };
     group.rows.push(row);
     grouped.set(key, group);
   }
 
-  const created: string[] = [];
-  const updated: string[] = [];
-  const skipped: string[] = [];
-  const errors: string[] = [];
-  const { data: supplierRows } = await supabase
-    .from("suppliers")
-    .select("name,trucking_cost_per_bottle,pick_up_location,eta_days,freight_forwarder,notes")
-    .returns<SupplierLogistics[]>();
-  const supplierMetadata = new Map((supplierRows || []).map((row) => [normalizeSupplier(row.name), row]));
-  const catalogProducersById = new Map(
-    supplierCatalogWines.map((wine) => [wine.id, wine.producer?.trim() || null])
-  );
-
-  for (const { supplier, orderPath: path, rows } of grouped.values()) {
-    const metadata = supplierMetadata.get(normalizeSupplier(supplier));
-    const groupKey = draftGroupKey(supplier, path);
-    let draft = activeDraftsBySupplierPath.get(groupKey) ? { id: activeDraftsBySupplierPath.get(groupKey) as string } : null;
-
-    if (!draft) {
-      const { data: createdDraft, error: draftError } = await supabase
-        .from("purchase_order_drafts")
-        .insert({
-          supplier_name: supplier,
-          report_run_id: reportRunId,
-          ordering_source: orderingSource,
-          status: "draft",
-          notes: [
-            "Created from global PO Drafts action.",
-            `Order path: ${orderPathLabel(path)}.`,
-            metadata?.pick_up_location ? `Pickup: ${metadata.pick_up_location}.` : "",
-            metadata?.eta_days ? `ETA: ${metadata.eta_days} days.` : ""
-          ]
-            .filter(Boolean)
-            .join(" "),
-          created_by: user.id
+  const groups = Array.from(grouped.values())
+    .sort((a, b) => draftGroupKey(a.supplier, a.path).localeCompare(draftGroupKey(b.supplier, b.path)))
+    .map(({ supplier, path, rows }) => {
+      const metadata = supplierMetadata.get(normalizeSupplier(supplier));
+      const lines = rows
+        .map((row) => {
+          const source = approvalSource(row);
+          const approvedQty = Math.max(0, Math.round(asNumber(row.approved_qty)));
+          const recommendedQty = Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)));
+          const fob = asNumber(row.fob);
+          const trucking = asNumber(row.trucking_cost_per_bottle) || asNumber(metadata?.trucking_cost_per_bottle);
+          return {
+            ...source,
+            sourceLockVersion: Math.max(0, Math.round(asNumber(row.lock_version))),
+            supplierCatalogWineId: row.supplier_catalog_wine_id || null,
+            producerName: row.supplier_catalog_wine_id ? catalogProducersById.get(row.supplier_catalog_wine_id) || null : null,
+            productName: row.product_name,
+            productCode: row.product_code,
+            planningSku: row.planning_sku,
+            recommendedQty,
+            approvedQty,
+            fob,
+            truckingCostPerBottle: trucking,
+            isNewItem: Boolean(row.is_new_item),
+            newItemWarning: row.new_item_warning || null,
+            sourceSnapshot: buildOrderingLineSourceSnapshot({
+              row, reportRunId, approvedQty, recommendedQty, trucking, orderingSource,
+              vinosmithAvailableAsOf: String(orderingRun.diagnostics?.vinosmith_available_as_of || new Date().toISOString()),
+              runDiagnostics: orderingRun.diagnostics || null
+            })
+          };
         })
-        .select("id")
-        .single<{ id: string }>();
-
-      if (draftError || !createdDraft) {
-        errors.push(`${supplier}: ${draftError?.message || "Could not create draft."}`);
-        continue;
-      }
-      draft = createdDraft;
-    }
-
-    const { data: existingLines, error: existingLinesError } = await supabase
-      .from("purchase_order_lines")
-      .select("id,recommendation_id,supplier_catalog_wine_id")
-      .eq("purchase_order_draft_id", draft.id)
-      .returns<Array<{ id: string; recommendation_id: string | null; supplier_catalog_wine_id: string | null }>>();
-
-    if (existingLinesError) {
-      errors.push(`${supplier}: ${existingLinesError.message}`);
-      continue;
-    }
-
-    const approvedRecommendationIds = new Set(rows.filter((row) => !row.supplier_catalog_wine_id).map((row) => row.id));
-    const approvedCatalogWineIds = new Set(rows.map((row) => row.supplier_catalog_wine_id).filter(Boolean));
-    const staleLineIds = (existingLines || [])
-      .filter((line) => {
-        if (line.supplier_catalog_wine_id) return !approvedCatalogWineIds.has(line.supplier_catalog_wine_id);
-        if (line.recommendation_id) return !approvedRecommendationIds.has(line.recommendation_id);
-        return false;
-      })
-      .map((line) => line.id);
-
-    if (staleLineIds.length > 0) {
-      const { error: deleteError } = await supabase.from("purchase_order_lines").delete().in("id", staleLineIds);
-      if (deleteError) {
-        errors.push(`${supplier}: ${deleteError.message}`);
-        continue;
-      }
-    }
-
-    const existingLineEntries: Array<[string, string]> = [];
-    for (const line of existingLines || []) {
-      if (line.supplier_catalog_wine_id && approvedCatalogWineIds.has(line.supplier_catalog_wine_id)) {
-        existingLineEntries.push([`catalog:${line.supplier_catalog_wine_id}`, line.id]);
-      } else if (line.recommendation_id && approvedRecommendationIds.has(line.recommendation_id)) {
-        existingLineEntries.push([`recommendation:${line.recommendation_id}`, line.id]);
-      }
-    }
-    const existingLineIds = new Map(existingLineEntries);
-    const linePayloads = rows.map((row) => {
-      const approvedQty = Math.max(0, Math.round(asNumber(row.approved_qty)));
-      const recommendedQty = Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)));
-      const fob = asNumber(row.fob);
-      const supplierTrucking = asNumber(metadata?.trucking_cost_per_bottle);
-      const trucking = asNumber(row.trucking_cost_per_bottle) || supplierTrucking;
-      const wineCost = fob * approvedQty;
-      const laidInCost = trucking * approvedQty;
-
+        .sort((a, b) => `${a.sourceType}:${a.sourceId}`.localeCompare(`${b.sourceType}:${b.sourceId}`));
+      const snapshotLines = lines.map((line) => ({
+        recommended_qty: line.recommendedQty,
+        approved_qty: line.approvedQty,
+        wine_cost: line.fob * line.approvedQty,
+        laid_in_cost: line.truckingCostPerBottle * line.approvedQty,
+        landed_cost: (line.fob + line.truckingCostPerBottle) * line.approvedQty
+      }));
+      const draftSnapshot = buildOrderingDraftSourceSnapshot({
+        supplier, reportRunId, path, metadata, lines: snapshotLines, orderingSource,
+        vinosmithAvailableAsOf: String(orderingRun.diagnostics?.vinosmith_available_as_of || new Date().toISOString()),
+        runDiagnostics: orderingRun.diagnostics || null
+      });
       return {
-        line_key: row.supplier_catalog_wine_id ? `catalog:${row.supplier_catalog_wine_id}` : `recommendation:${row.id}`,
-        purchase_order_draft_id: draft.id,
-        recommendation_id: row.supplier_catalog_wine_id ? null : row.id,
-        supplier_catalog_wine_id: row.supplier_catalog_wine_id || null,
-        producer_name: row.supplier_catalog_wine_id ? catalogProducersById.get(row.supplier_catalog_wine_id) || null : null,
-        product_name: row.product_name,
-        product_code: row.product_code,
-        planning_sku: row.planning_sku,
-        recommended_qty: recommendedQty,
-        approved_qty: approvedQty,
-        fob,
-        trucking_cost_per_bottle: trucking,
-        wine_cost: wineCost,
-        laid_in_cost: laidInCost,
-        landed_cost: wineCost + laidInCost,
-        line_cost: wineCost,
-        is_new_item: Boolean(row.is_new_item),
-        new_item_warning: row.new_item_warning || null,
-        source_snapshot: buildOrderingLineSourceSnapshot({
-          row,
-          reportRunId,
-          approvedQty,
-          recommendedQty,
-          trucking,
-          orderingSource,
-          vinosmithAvailableAsOf: String(orderingRun.diagnostics?.vinosmith_available_as_of || new Date().toISOString()),
-          runDiagnostics: orderingRun.diagnostics || null
-        })
+        supplier,
+        orderPath: path,
+        orderingSource,
+        notes: [
+          "Created from global PO Drafts action.",
+          `Order path: ${orderPathLabel(path)}.`,
+          metadata?.pick_up_location ? `Pickup: ${metadata.pick_up_location}.` : "",
+          metadata?.eta_days ? `ETA: ${metadata.eta_days} days.` : ""
+        ].filter(Boolean).join(" "),
+        draftSnapshot,
+        lines
       };
     });
 
-    const insertPayloads = linePayloads.filter((line) => !existingLineIds.has(line.line_key));
-    const updatePayloads = linePayloads.filter((line) => existingLineIds.has(line.line_key));
-
-    for (const line of updatePayloads) {
-      const lineId = existingLineIds.get(line.line_key);
-      if (!lineId) continue;
-      const { line_key: _lineKey, ...lineUpdate } = line;
-      const { error: updateError } = await supabase.from("purchase_order_lines").update(lineUpdate).eq("id", lineId);
-      if (updateError) {
-        errors.push(`${supplier}: ${updateError.message}`);
-      }
-    }
-
-    const { error: linesError } = insertPayloads.length
-      ? await supabase.from("purchase_order_lines").insert(insertPayloads.map(({ line_key: _lineKey, ...line }) => line))
-      : { error: null };
-    if (linesError) {
-      errors.push(`${supplier}: ${linesError.message}`);
-      continue;
-    }
-
-    const draftSnapshot = buildOrderingDraftSourceSnapshot({
-      supplier,
-      reportRunId,
-      path,
-      metadata,
-      lines: linePayloads,
-      orderingSource,
-      vinosmithAvailableAsOf: String(orderingRun.diagnostics?.vinosmith_available_as_of || new Date().toISOString()),
-      runDiagnostics: orderingRun.diagnostics || null
-    });
-    const { error: draftSnapshotError } = await supabase
-      .from("purchase_order_drafts")
-      .update({
-        ordering_source: orderingSource,
-        source_snapshot: draftSnapshot
-      })
-      .eq("id", draft.id);
-
-    if (draftSnapshotError) {
-      errors.push(`${supplier}: ${draftSnapshotError.message}`);
-      continue;
-    }
-
-    if (insertPayloads.length || updatePayloads.length || staleLineIds.length) {
-      const summary = `${supplier} (${orderPathLabel(path)})`;
-      if (activeDraftsBySupplierPath.has(groupKey)) {
-        updated.push(summary);
-      } else {
-        created.push(summary);
-      }
-    } else {
-      skipped.push(`${supplier} (${orderPathLabel(path)}): no approved lines changed`);
-    }
+  const requestPayload = { reportRunId, approvalManifest, groups };
+  const { data: rpcData, error: rpcError } = await supabase.rpc("create_purchase_order_drafts_atomic", {
+    p_report_run_id: reportRunId,
+    p_idempotency_key: idempotencyKey,
+    p_request_hash: stableHash(requestPayload),
+    p_approval_manifest: approvalManifest,
+    p_groups: groups
+  });
+  if (rpcError) return NextResponse.json({ error: rpcError.message }, { status: 500 });
+  const result = rpcData as DraftRpcResult;
+  if (!result.ok) {
+    return NextResponse.json({ error: "Approvals changed while drafts were being prepared.", conflicts: result.conflicts || [] }, { status: 409 });
   }
 
-  const { data: drafts, error: draftsError } = await supabase
-    .from("purchase_order_drafts")
-    .select(`
-      id,
-      report_run_id,
-      ordering_source,
-      source_snapshot,
-      supplier_name,
-      status,
-      po_number,
-      notes,
-      created_at,
-      updated_at,
-      lines:purchase_order_lines (
-        id,
-        purchase_order_draft_id,
-        recommendation_id,
-        supplier_catalog_wine_id,
-        producer_name,
-        product_name,
-        product_code,
-        planning_sku,
-        recommended_qty,
-        approved_qty,
-        fob,
-        line_cost,
-        trucking_cost_per_bottle,
-        wine_cost,
-        laid_in_cost,
-        landed_cost,
-        is_new_item,
-        new_item_warning,
-        source_snapshot
-      )
-    `)
-    .eq("report_run_id", reportRunId)
-    .order("created_at", { ascending: false })
-    .returns<PurchaseOrderDraftWithLines[]>();
-
-  if (draftsError) {
-    return NextResponse.json({ error: draftsError.message }, { status: 500 });
-  }
+  const { data: drafts, error: draftsError } = await loadDrafts(supabase, reportRunId);
+  if (draftsError) return NextResponse.json({ error: draftsError.message }, { status: 500 });
 
   revalidateTag(CACHE_TAGS.dashboard);
-  return NextResponse.json({ created, updated, skipped, errors, drafts: drafts || [] });
+  return NextResponse.json({
+    created: result.created || [],
+    updated: result.updated || [],
+    skipped: result.skipped || [],
+    errors: [],
+    drafts: drafts || []
+  });
 }

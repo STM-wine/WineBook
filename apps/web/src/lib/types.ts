@@ -63,6 +63,25 @@ export type Recommendation = {
   new_item_warning?: string | null;
   free_goods?: SupplierCatalogFreeGood[];
   diagnostics?: Record<string, unknown> | null;
+  updated_at?: string | null;
+  updated_by?: string | null;
+  lock_version?: number | string | null;
+  committed_qty?: number | string | null;
+  outstanding_approved_qty?: number | string | null;
+  approval_processing_status?: "unprocessed" | "partially_committed" | "committed" | "correction" | string | null;
+};
+
+export type ApprovalCommitment = {
+  id: string;
+  report_run_id: string;
+  source_type: "recommendation" | "catalog_workbench" | string;
+  source_id: string;
+  source_lock_version: number | string;
+  purchase_order_draft_id: string;
+  draft_revision_no: number | string;
+  quantity: number | string;
+  actor_id: string | null;
+  created_at: string;
 };
 
 export type SupplierGroup = {
@@ -243,6 +262,8 @@ export type SupplierCatalogWorkbenchItem = {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  updated_by?: string | null;
+  lock_version?: number | string | null;
 };
 
 export type WineRequest = {
@@ -303,9 +324,14 @@ export type PurchaseOrderDraft = {
   ordering_source?: "report" | "database" | string | null;
   source_snapshot?: Record<string, unknown> | null;
   supplier_name: string | null;
+  order_path?: "stateside" | "di" | string | null;
   status: string;
   po_number: string | null;
   notes: string | null;
+  revision_no?: number | string | null;
+  content_hash?: string | null;
+  last_exported_at?: string | null;
+  last_exported_by?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -330,10 +356,44 @@ export type PurchaseOrderLine = {
   is_new_item?: boolean | null;
   new_item_warning?: string | null;
   source_snapshot?: Record<string, unknown> | null;
+  source_type?: "recommendation" | "catalog_workbench" | string | null;
+  source_id?: string | null;
+  source_lock_version?: number | string | null;
 };
 
 export type PurchaseOrderDraftWithLines = PurchaseOrderDraft & {
   lines: PurchaseOrderLine[];
+};
+
+export type ApprovalConflict = {
+  sourceType: "recommendation" | "catalog_workbench";
+  id?: string | null;
+  sourceId?: string | null;
+  reason: "version_conflict" | "not_found" | "approval_set_changed" | string;
+  currentStatus?: string | null;
+  currentApprovedQty?: number | null;
+  currentLockVersion?: number | null;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+  updatedByName?: string | null;
+};
+
+export type ApprovalSaveRecord = {
+  sourceType: "recommendation" | "catalog_workbench";
+  id: string;
+  supplierCatalogWineId?: string | null;
+  recommendationStatus: string;
+  approvedQty: number;
+  lockVersion: number;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByName?: string | null;
+};
+
+export type ApprovalSaveResult = {
+  ok: boolean;
+  saved: ApprovalSaveRecord[];
+  conflicts: ApprovalConflict[];
 };
 
 export type VinosmithExplorerWine = {

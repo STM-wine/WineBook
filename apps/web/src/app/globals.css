@@ -4246,6 +4246,26 @@ th:nth-child(12) .table-sort-button {
   width: fit-content;
 }
 
+.approval-processing-badge {
+  background: #e6f1f3;
+  border: 1px solid #9abfc5;
+  border-radius: 999px;
+  color: #1d626c;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  padding: 3px 7px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.approval-processing-badge.is-correction {
+  background: #fff0d3;
+  border-color: #e5bd6a;
+  color: #805315;
+}
+
 .order-path-static {
   color: var(--muted);
   font-weight: 800;

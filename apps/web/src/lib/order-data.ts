@@ -1,4 +1,5 @@
 import type {
+  ApprovalCommitment,
   DashboardMetrics,
   Recommendation,
   SupplierCatalogFreeGood,
@@ -66,7 +67,7 @@ export function rowSuggestedValue(row: Recommendation): number {
 }
 
 export function rowApprovedEstimate(row: Recommendation): number {
-  const qty = asNumber(row.approved_qty) || rowRecommendedQty(row);
+  const qty = rowOutstandingApprovedQty(row);
   const fob = asNumber(row.fob);
   const trucking = asNumber(row.trucking_cost_per_bottle);
   return qty * (fob + trucking);
@@ -191,6 +192,60 @@ export function applySupplierTdmAssignments(rows: Recommendation[], suppliers: S
 
 export function isApproved(row: Recommendation): boolean {
   return row.recommendation_status === "approved" || row.recommendation_status === "edited";
+}
+
+export function rowOutstandingApprovedQty(row: Recommendation): number {
+  if (row.outstanding_approved_qty !== null && row.outstanding_approved_qty !== undefined) {
+    return asNumber(row.outstanding_approved_qty);
+  }
+  return isApproved(row) ? Math.max(0, Math.round(asNumber(row.approved_qty))) : 0;
+}
+
+export function approvalProcessingPatch(
+  row: Recommendation,
+  recommendationStatus: string | null | undefined,
+  approvedQty: number | string | null | undefined
+): Pick<Recommendation, "committed_qty" | "outstanding_approved_qty" | "approval_processing_status"> {
+  const committedQty = asNumber(row.committed_qty);
+  const decidedQty = recommendationStatus === "approved" || recommendationStatus === "edited"
+    ? Math.max(0, Math.round(asNumber(approvedQty)))
+    : 0;
+  const outstandingQty = decidedQty - committedQty;
+
+  return {
+    committed_qty: committedQty,
+    outstanding_approved_qty: outstandingQty,
+    approval_processing_status: committedQty === 0
+      ? "unprocessed"
+      : outstandingQty === 0
+        ? "committed"
+        : outstandingQty < 0
+          ? "correction"
+          : "partially_committed"
+  };
+}
+
+export function applyApprovalCommitments(rows: Recommendation[], commitments: ApprovalCommitment[]): Recommendation[] {
+  const committedBySource = new Map<string, number>();
+  for (const commitment of commitments) {
+    const key = `${commitment.source_type}:${commitment.source_id}`;
+    committedBySource.set(key, (committedBySource.get(key) || 0) + asNumber(commitment.quantity));
+  }
+
+  return rows.map((row) => {
+    const sourceType = row.supplier_catalog_wine_id ? "catalog_workbench" : "recommendation";
+    const sourceId = row.supplier_catalog_wine_id ? row.supplier_catalog_workbench_item_id : row.id;
+    const committedQty = sourceId ? committedBySource.get(`${sourceType}:${sourceId}`) || 0 : 0;
+    const processing = approvalProcessingPatch(
+      { ...row, committed_qty: committedQty },
+      row.recommendation_status,
+      row.approved_qty
+    );
+    return {
+      ...row,
+      ...processing
+    };
+  });
 }
 
 export function displayWineName(row: Recommendation): string {
@@ -318,7 +373,10 @@ export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, r
     order_path: workbenchItem?.order_path || "stateside",
     is_new_item: Boolean(warning),
     new_item_warning: warning,
-    free_goods: wine.free_goods || []
+    free_goods: wine.free_goods || [],
+    updated_at: workbenchItem?.updated_at || null,
+    updated_by: workbenchItem?.updated_by || null,
+    lock_version: workbenchItem?.lock_version || 0
   };
 }
 
@@ -345,6 +403,9 @@ export function replaceSupplierCatalogWineInWorkbench(
       approved_qty: row.approved_qty,
       recommendation_status: row.recommendation_status,
       order_path: row.order_path,
+      updated_at: row.updated_at,
+      updated_by: row.updated_by,
+      lock_version: row.lock_version,
       order_cost: fob * recommendedQty,
       landed_cost: (fob + trucking) * recommendedQty
     };
@@ -560,9 +621,9 @@ export function buildMetrics(rows: Recommendation[]): DashboardMetrics {
     if (row.risk_level === "High" || row.reorder_status === "URGENT") urgent += 1;
     if (row.risk_level === "Medium" || row.reorder_status === "LOW") low += 1;
     recommendedBottles += recommended;
-    if (isApproved(row)) {
-      const approved = rowRecommendedQty(row);
-      approvedBottles += approved;
+    const outstanding = rowOutstandingApprovedQty(row);
+    if (outstanding !== 0) {
+      approvedBottles += outstanding;
       poValue += rowApprovedEstimate(row);
     }
   });
@@ -593,8 +654,8 @@ export function buildSupplierGroups(rows: Recommendation[]): SupplierGroup[] {
         return nameCompare || asNumber(b.recommended_qty_rounded) - asNumber(a.recommended_qty_rounded);
       });
       const recommendedBottles = sorted.reduce((sum, row) => sum + asNumber(row.recommended_qty_rounded), 0);
-      const approvedRows = sorted.filter(isApproved);
-      const approvedBottles = approvedRows.reduce((sum, row) => sum + rowRecommendedQty(row), 0);
+      const approvedRows = sorted.filter((row) => rowOutstandingApprovedQty(row) !== 0);
+      const approvedBottles = approvedRows.reduce((sum, row) => sum + rowOutstandingApprovedQty(row), 0);
       const suggestedValue = sorted.reduce((sum, row) => sum + rowSuggestedValue(row), 0);
       const approvedValue = approvedRows.reduce((sum, row) => sum + rowApprovedEstimate(row), 0);
       const freeGoodProgramCount = sorted.reduce((sum, row) => sum + activeFreeGoodsForRow(row).length, 0);

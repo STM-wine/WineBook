@@ -13,6 +13,7 @@ import {
   fetchQuickBooksOnOrderItems
 } from "@/lib/supabase/recommendations";
 import type {
+  ApprovalCommitment,
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
   Recommendation,
@@ -97,6 +98,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     <OrderDashboard
       reportRun={latestRun}
       recommendations={data.recommendations}
+      approvalCommitments={data.approvalCommitments}
       poDrafts={data.poDraftRows}
       suppliers={data.suppliers}
       supplierCatalogWines={data.supplierCatalogWines}
@@ -117,6 +119,7 @@ type OrderingPageData = {
   reportRuns: ReportRun[];
   latestRun: ReportRun | null;
   recommendations: Recommendation[];
+  approvalCommitments: ApprovalCommitment[];
   poDraftRows: PurchaseOrderDraftWithLines[];
   suppliers: SupplierLogistics[];
   supplierCatalogWines: SupplierCatalogWine[];
@@ -244,6 +247,7 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
       reportRuns: reportRuns || [],
       latestRun: null,
       recommendations: [],
+      approvalCommitments: [],
       poDraftRows: [],
       suppliers: [],
       supplierCatalogWines: supplierCatalogWines || [],
@@ -278,9 +282,14 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
         ordering_source,
         source_snapshot,
         supplier_name,
+        order_path,
         status,
         po_number,
         notes,
+        revision_no,
+        content_hash,
+        last_exported_at,
+        last_exported_by,
         created_at,
         updated_at,
         lines:purchase_order_lines (
@@ -302,7 +311,10 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
           landed_cost,
           is_new_item,
           new_item_warning,
-          source_snapshot
+          source_snapshot,
+          source_type,
+          source_id,
+          source_lock_version
         )
       `)
     .eq("report_run_id", latestRun.id)
@@ -326,6 +338,11 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
       `)
     .order("name", { ascending: true })
     .returns<SupplierLogistics[]>();
+  const approvalCommitmentsPromise = serviceRoleSupabase
+    .from("approval_commitments")
+    .select("id,report_run_id,source_type,source_id,source_lock_version,purchase_order_draft_id,draft_revision_no,quantity,actor_id,created_at")
+    .eq("report_run_id", latestRun.id)
+    .returns<ApprovalCommitment[]>();
 
   const [
     reportRecommendations,
@@ -333,14 +350,16 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     { data: suppliers },
     quickBooksSupplierMatches,
     quickBooksOnOrderItems,
-    currentSourceOverlayResult
+    currentSourceOverlayResult,
+    { data: approvalCommitments }
   ] = await Promise.all([
     reportRecommendationsPromise,
     poDraftRowsPromise,
     suppliersPromise,
     fetchQuickBooksSupplierMatches(serviceRoleSupabase),
     quickBooksOnOrderItemsPromise,
-    currentSourceOverlayPromise
+    currentSourceOverlayPromise,
+    approvalCommitmentsPromise
   ]);
   const sourceRecommendations = currentSourceOverlayResult.rows
     ? overlayCurrentSourceRows(reportRecommendations || [], currentSourceOverlayResult.rows)
@@ -379,6 +398,7 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     reportRuns: reportRuns || [],
     latestRun,
     recommendations,
+    approvalCommitments: approvalCommitments || [],
     poDraftRows: poDraftRows || [],
     suppliers: suppliers || [],
     supplierCatalogWines: supplierCatalogWines || [],

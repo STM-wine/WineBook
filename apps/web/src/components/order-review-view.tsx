@@ -54,10 +54,7 @@ export function OrderReviewView({
   supplierTargetWeeks,
   globalTargetWeeks,
   visibleCount,
-  hasApprovedOrders,
   onSaveApproval,
-  onClearAllApprovals,
-  onClearSupplierApprovals,
   onSaveOrderPath,
   onSaveWorkingQty,
   onSetWorkingQty,
@@ -93,10 +90,7 @@ export function OrderReviewView({
   supplierTargetWeeks: Record<string, string>;
   globalTargetWeeks: string;
   visibleCount: number;
-  hasApprovedOrders: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
-  onClearAllApprovals: () => void;
-  onClearSupplierApprovals: (supplierName: string) => void;
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
@@ -134,8 +128,8 @@ export function OrderReviewView({
         <MetricCard label="Urgent" value={formatInteger(metrics.urgent)} detail="SKUs need action" tone="red" />
         <MetricCard label="Low" value={formatInteger(metrics.low)} detail="Below target" tone="gold" />
         <MetricCard label="Recommended" value={formatInteger(metrics.recommendedBottles)} detail="Bottles" tone="green" />
-        <MetricCard label="Approved" value={formatInteger(metrics.approvedBottles)} detail="Bottles ready for PO" tone="blue" />
-        <MetricCard label="PO Value" value={formatCurrency(metrics.poValue)} detail="Approved lines" tone="plum" />
+        <MetricCard label="PO Outstanding" value={formatInteger(metrics.approvedBottles)} detail="Net bottles ready for PO" tone="blue" />
+        <MetricCard label="Outstanding Value" value={formatCurrency(metrics.poValue)} detail="Net unprocessed value" tone="plum" />
         <MetricCard label="Suppliers" value={formatInteger(metrics.supplierCount)} detail="With suggested orders" tone="ink" />
       </section>
 
@@ -143,21 +137,8 @@ export function OrderReviewView({
         <div className="section-heading">
           <div>
             <h1>Order Summary</h1>
-            <p>Supplier groups sorted by suggested bottles by default. Rows are live from the latest completed report run.</p>
+            <p>Supplier groups sorted by suggested bottles by default. Approval decisions are retained as business history.</p>
           </div>
-          <button
-            className="ghost-button clear-approvals-button"
-            disabled={!hasApprovedOrders || isPending}
-            onClick={() => {
-              if (!window.confirm(
-                "Clear all approved orders across every supplier? This includes orders hidden by the current filters."
-              )) return;
-              onClearAllApprovals();
-            }}
-            type="button"
-          >
-            Clear All Approved Orders
-          </button>
         </div>
         <div className="filter-bar">
           <label>
@@ -252,7 +233,6 @@ export function OrderReviewView({
             group={group}
             expandAll={expandAll || supplier !== "All"}
             onSaveApproval={onSaveApproval}
-            onClearSupplierApprovals={onClearSupplierApprovals}
             onSaveOrderPath={onSaveOrderPath}
             onSetWorkingQty={onSetWorkingQty}
             onSaveWorkingQty={onSaveWorkingQty}
@@ -327,8 +307,8 @@ function SummaryTable({ groups }: { groups: SupplierGroup[] }) {
               <th>Free Goods</th>
               <th>Suggested Qty</th>
               <th>Suggested Value</th>
-              <th>Approved Qty</th>
-              <th>Approved Value</th>
+              <th>PO Outstanding Qty</th>
+              <th>Outstanding Value</th>
             </tr>
           </thead>
           <tbody>
@@ -362,7 +342,6 @@ function SupplierSection({
   group,
   expandAll,
   onSaveApproval,
-  onClearSupplierApprovals,
   onSaveOrderPath,
   onSetWorkingQty,
   onSaveWorkingQty,
@@ -379,7 +358,6 @@ function SupplierSection({
   group: SupplierGroup;
   expandAll: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
-  onClearSupplierApprovals: (supplierName: string) => void;
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
   onSetWorkingQty: (row: Recommendation, qty: number) => void;
   onSaveWorkingQty: (row: Recommendation, qty: number) => void;
@@ -400,7 +378,7 @@ function SupplierSection({
   const [inactiveSearch, setInactiveSearch] = useState("");
   const tdmNames = Array.from(new Set(group.rows.map((row) => row.brand_manager?.trim() || "").filter(Boolean)));
   const tdmLabel = tdmNames.length === 0 ? "Unassigned" : tdmNames.length === 1 ? tdmNames[0] : "Multiple";
-  const hasApprovedOrders = group.approvedBottles > 0;
+  const hasApprovedOrders = group.approvedBottles !== 0;
   const approvedPercent = group.suggestedValue > 0 ? Math.round((group.approvedValue / group.suggestedValue) * 100) : 0;
   const freeGoodsRows = group.rows
     .map((row) => ({ row, programs: activeFreeGoodsForRow(row) }))
@@ -419,7 +397,7 @@ function SupplierSection({
           <strong>{formatInteger(group.recommendedBottles)} bottles</strong>
           <span>{formatCurrency(group.suggestedValue)} suggested</span>
           <span className={hasApprovedOrders ? "supplier-approved-value" : "supplier-approved-value is-empty"}>
-            {formatCurrency(group.approvedValue)} approved
+            {formatCurrency(group.approvedValue)} outstanding
           </span>
           {group.freeGoodProgramCount > 0 ? <span className="free-goods-chip">{formatInteger(group.freeGoodProgramCount)} free-goods</span> : null}
         </div>
@@ -437,18 +415,6 @@ function SupplierSection({
               Add Wine
             </button>
           ) : null}
-          <button
-            className="ghost-button clear-approvals-button"
-            disabled={!hasApprovedOrders}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onClearSupplierApprovals(group.supplier);
-            }}
-            type="button"
-          >
-            Clear Approved Orders
-          </button>
           <span>{formatInteger(group.skuCount)} SKUs</span>
         </div>
       </summary>
@@ -458,12 +424,12 @@ function SupplierSection({
             <MetricCard label="SKUs" value={formatInteger(group.skuCount)} detail="In this supplier" tone="ink" />
             <MetricCard label="Urgent" value={formatInteger(group.urgentCount)} detail="Need review" tone="red" />
             <MetricCard label="Suggested" value={formatInteger(group.recommendedBottles)} detail="Bottles" tone="green" />
-            <MetricCard label="Approved" value={formatInteger(group.approvedBottles)} detail="Bottles" tone="blue" />
+            <MetricCard label="PO Outstanding" value={formatInteger(group.approvedBottles)} detail="Net bottles" tone="blue" />
             <MetricCard label="Suggested Value" value={formatCurrency(group.suggestedValue)} detail="Full recommended order" tone="gold" />
             <MetricCard
-              label="Approved Value"
+              label="Outstanding Value"
               value={formatCurrency(group.approvedValue)}
-              detail={hasApprovedOrders ? `${formatInteger(approvedPercent)}% of suggested` : "No approved lines yet"}
+              detail={hasApprovedOrders ? `${formatInteger(approvedPercent)}% of suggested` : "No outstanding lines"}
               tone="plum"
             />
           </div>
@@ -833,6 +799,6 @@ function InactiveWineSearch({
 
 function approvedValueComparison(approvedValue: number, suggestedValue: number) {
   if (suggestedValue <= 0) return "No suggested value";
-  if (approvedValue <= 0) return "No approved value";
+  if (approvedValue === 0) return "No outstanding value";
   return `${formatInteger(Math.round((approvedValue / suggestedValue) * 100))}% of suggested`;
 }

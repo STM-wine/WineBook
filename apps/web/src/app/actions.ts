@@ -32,7 +32,12 @@ import {
   quickBooksVintage,
   type QuickBooksItemIdentityRow
 } from "@/lib/quickbooks-item-fields";
-import type { QuickBooksVendorClassification, SupplierCatalogWine, WineRequest } from "@/lib/types";
+import type {
+  ApprovalSaveResult,
+  QuickBooksVendorClassification,
+  SupplierCatalogWine,
+  WineRequest
+} from "@/lib/types";
 import { createSourceBackedOrderingRun } from "@/lib/source-backed-ordering-runs";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
@@ -172,124 +177,67 @@ export async function updateRecommendationApproval(input: {
   id: string;
   recommendationStatus: string;
   approvedQty: number;
-}) {
-  const recommendationStatus = input.recommendationStatus;
-  const approvedQty = Math.max(0, Math.round(Number(input.approvedQty) || 0));
-
-  if (!input.id) {
-    throw new Error("Missing recommendation id.");
-  }
-  if (!VALID_STATUSES.has(recommendationStatus)) {
-    throw new Error("Unsupported recommendation status.");
-  }
-
-  const { supabase } = await requireWriteAccess();
-
-  const { error } = await supabase
-    .from("reorder_recommendations")
-    .update({
-      recommendation_status: recommendationStatus,
-      approved_qty: approvedQty
-    })
-    .eq("id", input.id);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  revalidateDashboardData();
-  // Order Review keeps approval state optimistically in the client. Avoid a
-  // full route revalidation here so rapid checkbox work does not freeze.
+  expectedLockVersion: number;
+}): Promise<ApprovalSaveResult> {
+  return updateRecommendationApprovals({
+    updates: [{ ...input, sourceType: "recommendation" }]
+  });
 }
 
 export async function updateRecommendationApprovals(input: {
   updates: Array<{
-    id: string;
+    sourceType?: "recommendation" | "catalog_workbench";
+    id?: string | null;
+    reportRunId?: string;
+    supplierCatalogWineId?: string;
     recommendationStatus: string;
     approvedQty: number;
+    expectedLockVersion: number;
+    recommendedQty?: number;
+    orderPath?: "stateside" | "di";
   }>;
-}) {
+}): Promise<ApprovalSaveResult> {
   const updates = input.updates
-    .filter((update) => update.id)
+    .filter((update) => update.id || update.supplierCatalogWineId)
     .map((update) => ({
-      id: update.id,
+      sourceType: update.sourceType || "recommendation",
+      id: update.id || null,
+      reportRunId: update.reportRunId,
+      supplierCatalogWineId: update.supplierCatalogWineId,
       recommendationStatus: update.recommendationStatus,
-      approvedQty: Math.max(0, Math.round(Number(update.approvedQty) || 0))
+      approvedQty: Math.max(0, Math.round(Number(update.approvedQty) || 0)),
+      expectedLockVersion: Math.max(0, Math.round(Number(update.expectedLockVersion) || 0)),
+      recommendedQty: update.recommendedQty === undefined
+        ? undefined
+        : Math.max(0, Math.round(Number(update.recommendedQty) || 0)),
+      orderPath: update.orderPath
     }));
 
-  if (updates.length === 0) return;
+  if (updates.length === 0) return { ok: true, saved: [], conflicts: [] };
 
   const invalid = updates.find((update) => !VALID_STATUSES.has(update.recommendationStatus));
   if (invalid) {
     throw new Error("Unsupported recommendation status.");
   }
+  const invalidSource = updates.find((update) =>
+    update.sourceType === "catalog_workbench" && (!update.reportRunId || !update.supplierCatalogWineId)
+  );
+  if (invalidSource) throw new Error("Catalog workbench approval is missing its report run or wine id.");
 
   const { supabase } = await requireWriteAccess();
-  const results = await Promise.all(
-    updates.map((update) =>
-      supabase
-        .from("reorder_recommendations")
-        .update({
-          recommendation_status: update.recommendationStatus,
-          approved_qty: update.approvedQty
-        })
-        .eq("id", update.id)
-    )
-  );
-  const failed = results.find((result) => result.error);
-
-  if (failed?.error) {
-    throw new Error(failed.error.message);
-  }
+  const { data, error } = await supabase.rpc("save_order_approvals", { p_updates: updates });
+  if (error) throw new Error(error.message);
 
   revalidateDashboardData();
-}
-
-export async function clearAllOrderApprovals(input: { reportRunId: string }) {
-  if (!input.reportRunId) {
-    throw new Error("Missing report run id.");
-  }
-
-  const { supabase } = await requireWriteAccess();
-  const { data: recommendationRows, error: recommendationError } = await supabase
-    .from("reorder_recommendations")
-    .update({
-      recommendation_status: "rejected",
-      approved_qty: 0
-    })
-    .eq("report_run_id", input.reportRunId)
-    .in("recommendation_status", ["approved", "edited"])
-    .select("id");
-
-  if (recommendationError) {
-    throw new Error(recommendationError.message);
-  }
-
-  const { data: catalogRows, error: catalogError } = await supabase
-    .from("supplier_catalog_workbench_items")
-    .update({
-      recommendation_status: "rejected",
-      approved_qty: 0,
-      updated_at: new Date().toISOString()
-    })
-    .eq("report_run_id", input.reportRunId)
-    .in("recommendation_status", ["approved", "edited"])
-    .select("id");
-
-  if (catalogError) {
-    throw new Error(catalogError.message);
-  }
-
-  revalidateSupplierCatalogData();
-  revalidatePath("/");
-  return { cleared: (recommendationRows?.length || 0) + (catalogRows?.length || 0) };
+  return (data || { ok: true, saved: [], conflicts: [] }) as ApprovalSaveResult;
 }
 
 export async function updateRecommendationOrderPath(input: {
   id: string;
   orderPath: "stateside" | "di";
-  approvedQty?: number;
-  recommendationStatus?: string;
+  approvedQty: number;
+  recommendationStatus: string;
+  expectedLockVersion: number;
 }) {
   if (!input.id) {
     throw new Error("Missing recommendation id.");
@@ -297,35 +245,21 @@ export async function updateRecommendationOrderPath(input: {
   if (!VALID_ORDER_PATHS.has(input.orderPath)) {
     throw new Error("Unsupported order path.");
   }
-  if (input.recommendationStatus && !VALID_STATUSES.has(input.recommendationStatus)) {
+  if (!VALID_STATUSES.has(input.recommendationStatus)) {
     throw new Error("Unsupported recommendation status.");
   }
 
-  const { supabase } = await requireWriteAccess();
-  const payload: {
-    order_path: "stateside" | "di";
-    approved_qty?: number;
-    recommendation_status?: string;
-  } = { order_path: input.orderPath };
-
-  if (input.approvedQty !== undefined) {
-    payload.approved_qty = Math.max(0, Math.round(Number(input.approvedQty) || 0));
-  }
-  if (input.recommendationStatus) {
-    payload.recommendation_status = input.recommendationStatus;
-  }
-
-  const { error } = await supabase
-    .from("reorder_recommendations")
-    .update(payload)
-    .eq("id", input.id);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  revalidateDashboardData();
-  revalidatePath("/");
+  const result = await updateRecommendationApprovals({
+    updates: [{
+      sourceType: "recommendation",
+      id: input.id,
+      recommendationStatus: input.recommendationStatus,
+      approvedQty: input.approvedQty,
+      expectedLockVersion: input.expectedLockVersion,
+      orderPath: input.orderPath
+    }]
+  });
+  return result;
 }
 
 export async function updatePurchaseOrderDraftStatus(input: { id: string; status: string }) {
@@ -336,15 +270,11 @@ export async function updatePurchaseOrderDraftStatus(input: { id: string; status
     throw new Error("Unsupported PO draft status.");
   }
 
-  const { supabase, user } = await requireWriteAccess();
-  const { error } = await supabase
-    .from("purchase_order_drafts")
-    .update({
-      status: input.status,
-      reviewed_by: user.id,
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", input.id);
+  const { supabase } = await requireWriteAccess();
+  const { error } = await supabase.rpc("set_purchase_order_draft_status", {
+    p_draft_id: input.id,
+    p_status: input.status
+  });
 
   if (error) {
     throw new Error(error.message);
@@ -359,23 +289,16 @@ export async function cancelPurchaseOrderDrafts(input: { ids: string[] }) {
   if (ids.length === 0) return { cancelled: 0 };
   if (ids.length > 500) throw new Error("Too many PO drafts selected.");
 
-  const { supabase, user } = await requireWriteAccess();
-  const { data, error } = await supabase
-    .from("purchase_order_drafts")
-    .update({
-      status: "cancelled",
-      reviewed_by: user.id,
-      updated_at: new Date().toISOString()
-    })
-    .in("id", ids)
-    .in("status", ["draft", "ready_for_entry"])
-    .select("id")
-    .returns<Array<{ id: string }>>();
-
-  if (error) throw new Error(error.message);
+  const { supabase } = await requireWriteAccess();
+  const results = await Promise.all(ids.map((id) => supabase.rpc("set_purchase_order_draft_status", {
+    p_draft_id: id,
+    p_status: "cancelled"
+  })));
+  const failed = results.find((result) => result.error);
+  if (failed?.error) throw new Error(failed.error.message);
   revalidateDashboardData();
   revalidatePath("/");
-  return { cancelled: data?.length || 0 };
+  return { cancelled: results.length };
 }
 
 export async function deletePurchaseOrderLine(input: { id: string; draftId: string }) {
@@ -386,20 +309,12 @@ export async function deletePurchaseOrderLine(input: { id: string; draftId: stri
     throw new Error("Missing PO draft id.");
   }
 
-  const { supabase, user } = await requireWriteAccess();
-  const { error } = await supabase.from("purchase_order_lines").delete().eq("id", input.id);
+  const { supabase } = await requireWriteAccess();
+  const { error } = await supabase.rpc("delete_purchase_order_line_revisioned", { p_line_id: input.id });
 
   if (error) {
     throw new Error(error.message);
   }
-
-  await supabase
-    .from("purchase_order_drafts")
-    .update({
-      reviewed_by: user.id,
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", input.draftId);
 
   revalidateDashboardData();
   revalidatePath("/");
@@ -997,10 +912,11 @@ export async function updateSupplierCatalogWorkbenchItems(input: {
     approvedQty?: number;
     recommendedQty?: number;
     orderPath?: "stateside" | "di";
+    expectedLockVersion: number;
   }>;
-}) {
+}): Promise<ApprovalSaveResult> {
   const updates = input.updates.filter((update) => update.supplierCatalogWineId && update.reportRunId);
-  if (updates.length === 0) return;
+  if (updates.length === 0) return { ok: true, saved: [], conflicts: [] };
 
   for (const update of updates) {
     if (update.recommendationStatus && !VALID_STATUSES.has(update.recommendationStatus)) {
@@ -1011,34 +927,19 @@ export async function updateSupplierCatalogWorkbenchItems(input: {
     }
   }
 
-  const { supabase, user } = await requireWriteAccess();
-  const results = await Promise.all(
-    updates.map((update) => {
-      const payload = {
-        report_run_id: update.reportRunId,
-        supplier_catalog_wine_id: update.supplierCatalogWineId,
-        ...(update.recommendationStatus ? { recommendation_status: update.recommendationStatus } : {}),
-        ...(update.approvedQty !== undefined ? { approved_qty: Math.max(0, Math.round(Number(update.approvedQty) || 0)) } : {}),
-        ...(update.recommendedQty !== undefined ? { recommended_qty: Math.max(0, Math.round(Number(update.recommendedQty) || 0)) } : {}),
-        ...(update.orderPath ? { order_path: update.orderPath } : {}),
-        active: true,
-        created_by: user.id,
-        updated_at: new Date().toISOString()
-      };
-
-      return supabase
-        .from("supplier_catalog_workbench_items")
-        .upsert(payload, { onConflict: "report_run_id,supplier_catalog_wine_id" });
-    })
-  );
-  const failed = results.find((result) => result.error);
-
-  if (failed?.error) {
-    throw new Error(failed.error.message);
-  }
-
-  revalidateSupplierCatalogData();
-  revalidatePath("/");
+  return updateRecommendationApprovals({
+    updates: updates.map((update) => ({
+      sourceType: "catalog_workbench" as const,
+      id: update.id,
+      reportRunId: update.reportRunId,
+      supplierCatalogWineId: update.supplierCatalogWineId,
+      recommendationStatus: update.recommendationStatus || "rejected",
+      approvedQty: update.approvedQty || 0,
+      expectedLockVersion: update.expectedLockVersion,
+      recommendedQty: update.recommendedQty,
+      orderPath: update.orderPath
+    }))
+  });
 }
 
 export async function restoreInactiveQuickBooksItemToWorkbench(input: {
@@ -1211,20 +1112,30 @@ export async function restoreInactiveQuickBooksItemToWorkbench(input: {
   if (!catalogWineId) throw new Error("Could not identify the restored supplier wine.");
 
   const recommendedQty = Math.max(1, Math.round(format.packSize || asNumber(existing?.pack_size) || 1));
-  const { error: workbenchError } = await supabase
+  const { data: existingWorkbench, error: existingWorkbenchError } = await supabase
     .from("supplier_catalog_workbench_items")
-    .upsert({
+    .select("id")
+    .eq("report_run_id", input.reportRunId)
+    .eq("supplier_catalog_wine_id", catalogWineId)
+    .maybeSingle<{ id: string }>();
+  if (existingWorkbenchError) throw new Error(existingWorkbenchError.message);
+  const workbenchPayload = {
       report_run_id: input.reportRunId,
       supplier_catalog_wine_id: catalogWineId,
-      recommendation_status: "rejected",
       recommended_qty: recommendedQty,
-      approved_qty: 0,
       order_path: "stateside",
       active: true,
       notes: "Restored from inactive QuickBooks item search.",
       created_by: user.id,
       updated_at: now
-    }, { onConflict: "report_run_id,supplier_catalog_wine_id" });
+  };
+  const { error: workbenchError } = existingWorkbench
+    ? await supabase.from("supplier_catalog_workbench_items").update(workbenchPayload).eq("id", existingWorkbench.id)
+    : await supabase.from("supplier_catalog_workbench_items").insert({
+        ...workbenchPayload,
+        recommendation_status: "rejected",
+        approved_qty: 0
+      });
   if (workbenchError) throw new Error(workbenchError.message);
 
   revalidateSupplierCatalogData();

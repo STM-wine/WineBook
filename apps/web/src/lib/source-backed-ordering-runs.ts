@@ -205,18 +205,11 @@ async function fetchEnteredItems(supabase: OrderingClient, reportRunId: string) 
 }
 
 async function carryForwardWorkbenchItems(supabase: OrderingClient, previousRunId: string, nextRunId: string, enteredCatalogWineIds: ReadonlySet<string>) {
-  const { data, error } = await supabase
-    .from("supplier_catalog_workbench_items")
-    .select("supplier_catalog_wine_id,recommended_qty,approved_qty,recommendation_status,order_path,active,notes,created_by")
-    .eq("report_run_id", previousRunId)
-    .eq("active", true);
+  const { data, error } = await supabase.rpc("carry_forward_supplier_workbench_items", {
+    p_previous_report_run_id: previousRunId,
+    p_next_report_run_id: nextRunId,
+    p_excluded_catalog_wine_ids: Array.from(enteredCatalogWineIds)
+  });
   if (error) throw new Error(error.message);
-  const rows = (data || []).filter((row) => !enteredCatalogWineIds.has(row.supplier_catalog_wine_id));
-  if (!rows.length) return 0;
-  const { error: insertError } = await supabase.from("supplier_catalog_workbench_items").upsert(
-    rows.map((row) => ({ ...row, report_run_id: nextRunId, updated_at: new Date().toISOString() })),
-    { onConflict: "report_run_id,supplier_catalog_wine_id" }
-  );
-  if (insertError) throw new Error(insertError.message);
-  return rows.length;
+  return Number(data) || 0;
 }

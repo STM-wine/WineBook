@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   cancelPurchaseOrderDrafts,
-  clearAllOrderApprovals,
   createSupplierWineRequest,
   deletePendingSupplierCatalogWine,
   deletePurchaseOrderLine,
@@ -13,13 +12,13 @@ import {
   restoreInactiveQuickBooksItemToWorkbench,
   saveSupplierCatalogWine,
   saveSupplierLogisticsBatch,
-  updateSupplierCatalogWorkbenchItems,
   updateSupplierWineRequestApproval,
   updatePurchaseOrderDraftStatus,
-  updateRecommendationOrderPath,
   updateRecommendationApprovals
 } from "@/app/actions";
 import type {
+  ApprovalCommitment,
+  ApprovalConflict,
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
   Recommendation,
@@ -30,6 +29,7 @@ import type {
   WineRequest,
   SupplierLogistics
 } from "@/lib/types";
+import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
 import {
   MANUAL_RECOMMENDATION_PAUSE_REASON,
@@ -38,6 +38,8 @@ import {
 } from "@/lib/replenishment-policy";
 import {
   applySupplierTargetWeeks,
+  applyApprovalCommitments,
+  approvalProcessingPatch,
   applySupplierTdmAssignments,
   asNumber,
   buildMetrics,
@@ -74,6 +76,7 @@ function ViewLoading() {
 type Props = {
   reportRun: ReportRun;
   recommendations: Recommendation[];
+  approvalCommitments: ApprovalCommitment[];
   poDrafts: PurchaseOrderDraftWithLines[];
   suppliers: SupplierLogistics[];
   supplierCatalogWines: SupplierCatalogWine[];
@@ -87,6 +90,31 @@ type Props = {
   orderingDataWarning?: string | null;
   canViewSettings?: boolean;
 };
+
+type ApprovalQueueItem = {
+  rowId: string;
+  sourceType: "recommendation" | "catalog_workbench";
+  id: string | null;
+  reportRunId: string;
+  supplierCatalogWineId?: string;
+  recommendationStatus: string;
+  approvedQty: number;
+  expectedLockVersion: number;
+  recommendedQty?: number;
+  orderPath?: "stateside" | "di";
+};
+
+function approvalConflictMessage(conflicts: ApprovalConflict[]) {
+  const first = conflicts[0];
+  if (!first) return "Another buyer changed an approval. Your unsaved value is still shown; edit it again to retry.";
+  if (first.reason === "approval_set_changed") {
+    return "The approved set changed while PO drafts were being prepared. Nothing was created. Review the new approvals and retry.";
+  }
+  const editor = first.updatedByName || "another buyer";
+  const when = first.updatedAt ? ` at ${new Date(first.updatedAt).toLocaleString()}` : "";
+  const more = conflicts.length > 1 ? ` (${conflicts.length.toLocaleString()} conflicts total)` : "";
+  return `This row was changed by ${editor}${when}${more}. Your unsaved value is still shown; edit it again to retry.`;
+}
 
 function formatSourceUpdatedAt(value: string | null) {
   if (!value) return null;
@@ -106,6 +134,7 @@ function formatSourceUpdatedAt(value: string | null) {
 export function OrderDashboard({
   reportRun,
   recommendations,
+  approvalCommitments,
   poDrafts,
   suppliers,
   supplierCatalogWines,
@@ -122,14 +151,17 @@ export function OrderDashboard({
   const router = useRouter();
   const combinedRecommendations = useMemo(
     () =>
-      applySupplierTdmAssignments(
-        enrichRecommendationsWithSupplierCatalogPrograms(
-          mergeSupplierCatalogRows(recommendations, supplierCatalogWines, reportRun.id),
-          supplierCatalogWines
+      applyApprovalCommitments(
+        applySupplierTdmAssignments(
+          enrichRecommendationsWithSupplierCatalogPrograms(
+            mergeSupplierCatalogRows(recommendations, supplierCatalogWines, reportRun.id),
+            supplierCatalogWines
+          ),
+          suppliers
         ),
-        suppliers
+        approvalCommitments
       ),
-    [recommendations, reportRun.id, supplierCatalogWines, suppliers]
+    [approvalCommitments, recommendations, reportRun.id, supplierCatalogWines, suppliers]
   );
   const [rows, setRows] = useState(combinedRecommendations);
   const [draftRows, setDraftRows] = useState(poDrafts);
@@ -147,19 +179,122 @@ export function OrderDashboard({
   const [pendingMessage, setPendingMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [showPoDraftProgress, setShowPoDraftProgress] = useState(false);
-  const approvalQueueRef = useRef(new Map<string, { recommendationStatus: string; approvedQty: number }>());
+  const realtimeSupabase = useMemo(() => createBrowserClient(), []);
+  const approvalQueueRef = useRef(new Map<string, ApprovalQueueItem>());
+  const approvalInFlightKeysRef = useRef(new Set<string>());
   const approvalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const approvalFlushRef = useRef<Promise<void> | null>(null);
-  const catalogWorkbenchSavesRef = useRef(new Set<Promise<void>>());
+  const realtimeRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
-    setRows(combinedRecommendations);
+    setRows((current) => combinedRecommendations.map((incoming) => {
+      const queueKey = incoming.supplier_catalog_wine_id
+        ? `catalog:${incoming.supplier_catalog_wine_id}`
+        : `recommendation:${incoming.id}`;
+      if (!approvalQueueRef.current.has(queueKey) && !approvalInFlightKeysRef.current.has(queueKey)) return incoming;
+      const local = current.find((row) => row.id === incoming.id || (
+        incoming.supplier_catalog_wine_id && row.supplier_catalog_wine_id === incoming.supplier_catalog_wine_id
+      ));
+      if (!local) return incoming;
+      const preserved = {
+        ...incoming,
+        recommendation_status: local.recommendation_status,
+        approved_qty: local.approved_qty,
+        order_path: local.order_path
+      };
+      return {
+        ...preserved,
+        ...approvalProcessingPatch(preserved, preserved.recommendation_status, preserved.approved_qty)
+      };
+    }));
   }, [combinedRecommendations]);
 
   useEffect(() => {
     setDraftRows(poDrafts);
   }, [poDrafts]);
+
+  useEffect(() => {
+    function scheduleDraftRefresh() {
+      if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current);
+      realtimeRefreshTimerRef.current = setTimeout(() => router.refresh(), 250);
+    }
+
+    const channel = realtimeSupabase
+      .channel(`ordering-run:${reportRun.id}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "reorder_recommendations", filter: `report_run_id=eq.${reportRun.id}` },
+        (payload) => {
+          const incoming = payload.new as Partial<Recommendation> & { id: string };
+          const key = `recommendation:${incoming.id}`;
+          if (approvalQueueRef.current.has(key) || approvalInFlightKeysRef.current.has(key)) return;
+          setRows((current) => current.map((row) => {
+            if (row.id !== incoming.id) return row;
+            const updated = { ...row, ...incoming };
+            return {
+              ...updated,
+              ...approvalProcessingPatch(updated, updated.recommendation_status, updated.approved_qty)
+            };
+          }));
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "supplier_catalog_workbench_items", filter: `report_run_id=eq.${reportRun.id}` },
+        (payload) => {
+          const incoming = payload.new as {
+            id?: string;
+            supplier_catalog_wine_id?: string;
+            recommendation_status?: string;
+            approved_qty?: number;
+            recommended_qty?: number;
+            order_path?: string;
+            lock_version?: number;
+            updated_at?: string;
+            updated_by?: string;
+          };
+          if (!incoming.supplier_catalog_wine_id) return;
+          const key = `catalog:${incoming.supplier_catalog_wine_id}`;
+          if (approvalQueueRef.current.has(key) || approvalInFlightKeysRef.current.has(key)) return;
+          setRows((current) => current.map((row) => {
+            if (row.supplier_catalog_wine_id !== incoming.supplier_catalog_wine_id) return row;
+            const updated: Recommendation = {
+                ...row,
+                supplier_catalog_workbench_item_id: incoming.id || row.supplier_catalog_workbench_item_id,
+                recommendation_status: incoming.recommendation_status ?? row.recommendation_status,
+                approved_qty: incoming.approved_qty ?? row.approved_qty,
+                recommended_qty_rounded: incoming.recommended_qty ?? row.recommended_qty_rounded,
+                order_path: incoming.order_path ?? row.order_path,
+                lock_version: incoming.lock_version ?? row.lock_version,
+                updated_at: incoming.updated_at ?? row.updated_at,
+                updated_by: incoming.updated_by ?? row.updated_by
+              };
+            return {
+              ...updated,
+              ...approvalProcessingPatch(updated, updated.recommendation_status, updated.approved_qty)
+            };
+          }));
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "purchase_order_drafts", filter: `report_run_id=eq.${reportRun.id}` },
+        scheduleDraftRefresh
+      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "purchase_order_lines" }, scheduleDraftRefresh)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "purchase_order_export_events", filter: `report_run_id=eq.${reportRun.id}` },
+        scheduleDraftRefresh
+      )
+      .subscribe();
+
+    return () => {
+      if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current);
+      void realtimeSupabase.removeChannel(channel);
+    };
+  }, [realtimeSupabase, reportRun.id, router]);
 
   useEffect(() => {
     const syncViewFromUrl = () => {
@@ -305,14 +440,80 @@ export function OrderDashboard({
     }
     if (approvalFlushRef.current) {
       await approvalFlushRef.current;
-      return;
+      if (approvalQueueRef.current.size === 0) return;
     }
 
-    const updates = Array.from(approvalQueueRef.current.entries()).map(([id, value]) => ({ id, ...value }));
-    approvalQueueRef.current.clear();
-    if (updates.length === 0) return;
+    approvalFlushRef.current = (async () => {
+      while (approvalQueueRef.current.size > 0) {
+        const queued = Array.from(approvalQueueRef.current.entries());
+        approvalQueueRef.current.clear();
+        const updates = queued.map(([, value]) => ({
+          sourceType: value.sourceType,
+          id: value.id,
+          reportRunId: value.reportRunId,
+          supplierCatalogWineId: value.supplierCatalogWineId,
+          recommendationStatus: value.recommendationStatus,
+          approvedQty: value.approvedQty,
+          expectedLockVersion: value.expectedLockVersion,
+          recommendedQty: value.recommendedQty,
+          orderPath: value.orderPath
+        }));
+        queued.forEach(([key]) => approvalInFlightKeysRef.current.add(key));
+        const result = await updateRecommendationApprovals({ updates }).finally(() => {
+          queued.forEach(([key]) => approvalInFlightKeysRef.current.delete(key));
+        });
+        if (!result.ok) {
+          for (const conflict of result.conflicts) {
+            setRows((current) => current.map((row) => {
+              const sameRow = conflict.sourceType === "recommendation"
+                ? row.id === conflict.id || row.id === conflict.sourceId
+                : row.supplier_catalog_workbench_item_id === conflict.id || row.supplier_catalog_workbench_item_id === conflict.sourceId;
+              if (!sameRow) return row;
+              return {
+                ...row,
+                lock_version: conflict.currentLockVersion ?? row.lock_version,
+                updated_at: conflict.updatedAt ?? row.updated_at,
+                updated_by: conflict.updatedBy ?? row.updated_by
+              };
+            }));
+          }
+          throw new Error(approvalConflictMessage(result.conflicts));
+        }
 
-    approvalFlushRef.current = updateRecommendationApprovals({ updates })
+        for (const saved of result.saved) {
+          const submitted = queued.find(([, value]) =>
+            saved.sourceType === "recommendation"
+              ? value.id === saved.id
+              : value.id === saved.id || value.supplierCatalogWineId === saved.supplierCatalogWineId
+          );
+          setRows((current) => current.map((row) => {
+            const sameRow = saved.sourceType === "recommendation"
+              ? row.id === saved.id
+              : row.supplier_catalog_workbench_item_id === saved.id || row.supplier_catalog_wine_id === saved.supplierCatalogWineId;
+            if (!sameRow) return row;
+            return {
+              ...row,
+              supplier_catalog_workbench_item_id: saved.sourceType === "catalog_workbench" ? saved.id : row.supplier_catalog_workbench_item_id,
+              lock_version: saved.lockVersion,
+              updated_at: saved.updatedAt,
+              updated_by: saved.updatedBy
+            };
+          }));
+
+          if (submitted) {
+            const [queueKey] = submitted;
+            const newer = approvalQueueRef.current.get(queueKey);
+            if (newer && newer.expectedLockVersion === submitted[1].expectedLockVersion) {
+              approvalQueueRef.current.set(queueKey, {
+                ...newer,
+                id: saved.id,
+                expectedLockVersion: saved.lockVersion
+              });
+            }
+          }
+        }
+      }
+    })()
       .catch((error) => {
         setErrorMessage(error instanceof Error ? error.message : "Could not save approvals.");
         throw error;
@@ -324,29 +525,35 @@ export function OrderDashboard({
     await approvalFlushRef.current;
   }
 
-  function queueApprovalSave(id: string, recommendationStatus: string, approvedQty: number) {
-    approvalQueueRef.current.set(id, { recommendationStatus, approvedQty });
+  function queueApprovalSave(
+    row: Recommendation,
+    recommendationStatus: string,
+    approvedQty: number,
+    orderPath = row.order_path === "di" ? "di" as const : "stateside" as const
+  ) {
+    const sourceType = row.supplier_catalog_wine_id ? "catalog_workbench" as const : "recommendation" as const;
+    const queueKey = sourceType === "recommendation" ? `recommendation:${row.id}` : `catalog:${row.supplier_catalog_wine_id}`;
+    const existing = approvalQueueRef.current.get(queueKey);
+    approvalQueueRef.current.set(queueKey, {
+      rowId: row.id,
+      sourceType,
+      id: sourceType === "recommendation" ? row.id : row.supplier_catalog_workbench_item_id || null,
+      reportRunId: row.report_run_id || reportRun.id,
+      supplierCatalogWineId: row.supplier_catalog_wine_id || undefined,
+      recommendationStatus,
+      approvedQty,
+      expectedLockVersion: existing?.expectedLockVersion ?? Math.max(0, Math.round(asNumber(row.lock_version))),
+      recommendedQty: sourceType === "catalog_workbench"
+        ? Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)))
+        : undefined,
+      orderPath
+    });
     if (approvalTimerRef.current) {
       clearTimeout(approvalTimerRef.current);
     }
     approvalTimerRef.current = setTimeout(() => {
       void flushApprovalQueue();
     }, 650);
-  }
-
-  function trackCatalogWorkbenchSave(save: Promise<void>) {
-    catalogWorkbenchSavesRef.current.add(save);
-    save.then(
-      () => catalogWorkbenchSavesRef.current.delete(save),
-      () => catalogWorkbenchSavesRef.current.delete(save)
-    );
-    return save;
-  }
-
-  async function flushCatalogWorkbenchSaves() {
-    while (catalogWorkbenchSavesRef.current.size > 0) {
-      await Promise.all(Array.from(catalogWorkbenchSavesRef.current));
-    }
   }
 
   function setSupplierTargetWeeksValue(supplierName: string, value: string) {
@@ -384,120 +591,21 @@ export function OrderDashboard({
 
     patchRow(row.id, {
       recommendation_status: status,
-      approved_qty: qty
+      approved_qty: qty,
+      ...approvalProcessingPatch(row, status, qty)
     });
     setPendingMessage("");
     setErrorMessage("");
 
-    if (row.supplier_catalog_wine_id) {
-      setPendingMessage("Saving catalog workbench row...");
-      startTransition(async () => {
-        const save = updateSupplierCatalogWorkbenchItems({
-          updates: [
-            {
-              id: row.supplier_catalog_workbench_item_id,
-              reportRunId: row.report_run_id || reportRun.id,
-              supplierCatalogWineId: row.supplier_catalog_wine_id as string,
-              recommendationStatus: status,
-              approvedQty: qty,
-              recommendedQty: Math.max(0, Math.round(asNumber(row.recommended_qty_rounded))),
-              orderPath: row.order_path === "di" ? "di" : "stateside"
-            }
-          ]
-        });
-        trackCatalogWorkbenchSave(save);
-        try {
-          await save;
-          setPendingMessage("Catalog workbench row saved");
-        } catch (error) {
-          setErrorMessage(error instanceof Error ? error.message : "Could not save catalog workbench row.");
-          setPendingMessage("");
-        }
-      });
-      return;
-    }
-
-    queueApprovalSave(row.id, status, qty);
-  }
-
-  function clearSupplierApprovals(supplierName: string) {
-    const supplierRows = displayRows.filter((row) => (row.supplier_name?.trim() || "Unknown Supplier") === supplierName);
-    const approvedRows = supplierRows.filter((row) => row.recommendation_status === "approved" || row.recommendation_status === "edited");
-    if (approvedRows.length === 0) return;
-
-    setRows((current) =>
-      current.map((row) =>
-        (row.supplier_name?.trim() || "Unknown Supplier") === supplierName &&
-        (row.recommendation_status === "approved" || row.recommendation_status === "edited")
-          ? { ...row, recommendation_status: "rejected", approved_qty: 0 }
-          : row
-      )
-    );
-    setErrorMessage("");
-    approvedRows
-      .filter((row) => !row.supplier_catalog_wine_id)
-      .forEach((row) => queueApprovalSave(row.id, "rejected", 0));
-
-    const manualRows = approvedRows.filter((row) => row.supplier_catalog_wine_id);
-    if (manualRows.length > 0) {
-      setPendingMessage("Clearing catalog workbench approvals...");
-      startTransition(async () => {
-        const save = updateSupplierCatalogWorkbenchItems({
-          updates: manualRows.map((row) => ({
-            id: row.supplier_catalog_workbench_item_id,
-            reportRunId: row.report_run_id || reportRun.id,
-            supplierCatalogWineId: row.supplier_catalog_wine_id as string,
-            recommendationStatus: "rejected",
-            approvedQty: 0,
-            recommendedQty: Math.max(0, Math.round(asNumber(row.recommended_qty_rounded))),
-            orderPath: row.order_path === "di" ? "di" : "stateside"
-          }))
-        });
-        trackCatalogWorkbenchSave(save);
-        try {
-          await save;
-          setPendingMessage("Catalog workbench approvals cleared");
-        } catch (error) {
-          setErrorMessage(error instanceof Error ? error.message : "Could not clear catalog workbench approvals.");
-          setPendingMessage("");
-        }
-      });
-    }
-  }
-
-  function clearAllApprovals() {
-    const approvedRows = rows.filter(
-      (row) => row.recommendation_status === "approved" || row.recommendation_status === "edited"
-    );
-    if (approvedRows.length === 0) return;
-
-    setPendingMessage("Clearing all approved orders...");
-    setErrorMessage("");
-
-    startTransition(async () => {
-      try {
-        await flushApprovalQueue();
-        await flushCatalogWorkbenchSaves();
-        const result = await clearAllOrderApprovals({ reportRunId: reportRun.id });
-        setRows((current) =>
-          current.map((row) =>
-            row.recommendation_status === "approved" || row.recommendation_status === "edited"
-              ? { ...row, recommendation_status: "rejected", approved_qty: 0 }
-              : row
-          )
-        );
-        setPendingMessage(
-          `Cleared ${result.cleared.toLocaleString()} approved order line${result.cleared === 1 ? "" : "s"}.`
-        );
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Could not clear all approved orders.");
-        setPendingMessage("");
-      }
-    });
+    queueApprovalSave(row, status, qty);
   }
 
   function setWorkingQty(row: Recommendation, qty: number) {
-    patchRow(row.id, { approved_qty: Math.max(0, Math.round(qty)) });
+    const approvedQty = Math.max(0, Math.round(qty));
+    patchRow(row.id, {
+      approved_qty: approvedQty,
+      ...approvalProcessingPatch(row, row.recommendation_status, approvedQty)
+    });
   }
 
   function saveWorkingQty(row: Recommendation, qty: number) {
@@ -508,64 +616,23 @@ export function OrderDashboard({
   }
 
   function saveOrderPath(row: Recommendation, orderPath: "stateside" | "di") {
-    if (row.supplier_catalog_wine_id) {
-      patchRow(row.id, { order_path: orderPath });
-      setPendingMessage("Saving catalog order path...");
-      setErrorMessage("");
-
-      startTransition(async () => {
-        const save = updateSupplierCatalogWorkbenchItems({
-          updates: [
-            {
-              id: row.supplier_catalog_workbench_item_id,
-              reportRunId: row.report_run_id || reportRun.id,
-              supplierCatalogWineId: row.supplier_catalog_wine_id as string,
-              recommendationStatus: row.recommendation_status || "rejected",
-              approvedQty: asNumber(row.approved_qty),
-              recommendedQty: Math.max(0, Math.round(asNumber(row.recommended_qty_rounded))),
-              orderPath
-            }
-          ]
-        });
-        trackCatalogWorkbenchSave(save);
-        try {
-          await save;
-          setPendingMessage("Catalog order path saved");
-        } catch (error) {
-          setErrorMessage(error instanceof Error ? error.message : "Could not save catalog order path.");
-          setPendingMessage("");
-        }
-      });
-      return;
-    }
-
     const nextRows = rows.map((current) => (current.id === row.id ? { ...current, order_path: orderPath } : current));
     const nextDisplayRow = applyDiContainerRecommendations(nextRows).find((current) => current.id === row.id);
     const isApprovedRow = row.recommendation_status === "approved" || row.recommendation_status === "edited";
-    const approvedQty = isApprovedRow ? Math.max(0, Math.round(asNumber(nextDisplayRow?.recommended_qty_rounded))) : undefined;
-    const recommendationStatus = isApprovedRow ? "approved" : undefined;
+    const approvedQty = isApprovedRow
+      ? Math.max(0, Math.round(asNumber(nextDisplayRow?.recommended_qty_rounded)))
+      : Math.max(0, Math.round(asNumber(row.approved_qty)));
+    const recommendationStatus = isApprovedRow ? "approved" : row.recommendation_status || "rejected";
 
     patchRow(row.id, {
       order_path: orderPath,
-      ...(approvedQty !== undefined ? { approved_qty: approvedQty, recommendation_status: recommendationStatus } : {})
+      approved_qty: approvedQty,
+      recommendation_status: recommendationStatus,
+      ...approvalProcessingPatch(row, recommendationStatus, approvedQty)
     });
-    setPendingMessage("Saving order path...");
+    setPendingMessage("");
     setErrorMessage("");
-
-    startTransition(async () => {
-      try {
-        await updateRecommendationOrderPath({
-          id: row.id,
-          orderPath,
-          approvedQty,
-          recommendationStatus
-        });
-        setPendingMessage("Order path saved");
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Could not save order path.");
-        setPendingMessage("");
-      }
-    });
+    queueApprovalSave(row, recommendationStatus, approvedQty, orderPath);
   }
 
   function createDrafts() {
@@ -576,11 +643,10 @@ export function OrderDashboard({
     startTransition(async () => {
       try {
         await flushApprovalQueue();
-        await flushCatalogWorkbenchSaves();
         const response = await fetch("/api/po-drafts/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reportRunId: reportRun.id })
+          body: JSON.stringify({ reportRunId: reportRun.id, idempotencyKey: crypto.randomUUID() })
         });
         const result = (await response.json()) as {
           created?: string[];
@@ -588,11 +654,12 @@ export function OrderDashboard({
           skipped?: string[];
           errors?: string[];
           drafts?: PurchaseOrderDraftWithLines[];
+          conflicts?: ApprovalConflict[];
           error?: string;
         };
 
         if (!response.ok) {
-          throw new Error(result.error || "Could not create PO drafts.");
+          throw new Error(result.conflicts?.length ? approvalConflictMessage(result.conflicts) : result.error || "Could not create PO drafts.");
         }
 
         const createdList = result.created || [];
@@ -874,12 +941,7 @@ export function OrderDashboard({
           supplierTargetWeeks={supplierTargetWeeks}
           globalTargetWeeks={globalTargetWeeks}
           visibleCount={visibleRecommendations.length}
-          hasApprovedOrders={rows.some(
-            (row) => row.recommendation_status === "approved" || row.recommendation_status === "edited"
-          )}
           onSaveApproval={saveApproval}
-          onClearAllApprovals={clearAllApprovals}
-          onClearSupplierApprovals={clearSupplierApprovals}
           onSaveOrderPath={saveOrderPath}
           onSaveWorkingQty={saveWorkingQty}
           onSetWorkingQty={setWorkingQty}

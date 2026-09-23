@@ -4,109 +4,11 @@ import { asNumber, formatCurrency, formatCurrencyCents, formatInteger } from "@/
 import { isActivePoStatus } from "@/lib/po-status";
 import {
   poDraftOrderPath,
-  poDraftSupplierLabel,
   poLineCosts,
   poOrderPathLabel,
-  poTimestamp,
   supplierLaidInForDraft,
   supplierLogisticsLookup
 } from "@/lib/po-utils";
-
-function csvEscape(value: string | number): string {
-  const text = String(value ?? "");
-  if (/[",\n]/.test(text)) {
-    return `"${text.replaceAll('"', '""')}"`;
-  }
-  return text;
-}
-
-function poCsvText(draft: PurchaseOrderDraftWithLines, fallbackLaidInPerBottle = 0): string {
-  const headers = [
-    "Supplier",
-    "Wine",
-    "Code",
-    "Item Warning",
-    "Quantity",
-    "FOB",
-    "Laid In Cost",
-    "Total Wine Cost",
-    "Total Laid In Cost",
-    "Estimated Cost"
-  ];
-  const rows = (draft.lines || []).map((line) => {
-    const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidInPerBottle);
-
-    return [
-      poDraftSupplierLabel(draft),
-      line.product_name || "",
-      line.product_code || "",
-      line.is_new_item ? line.new_item_warning || "New Item" : "",
-      qty,
-      fob.toFixed(2),
-      laidIn.toFixed(4),
-      wineCost.toFixed(2),
-      laidInCost.toFixed(2),
-      estimatedCost.toFixed(2)
-    ];
-  });
-
-  const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
-  return csv;
-}
-
-function allPoCsvText(drafts: PurchaseOrderDraftWithLines[], suppliers: Map<string, SupplierLogistics>): string {
-  const headers = [
-    "Supplier",
-    "Wine",
-    "Code",
-    "Item Warning",
-    "Quantity",
-    "FOB",
-    "Laid In Cost",
-    "Total Wine Cost",
-    "Total Laid In Cost",
-    "Estimated Cost"
-  ];
-  const rows = drafts.flatMap((draft) => {
-    const fallbackLaidInPerBottle = supplierLaidInForDraft(draft, suppliers);
-
-    return (draft.lines || []).map((line) => {
-      const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidInPerBottle);
-
-      return [
-        poDraftSupplierLabel(draft),
-        line.product_name || "",
-        line.product_code || "",
-        line.is_new_item ? line.new_item_warning || "New Item" : "",
-        qty,
-        fob.toFixed(2),
-        laidIn.toFixed(4),
-        wineCost.toFixed(2),
-        laidInCost.toFixed(2),
-        estimatedCost.toFixed(2)
-      ];
-    });
-  });
-
-  return [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
-}
-
-function poCsvFilename(draft: PurchaseOrderDraftWithLines): string {
-  const supplier = poDraftSupplierLabel(draft)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "");
-  return `PO ${supplier || "supplier"} ${stamp}.csv`;
-}
-
-function poXlsxFilename(draft: PurchaseOrderDraftWithLines): string {
-  const supplier = poDraftSupplierLabel(draft)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  return `PO ${supplier || "supplier"} ${poTimestamp()}.xlsx`;
-}
 
 export function PoDraftsView({
   drafts,
@@ -128,6 +30,8 @@ export function PoDraftsView({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
+  const [exportStatus, setExportStatus] = useState("");
+  const [exporting, setExporting] = useState(false);
   const supplierMetadata = useMemo(() => supplierLogisticsLookup(suppliers), [suppliers]);
   const draftSummaries = useMemo(() => drafts.map((draft) => {
     const lines = draft.lines || [];
@@ -225,46 +129,40 @@ export function PoDraftsView({
     });
   }
 
-  function downloadCsv(draft: PurchaseOrderDraftWithLines) {
-    const blob = new Blob([poCsvText(draft, supplierLaidInForDraft(draft, supplierMetadata))], {
-      type: "text/csv;charset=utf-8"
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = poCsvFilename(draft);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  function downloadAllCsv() {
-    const blob = new Blob([allPoCsvText(exportableDrafts, supplierMetadata)], {
-      type: "text/csv;charset=utf-8"
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `POs ${poTimestamp()}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  function downloadSelectedCsv() {
-    const blob = new Blob([allPoCsvText(selectedExportableDrafts, supplierMetadata)], {
-      type: "text/csv;charset=utf-8"
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `POs selected ${poTimestamp()}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+  async function downloadExport(
+    format: "xlsx" | "csv",
+    scope: "single" | "selected" | "all",
+    draftIds: string[] = []
+  ) {
+    setExporting(true);
+    setExportStatus("Generating and auditing export...");
+    try {
+      const response = await fetch("/api/po-drafts/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportRunId, draftIds, format, scope })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || "PO export failed.");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] || `PO export.${format}`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setExportStatus(`Generated ${filename}. The exact draft revision was recorded.`);
+    } catch (error) {
+      setExportStatus(error instanceof Error ? error.message : "PO export failed.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   function cancelDrafts(ids: string[], label: string) {
@@ -298,30 +196,31 @@ export function PoDraftsView({
           >
             Cancel All Active
           </button>
-          <a
-            className={selectedCount === 0 ? "button button-small disabled-link" : "button button-small"}
-            download={`POs selected ${poTimestamp()}.xlsx`}
-            href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}&draftIds=${encodeURIComponent(selectedDraftIdList.join(","))}`}
-            aria-disabled={selectedCount === 0}
+          <button
+            className="button button-small"
+            disabled={selectedCount === 0 || exporting}
+            onClick={() => void downloadExport("xlsx", "selected", selectedDraftIdList)}
+            type="button"
           >
             Export Selected PO XLSX
-          </a>
-          <button className="button button-small" disabled={selectedCount === 0} onClick={downloadSelectedCsv} type="button">
+          </button>
+          <button className="button button-small" disabled={selectedCount === 0 || exporting} onClick={() => void downloadExport("csv", "selected", selectedDraftIdList)} type="button">
             Export Selected PO CSV
           </button>
-          <a
-            className={exportableDrafts.length === 0 ? "button button-small disabled-link" : "button button-small"}
-            download={`POs ${poTimestamp()}.xlsx`}
-            href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}`}
-            aria-disabled={exportableDrafts.length === 0}
+          <button
+            className="button button-small"
+            disabled={exportableDrafts.length === 0 || exporting}
+            onClick={() => void downloadExport("xlsx", "all")}
+            type="button"
           >
             Export ALL PO XLSX
-          </a>
-          <button className="button button-small" disabled={exportableDrafts.length === 0} onClick={downloadAllCsv} type="button">
+          </button>
+          <button className="button button-small" disabled={exportableDrafts.length === 0 || exporting} onClick={() => void downloadExport("csv", "all")} type="button">
             Export ALL PO CSV
           </button>
         </div>
       </div>
+      {exportStatus ? <p className="muted" role="status">{exportStatus}</p> : null}
       <div className="po-summary-grid">
         <div>
           <span>Drafts</span>
@@ -405,23 +304,26 @@ export function PoDraftsView({
                   <span>{formatCurrency(estimatedCost || wineCost + laidInCost)} estimated</span>
                 </div>
                 <span>
-                  {draft.status.replaceAll("_", " ")} | {formatInteger(lineCount)} lines
+                  {draft.status.replaceAll("_", " ")} | revision {formatInteger(Number(draft.revision_no) || 1)} | {formatInteger(lineCount)} lines
+                  {draft.last_exported_at ? ` | generated ${new Date(draft.last_exported_at).toLocaleString()}` : ""}
                 </span>
               </summary>
               <div className="po-draft-actions">
                 <DraftStatusActions draft={draft} disabled={isPending} onStatusChange={onStatusChange} />
                 {isExportable ? (
                   <>
-                    <a
-                      className="button button-tiny"
-                      download={poXlsxFilename(draft)}
-                      href={`/api/po-drafts/xlsx?reportRunId=${encodeURIComponent(reportRunId)}&draftId=${encodeURIComponent(draft.id)}`}
-                    >
-                      Export XLSX
-                    </a>
                     <button
                       className="button button-tiny"
-                      onClick={() => downloadCsv(draft)}
+                      disabled={exporting}
+                      onClick={() => void downloadExport("xlsx", "single", [draft.id])}
+                      type="button"
+                    >
+                      Export XLSX
+                    </button>
+                    <button
+                      className="button button-tiny"
+                      disabled={exporting}
+                      onClick={() => void downloadExport("csv", "single", [draft.id])}
                       type="button"
                     >
                       Export CSV
@@ -556,7 +458,12 @@ function DraftStatusActions({
         <button
           className="button button-tiny"
           disabled={disabled}
-          onClick={() => onStatusChange(draft.id, "entered_in_quickbooks")}
+          onClick={() => {
+            if (!window.confirm(
+              "Mark this PO as entered in QuickBooks? This records its current revision as an immutable commitment. Later quantity changes will create a delta or correction."
+            )) return;
+            onStatusChange(draft.id, "entered_in_quickbooks");
+          }}
         >
           Mark Entered
         </button>

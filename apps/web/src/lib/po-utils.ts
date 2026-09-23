@@ -76,11 +76,12 @@ export function poOrderPathLabel(path: OrderPath) {
   return path === "di" ? "DI" : "Stateside";
 }
 
-export function poDraftOrderPath(draft: Pick<PurchaseOrderDraftWithLines, "notes">): OrderPath {
+export function poDraftOrderPath(draft: Pick<PurchaseOrderDraftWithLines, "notes" | "order_path">): OrderPath {
+  if (draft.order_path === "di" || draft.order_path === "stateside") return draft.order_path;
   return /order path:\s*(direct import|di)/i.test(draft.notes || "") ? "di" : "stateside";
 }
 
-export function poDraftSupplierLabel(draft: Pick<PurchaseOrderDraftWithLines, "supplier_name" | "notes">) {
+export function poDraftSupplierLabel(draft: Pick<PurchaseOrderDraftWithLines, "supplier_name" | "notes" | "order_path">) {
   const supplier = draft.supplier_name || "Unknown Supplier";
   const path = poDraftOrderPath(draft);
   return path === "di" ? `${supplier} - DI` : supplier;
