@@ -61,23 +61,29 @@ const currencyFormatter = (params: ValueFormatterParams<WorkbenchRow, number>) =
 const wineRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
   <span className="wine-cell-value">
     <span>{params.valueFormatted ?? params.value ?? ""}</span>
-    {params.data && !params.data.is_new_item ? (
-      <button
-        className="replenishment-policy-link"
-        onClick={(event) => {
-          event.stopPropagation();
-          params.context.onEditReplenishment(params.data);
-        }}
-        title="Edit this wine without leaving Order Summary"
-        type="button"
-      >
-        {replenishmentPolicyLabel(rowReplenishmentPolicy(params.data))}
-      </button>
+    {params.data ? (
+      <span className="wine-marker-row">
+        {!params.data.is_new_item ? (
+          <button
+            aria-label={`${replenishmentPolicyLabel(rowReplenishmentPolicy(params.data))}. Edit replenishment settings`}
+            className="replenishment-policy-link"
+            onClick={(event) => {
+              event.stopPropagation();
+              params.context.onEditReplenishment(params.data);
+            }}
+            title="Click to edit replenishment and automatic reorder settings"
+            type="button"
+          >
+            <span>{replenishmentPolicyLabel(rowReplenishmentPolicy(params.data))}</span>
+            <span className="replenishment-edit-affordance">Edit</span>
+          </button>
+        ) : null}
+        {params.data.is_new_item ? <span className="new-item-badge">New Item</span> : null}
+        {params.data.recommendations_suppressed ? <span className="recommendation-off-badge">Reorder Off</span> : null}
+        {activeFreeGoodsForRow(params.data).length > 0 ? <span className="free-goods-badge">Free Goods</span> : null}
+        {isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}
+      </span>
     ) : null}
-    {params.data?.is_new_item ? <span className="new-item-badge">New Item</span> : null}
-    {params.data?.recommendations_suppressed ? <span className="recommendation-off-badge">Reorder Off</span> : null}
-    {params.data && activeFreeGoodsForRow(params.data).length > 0 ? <span className="free-goods-badge">Free Goods</span> : null}
-    {params.data && isDiOpportunity(params.data) ? <span className="di-opportunity-badge">DI Opportunity</span> : null}
   </span>
 );
 const centeredRenderer = (params: ICellRendererParams<WorkbenchRow>) => (
@@ -145,7 +151,7 @@ const wineBadgeCount = (row?: Recommendation | null) => {
 const rowHeightForWine = (row?: WorkbenchRow | null) => {
   const name = row?.wine_display ?? "";
   const lines = Math.max(1, Math.ceil(name.length / 42));
-  const badgeSpace = wineBadgeCount(row) * 22;
+  const badgeSpace = Math.ceil(wineBadgeCount(row) / 2) * 22;
   return Math.max(56, Math.min(140, 16 + lines * 17 + badgeSpace));
 };
 const roundUpToPack = (qty: number, packSize: number) => {
