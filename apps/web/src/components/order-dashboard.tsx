@@ -32,6 +32,7 @@ import type {
 } from "@/lib/types";
 import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import { applyDiContainerRecommendations } from "@/lib/di-planning";
+import { restoreOptimisticallyRemovedDrafts } from "@/lib/po-draft-optimistic";
 import {
   LOCAL_DRAFT_MUTATION_SETTLE_MS,
   REALTIME_REFRESH_DEBOUNCE_MS,
@@ -797,6 +798,17 @@ export function OrderDashboard({
   }
 
   function changeDraftStatus(draftId: string, status: string) {
+    const cancelling = status === "cancelled";
+    const draftToCancel = cancelling ? draftRows.find((draft) => draft.id === draftId) : undefined;
+    if (cancelling && !window.confirm(
+      `Are you sure you want to cancel the ${draftToCancel?.supplier_name || "selected"} PO draft? It will disappear from Active Drafts, but its audit history will be retained.`
+    )) return;
+
+    const originalOrder = new Map(draftRows.map((draft, index) => [draft.id, index]));
+    const optimisticallyRemoved = draftToCancel ? [draftToCancel] : [];
+    if (cancelling) {
+      setDraftRows((current) => current.filter((draft) => draft.id !== draftId));
+    }
     setPendingMessage("Updating PO draft...");
     setErrorMessage("");
     beginDraftMutation();
@@ -808,6 +820,9 @@ export function OrderDashboard({
         setPendingMessage("PO draft updated");
         refreshAfterMutation = true;
       } catch (error) {
+        if (optimisticallyRemoved.length > 0) {
+          setDraftRows((current) => restoreOptimisticallyRemovedDrafts(current, optimisticallyRemoved, originalOrder));
+        }
         setErrorMessage(error instanceof Error ? error.message : "Could not update PO draft.");
         setPendingMessage("");
       } finally {
@@ -819,6 +834,10 @@ export function OrderDashboard({
   function cancelDrafts(draftIds: string[]) {
     const ids = Array.from(new Set(draftIds.filter(Boolean)));
     if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const originalOrder = new Map(draftRows.map((draft, index) => [draft.id, index]));
+    const optimisticallyRemoved = draftRows.filter((draft) => idSet.has(draft.id));
+    setDraftRows((current) => current.filter((draft) => !idSet.has(draft.id)));
     setPendingMessage(`Cancelling ${ids.length.toLocaleString()} PO draft${ids.length === 1 ? "" : "s"}...`);
     setErrorMessage("");
     beginDraftMutation();
@@ -830,6 +849,7 @@ export function OrderDashboard({
         setPendingMessage(`${result.cancelled.toLocaleString()} active PO draft${result.cancelled === 1 ? "" : "s"} cancelled.`);
         refreshAfterMutation = true;
       } catch (error) {
+        setDraftRows((current) => restoreOptimisticallyRemovedDrafts(current, optimisticallyRemoved, originalOrder));
         setErrorMessage(error instanceof Error ? error.message : "Could not cancel PO drafts.");
         setPendingMessage("");
       } finally {

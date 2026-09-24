@@ -173,7 +173,7 @@ export function PoDraftsView({
 
   function cancelDrafts(ids: string[], label: string) {
     if (ids.length === 0) return;
-    if (!window.confirm(`Cancel ${ids.length.toLocaleString()} ${label} PO draft${ids.length === 1 ? "" : "s"}? Entered drafts will not be changed.`)) return;
+    if (!window.confirm(`Are you sure you want to cancel ${ids.length.toLocaleString()} ${label} PO draft${ids.length === 1 ? "" : "s"}? They will disappear from Active Drafts, but their audit history will be retained. Entered drafts will not be changed.`)) return;
     onCancelDrafts(ids);
     setSelectedDraftIds((current) => new Set(Array.from(current).filter((id) => !ids.includes(id))));
   }
