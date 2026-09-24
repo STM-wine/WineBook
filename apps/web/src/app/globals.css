@@ -113,8 +113,9 @@ textarea {
   overflow: visible;
 }
 
-.nav-tabs button,
-.nav-tabs > a {
+.nav-tabs > button,
+.nav-tabs > a,
+.nav-dropdown > .nav-dropdown-trigger {
   background: transparent;
   border-bottom: 3px solid transparent;
   border-left: 0;
@@ -128,8 +129,9 @@ textarea {
   white-space: nowrap;
 }
 
-.nav-tabs button.active,
-.nav-tabs > a.active {
+.nav-tabs > button.active,
+.nav-tabs > a.active,
+.nav-dropdown > .nav-dropdown-trigger.active {
   border-color: var(--red);
   color: var(--ink);
 }
@@ -6280,8 +6282,9 @@ tr.has-recommendation .sticky-name {
     overflow: visible;
   }
 
-  .nav-tabs button,
-  .nav-tabs > a {
+  .nav-tabs > button,
+  .nav-tabs > a,
+  .nav-dropdown > .nav-dropdown-trigger {
     font-size: 16px;
     padding: 12px 14px 11px;
   }
