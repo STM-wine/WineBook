@@ -24,7 +24,8 @@ export async function GET(request: Request) {
   const vintage = url.searchParams.get("vintage") || null;
   const packSize = Number(url.searchParams.get("packSize") || 0) || null;
   const bottleSize = url.searchParams.get("bottleSize") || null;
-  const quickBooksSearchPattern = `%${query
+  const includeInactive = url.searchParams.get("includeInactive") === "true";
+  const searchPattern = `%${query
     .replace(/[%_*,()'"\\]/g, " ")
     .trim()
     .split(/\s+/)
@@ -78,9 +79,8 @@ export async function GET(request: Request) {
       .select("id,name,trucking_cost_per_bottle", { count: "exact" })
       .order("id", { ascending: true })
       .range(from, to) as never),
-    fetchAllExact("supplier catalog match search", (from, to) => searchSupabase
-      .from("supplier_catalog_wines")
-      .select(`
+    fetchAllExact("supplier catalog match search", (from, to) => {
+      let request = searchSupabase.from("supplier_catalog_wines").select(`
         id,
         supplier_id,
         supplier_name,
@@ -104,13 +104,17 @@ export async function GET(request: Request) {
         system_tags,
         updated_at
       `, { count: "exact" })
-      .order("id", { ascending: true })
-      .range(from, to) as never),
-    fetchAllExact("product match search", (from, to) => searchSupabase
-      .from("products")
-      .select("id,planning_sku,product_code,name,vintage,pack_size,is_btg,is_core,supplier_id,current_fob,active,updated_at", { count: "exact" })
-      .order("id", { ascending: true })
-      .range(from, to) as never),
+        .or(`display_name.ilike.${searchPattern},producer.ilike.${searchPattern},wine_name.ilike.${searchPattern},planning_sku.ilike.${searchPattern}`);
+      if (!includeInactive) request = request.neq("product_lifecycle_status", "inactive");
+      return request.order("id", { ascending: true }).range(from, to) as never;
+    }),
+    fetchAllExact("product match search", (from, to) => {
+      let request = searchSupabase.from("products")
+        .select("id,planning_sku,product_code,name,vintage,pack_size,is_btg,is_core,supplier_id,current_fob,active,updated_at", { count: "exact" })
+        .or(`name.ilike.${searchPattern},planning_sku.ilike.${searchPattern},product_code.ilike.${searchPattern}`);
+      if (!includeInactive) request = request.eq("active", true);
+      return request.order("id", { ascending: true }).range(from, to) as never;
+    }),
     searchSupabase
       .from("report_runs")
       .select("id")
@@ -118,9 +122,8 @@ export async function GET(request: Request) {
       .order("completed_at", { ascending: false })
       .limit(RECENT_REPORT_RUN_COUNT)
       .then(({ data, error }) => { if (error) throw new Error(error.message); return data || []; }),
-    fetchAllExact("Vinosmith wine match search", (from, to) => searchSupabase
-      .from("vinosmith_wines")
-      .select(`
+    fetchAllExact("Vinosmith wine match search", (from, to) => {
+      let request = searchSupabase.from("vinosmith_wines").select(`
         wine_id,
         code,
         name,
@@ -137,19 +140,22 @@ export async function GET(request: Request) {
         core,
         last_seen_at
       `, { count: "exact" })
-      .order("wine_id", { ascending: true })
-      .range(from, to) as never),
-    fetchAllExact("QuickBooks item match search", (from, to) => searchSupabase
-      .from("quickbooks_items")
-      .select("list_id,name,full_name,is_active,sales_desc,purchase_desc,sales_price,purchase_cost,custom_fields,raw_data,time_modified,last_seen_at", { count: "exact" })
-      .or([
-        `name.ilike.${quickBooksSearchPattern}`,
-        `full_name.ilike.${quickBooksSearchPattern}`,
-        `sales_desc.ilike.${quickBooksSearchPattern}`,
-        `purchase_desc.ilike.${quickBooksSearchPattern}`
-      ].join(","))
-      .order("list_id", { ascending: true })
-      .range(from, to) as never)
+        .or(`name.ilike.${searchPattern},producer_name.ilike.${searchPattern},code.ilike.${searchPattern},importer_name.ilike.${searchPattern}`);
+      if (!includeInactive) request = request.eq("active", true);
+      return request.order("wine_id", { ascending: true }).range(from, to) as never;
+    }),
+    fetchAllExact("QuickBooks item match search", (from, to) => {
+      let request = searchSupabase.from("quickbooks_items")
+        .select("list_id,name,full_name,is_active,sales_desc,purchase_desc,sales_price,purchase_cost,custom_fields,raw_data,time_modified,last_seen_at", { count: "exact" })
+        .or([
+          `name.ilike.${searchPattern}`,
+          `full_name.ilike.${searchPattern}`,
+          `sales_desc.ilike.${searchPattern}`,
+          `purchase_desc.ilike.${searchPattern}`
+        ].join(","));
+      if (!includeInactive) request = request.eq("is_active", true);
+      return request.order("list_id", { ascending: true }).range(from, to) as never;
+    })
     ]);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load product match sources." }, { status: 500 });
@@ -174,6 +180,7 @@ export async function GET(request: Request) {
           created_at
         `, { count: "exact" })
         .in("report_run_id", reportRunIds)
+        .or(`product_name.ilike.${searchPattern},planning_sku.ilike.${searchPattern},product_code.ilike.${searchPattern}`)
         .order("id", { ascending: true })
         .range(from, to) as never)
     : [];
@@ -216,6 +223,7 @@ export async function GET(request: Request) {
       bottleSize,
       supplierId,
       supplierName,
+      includeInactive,
       limit: 20
     },
     dedupeProductIdentityCandidates(candidates)

@@ -14,7 +14,7 @@ This document records the Add Wine behavior found before the September 24, 2026 
 
 Supplier assignment uses the canonical supplier record when one exists. QuickBooks importer metadata is matched to that supplier record. Selecting any known supplier populates its current trucking/laid-in amount per bottle; an unknown supplier leaves laid-in blank so pricing cannot be suggested from a fabricated zero.
 
-Search now includes inactive Supplier Catalog, product, Vinosmith, and QuickBooks records. All matching source rows are fetched with exact pagination. The result list retains distinct records even when they normalize to the same planning SKU, so an inactive item is selectable beside an active item. “Start From” copies the identity and current source context; only an active QuickBooks result can be linked automatically.
+Search queries active Supplier Catalog, product, Vinosmith, and QuickBooks records first. “Search inactive items too” repeats the same query with inactive records included. Filtering happens in the database before exact pagination, and the result list retains distinct records even when they normalize to the same planning SKU, so an inactive item remains selectable beside an active item without slowing every initial search. “Start From” copies the identity and current source context; only an active QuickBooks result can be linked automatically.
 
 ## Previous pricing behavior
 

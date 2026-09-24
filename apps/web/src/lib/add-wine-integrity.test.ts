@@ -7,6 +7,8 @@ const migrationPath = path.resolve(
   "../../supabase/migrations/20260924120000_add_wine_pricing_integrity.sql"
 );
 const actionPath = path.resolve(process.cwd(), "src/app/actions.ts");
+const addWineViewPath = path.resolve(process.cwd(), "src/components/supplier-hub-view.tsx");
+const matchRoutePath = path.resolve(process.cwd(), "src/app/api/supplier-wines/matches/route.ts");
 
 describe("Add Wine database safety contract", () => {
   it("uses one versioned and idempotent transaction for the entire save", async () => {
@@ -34,5 +36,25 @@ describe("Add Wine database safety contract", () => {
     expect(sql).toContain("trg_supplier_catalog_events_immutable");
     expect(sql).toContain("revoke insert, update, delete on public.supplier_catalog_events");
     expect(sql).toContain("revoke execute on function public.save_supplier_catalog_sku");
+  });
+});
+
+describe("Add Wine search and price-level UI", () => {
+  it("searches active source rows first and exposes an inactive opt-in", async () => {
+    const [view, route] = await Promise.all([
+      readFile(addWineViewPath, "utf8"),
+      readFile(matchRoutePath, "utf8")
+    ]);
+
+    expect(view).toContain("Search inactive items too");
+    expect(view).toContain('new URL("/api/supplier-wines/matches", window.location.origin)');
+    expect(route).toContain('url.searchParams.get("includeInactive") === "true"');
+    expect(route).toContain('request = request.eq("is_active", true)');
+  });
+
+  it("does not show price decision or owner columns in Add Wine", async () => {
+    const view = await readFile(addWineViewPath, "utf8");
+    expect(view).not.toContain("<th>Decision</th>");
+    expect(view).not.toContain("<th>Owner / approver</th>");
   });
 });

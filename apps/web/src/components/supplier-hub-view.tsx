@@ -12,7 +12,6 @@ import {
   APPROVAL_DECISIONS,
   APPROVER_NAMES,
   AVAILABILITY_STATUSES,
-  PRICE_APPROVAL_DECISIONS,
   PLACEMENT_TYPES,
   SOLVE_FOR_MODES,
   SYSTEM_TAGS,
@@ -260,11 +259,17 @@ function AddWinePanel({
   const [wineNameMatches, setWineNameMatches] = useState<ProductIdentityMatch[]>([]);
   const [wineMatchError, setWineMatchError] = useState("");
   const [isSearchingWineMatches, setIsSearchingWineMatches] = useState(false);
+  const [includeInactiveMatches, setIncludeInactiveMatches] = useState(false);
   const [priceLevels, setPriceLevels] = useState<PriceLevelDraft[]>(() => defaultPriceLevelDrafts());
   const [priceLevelsFollowPricing, setPriceLevelsFollowPricing] = useState(false);
   const [freeGoods, setFreeGoods] = useState<FreeGoodDraft[]>([]);
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
-  const sortedCloneOptions = useMemo(() => [...wines].sort(sortNewestVintageFirst), [wines]);
+  const sortedCloneOptions = useMemo(
+    () => wines
+      .filter((wine) => includeInactiveMatches || wine.product_lifecycle_status !== "inactive")
+      .sort(sortNewestVintageFirst),
+    [includeInactiveMatches, wines]
+  );
   const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
   const supplierOptions = useMemo(() => uniqueSorted(suppliers.map((supplier) => supplier.name)), [suppliers]);
   const parsedPackSize = Number(packSize);
@@ -322,10 +327,13 @@ function AddWinePanel({
       if (vintage) params.set("vintage", vintage);
       if (packSize) params.set("packSize", packSize);
       if (bottleSize) params.set("bottleSize", bottleSize);
+      if (includeInactiveMatches) params.set("includeInactive", "true");
 
       setIsSearchingWineMatches(true);
       setWineMatchError("");
-      fetch(`/api/supplier-wines/matches?${params.toString()}`, { signal: controller.signal })
+      const endpoint = new URL("/api/supplier-wines/matches", window.location.origin);
+      endpoint.search = params.toString();
+      fetch(endpoint.toString(), { signal: controller.signal })
         .then(async (response) => {
           const body = await response.json();
           if (!response.ok) {
@@ -345,7 +353,7 @@ function AddWinePanel({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [bottleSize, packSize, producer, searchItem, supplierId, supplierName, templateWine, vintage]);
+  }, [bottleSize, includeInactiveMatches, packSize, producer, searchItem, supplierId, supplierName, templateWine, vintage]);
 
   function supplierByName(name: string) {
     const normalizedName = name.trim().toLowerCase();
@@ -385,6 +393,7 @@ function AddWinePanel({
     setCopiedFromSupplierCatalogWineId(catalogWineId);
     setWineNameMatches([]);
     setWineMatchError("");
+    setIncludeInactiveMatches(false);
     setSearchItem(wine.display_name);
     const supplier = options.preserveSupplier
       ? null
@@ -444,6 +453,7 @@ function AddWinePanel({
     setTemplateWine(null);
     setWineNameMatches([]);
     setWineMatchError("");
+    setIncludeInactiveMatches(false);
     setSearchItem("");
     setProducer("");
     setWineName("");
@@ -479,6 +489,7 @@ function AddWinePanel({
     setTemplateWine(null);
     setWineNameMatches([]);
     setWineMatchError("");
+    setIncludeInactiveMatches(false);
     setSearchItem("");
     setSupplierId("");
     setSupplierName("");
@@ -704,8 +715,11 @@ function AddWinePanel({
           <input
             list="supplier-catalog-clone-options"
             value={searchItem}
-            onChange={(event) => setSearchItem(event.target.value)}
-            placeholder="Search active or inactive item / SKU"
+            onChange={(event) => {
+              setSearchItem(event.target.value);
+              setIncludeInactiveMatches(false);
+            }}
+            placeholder="Search active item / SKU"
           />
           <datalist id="supplier-catalog-clone-options">
             {sortedCloneOptions.map((wine) => (
@@ -757,8 +771,18 @@ function AddWinePanel({
                 </div>
               ))
             ) : (
-              <div className="catalog-match-empty">No product matches found.</div>
+              <div className="catalog-match-empty">
+                {includeInactiveMatches ? "No active or inactive product matches found." : "No active product matches found."}
+              </div>
             )}
+            <button
+              className="ghost-button button-small"
+              disabled={isSearchingWineMatches}
+              onClick={() => setIncludeInactiveMatches((current) => !current)}
+              type="button"
+            >
+              {includeInactiveMatches ? "Search active items only" : "Search inactive items too"}
+            </button>
           </div>
         ) : null}
         <label className="wide-field">
@@ -979,9 +1003,7 @@ function AddWinePanel({
                 <th>Target GP</th>
                 <th>Solve for</th>
                 <th>GM</th>
-                <th>Decision</th>
                 <th>Reason</th>
-                <th>Owner / approver</th>
                 <th>FL</th>
                 <th>Best</th>
                 <th>Active</th>
@@ -1074,28 +1096,7 @@ function AddWinePanel({
                       </select>
                     </td>
                     <td className={effective.belowMinimumGp ? "danger-cell" : undefined}>{formatPercent(effective.calculatedGpMargin)}</td>
-                    <td>
-                      <select aria-label="Price approval decision" value={level.approvalDecision} onChange={(event) => patchPriceLevel(level.id, {
-                        approvalDecision: event.target.value as PriceLevelDraft["approvalDecision"],
-                        decisionTimestamp: event.target.value ? new Date().toISOString() : ""
-                      })}>
-                        <option value="">Pending</option>
-                        {PRICE_APPROVAL_DECISIONS.map((decision) => <option key={decision} value={decision}>{({
-                          approve_price: "Approve price",
-                          pursue_da: "Pursue DA",
-                          revise: "Revise",
-                          hold: "Hold",
-                          no_change: "No change"
-                        } as const)[decision]}</option>)}
-                      </select>
-                    </td>
                     <td><input aria-label="Price decision reason" value={level.overrideReason} onChange={(event) => patchPriceLevel(level.id, { overrideReason: event.target.value })} /></td>
-                    <td>
-                      <select aria-label="Price decision owner" value={level.approvalOwner} onChange={(event) => patchPriceLevel(level.id, { approvalOwner: event.target.value })}>
-                        <option value="">Select</option>
-                        {APPROVER_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
-                      </select>
-                    </td>
                     <td>
                       <input
                         aria-label="Frontline"

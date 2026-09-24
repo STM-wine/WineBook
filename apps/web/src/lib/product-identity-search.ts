@@ -79,6 +79,7 @@ type SearchInput = {
   bottleSize?: string | null;
   supplierId?: string | null;
   supplierName?: string | null;
+  includeInactive?: boolean;
   limit?: number;
 };
 
@@ -111,6 +112,7 @@ export function searchProductIdentityCandidates(
   if (query.length < 3 || queryTokens.length === 0) return [];
 
   const scored = candidates
+    .filter((candidate) => input.includeInactive || candidate.active)
     .map((candidate) => {
       const candidateKeys = [
         `${candidate.producer} ${candidate.wineName}`,

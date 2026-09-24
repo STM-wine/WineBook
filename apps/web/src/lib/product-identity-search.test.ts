@@ -17,7 +17,7 @@ describe("product identity search", () => {
     });
 
     const matches = searchProductIdentityCandidates(
-      { query: "Vacheron Sancerre Blanc", limit: 8 },
+      { query: "Vacheron Sancerre Blanc", includeInactive: true, limit: 8 },
       [inactive]
     );
 
@@ -30,6 +30,21 @@ describe("product identity search", () => {
     });
   });
 
+  it("searches active items by default and includes inactive items only when requested", () => {
+    const base = {
+      full_name: "Illahe Pinot Noir 2024 12/750ml",
+      purchase_cost: 18,
+      sales_price: 30
+    };
+    const active = quickbooksItemRowToCandidate({ ...base, list_id: "illahe-active", is_active: true });
+    const inactive = quickbooksItemRowToCandidate({ ...base, list_id: "illahe-inactive", is_active: false });
+
+    expect(searchProductIdentityCandidates({ query: "Illahe", limit: 20 }, [active, inactive]).map((match) => match.sourceId))
+      .toEqual(["illahe-active"]);
+    expect(searchProductIdentityCandidates({ query: "Illahe", includeInactive: true, limit: 20 }, [active, inactive]).map((match) => match.sourceId))
+      .toEqual(["illahe-active", "illahe-inactive"]);
+  });
+
   it("keeps active and inactive source records even when their normalized SKU is identical", () => {
     const base = {
       full_name: "Domaine Vacheron Sancerre Blanc 2024 6/750ml",
@@ -40,7 +55,7 @@ describe("product identity search", () => {
     const inactive = quickbooksItemRowToCandidate({ ...base, list_id: "qb-inactive", is_active: false });
 
     const matches = searchProductIdentityCandidates(
-      { query: "Vacheron Sancerre", limit: 20 },
+      { query: "Vacheron Sancerre", includeInactive: true, limit: 20 },
       dedupeProductIdentityCandidates([active, inactive])
     );
 
