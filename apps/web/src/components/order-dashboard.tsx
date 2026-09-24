@@ -951,7 +951,7 @@ export function OrderDashboard({
     });
   }
 
-  function saveCatalogWine(input: Parameters<typeof saveSupplierCatalogWine>[0]) {
+  function saveCatalogWine(input: Parameters<typeof saveSupplierCatalogWine>[0], onSuccess?: () => void) {
     setPendingMessage("Saving supplier wine...");
     setErrorMessage("");
 
@@ -967,6 +967,7 @@ export function OrderDashboard({
             replaceSupplierCatalogWineInWorkbench(currentRows, result.saved, reportRun.id)
           );
         }
+        onSuccess?.();
         router.refresh();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save supplier wine.");

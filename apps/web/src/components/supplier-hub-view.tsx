@@ -111,7 +111,7 @@ export function SupplierHubView({
   isPending: boolean;
   onCreateWineRequest: (input: CreateWineRequestInput) => void;
   onDeleteCatalogWine: (input: DeleteCatalogWineInput) => void;
-  onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
+  onSaveCatalogWine: (input: SaveCatalogWineInput, onSuccess?: () => void) => void;
   onSaveSuppliers: (suppliers: SupplierLogistics[]) => void;
   onUpdateWineRequestApproval: (input: UpdateWineRequestApprovalInput) => void;
 }) {
@@ -230,7 +230,7 @@ function AddWinePanel({
   isPending: boolean;
   editWine: SupplierCatalogWine | null;
   onClearPendingEdit: () => void;
-  onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
+  onSaveCatalogWine: (input: SaveCatalogWineInput, onSuccess?: () => void) => void;
 }) {
   const [supplierId, setSupplierId] = useState("");
   const [supplierName, setSupplierName] = useState("");
@@ -246,8 +246,6 @@ function AddWinePanel({
   const [pricingModel, setPricingModel] = useState<"standard" | "grw_broker">("standard");
   const [frontlineOnly, setFrontlineOnly] = useState(false);
   const [laidInPerBottle, setLaidInPerBottle] = useState("");
-  const [fobSourceDate, setFobSourceDate] = useState("");
-  const [laidInSourceDate, setLaidInSourceDate] = useState("");
   const [systemTags, setSystemTags] = useState<string[]>([]);
   const [quickbooksItemId, setQuickbooksItemId] = useState("");
   const [quickbooksItemName, setQuickbooksItemName] = useState("");
@@ -411,8 +409,6 @@ function AddWinePanel({
     setLaidInPerBottle(selectedSupplier
       ? String(defaultLaidInForSupplier(suppliers, selectedSupplier.id, selectedSupplier.name))
       : "");
-    setFobSourceDate(wine.fob_source_date || "");
-    setLaidInSourceDate(wine.laid_in_source_date || "");
     setSystemTags(wine.system_tags || []);
     const shouldLinkQuickBooks = options.linkQuickBooks ?? wine.source_system === "quickbooks_item";
     setQuickbooksItemId(shouldLinkQuickBooks ? wine.quickbooks_item_id || wine.quickbooks_item_number || "" : "");
@@ -452,8 +448,6 @@ function AddWinePanel({
     setPricingBasis("bottle");
     setPricingModel("standard");
     setFrontlineOnly(false);
-    setFobSourceDate("");
-    setLaidInSourceDate("");
     setSystemTags([]);
     setQuickbooksItemId("");
     setQuickbooksItemName("");
@@ -491,8 +485,6 @@ function AddWinePanel({
     setPricingModel("standard");
     setFrontlineOnly(false);
     setLaidInPerBottle("");
-    setFobSourceDate("");
-    setLaidInSourceDate("");
     setSystemTags([]);
     setQuickbooksItemId("");
     setQuickbooksItemName("");
@@ -598,8 +590,6 @@ function AddWinePanel({
     pricingBasis,
     pricingModel,
     frontlineOnly,
-    fobSourceDate: fobSourceDate || null,
-    laidInSourceDate: laidInSourceDate || null,
     priorPricingCostFingerprint: templateWine?.pricing_cost_fingerprint || null,
     pricingCalculatedAt: templateWine?.pricing_calculated_at || null,
     expectedLockVersion: pendingEditId ? asNumber(editWine?.lock_version) : 0
@@ -660,13 +650,16 @@ function AddWinePanel({
   function saveWine(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder) return;
-    onSaveCatalogWine({
-      ...draftInput,
-      existingCatalogWineId: pendingEditId,
-      expectedLockVersion: asNumber((pendingEditId ? editWine : existing)?.lock_version),
-      priceChangeReason,
-      idempotencyKey: crypto.randomUUID()
-    });
+    onSaveCatalogWine(
+      {
+        ...draftInput,
+        existingCatalogWineId: pendingEditId,
+        expectedLockVersion: asNumber((pendingEditId ? editWine : existing)?.lock_version),
+        priceChangeReason,
+        idempotencyKey: crypto.randomUUID()
+      },
+      clearForm
+    );
   }
 
   return (
@@ -866,14 +859,6 @@ function AddWinePanel({
         <label className="check-control">
           <input type="checkbox" checked={frontlineOnly} onChange={(event) => setFrontlineOnly(event.target.checked)} />
           Frontline-only pricing
-        </label>
-        <label>
-          FOB source date
-          <input type="date" value={fobSourceDate} onChange={(event) => setFobSourceDate(event.target.value)} />
-        </label>
-        <label>
-          Laid-in source date
-          <input type="date" value={laidInSourceDate} onChange={(event) => setLaidInSourceDate(event.target.value)} />
         </label>
         <label>
           QB Item #

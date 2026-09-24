@@ -584,8 +584,6 @@ export async function saveSupplierCatalogWine(input: {
   priceChangeReason?: string;
   pricingBasis?: "bottle" | "case";
   pricingModel?: "standard" | "grw_broker";
-  fobSourceDate?: string | null;
-  laidInSourceDate?: string | null;
   priorPricingCostFingerprint?: string | null;
   pricingCalculatedAt?: string | null;
   frontlineOnly?: boolean;
@@ -687,8 +685,6 @@ export async function saveSupplierCatalogWine(input: {
     priceChangeReason: input.priceChangeReason,
     pricingBasis,
     pricingModel: input.pricingModel,
-    fobSourceDate: input.fobSourceDate,
-    laidInSourceDate: input.laidInSourceDate,
     priorPricingCostFingerprint: input.priorPricingCostFingerprint,
     pricingCalculatedAt: input.pricingCalculatedAt,
     frontlineOnly: Boolean(input.frontlineOnly),

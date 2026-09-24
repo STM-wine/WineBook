@@ -10,6 +10,10 @@ const actionPath = path.resolve(process.cwd(), "src/app/actions.ts");
 const addWineViewPath = path.resolve(process.cwd(), "src/components/supplier-hub-view.tsx");
 const globalStylesPath = path.resolve(process.cwd(), "src/app/globals.css");
 const matchRoutePath = path.resolve(process.cwd(), "src/app/api/supplier-wines/matches/route.ts");
+const automaticSourceDatesMigrationPath = path.resolve(
+  process.cwd(),
+  "../../supabase/migrations/20260924233000_supplier_catalog_automatic_source_dates.sql"
+);
 
 describe("Add Wine database safety contract", () => {
   it("uses one versioned and idempotent transaction for the entire save", async () => {
@@ -71,5 +75,22 @@ describe("Add Wine search and price-level UI", () => {
     expect(view).not.toContain("Link QB");
     expect(styles).toMatch(/\.catalog-match-suggestions\s*\{[\s\S]*?position:\s*absolute;/);
     expect(styles).toMatch(/\.catalog-match-results\s*\{[\s\S]*?max-height:\s*332px;[\s\S]*?overflow-y:\s*auto;/);
+  });
+
+  it("keeps source dates backend-owned and clears the form only after a successful save", async () => {
+    const [view, action, sql] = await Promise.all([
+      readFile(addWineViewPath, "utf8"),
+      readFile(actionPath, "utf8"),
+      readFile(automaticSourceDatesMigrationPath, "utf8")
+    ]);
+
+    expect(view).not.toContain("FOB source date");
+    expect(view).not.toContain("Laid-in source date");
+    expect(view).toContain("clearForm");
+    expect(action).not.toContain("fobSourceDate: input.fobSourceDate");
+    expect(action).not.toContain("laidInSourceDate: input.laidInSourceDate");
+    expect(sql).toContain("America/Phoenix");
+    expect(sql).toContain("old.fob_source_date");
+    expect(sql).toContain("old.laid_in_source_date");
   });
 });

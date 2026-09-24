@@ -104,7 +104,7 @@ export function OrderReviewView({
   onSetSupplierTargetWeeks: (supplierName: string, value: string) => void;
   onSetGlobalTargetWeeks: (value: string) => void;
   onRestoreInactiveWine: (listId: string) => void;
-  onSaveCatalogWine: (input: SaveCatalogWineInput) => void;
+  onSaveCatalogWine: (input: SaveCatalogWineInput, onSuccess?: () => void) => void;
   onDeleteCatalogWine: (input: { id: string }) => void;
   onAddWine: (supplierName: string) => void;
   onSaveReplenishmentPolicy: (
@@ -274,10 +274,7 @@ export function OrderReviewView({
           wine={editingWine}
           isPending={isPending}
           onClose={() => setEditingWine(null)}
-          onSave={(input) => {
-            onSaveCatalogWine(input);
-            setEditingWine(null);
-          }}
+          onSave={(input) => onSaveCatalogWine(input, () => setEditingWine(null))}
         />
       ) : null}
       {editingReplenishment ? (

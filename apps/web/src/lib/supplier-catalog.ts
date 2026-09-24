@@ -718,15 +718,7 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
   const pricingCostFingerprint = [pricing.packSize, pricing.fobBottle.toFixed(2), pricing.laidInPerBottle.toFixed(2)].join("|");
   const costFreshnessWarnings = [
     pricing.fobBottle <= 0 ? "FOB cost is missing." : "",
-    !input.fobSourceDate ? "FOB source date is missing." : "",
-    !input.laidInSourceDate ? "Laid-in source date is missing." : "",
     pricing.laidInPerBottle === 0 ? "Laid-in cost is zero; confirm that no freight applies." : "",
-    input.pricingCalculatedAt && input.fobSourceDate && input.fobSourceDate > input.pricingCalculatedAt.slice(0, 10)
-      ? "FOB source is newer than the saved pricing calculation."
-      : "",
-    input.pricingCalculatedAt && input.laidInSourceDate && input.laidInSourceDate > input.pricingCalculatedAt.slice(0, 10)
-      ? "Laid-in source is newer than the saved pricing calculation."
-      : "",
     input.priorPricingCostFingerprint && input.priorPricingCostFingerprint !== pricingCostFingerprint
       ? "Cost changed after the saved pricing was calculated. Review the proposed prices before saving."
       : ""
