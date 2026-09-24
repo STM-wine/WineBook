@@ -12,6 +12,10 @@ const poExportRoutePath = path.resolve(
   process.cwd(),
   "src/app/api/po-drafts/export/route.ts"
 );
+const poLineNotesMigrationPath = path.resolve(
+  process.cwd(),
+  "../../supabase/migrations/20260924100000_po_draft_line_collaboration_notes.sql"
+);
 
 describe("multi-buyer database safety contract", () => {
   it("requires versioned, atomic approval writes", async () => {
@@ -90,5 +94,23 @@ describe("server CSV export", () => {
     expect(csv).toContain("Supplier,Producer,Wine,Code");
     expect(csv).toContain("North Berkeley,Domaine Test,Test Wine 2025 12/750ml,TEST1");
     expect(csv).toContain(",24,10.00,1.0000,240.00,24.00,264.00");
+  });
+});
+
+describe("PO line collaboration notes", () => {
+  it("keeps notes append-only, attributed, and tied to stable line identity", async () => {
+    const sql = await readFile(poLineNotesMigrationPath, "utf8");
+    expect(sql).toContain("create table if not exists public.purchase_order_line_notes");
+    expect(sql).toContain("line_key text not null");
+    expect(sql).toContain("created_by uuid not null");
+    expect(sql).toContain("trg_po_line_notes_immutable");
+    expect(sql).toContain("create or replace function public.add_purchase_order_line_note");
+    expect(sql).toContain("v_line.source_type || ':' || v_line.source_id::text");
+  });
+
+  it("keeps internal notes outside immutable supplier export snapshots", async () => {
+    const route = await readFile(poExportRoutePath, "utf8");
+    expect(route).not.toContain("purchase_order_line_notes");
+    expect(route).not.toContain("line_notes:");
   });
 });

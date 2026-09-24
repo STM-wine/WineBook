@@ -34,6 +34,7 @@ import {
 } from "@/lib/quickbooks-item-fields";
 import type {
   ApprovalSaveResult,
+  PurchaseOrderLineNote,
   QuickBooksVendorClassification,
   SupplierCatalogWine,
   WineRequest
@@ -299,6 +300,26 @@ export async function cancelPurchaseOrderDrafts(input: { ids: string[] }) {
   revalidateDashboardData();
   revalidatePath("/");
   return { cancelled: results.length };
+}
+
+export async function addPurchaseOrderLineNote(input: { lineId: string; body: string }): Promise<PurchaseOrderLineNote> {
+  const lineId = input.lineId?.trim();
+  const body = input.body?.trim();
+  if (!lineId) throw new Error("Missing PO line id.");
+  if (!body) throw new Error("Write a note before saving.");
+  if (body.length > 2000) throw new Error("PO line notes are limited to 2,000 characters.");
+
+  const { supabase } = await requireWriteAccess();
+  const { data, error } = await supabase.rpc("add_purchase_order_line_note", {
+    p_line_id: lineId,
+    p_body: body
+  });
+  if (error) throw new Error(error.message);
+
+  const note = (Array.isArray(data) ? data[0] : data) as PurchaseOrderLineNote | null;
+  if (!note?.id) throw new Error("The note was not saved.");
+  revalidateDashboardData();
+  return note;
 }
 
 export async function deletePurchaseOrderLine(input: { id: string; draftId: string }) {

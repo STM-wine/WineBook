@@ -18,6 +18,7 @@ import type {
   ApprovalEvent,
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
+  PurchaseOrderLineNote,
   Recommendation,
   ReportRun,
   SupplierCatalogWine,
@@ -352,6 +353,15 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     .order("created_at", { ascending: false })
     .returns<PurchaseOrderDraftWithLines[]>();
 
+  const poLineNotesPromise = fetchAllExact<PurchaseOrderLineNote>("PO line collaboration notes", (from, to) => serviceRoleSupabase
+    .from("purchase_order_line_notes")
+    .select("id,report_run_id,purchase_order_draft_id,line_key,product_code_snapshot,product_name_snapshot,body,created_by,created_at", { count: "exact" })
+    .eq("report_run_id", latestRun.id)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
+    .range(from, to)
+    .returns<PurchaseOrderLineNote[]>() as never);
+
   const suppliersPromise = serviceRoleSupabase
     .from("suppliers")
     .select(`
@@ -384,7 +394,8 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     quickBooksSupplierMatches,
     quickBooksOnOrderItems,
     currentSourceOverlayResult,
-    { data: approvalCommitments }
+    { data: approvalCommitments },
+    poLineNotes
   ] = await Promise.all([
     reportRecommendationsPromise,
     approvalEventsPromise,
@@ -394,8 +405,19 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     fetchQuickBooksSupplierMatches(serviceRoleSupabase),
     quickBooksOnOrderItemsPromise,
     currentSourceOverlayPromise,
-    approvalCommitmentsPromise
+    approvalCommitmentsPromise,
+    poLineNotesPromise
   ]);
+  const lineNotesByDraft = new Map<string, PurchaseOrderLineNote[]>();
+  for (const note of poLineNotes) {
+    const group = lineNotesByDraft.get(note.purchase_order_draft_id);
+    if (group) group.push(note);
+    else lineNotesByDraft.set(note.purchase_order_draft_id, [note]);
+  }
+  const draftsWithLineNotes = (poDraftRows || []).map((draft) => ({
+    ...draft,
+    line_notes: lineNotesByDraft.get(draft.id) || []
+  }));
   const sourceRecommendations = currentSourceOverlayResult.rows
     ? overlayCurrentSourceRows(reportRecommendations || [], currentSourceOverlayResult.rows)
     : vinosmithAvailabilityResult.data
@@ -439,7 +461,7 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
       profile.full_name?.trim() || profile.email
     ])),
     approvalCommitments: approvalCommitments || [],
-    poDraftRows: poDraftRows || [],
+    poDraftRows: draftsWithLineNotes,
     suppliers: suppliers || [],
     supplierCatalogWines: supplierCatalogWines || [],
     wineRequests: wineRequests || [],

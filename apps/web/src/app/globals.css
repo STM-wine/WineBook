@@ -2506,12 +2506,139 @@ th:nth-child(12) .table-sort-button {
 }
 
 .po-lines-shell table {
-  min-width: 1280px;
+  min-width: 1480px;
 }
 
 .po-lines-shell th,
 .po-lines-shell td {
   vertical-align: middle;
+}
+
+.po-line-note-cell {
+  display: grid;
+  gap: 5px;
+  min-width: 150px;
+  max-width: 220px;
+}
+
+.po-line-note-button {
+  border: 1px solid #b7c6b8;
+  border-radius: 8px;
+  color: var(--green);
+  font-size: 12px;
+  justify-self: start;
+  padding: 8px 10px;
+}
+
+.po-line-note-cell small {
+  color: var(--muted);
+  display: -webkit-box;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.po-line-notes-dialog {
+  max-width: 680px;
+}
+
+.po-line-notes-internal-callout {
+  background: #f4f7f1;
+  border: 1px solid #cbd8c8;
+  border-radius: 8px;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 750;
+  margin: 18px 0;
+  padding: 11px 12px;
+}
+
+.po-line-notes-thread {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.po-line-note {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.po-line-note > div {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  justify-content: space-between;
+}
+
+.po-line-note strong {
+  font-size: 13px;
+}
+
+.po-line-note time {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.po-line-note p {
+  line-height: 1.45;
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.po-line-note-form {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.po-line-note-form label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.po-line-note-form textarea {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  line-height: 1.45;
+  padding: 11px 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+.po-line-note-form-footer {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.po-line-note-form-footer small {
+  color: var(--muted);
+}
+
+.po-line-note-form .form-error {
+  color: #9a4038;
+  font-size: 12px;
+  font-weight: 750;
+  margin: 0;
 }
 
 .remove-line-button {

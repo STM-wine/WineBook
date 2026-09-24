@@ -87,6 +87,15 @@ export function poDraftSupplierLabel(draft: Pick<PurchaseOrderDraftWithLines, "s
   return path === "di" ? `${supplier} - DI` : supplier;
 }
 
+export function poLineCollaborationKey(line: PurchaseOrderLine) {
+  if (line.source_type && line.source_id) return `${line.source_type}:${line.source_id}`;
+  if (line.supplier_catalog_wine_id) return `catalog_wine:${line.supplier_catalog_wine_id}`;
+  if (line.recommendation_id) return `recommendation:${line.recommendation_id}`;
+  if (line.product_code?.trim()) return `code:${line.product_code.trim().toLowerCase()}`;
+  if (line.planning_sku?.trim()) return `sku:${line.planning_sku.trim().toLowerCase()}`;
+  return `line:${line.id}`;
+}
+
 export function supplierLogisticsLookup(suppliers: SupplierLogistics[] = []) {
   return new Map(suppliers.map((supplier) => [supplierKey(supplier.name), supplier]));
 }

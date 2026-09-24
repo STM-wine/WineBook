@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { PurchaseOrderDraftWithLines, SupplierLogistics } from "@/lib/types";
-import { formatAuditTimestamp, poDraftAuditTrail } from "@/lib/audit-trail";
+import type { PurchaseOrderDraftWithLines, PurchaseOrderLine, PurchaseOrderLineNote, SupplierLogistics } from "@/lib/types";
+import { auditActorName, formatAuditTimestamp, poDraftAuditTrail } from "@/lib/audit-trail";
 import { asNumber, formatCurrency, formatCurrencyCents, formatInteger } from "@/lib/order-data";
 import { isActivePoStatus } from "@/lib/po-status";
 import {
   poDraftOrderPath,
+  poLineCollaborationKey,
   poLineCosts,
   poOrderPathLabel,
   supplierLaidInForDraft,
@@ -18,6 +19,7 @@ export function PoDraftsView({
   reportRunId,
   suppliers,
   auditActorNames,
+  onAddLineNote,
   onCancelDrafts,
   onDeleteLine,
   onStatusChange
@@ -27,6 +29,7 @@ export function PoDraftsView({
   reportRunId: string;
   suppliers: SupplierLogistics[];
   auditActorNames: Record<string, string>;
+  onAddLineNote: (lineId: string, body: string) => Promise<void>;
   onCancelDrafts: (draftIds: string[]) => void;
   onDeleteLine: (lineId: string, draftId: string) => void;
   onStatusChange: (draftId: string, status: string) => void;
@@ -37,6 +40,7 @@ export function PoDraftsView({
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
   const [exportStatus, setExportStatus] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [noteTarget, setNoteTarget] = useState<{ draftId: string; lineKey: string } | null>(null);
   const supplierMetadata = useMemo(() => supplierLogisticsLookup(suppliers), [suppliers]);
   const draftSummaries = useMemo(() => drafts.map((draft) => {
     const lines = draft.lines || [];
@@ -97,6 +101,8 @@ export function PoDraftsView({
   const allFilteredSelected =
     filteredSelectableDraftIds.length > 0 && filteredSelectableDraftIds.every((id) => selectedDraftIds.has(id));
   const selectedCount = selectedExportableDrafts.length;
+  const noteDraft = noteTarget ? drafts.find((draft) => draft.id === noteTarget.draftId) : undefined;
+  const noteLine = (noteDraft?.lines || []).find((line) => poLineCollaborationKey(line) === noteTarget?.lineKey);
 
   useEffect(() => {
     setSelectedDraftIds((current) => {
@@ -179,6 +185,7 @@ export function PoDraftsView({
   }
 
   return (
+    <>
     <section className="panel po-panel" id="po-drafts">
       <div className="section-heading">
         <div>
@@ -353,6 +360,7 @@ export function PoDraftsView({
                 disabled={isPending}
                 fallbackLaidInPerBottle={supplierLaidInForDraft(draft, supplierMetadata)}
                 onDeleteLine={onDeleteLine}
+                onOpenNotes={(line) => setNoteTarget({ draftId: draft.id, lineKey: poLineCollaborationKey(line) })}
               />
             </details>
             );
@@ -361,6 +369,16 @@ export function PoDraftsView({
         </div>
       )}
     </section>
+    {noteDraft && noteLine ? (
+      <PoLineNotesDialog
+        actorNames={auditActorNames}
+        draft={noteDraft}
+        line={noteLine}
+        onClose={() => setNoteTarget(null)}
+        onSave={onAddLineNote}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -385,12 +403,14 @@ function PoDraftLinesTable({
   draft,
   disabled,
   fallbackLaidInPerBottle,
-  onDeleteLine
+  onDeleteLine,
+  onOpenNotes
 }: {
   draft: PurchaseOrderDraftWithLines;
   disabled: boolean;
   fallbackLaidInPerBottle: number;
   onDeleteLine: (lineId: string, draftId: string) => void;
+  onOpenNotes: (line: PurchaseOrderLine) => void;
 }) {
   return (
     <div className="table-shell po-lines-shell">
@@ -406,12 +426,18 @@ function PoDraftLinesTable({
             <th>Total Wine Cost</th>
             <th>Total Laid In Cost</th>
             <th>Estimated Cost</th>
+            <th>Internal Notes</th>
             <th>Remove</th>
           </tr>
         </thead>
         <tbody>
           {(draft.lines || []).map((line) => {
             const { qty, fob, laidIn, wineCost, laidInCost, estimatedCost } = poLineCosts(line, fallbackLaidInPerBottle);
+            const lineKey = poLineCollaborationKey(line);
+            const notes = (draft.line_notes || [])
+              .filter((note) => note.line_key === lineKey)
+              .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id));
+            const latestNote = notes[notes.length - 1];
 
             return (
               <tr className={line.is_new_item ? "new-item-row" : undefined} key={line.id}>
@@ -428,6 +454,14 @@ function PoDraftLinesTable({
                 <td>{formatCurrency(laidInCost)}</td>
                 <td>{formatCurrency(estimatedCost)}</td>
                 <td>
+                  <div className="po-line-note-cell">
+                    <button className="ghost-button po-line-note-button" onClick={() => onOpenNotes(line)} type="button">
+                      {notes.length > 0 ? `Notes (${formatInteger(notes.length)})` : "Add Note"}
+                    </button>
+                    {latestNote ? <small title={latestNote.body}>{latestNote.body}</small> : null}
+                  </div>
+                </td>
+                <td>
                   <button
                     className="ghost-button remove-line-button"
                     disabled={disabled}
@@ -442,6 +476,112 @@ function PoDraftLinesTable({
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function PoLineNotesDialog({
+  actorNames,
+  draft,
+  line,
+  onClose,
+  onSave
+}: {
+  actorNames: Record<string, string>;
+  draft: PurchaseOrderDraftWithLines;
+  line: PurchaseOrderLine;
+  onClose: () => void;
+  onSave: (lineId: string, body: string) => Promise<void>;
+}) {
+  const [body, setBody] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const lineKey = poLineCollaborationKey(line);
+  const notes = useMemo(
+    () => (draft.line_notes || [])
+      .filter((note) => note.line_key === lineKey)
+      .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id)),
+    [draft.line_notes, lineKey]
+  );
+  const canAddNote = isActivePoStatus(draft.status);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !saving) onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, saving]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const note = body.trim();
+    if (!note) {
+      setError("Write a note before saving.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(line.id, note);
+      setBody("");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save the SKU note.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="new-item-edit-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
+      <div className="new-item-edit-dialog po-line-notes-dialog" role="dialog" aria-modal="true" aria-labelledby="po-line-notes-title">
+        <div className="new-item-edit-header">
+          <div>
+            <p className="eyebrow">Internal collaboration</p>
+            <h2 id="po-line-notes-title">SKU Notes</h2>
+            <p>{line.product_name || "Unnamed wine"} · {line.product_code || line.planning_sku || "No item number"}</p>
+          </div>
+          <button aria-label="Close SKU notes" className="ghost-button" disabled={saving} onClick={onClose} type="button">Close</button>
+        </div>
+
+        <p className="po-line-notes-internal-callout">Internal only. Notes are permanent and attributed; they are never included in supplier XLSX or CSV exports.</p>
+
+        <div className="po-line-notes-thread" aria-live="polite">
+          {notes.length > 0 ? notes.map((note: PurchaseOrderLineNote) => (
+            <article className="po-line-note" key={note.id}>
+              <div>
+                <strong>{auditActorName(note.created_by, actorNames)}</strong>
+                <time dateTime={note.created_at}>{formatAuditTimestamp(note.created_at)}</time>
+              </div>
+              <p>{note.body}</p>
+            </article>
+          )) : <p className="muted">No internal notes for this SKU yet.</p>}
+        </div>
+
+        {canAddNote ? (
+          <form className="po-line-note-form" onSubmit={submit}>
+            <label htmlFor="po-line-note-body">Add a note</label>
+            <textarea
+              autoFocus
+              id="po-line-note-body"
+              maxLength={2000}
+              onChange={(event) => setBody(event.target.value)}
+              placeholder="Add context for the other buyers or AP..."
+              rows={4}
+              value={body}
+            />
+            <div className="po-line-note-form-footer">
+              <small>{body.length.toLocaleString()} / 2,000</small>
+              <button className="button button-small" disabled={saving || !body.trim()} type="submit">
+                {saving ? "Saving..." : "Add Note"}
+              </button>
+            </div>
+            {error ? <p className="form-error" role="alert">{error}</p> : null}
+          </form>
+        ) : (
+          <p className="muted">This PO draft is complete. Its collaboration notes are read-only.</p>
+        )}
+      </div>
     </div>
   );
 }

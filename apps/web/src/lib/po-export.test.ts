@@ -1,7 +1,8 @@
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
+import { poCsvBuffer } from "./po-csv-export";
 import { poTemplateXlsxBuffer } from "./po-export";
-import { hydratePoLineProducers } from "./po-utils";
+import { hydratePoLineProducers, poLineCollaborationKey } from "./po-utils";
 import type { PurchaseOrderDraftWithLines } from "./types";
 
 function draft(): PurchaseOrderDraftWithLines {
@@ -16,6 +17,17 @@ function draft(): PurchaseOrderDraftWithLines {
     notes: "Order path: Stateside.",
     created_at: "2026-09-14T00:00:00Z",
     updated_at: "2026-09-14T00:00:00Z",
+    line_notes: [{
+      id: "note-1",
+      report_run_id: "run-1",
+      purchase_order_draft_id: "draft-1",
+      line_key: "recommendation:recommendation-1",
+      product_code_snapshot: "BI00001",
+      product_name_snapshot: "Sancerre Blanc 2025 6/750ml",
+      body: "INTERNAL ONLY: Bethany is confirming allocation.",
+      created_by: "buyer-1",
+      created_at: "2026-09-14T01:00:00Z"
+    }],
     lines: [{
       id: "line-1",
       purchase_order_draft_id: "draft-1",
@@ -41,6 +53,15 @@ function draft(): PurchaseOrderDraftWithLines {
 }
 
 describe("PO workbook export", () => {
+  it("uses a stable approval identity for collaboration notes across draft revisions", () => {
+    const line = draft().lines[0];
+    line.source_type = "recommendation";
+    line.source_id = "recommendation-1";
+
+    expect(poLineCollaborationKey(line)).toBe("recommendation:recommendation-1");
+    expect(poLineCollaborationKey({ ...line, id: "replacement-line-id" })).toBe("recommendation:recommendation-1");
+  });
+
   it("uses complete Vinosmith producer names instead of guessing the first word", () => {
     const vacheron = draft();
     vacheron.lines[0].producer_name = null;
@@ -76,5 +97,10 @@ describe("PO workbook export", () => {
 
     expect(sheet.getCell("H4").value).toBe(38);
     expect(sheet.getCell("I4").value).toBe(36);
+    expect(JSON.stringify(sheet.getSheetValues())).not.toContain("Bethany is confirming allocation");
+  });
+
+  it("never includes internal collaboration notes in CSV exports", () => {
+    expect(poCsvBuffer([draft()]).toString("utf8")).not.toContain("Bethany is confirming allocation");
   });
 });

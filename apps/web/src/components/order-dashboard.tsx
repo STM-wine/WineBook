@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
+  addPurchaseOrderLineNote,
   cancelPurchaseOrderDrafts,
   createSupplierWineRequest,
   deletePendingSupplierCatalogWine,
@@ -22,6 +23,7 @@ import type {
   ApprovalEvent,
   PriceChangeEvent,
   PurchaseOrderDraftWithLines,
+  PurchaseOrderLineNote,
   Recommendation,
   ReportRun,
   SupplierCatalogWine,
@@ -343,6 +345,19 @@ export function OrderDashboard({
         () => scheduleDraftRefresh()
       )
       .on("postgres_changes", { event: "*", schema: "public", table: "purchase_order_lines" }, () => scheduleDraftRefresh())
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "purchase_order_line_notes", filter: `report_run_id=eq.${reportRun.id}` },
+        (payload) => {
+          const note = payload.new as PurchaseOrderLineNote;
+          setDraftRows((current) => current.map((draft) => {
+            if (draft.id !== note.purchase_order_draft_id) return draft;
+            const existing = draft.line_notes || [];
+            if (existing.some((candidate) => candidate.id === note.id)) return draft;
+            return { ...draft, line_notes: [...existing, note] };
+          }));
+        }
+      )
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "purchase_order_export_events", filter: `report_run_id=eq.${reportRun.id}` },
@@ -878,6 +893,29 @@ export function OrderDashboard({
     });
   }
 
+  async function addDraftLineNote(lineId: string, body: string) {
+    setPendingMessage("Saving internal SKU note...");
+    setErrorMessage("");
+    beginDraftMutation();
+    try {
+      const note = await addPurchaseOrderLineNote({ lineId, body });
+      setDraftRows((current) => current.map((draft) => {
+        if (draft.id !== note.purchase_order_draft_id) return draft;
+        const existing = draft.line_notes || [];
+        if (existing.some((candidate) => candidate.id === note.id)) return draft;
+        return { ...draft, line_notes: [...existing, note] };
+      }));
+      setPendingMessage("Internal SKU note saved.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save the SKU note.";
+      setErrorMessage(message);
+      setPendingMessage("");
+      throw error;
+    } finally {
+      finishDraftMutation(false);
+    }
+  }
+
   function saveSuppliers(updatedSuppliers: SupplierLogistics[]) {
     setPendingMessage(`Saving ${updatedSuppliers.length.toLocaleString()} supplier logistics change(s)...`);
     setErrorMessage("");
@@ -1086,6 +1124,7 @@ export function OrderDashboard({
           reportRunId={reportRun.id}
           suppliers={suppliers}
           auditActorNames={auditActorNames}
+          onAddLineNote={addDraftLineNote}
           onCancelDrafts={cancelDrafts}
           onDeleteLine={removeDraftLine}
           onStatusChange={changeDraftStatus}

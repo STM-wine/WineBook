@@ -387,8 +387,21 @@ export type PurchaseOrderLine = {
   source_lock_version?: number | string | null;
 };
 
+export type PurchaseOrderLineNote = {
+  id: string;
+  report_run_id: string;
+  purchase_order_draft_id: string;
+  line_key: string;
+  product_code_snapshot: string | null;
+  product_name_snapshot: string | null;
+  body: string;
+  created_by: string;
+  created_at: string;
+};
+
 export type PurchaseOrderDraftWithLines = PurchaseOrderDraft & {
   lines: PurchaseOrderLine[];
+  line_notes?: PurchaseOrderLineNote[];
   revisions?: PurchaseOrderDraftRevision[];
 };
 

@@ -5,13 +5,14 @@ import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from
 import { CACHE_TAGS } from "@/lib/cache-tags";
 import { applyVinosmithAvailability, asNumber, formatInteger, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { fetchAllRecommendationsForRun, fetchQuickBooksOnOrderItems } from "@/lib/supabase/recommendations";
+import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchLiveVinosmithAvailability } from "@/lib/supabase/vinosmith-availability";
 import { fetchSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
 import { isSourceBackedRun, overlayCurrentSourceRows, type OrderingRun } from "@/lib/source-backed-ordering-runs";
 import { buildOrderingDraftSourceSnapshot, buildOrderingLineSourceSnapshot } from "@/lib/po-source-snapshot";
-import type { ApprovalConflict, PurchaseOrderDraftWithLines, Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
+import type { ApprovalConflict, PurchaseOrderDraftWithLines, PurchaseOrderLineNote, Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 
@@ -69,7 +70,7 @@ async function loadDrafts(
   supabase: Awaited<ReturnType<typeof createClient>>,
   reportRunId: string
 ) {
-  return supabase
+  const draftsPromise = supabase
     .from("purchase_order_drafts")
     .select(`
       id, report_run_id, ordering_source, source_snapshot, supplier_name, order_path,
@@ -89,6 +90,29 @@ async function loadDrafts(
     .eq("report_run_id", reportRunId)
     .order("created_at", { ascending: false })
     .returns<PurchaseOrderDraftWithLines[]>();
+  const notesPromise = fetchAllExact<PurchaseOrderLineNote>("PO line collaboration notes", (from, to) => supabase
+    .from("purchase_order_line_notes")
+    .select("id,report_run_id,purchase_order_draft_id,line_key,product_code_snapshot,product_name_snapshot,body,created_by,created_at", { count: "exact" })
+    .eq("report_run_id", reportRunId)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true })
+    .range(from, to)
+    .returns<PurchaseOrderLineNote[]>() as never);
+  const [draftResult, notes] = await Promise.all([draftsPromise, notesPromise]);
+  if (draftResult.error) return draftResult;
+  const notesByDraft = new Map<string, PurchaseOrderLineNote[]>();
+  for (const note of notes) {
+    const group = notesByDraft.get(note.purchase_order_draft_id);
+    if (group) group.push(note);
+    else notesByDraft.set(note.purchase_order_draft_id, [note]);
+  }
+  return {
+    ...draftResult,
+    data: (draftResult.data || []).map((draft) => ({
+      ...draft,
+      line_notes: notesByDraft.get(draft.id) || []
+    }))
+  };
 }
 
 export async function POST(request: Request) {
