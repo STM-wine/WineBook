@@ -38,6 +38,28 @@ Manual RB6/RADs upload is no longer part of the default app surface. For reruns 
 
 `Importer` is Vinosmith terminology. In user-facing workflow and business language, use `Supplier`.
 
+## Multi-user Ordering Safety
+
+WineBook is a shared ordering system: multiple buyers can review approvals,
+revise PO drafts, export files, and add internal SKU notes at the same time.
+Before changing any of those workflows, read
+[`docs/multi-buyer-ordering-architecture.md`](docs/multi-buyer-ordering-architecture.md).
+It defines the database transaction boundary, optimistic concurrency contract,
+idempotency rules, immutable audit history, realtime behavior, security
+boundary, internal-note rules, and required regression tests.
+
+Also use:
+
+- [`docs/multi-buyer-concurrency-test.md`](docs/multi-buyer-concurrency-test.md)
+  for two-buyer validation.
+- [`docs/multi-buyer-safety-deployment.md`](docs/multi-buyer-safety-deployment.md)
+  for the original rollout constraints and recovery guidance.
+
+Do not add direct browser or server writes to guarded approval/PO tables. Shared
+writes must continue through the reviewed database functions so stale sessions,
+retries, and simultaneous buyers cannot overwrite or duplicate one another's
+work.
+
 ## Repo Structure
 
 ```text
@@ -53,6 +75,9 @@ WineBook/
 │   └── po_draft_template_stm.xlsx  # Excel PO draft template
 ├── components/supplier_catalog/   # Supplier Hub Streamlit module
 ├── docs/
+│   ├── multi-buyer-ordering-architecture.md
+│   ├── multi-buyer-concurrency-test.md
+│   ├── multi-buyer-safety-deployment.md
 │   ├── product_architecture.md
 │   ├── supabase_setup.md
 │   └── next_steps.md
