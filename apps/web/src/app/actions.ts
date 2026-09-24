@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash, randomUUID } from "node:crypto";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { CACHE_TAGS } from "@/lib/cache-tags";
 import { asNumber } from "@/lib/order-data";
@@ -15,7 +16,6 @@ import {
   buildOrderingWorkflowPayload,
   buildSupplierCatalogWine,
   decisionToRequestStatus,
-  detectPriceChange,
   hasOfficialQuickBooksProduct,
   MINIMUM_GP_MARGIN,
   type ApprovalDecision,
@@ -565,6 +565,7 @@ export async function saveSupplierCatalogWine(input: {
     finalApprovedPrice?: number | null;
     finalApprovedDa?: number | null;
     finalGpMargin?: number | null;
+    isManualOverride?: boolean;
   }>;
   freeGoods?: Array<{
     id?: string;
@@ -587,16 +588,27 @@ export async function saveSupplierCatalogWine(input: {
   laidInSourceDate?: string | null;
   priorPricingCostFingerprint?: string | null;
   pricingCalculatedAt?: string | null;
+  frontlineOnly?: boolean;
+  expectedLockVersion?: number | null;
+  idempotencyKey?: string | null;
 }) {
   if (!input.producer.trim()) {
     throw new Error("Producer is required.");
   }
   if (!input.wineName.trim()) {
-    throw new Error("Fantasy Name is required.");
+    throw new Error("Item Name is required.");
+  }
+  if (input.laidInPerBottle === null || input.laidInPerBottle === undefined) {
+    throw new Error("Laid-in per bottle is required before calculating pricing.");
   }
   const parsedPackSize = Number(input.packSize);
   if (!Number.isFinite(parsedPackSize) || parsedPackSize <= 0 || !Number.isInteger(parsedPackSize)) {
     throw new Error("Pack size is required and must be a positive whole number.");
+  }
+  const pricingBasis = input.pricingBasis || (Number(input.fobBottle || 0) > 0 ? "bottle" : "case");
+  const sourceFob = pricingBasis === "case" ? Number(input.fobCase || 0) : Number(input.fobBottle || 0);
+  if (!Number.isFinite(sourceFob) || sourceFob <= 0) {
+    throw new Error(`${pricingBasis === "case" ? "Case" : "Bottle"} FOB is required before calculating pricing.`);
   }
   for (const [label, value] of [
     ["Bottle FOB", input.fobBottle],
@@ -673,17 +685,25 @@ export async function saveSupplierCatalogWine(input: {
     availabilityStatus: availabilityStatus as AvailabilityStatus,
     conversionStatus: conversionStatus as ConversionStatus,
     priceChangeReason: input.priceChangeReason,
-    pricingBasis: input.pricingBasis,
+    pricingBasis,
     pricingModel: input.pricingModel,
     fobSourceDate: input.fobSourceDate,
     laidInSourceDate: input.laidInSourceDate,
     priorPricingCostFingerprint: input.priorPricingCostFingerprint,
-    pricingCalculatedAt: input.pricingCalculatedAt
+    pricingCalculatedAt: input.pricingCalculatedAt,
+    frontlineOnly: Boolean(input.frontlineOnly),
+    expectedLockVersion: input.expectedLockVersion
   });
   const lowGpLevels = (payload.price_levels || []).filter(
     (level) => level.active !== false && Number(level.bottle_price || 0) > 0 && Number(level.calculated_gp_margin || 0) < MINIMUM_GP_MARGIN
   );
   const frontlineLevel = (payload.price_levels || []).find((level) => level.is_frontline);
+  const bestLevel = input.frontlineOnly
+    ? null
+    : (payload.price_levels || []).find((level) => level.active !== false && level.is_best && Number(level.bottle_price || 0) > 0);
+  if (frontlineLevel && bestLevel && Number(frontlineLevel.bottle_price || 0) <= Number(bestLevel.bottle_price || 0)) {
+    throw new Error("Frontline must be higher than Best. Reset either level to the suggestion or enter a valid manual ladder.");
+  }
   const requiredOverrides = [
     ...lowGpLevels,
     ...(Number(payload.gross_profit_margin || 0) < MINIMUM_GP_MARGIN && frontlineLevel && !lowGpLevels.includes(frontlineLevel) ? [frontlineLevel] : [])
@@ -708,6 +728,7 @@ export async function saveSupplierCatalogWine(input: {
   const { price_levels: payloadPriceLevels, free_goods: payloadFreeGoods, ...payloadCatalog } = payload;
   const rpcPayload = {
     ...payloadCatalog,
+    price_change_reason: input.priceChangeReason || "Manual catalog update",
     ...(input.existingCatalogWineId ? { id: input.existingCatalogWineId } : {})
   };
   const priceLevels = (payloadPriceLevels || []).map((level) => ({
@@ -730,6 +751,7 @@ export async function saveSupplierCatalogWine(input: {
     final_approved_price: level.final_approved_price,
     final_approved_da: level.final_approved_da,
     final_gp_margin: level.final_gp_margin,
+    is_manual_override: Boolean(level.is_manual_override),
     override_reason: level.override_reason,
     approval_owner: level.approval_owner,
     decision_timestamp: level.approval_decision ? (level.decision_timestamp || new Date().toISOString()) : null
@@ -746,11 +768,17 @@ export async function saveSupplierCatalogWine(input: {
     extension_metadata: freeGood.extension_metadata || {}
   }));
 
-  const { data: saveResult, error: saveError } = await supabase.rpc("save_supplier_catalog_sku", {
+  const requestHash = createHash("sha256")
+    .update(JSON.stringify({ catalog: rpcPayload, priceLevels, freeGoods, reportRunId: latestRun?.id || null }))
+    .digest("hex");
+  const { data: saveResult, error: saveError } = await supabase.rpc("save_supplier_catalog_sku_atomic", {
     p_catalog: rpcPayload,
     p_price_levels: priceLevels,
     p_free_goods: freeGoods,
-    p_report_run_id: latestRun?.id || null
+    p_report_run_id: latestRun?.id || null,
+    p_expected_lock_version: Number(input.expectedLockVersion || 0),
+    p_idempotency_key: input.idempotencyKey || randomUUID(),
+    p_request_hash: requestHash
   });
 
   if (saveError || !saveResult) {
@@ -761,52 +789,9 @@ export async function saveSupplierCatalogWine(input: {
     mode: "created" | "updated";
     saved: SupplierCatalogWine;
     previous: SupplierCatalogWine | null;
+    price_change_created?: boolean;
   };
   const saved = result.saved;
-  const existing = result.previous;
-
-  const metadataUpdates = await Promise.all([
-    supabase.from("supplier_catalog_wines").update({
-      pricing_model: input.pricingModel || "standard",
-      fob_source_date: input.fobSourceDate || null,
-      laid_in_source_date: input.laidInSourceDate || null,
-      pricing_calculated_at: new Date().toISOString(),
-      pricing_cost_fingerprint: payload.pricing_cost_fingerprint
-    }).eq("id", saved.id),
-    ...priceLevels.map((level) => supabase
-      .from("supplier_catalog_price_levels")
-      .update({
-        solve_for: level.solve_for,
-        approval_decision: level.approval_decision,
-        suggested_price: level.suggested_price,
-        suggested_gp_margin: level.suggested_gp_margin,
-        da_alternative: level.da_alternative,
-        final_approved_price: level.final_approved_price,
-        final_approved_da: level.final_approved_da,
-        final_gp_margin: level.final_gp_margin,
-        override_reason: level.override_reason,
-        approval_owner: level.approval_owner,
-        decision_timestamp: level.decision_timestamp
-      })
-      .eq("supplier_catalog_wine_id", saved.id)
-      .eq("display_order", level.display_order))
-  ]);
-  const metadataError = metadataUpdates
-    .map((update) => update.error)
-    .find((error) => error && !isMissingOptionalPricingMetadataError(error));
-  if (metadataError) {
-    throw new Error(metadataError.message);
-  }
-
-  const event = input.pricingModel === "grw_broker"
-    ? null
-    : detectPriceChange(existing || null, saved, input.priceChangeReason || "Manual catalog update");
-  if (event) {
-    const { error: eventError } = await supabase.from("price_change_events").insert(event);
-    if (eventError) {
-      throw new Error(eventError.message);
-    }
-  }
 
   revalidateSupplierCatalogData();
   revalidatePath("/");
@@ -815,32 +800,8 @@ export async function saveSupplierCatalogWine(input: {
     saved,
     displayName: saved.display_name,
     planningSku: saved.planning_sku,
-    priceChangeCreated: Boolean(event)
+    priceChangeCreated: Boolean(result.price_change_created)
   };
-}
-
-function isMissingOptionalPricingMetadataError(error: { code?: string; message?: string; details?: string | null }) {
-  const message = `${error.message || ""} ${error.details || ""}`.toLowerCase();
-  const optionalColumns = [
-    "pricing_model",
-    "fob_source_date",
-    "laid_in_source_date",
-    "pricing_calculated_at",
-    "pricing_cost_fingerprint",
-    "solve_for",
-    "approval_decision",
-    "suggested_price",
-    "suggested_gp_margin",
-    "da_alternative",
-    "final_approved_price",
-    "final_approved_da",
-    "final_gp_margin",
-    "override_reason",
-    "approval_owner",
-    "decision_timestamp"
-  ];
-  const mentionsOptionalColumn = optionalColumns.some((column) => message.includes(column));
-  return mentionsOptionalColumn && (error.code === "42703" || error.code === "PGRST204" || message.includes("does not exist") || message.includes("schema cache"));
 }
 
 export async function deletePendingSupplierCatalogWine(input: { id: string }) {

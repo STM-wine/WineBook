@@ -39,44 +39,42 @@ describe("production Supplier Hub pricing", () => {
     expect(() => normalizeFobCosts({ packSize: Number.NaN, fobCase: 240 })).toThrow(/Pack size/);
   });
 
-  it("applies the Best ladder at the Frontline boundaries", () => {
-    expect(calculateBestPrice(19)).toBe(18);
-    expect(calculateBestPrice(20)).toBe(18);
-    expect(calculateBestPrice(49)).toBe(47);
-    expect(calculateBestPrice(50)).toBeNull();
+  it("calculates Best independently at a minimum 30% GP", () => {
+    expect(calculateBestPrice(10.3)).toBe(14.75);
+    expect(calculateBestPrice(22)).toBe(32);
   });
 
   it("matches the canonical $22 landed-cost example", () => {
     const result = calculatePricing({ packSize: 12, fobBottle: 20, laidInPerBottle: 2, pricingBasis: "bottle" });
     expect(result.frontlineBottlePrice).toBe(33);
-    expect(result.bestPrice).toBe(31);
+    expect(result.bestPrice).toBe(32);
     expect(result.grossProfitMargin).toBe(0.3333);
-    expect(calculateGpMargin({ bottlePrice: result.bestPrice, landedBottleCost: 22 })).toBe(0.2903);
+    expect(calculateGpMargin({ bottlePrice: result.bestPrice, landedBottleCost: 22 })).toBe(0.3125);
   });
 
-  it("keeps the ladder and flags Best below its 30% target", () => {
+  it("keeps both automatic prices at or above their target GP", () => {
     const result = calculatePricing({ packSize: 12, fobBottle: 13, laidInPerBottle: 0, pricingBasis: "bottle" });
     expect(result.frontlineBottlePrice).toBe(19.25);
-    expect(result.bestPrice).toBe(18.25);
-    expect(calculateGpMargin({ bottlePrice: result.bestPrice, landedBottleCost: 13 })).toBeGreaterThanOrEqual(0.28);
-    expect(result.diagnostics.best_target_conflict).toBe(true);
-    expect(result.warnings).toContain("Best ladder price is below the 30% target GP.");
+    expect(result.bestPrice).toBe(18.75);
+    expect(calculateGpMargin({ bottlePrice: result.bestPrice, landedBottleCost: 13 })).toBeGreaterThanOrEqual(0.3);
+    expect(result.diagnostics.best_target_conflict).toBe(false);
   });
 
   it("rounds sub-$20 Frontline upward to a quarter and uses Best DA", () => {
     const result = calculatePricing({
       packSize: 12,
       fobBottle: 13,
+      laidInPerBottle: 0,
       bestDepletionAllowance: 1,
       pricingBasis: "bottle"
     });
     expect(result.frontlineBottlePrice).toBe(19.25);
-    expect(result.bestPrice).toBe(18.25);
-    expect(calculateGpMargin({ bottlePrice: 18.25, landedBottleCost: 13, depletionAllowance: 1 })).toBe(0.3425);
+    expect(result.bestPrice).toBe(18.75);
+    expect(calculateGpMargin({ bottlePrice: 18.75, landedBottleCost: 13, depletionAllowance: 1 })).toBe(0.36);
     expect(result.diagnostics.best_target_conflict).toBe(false);
   });
 
-  it("preserves higher manual prices and raises Frontline to maintain the ladder", () => {
+  it("preserves manual prices exactly instead of silently overwriting them", () => {
     const result = calculatePricing({
       packSize: 12,
       fobBottle: 20,
@@ -84,7 +82,7 @@ describe("production Supplier Hub pricing", () => {
       bestPrice: 39,
       pricingBasis: "bottle"
     });
-    expect(result.frontlineBottlePrice).toBe(41);
+    expect(result.frontlineBottlePrice).toBe(35);
     expect(result.bestPrice).toBe(39);
 
     const frontlineOnly = calculatePricing({
@@ -96,6 +94,34 @@ describe("production Supplier Hub pricing", () => {
     });
     expect(frontlineOnly.bestPrice).toBe(48);
     expect(frontlineOnly.diagnostics.best_target_conflict).toBe(false);
+  });
+
+  it("supports explicit Frontline-only pricing without a $50 suppression rule", () => {
+    expect(calculatePricing({ packSize: 12, fobBottle: 40, laidInPerBottle: 0 }).bestPrice).toBe(58);
+    expect(calculatePricing({ packSize: 12, fobBottle: 40, laidInPerBottle: 0, frontlineOnly: true }).bestPrice).toBeNull();
+  });
+
+  it("matches the requested under-$20 acceptance example", () => {
+    const result = calculatePricing({ packSize: 12, fobBottle: 10, laidInPerBottle: 0.3 });
+    expect(result.bestPrice).toBe(14.75);
+    expect(result.frontlineBottlePrice).toBe(15.25);
+    expect(result.bestGrossProfitMargin).toBe(0.3017);
+    expect(result.grossProfitMargin).toBe(0.3246);
+  });
+
+  it("rounds raw prices immediately below, equal to, and above $20 upward", () => {
+    expect(calculatePricing({ packSize: 12, fobBottle: 13.99, laidInPerBottle: 0 }).bestPrice).toBe(20);
+    expect(calculatePricing({ packSize: 12, fobBottle: 14, laidInPerBottle: 0 }).bestPrice).toBe(20);
+    expect(calculatePricing({ packSize: 12, fobBottle: 14.01, laidInPerBottle: 0 }).bestPrice).toBe(21);
+    expect(calculatePricing({ packSize: 12, fobBottle: 13.59, laidInPerBottle: 0 }).frontlineBottlePrice).toBe(20);
+    expect(calculatePricing({ packSize: 12, fobBottle: 13.6, laidInPerBottle: 0 }).frontlineBottlePrice).toBe(20);
+    expect(calculatePricing({ packSize: 12, fobBottle: 13.61, laidInPerBottle: 0 }).frontlineBottlePrice).toBe(21);
+  });
+
+  it("does not suggest prices until FOB and laid-in are explicitly available", () => {
+    expect(calculatePricing({ packSize: 12, fobBottle: 10 }).suggestionsReady).toBe(false);
+    expect(calculatePricing({ packSize: 12, laidInPerBottle: 1 }).suggestionsReady).toBe(false);
+    expect(calculatePricing({ packSize: 12, fobBottle: 10, laidInPerBottle: 0 }).suggestionsReady).toBe(true);
   });
 
   it("uses explicit solve modes without changing unrelated inputs", () => {

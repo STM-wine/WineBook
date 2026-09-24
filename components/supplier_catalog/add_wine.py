@@ -22,7 +22,7 @@ def render_add_wine(importers_data, wines: list[dict], price_events: list[dict])
 
     identity_cols = st.columns([1.4, 1.8, 0.7, 0.7, 0.8])
     producer = identity_cols[0].text_input("Producer", key="catalog_add_producer")
-    wine_name = identity_cols[1].text_input("Wine / fantasy name", key="catalog_add_wine_name")
+    wine_name = identity_cols[1].text_input("Item Name", key="catalog_add_wine_name")
     vintage = identity_cols[2].text_input("Vintage", value="NV", key="catalog_add_vintage")
     pack_size = identity_cols[3].number_input("Pack", min_value=1, value=12, step=1, key="catalog_add_pack")
     bottle_size = identity_cols[4].text_input("Bottle size", value="750ml", key="catalog_add_bottle_size")
@@ -90,7 +90,7 @@ def render_add_wine(importers_data, wines: list[dict], price_events: list[dict])
 
     if st.button("Save Supplier Wine", type="primary"):
         if not producer or not wine_name:
-            st.error("Producer and wine name are required.")
+            st.error("Producer and Item Name are required.")
             return
         wine, event = build_available_wine(payload, previous=existing)
         if existing:
@@ -100,4 +100,3 @@ def render_add_wine(importers_data, wines: list[dict], price_events: list[dict])
             price_events.append(event)
         st.success("Supplier wine saved.")
         st.rerun()
-

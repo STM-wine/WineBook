@@ -245,7 +245,8 @@ function AddWinePanel({
   const [fobCase, setFobCase] = useState("");
   const [pricingBasis, setPricingBasis] = useState<"bottle" | "case">("bottle");
   const [pricingModel, setPricingModel] = useState<"standard" | "grw_broker">("standard");
-  const [laidInPerBottle, setLaidInPerBottle] = useState("0");
+  const [frontlineOnly, setFrontlineOnly] = useState(false);
+  const [laidInPerBottle, setLaidInPerBottle] = useState("");
   const [fobSourceDate, setFobSourceDate] = useState("");
   const [laidInSourceDate, setLaidInSourceDate] = useState("");
   const [systemTags, setSystemTags] = useState<string[]>([]);
@@ -266,16 +267,16 @@ function AddWinePanel({
   const sortedCloneOptions = useMemo(() => [...wines].sort(sortNewestVintageFirst), [wines]);
   const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
   const supplierOptions = useMemo(() => uniqueSorted(suppliers.map((supplier) => supplier.name)), [suppliers]);
+  const parsedPackSize = Number(packSize);
+  const hasValidPack = Number.isInteger(parsedPackSize) && parsedPackSize > 0;
   const computedPricing = calculatePricing({
-    packSize: Math.max(1, Math.trunc(Number(packSize) || 12)),
-    fobBottle: parseOptionalNumber(fobBottle),
-    fobCase: parseOptionalNumber(fobCase),
-    laidInPerBottle: parseOptionalNumber(laidInPerBottle) || 0,
+    packSize: hasValidPack ? parsedPackSize : 1,
+    fobBottle: hasValidPack ? parseOptionalNumber(fobBottle) : null,
+    fobCase: hasValidPack ? parseOptionalNumber(fobCase) : null,
+    laidInPerBottle: parseOptionalNumber(laidInPerBottle),
     pricingBasis,
     grwBrokerModel: pricingModel === "grw_broker",
-    frontlineBottlePrice: templateWine ? asNumber(templateWine.frontline_bottle_price) : null,
-    bestPrice: templateWine?.best_price === null || templateWine?.best_price === undefined ? null : asNumber(templateWine.best_price),
-    bestDepletionAllowance: asNumber(templateWine?.price_levels?.find((level) => level.is_best)?.depletion_allowance)
+    frontlineOnly
   });
   const copiedFromWine = templateWine;
   const showWineNameMatches = searchItem.trim().length >= 3 && !templateWine;
@@ -295,9 +296,12 @@ function AddWinePanel({
     pendingEditId && pendingEditConversionStatus
       ? pendingEditConversionStatus
       : conversionStatusForDraft(copiedFromWine, currentIdentity);
-  const priceLevelsForDraft = priceLevelsFollowPricing ? defaultPriceLevelDrafts() : priceLevels;
+  const priceLevelsForDraft = priceLevels;
   const draftPriceLevels = priceLevelsForDraft
-    .map((level, index) => priceLevelDraftToInput(level, index, computedPricing))
+    .map((level, index) => {
+      const input = priceLevelDraftToInput(level, index, computedPricing);
+      return frontlineOnly && input.isBest ? { ...input, active: false } : input;
+    })
     .filter((level) => money(level.bottlePrice) > 0 || level.isFrontline);
 
   useEffect(() => {
@@ -355,8 +359,8 @@ function AddWinePanel({
     setSupplierId(supplier?.id || "");
     if (supplier) {
       setLaidInPerBottle(String(defaultLaidInForSupplier(suppliers, supplier.id, supplier.name)));
-    } else if (!nextSupplierName.trim()) {
-      setLaidInPerBottle("0");
+    } else {
+      setLaidInPerBottle("");
     }
   }
 
@@ -369,7 +373,7 @@ function AddWinePanel({
   function applyWineTemplate(
     wine: SupplierCatalogWine,
     catalogWineId: string | null = null,
-    options: { followPricing?: boolean; linkQuickBooks?: boolean; preserveSupplier?: boolean } = {}
+    options: { followPricing?: boolean; linkQuickBooks?: boolean; preserveSupplier?: boolean; preservePricingModel?: boolean } = {}
   ) {
     const nextProducer = wine.producer;
     const nextWineName = wine.wine_name;
@@ -398,8 +402,12 @@ function AddWinePanel({
     setFobBottle(String(asNumber(wine.fob_bottle) || ""));
     setFobCase(String(asNumber(wine.fob_case) || ""));
     setPricingBasis(wine.pricing_basis === "case" ? "case" : "bottle");
-    setPricingModel(wine.pricing_model === "grw_broker" ? "grw_broker" : "standard");
-    setLaidInPerBottle(String(asNumber(wine.laid_in_per_bottle) || defaultLaidInForSupplier(suppliers, nextSupplierId || null, nextSupplierName)));
+    setPricingModel(options.preservePricingModel && wine.pricing_model === "grw_broker" ? "grw_broker" : "standard");
+    setFrontlineOnly(Boolean(wine.frontline_only));
+    const selectedSupplier = suppliers.find((row) => row.id === nextSupplierId) || supplierByName(nextSupplierName);
+    setLaidInPerBottle(selectedSupplier
+      ? String(defaultLaidInForSupplier(suppliers, selectedSupplier.id, selectedSupplier.name))
+      : "");
     setFobSourceDate(wine.fob_source_date || "");
     setLaidInSourceDate(wine.laid_in_source_date || "");
     setSystemTags(wine.system_tags || []);
@@ -407,7 +415,7 @@ function AddWinePanel({
     setQuickbooksItemId(shouldLinkQuickBooks ? wine.quickbooks_item_id || wine.quickbooks_item_number || "" : "");
     setQuickbooksItemName(shouldLinkQuickBooks ? wine.quickbooks_item_name || "" : "");
     setQuickbooksItemNumber(shouldLinkQuickBooks ? wine.quickbooks_item_number || wine.quickbooks_item_id || "" : "");
-    setPriceLevels(options.followPricing ? defaultPriceLevelDrafts() : priceLevelDraftsFromWine(wine));
+    setPriceLevels(priceLevelDraftsFromWine(wine, { asReference: Boolean(options.followPricing) }));
     setPriceLevelsFollowPricing(Boolean(options.followPricing));
     setFreeGoods(freeGoodDraftsFromWine(wine, { expirePastPrograms: Boolean(options.followPricing) }));
     setPriceChangeReason(`Matched from ${wine.display_name}`);
@@ -415,7 +423,7 @@ function AddWinePanel({
 
   useEffect(() => {
     if (!editWine || editWine.id === pendingEditId) return;
-    applyWineTemplate(editWine, editWine.copied_from_supplier_catalog_wine_id || null, { followPricing: false });
+    applyWineTemplate(editWine, editWine.copied_from_supplier_catalog_wine_id || null, { followPricing: false, preservePricingModel: true });
     setPendingEditId(editWine.id);
     setPendingEditConversionStatus(normalizeConversionStatus(editWine.conversion_status));
     setPriceChangeReason(`Editing pending product: ${editWine.display_name}`);
@@ -446,6 +454,7 @@ function AddWinePanel({
     setFobCase("");
     setPricingBasis("bottle");
     setPricingModel("standard");
+    setFrontlineOnly(false);
     setFobSourceDate("");
     setLaidInSourceDate("");
     setSystemTags([]);
@@ -482,7 +491,8 @@ function AddWinePanel({
     setFobCase("");
     setPricingBasis("bottle");
     setPricingModel("standard");
-    setLaidInPerBottle("0");
+    setFrontlineOnly(false);
+    setLaidInPerBottle("");
     setFobSourceDate("");
     setLaidInSourceDate("");
     setSystemTags([]);
@@ -529,7 +539,11 @@ function AddWinePanel({
         decisionTimestamp: "",
         isFrontline: false,
         isBest: false,
-        active: true
+        active: true,
+        isManualOverride: true,
+        sourceBottlePrice: null,
+        sourceDepletionAllowance: null,
+        sourceUpdatedAt: null
       }
     ]);
   }
@@ -576,7 +590,7 @@ function AddWinePanel({
     bottleSize,
     fobBottle: parseOptionalNumber(fobBottle),
     fobCase: parseOptionalNumber(fobCase),
-    laidInPerBottle: parseOptionalNumber(laidInPerBottle) || 0,
+    laidInPerBottle: parseOptionalNumber(laidInPerBottle),
     frontlineOverride: null,
     bestPriceOverride: null,
     availabilityStatus: "available",
@@ -591,10 +605,12 @@ function AddWinePanel({
     priceChangeReason,
     pricingBasis,
     pricingModel,
+    frontlineOnly,
     fobSourceDate: fobSourceDate || null,
     laidInSourceDate: laidInSourceDate || null,
     priorPricingCostFingerprint: templateWine?.pricing_cost_fingerprint || null,
-    pricingCalculatedAt: templateWine?.pricing_calculated_at || null
+    pricingCalculatedAt: templateWine?.pricing_calculated_at || null,
+    expectedLockVersion: pendingEditId ? asNumber(editWine?.lock_version) : 0
   };
   const preview = buildSupplierCatalogWine(draftInput);
   const existing = wines.find((wine) => wine.planning_sku === preview.planning_sku && wine.id !== pendingEditId);
@@ -614,6 +630,11 @@ function AddWinePanel({
     const target = Number(level.targetGpMargin);
     return !Number.isFinite(target) || target < 0 || target >= 100;
   });
+  const activeFrontline = draftPriceLevels.find((level) => level.active && level.isFrontline && level.bottlePrice > 0);
+  const activeBest = frontlineOnly
+    ? null
+    : draftPriceLevels.find((level) => level.active && level.isBest && level.bottlePrice > 0);
+  const invalidPricingLadder = Boolean(activeFrontline && activeBest && activeFrontline.bottlePrice <= activeBest.bottlePrice);
   const duplicatePriceLevels = findDuplicateActivePriceLevels(draftPriceLevels);
   const vintagePricingComparisonRows = copiedFromWine && conversionStatus === "new_vintage"
     ? [
@@ -646,8 +667,14 @@ function AddWinePanel({
 
   function saveWine(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave) return;
-    onSaveCatalogWine({ ...draftInput, existingCatalogWineId: pendingEditId, priceChangeReason });
+    if (lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder) return;
+    onSaveCatalogWine({
+      ...draftInput,
+      existingCatalogWineId: pendingEditId,
+      expectedLockVersion: asNumber((pendingEditId ? editWine : existing)?.lock_version),
+      priceChangeReason,
+      idempotencyKey: crypto.randomUUID()
+    });
   }
 
   return (
@@ -712,9 +739,9 @@ function AddWinePanel({
                         productIdentityMatchToTemplateWine(match, searchItem),
                         match.source === "supplier_catalog" ? match.sourceId : null,
                         {
-                          followPricing: match.source === "supplier_catalog",
+                          followPricing: true,
                           linkQuickBooks: match.source === "quickbooks_item" && match.active,
-                          preserveSupplier: match.source === "quickbooks_item"
+                          preserveSupplier: match.source === "quickbooks_item" && Boolean(supplierName.trim())
                         }
                       )
                     }
@@ -748,15 +775,6 @@ function AddWinePanel({
             ))}
           </datalist>
         </label>
-        <label className="wide-field">
-          Fantasy Name
-          <input
-            required
-            value={wineName}
-            onChange={(event) => setWineName(event.target.value)}
-            placeholder="Saved wine/fantasy name"
-          />
-        </label>
         <label>
           Producer
           <input list="producer-options" required value={producer} onChange={(event) => setProducer(event.target.value)} />
@@ -765,6 +783,15 @@ function AddWinePanel({
               <option key={option} value={option} />
             ))}
           </datalist>
+        </label>
+        <label className="wide-field">
+          Item Name
+          <input
+            required
+            value={wineName}
+            onChange={(event) => setWineName(event.target.value)}
+            placeholder="Saved item name"
+          />
         </label>
         <label>
           Vintage
@@ -794,13 +821,6 @@ function AddWinePanel({
           </select>
         </label>
         <label>
-          Pricing model
-          <select value={pricingModel} onChange={(event) => setPricingModel(event.target.value as "standard" | "grw_broker")}>
-            <option value="standard">Controllable</option>
-            <option value="grw_broker">GRW broker — informational only</option>
-          </select>
-        </label>
-        <label>
           Bottle size
           <input value={bottleSize} onChange={(event) => setBottleSize(event.target.value)} />
         </label>
@@ -815,7 +835,7 @@ function AddWinePanel({
               setPricingBasis("bottle");
               setFobBottle(event.target.value);
               const next = parseOptionalNumber(event.target.value);
-              if (next !== null) setFobCase(String(money(next * Math.max(1, Number(packSize) || 12))));
+              if (next !== null && hasValidPack) setFobCase(String(money(next * parsedPackSize)));
             }}
           />
         </label>
@@ -830,13 +850,17 @@ function AddWinePanel({
               setPricingBasis("case");
               setFobCase(event.target.value);
               const next = parseOptionalNumber(event.target.value);
-              if (next !== null) setFobBottle(String(money(next / Math.max(1, Number(packSize) || 12))));
+              if (next !== null && hasValidPack) setFobBottle(String(money(next / parsedPackSize)));
             }}
           />
         </label>
         <label>
           Laid-in per bottle
           <input min={0} step={0.01} type="number" value={laidInPerBottle} onChange={(event) => setLaidInPerBottle(event.target.value)} />
+        </label>
+        <label className="check-control">
+          <input type="checkbox" checked={frontlineOnly} onChange={(event) => setFrontlineOnly(event.target.checked)} />
+          Frontline-only pricing
         </label>
         <label>
           FOB source date
@@ -987,15 +1011,26 @@ function AddWinePanel({
                           type="number"
                           readOnly={level.solveFor === "price"}
                           value={level.bottlePrice}
-                          onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value })}
+                          onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value, isManualOverride: true })}
                         />
                         <small className={effective.calculatedField === "price" ? "price-suggestion-value" : undefined}>
                           {effective.calculatedField === "price"
-                            ? `Suggested ${formatCurrencyCents(effective.bottlePrice)}`
+                            ? `Suggested ${formatCurrencyCents(effective.bottlePrice)} · GP ${formatPercent(effective.suggestedGpMargin)}`
                             : bottlePriceEntered
-                              ? "Entered"
-                              : "Calculated"}
+                              ? "Manual override"
+                              : `Suggested ${formatCurrencyCents(effective.suggestedPrice)} · GP ${formatPercent(effective.suggestedGpMargin)}`}
                         </small>
+                        {level.sourceBottlePrice !== null ? (
+                          <small>
+                            Source {formatCurrencyCents(level.sourceBottlePrice)} · DA {formatCurrencyCents(level.sourceDepletionAllowance || 0)} · GP {formatPercent(calculateGpMargin({ bottlePrice: level.sourceBottlePrice, landedBottleCost: computedPricing.landedBottleCost, depletionAllowance: level.sourceDepletionAllowance }))}
+                            {level.sourceUpdatedAt ? ` · ${level.sourceUpdatedAt.slice(0, 10)}` : ""}
+                          </small>
+                        ) : null}
+                        {(level.isFrontline || level.isBest) && level.isManualOverride ? (
+                          <button className="ghost-button button-small" type="button" onClick={() => patchPriceLevel(level.id, { bottlePrice: "", isManualOverride: false })}>
+                            Reset to suggested
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                     <td>
@@ -1182,6 +1217,9 @@ function AddWinePanel({
       {duplicatePriceLevels.length > 0 ? (
         <div className="inline-warning">Possible duplicate active price level: {duplicatePriceLevels.join(", ")}. Deactivate it or document why both should remain active.</div>
       ) : null}
+      {invalidPricingLadder ? (
+        <div className="inline-warning">Frontline must be higher than Best. Reset either level to the suggestion or enter a valid manual ladder.</div>
+      ) : null}
       {pricingModel === "grw_broker" ? (
         <div className="inline-info">GRW broker pricing is informational only and is excluded from recommendations, automatic price changes, and approval blocking.</div>
       ) : null}
@@ -1207,7 +1245,7 @@ function AddWinePanel({
       ) : null}
 
       <div className="form-actions">
-        <button className="button" disabled={isPending || lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || !producer.trim() || !wineName.trim()} type="submit">
+        <button className="button" disabled={isPending || lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder || !producer.trim() || !wineName.trim() || !hasValidPack || !computedPricing.suggestionsReady} type="submit">
           {pendingEditId ? "Save Changes" : existing ? "Update Wine" : "Save Wine"}
         </button>
       </div>
@@ -1229,6 +1267,10 @@ type PriceLevelDraft = {
   isFrontline: boolean;
   isBest: boolean;
   active: boolean;
+  isManualOverride: boolean;
+  sourceBottlePrice: number | null;
+  sourceDepletionAllowance: number | null;
+  sourceUpdatedAt: string | null;
 };
 
 type FreeGoodDraft = {
@@ -1296,7 +1338,29 @@ function productIdentityMatchToTemplateWine(match: ProductIdentityMatch, query: 
     copied_from_supplier_catalog_wine_id: match.source === "supplier_catalog" ? match.sourceId : null,
     source_system: match.source,
     source_id: match.sourceId,
-    price_levels: [],
+    price_levels: (match.priceLevels || []).map((level, index) => ({
+      id: level.id,
+      supplier_catalog_wine_id: match.source === "supplier_catalog" ? match.sourceId : "",
+      name: level.name,
+      bottle_price: level.bottlePrice,
+      depletion_allowance: level.depletionAllowance,
+      target_gp_margin: null,
+      solve_for: "gp",
+      calculated_gp_margin: calculateGpMargin({
+        bottlePrice: level.bottlePrice,
+        landedBottleCost: pricing.landedBottleCost,
+        depletionAllowance: level.depletionAllowance
+      }),
+      is_frontline: level.isFrontline,
+      is_best: level.isBest,
+      display_order: index,
+      active: level.active,
+      source_system: level.sourceSystem,
+      source_id: level.id,
+      is_manual_override: false,
+      created_at: level.updatedAt || "",
+      updated_at: level.updatedAt || ""
+    })),
     free_goods: [],
     workbench_items: [],
     created_at: match.updatedAt || "",
@@ -1319,7 +1383,11 @@ function defaultPriceLevelDrafts(): PriceLevelDraft[] {
       decisionTimestamp: "",
       isFrontline: true,
       isBest: false,
-      active: true
+      active: true,
+      isManualOverride: false,
+      sourceBottlePrice: null,
+      sourceDepletionAllowance: null,
+      sourceUpdatedAt: null
     },
     {
       id: "best",
@@ -1334,7 +1402,11 @@ function defaultPriceLevelDrafts(): PriceLevelDraft[] {
       decisionTimestamp: "",
       isFrontline: false,
       isBest: true,
-      active: true
+      active: true,
+      isManualOverride: false,
+      sourceBottlePrice: null,
+      sourceDepletionAllowance: null,
+      sourceUpdatedAt: null
     }
   ];
 }
@@ -1351,7 +1423,7 @@ function sortNewestVintageFirst(a: SupplierCatalogWine, b: SupplierCatalogWine) 
   return (b.updated_at || "").localeCompare(a.updated_at || "") || a.display_name.localeCompare(b.display_name);
 }
 
-function priceLevelDraftsFromWine(wine: SupplierCatalogWine): PriceLevelDraft[] {
+function priceLevelDraftsFromWine(wine: SupplierCatalogWine, options: { asReference?: boolean } = {}): PriceLevelDraft[] {
   const levels = wine.price_levels && wine.price_levels.length > 0
     ? [...wine.price_levels].sort((a, b) => asNumber(a.display_order) - asNumber(b.display_order))
     : [
@@ -1368,7 +1440,9 @@ function priceLevelDraftsFromWine(wine: SupplierCatalogWine): PriceLevelDraft[] 
           decision_timestamp: null,
           is_frontline: true,
           is_best: false,
-          active: true
+          active: true,
+          is_manual_override: true,
+          updated_at: wine.updated_at
         },
         ...(wine.best_price !== null
           ? [
@@ -1385,7 +1459,9 @@ function priceLevelDraftsFromWine(wine: SupplierCatalogWine): PriceLevelDraft[] 
                 decision_timestamp: null,
                 is_frontline: false,
                 is_best: true,
-                active: true
+                active: true,
+                is_manual_override: true,
+                updated_at: wine.updated_at
               }
             ]
           : [])
@@ -1394,8 +1470,10 @@ function priceLevelDraftsFromWine(wine: SupplierCatalogWine): PriceLevelDraft[] 
   return levels.map((level, index) => ({
     id: `${level.id || "level"}-${index}`,
     name: level.name || `Level ${index + 1}`,
-    bottlePrice: asNumber(level.bottle_price).toString(),
-    depletionAllowance: asNumber(level.depletion_allowance).toString(),
+    bottlePrice: options.asReference && (level.is_frontline || level.is_best) ? "" : asNumber(level.bottle_price).toString(),
+    depletionAllowance: options.asReference && (level.is_frontline || level.is_best)
+      ? "0"
+      : asNumber(level.depletion_allowance).toString(),
     targetGpMargin: level.target_gp_margin === null || level.target_gp_margin === undefined ? "" : (asNumber(level.target_gp_margin) * 100).toString(),
     solveFor: level.solve_for === "price" || level.solve_for === "da" ? level.solve_for : "gp",
     approvalDecision: (level.approval_decision || "") as PriceLevelDraft["approvalDecision"],
@@ -1404,7 +1482,11 @@ function priceLevelDraftsFromWine(wine: SupplierCatalogWine): PriceLevelDraft[] 
     decisionTimestamp: level.decision_timestamp || "",
     isFrontline: Boolean(level.is_frontline),
     isBest: Boolean(level.is_best),
-    active: level.active !== false
+    active: level.active !== false,
+    isManualOverride: options.asReference ? !(level.is_frontline || level.is_best) : level.is_manual_override !== false,
+    sourceBottlePrice: options.asReference ? asNumber(level.bottle_price) : null,
+    sourceDepletionAllowance: options.asReference ? asNumber(level.depletion_allowance) : null,
+    sourceUpdatedAt: options.asReference ? level.updated_at || wine.updated_at || null : null
   }));
 }
 
@@ -1460,7 +1542,7 @@ function priceLevelDraftToInput(level: PriceLevelDraft, index: number, pricing: 
     : level.isBest
       ? pricing.bestPrice || 0
       : 0;
-  const bottlePrice = parseOptionalNumber(level.bottlePrice);
+  const bottlePrice = level.isManualOverride ? parseOptionalNumber(level.bottlePrice) : null;
   const targetGpMargin = parseOptionalPercent(level.targetGpMargin);
   const depletionAllowance = parseOptionalNumber(level.depletionAllowance);
   const solveInputsMissing = (level.solveFor === "price" && targetGpMargin === null) ||
@@ -1486,8 +1568,8 @@ function priceLevelDraftToInput(level: PriceLevelDraft, index: number, pricing: 
     overrideReason: level.overrideReason || null,
     approvalOwner: level.approvalOwner || null,
     decisionTimestamp: level.decisionTimestamp || null,
-    suggestedPrice: balanced.bottlePrice,
-    suggestedGpMargin: balanced.calculatedGpMargin,
+    suggestedPrice: fallbackPrice,
+    suggestedGpMargin: calculateGpMargin({ bottlePrice: fallbackPrice, landedBottleCost: pricing.landedBottleCost }),
     daAlternative: balancePriceLevel({
       bottlePrice: balanced.bottlePrice,
       landedBottleCost: pricing.landedBottleCost,
@@ -1505,7 +1587,8 @@ function priceLevelDraftToInput(level: PriceLevelDraft, index: number, pricing: 
     isFrontline: level.isFrontline,
     isBest: level.isBest,
     displayOrder: index,
-    active: level.active
+    active: level.active,
+    isManualOverride: level.isManualOverride
   };
 }
 

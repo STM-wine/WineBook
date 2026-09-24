@@ -101,6 +101,7 @@ export type SupplierCatalogPriceLevelInput = {
   finalApprovedPrice?: number | null;
   finalApprovedDa?: number | null;
   finalGpMargin?: number | null;
+  isManualOverride?: boolean;
 };
 
 export type SupplierCatalogFreeGoodInput = {
@@ -147,6 +148,9 @@ export type SupplierCatalogWineInput = {
   laidInSourceDate?: string | null;
   priorPricingCostFingerprint?: string | null;
   pricingCalculatedAt?: string | null;
+  frontlineOnly?: boolean;
+  expectedLockVersion?: number | null;
+  idempotencyKey?: string | null;
 };
 
 export function supplierCatalogWineToInput(wine: SupplierCatalogWine): SupplierCatalogWineInput {
@@ -182,6 +186,8 @@ export function supplierCatalogWineToInput(wine: SupplierCatalogWine): SupplierC
     laidInSourceDate: wine.laid_in_source_date,
     priorPricingCostFingerprint: wine.pricing_cost_fingerprint,
     pricingCalculatedAt: wine.pricing_calculated_at,
+    frontlineOnly: Boolean(wine.frontline_only),
+    expectedLockVersion: Number(wine.lock_version || 0),
     priceLevels: (wine.price_levels || []).map((level) => ({
       id: level.id,
       name: level.name,
@@ -207,7 +213,8 @@ export function supplierCatalogWineToInput(wine: SupplierCatalogWine): SupplierC
       daAlternative: level.da_alternative === null ? null : Number(level.da_alternative),
       finalApprovedPrice: level.final_approved_price === null ? null : Number(level.final_approved_price),
       finalApprovedDa: level.final_approved_da === null ? null : Number(level.final_approved_da),
-      finalGpMargin: level.final_gp_margin === null ? null : Number(level.final_gp_margin)
+      finalGpMargin: level.final_gp_margin === null ? null : Number(level.final_gp_margin),
+      isManualOverride: Boolean(level.is_manual_override)
     })),
     freeGoods: (wine.free_goods || []).map((freeGood) => ({
       id: freeGood.id,
@@ -233,6 +240,8 @@ export type PricingResult = {
   frontlineBottlePrice: number;
   bestPrice: number | null;
   grossProfitMargin: number;
+  bestGrossProfitMargin: number | null;
+  suggestionsReady: boolean;
   warnings: string[];
   diagnostics: Record<string, unknown>;
 };
@@ -341,12 +350,15 @@ export function normalizeWineIdentity(input: {
   };
 }
 
-export function calculateBestPrice(frontlineBottlePrice: number) {
-  const frontline = money(frontlineBottlePrice);
-  if (frontline >= 50) return null;
-  if (frontline >= 20 && frontline < 50) return money(frontline - 2);
-  if (frontline < 20 && frontline > 0) return money(frontline - 1);
-  return null;
+export function calculateBestPrice(landedBottleCost: number) {
+  const landed = money(landedBottleCost);
+  return landed > 0 ? roundSuggestedPriceUp(landed / (1 - BEST_TARGET_MARGIN)) : null;
+}
+
+export function roundSuggestedPriceUp(rawPrice: number) {
+  if (!Number.isFinite(rawPrice) || rawPrice <= 0) return 0;
+  const increment = rawPrice < 20 ? 0.25 : 1;
+  return money(Math.ceil((rawPrice - Number.EPSILON) / increment) * increment);
 }
 
 export function calculateGpMargin(input: {
@@ -456,6 +468,7 @@ export function calculatePricing(input: {
   bestDepletionAllowance?: number | null;
   pricingBasis?: "bottle" | "case" | null;
   grwBrokerModel?: boolean;
+  frontlineOnly?: boolean;
 }): PricingResult {
   const normalized = normalizeFobCosts({
     packSize: Number(input.packSize),
@@ -468,31 +481,29 @@ export function calculatePricing(input: {
   if (laidInPerBottle < 0) throw new Error("Laid-in cost cannot be negative.");
 
   const landedBottleCost = money(fobBottle + laidInPerBottle);
-  const unroundedFrontline = landedBottleCost ? landedBottleCost / (1 - FRONTLINE_TARGET_MARGIN) : 0;
-  const baseFrontline = unroundedFrontline > 0 && unroundedFrontline < 20
-    ? Math.ceil(unroundedFrontline * 4) / 4
-    : Math.ceil(unroundedFrontline);
-  const existingFrontline = money(input.frontlineBottlePrice);
-  const existingBest = input.bestPrice !== null && input.bestPrice !== undefined ? money(input.bestPrice) : null;
-  let frontlineBottlePrice = Math.max(baseFrontline, existingFrontline);
-  const discountFor = (frontline: number) => frontline < 20 ? 1 : frontline < 50 ? 2 : null;
-  if (existingBest !== null && frontlineBottlePrice < 50) {
-    while (frontlineBottlePrice < 50) {
-      const discount = discountFor(frontlineBottlePrice);
-      if (discount === null || frontlineBottlePrice >= existingBest + discount) break;
-      frontlineBottlePrice += 1;
-    }
+  const hasFob = normalized.pricingBasis === "case"
+    ? input.fobCase !== null && input.fobCase !== undefined && money(input.fobCase) > 0
+    : input.fobBottle !== null && input.fobBottle !== undefined && money(input.fobBottle) > 0;
+  const hasLaidIn = input.laidInPerBottle !== null && input.laidInPerBottle !== undefined;
+  const suggestionsReady = hasFob && hasLaidIn;
+  const suggestedBest = suggestionsReady ? roundSuggestedPriceUp(landedBottleCost / (1 - BEST_TARGET_MARGIN)) : 0;
+  let suggestedFrontline = suggestionsReady ? roundSuggestedPriceUp(landedBottleCost / (1 - FRONTLINE_TARGET_MARGIN)) : 0;
+  if (suggestedBest > 0 && suggestedFrontline <= suggestedBest) {
+    suggestedFrontline = money(suggestedBest + (suggestedBest >= 20 || suggestedFrontline >= 20 ? 1 : 0.25));
   }
-  let bestPrice = frontlineBottlePrice >= 50 ? existingBest : Math.max(calculateBestPrice(frontlineBottlePrice) || 0, existingBest || 0);
-  if (frontlineBottlePrice >= 50 && existingBest === null) bestPrice = null;
+  const existingFrontline = input.frontlineBottlePrice !== null && input.frontlineBottlePrice !== undefined
+    ? money(input.frontlineBottlePrice)
+    : null;
+  const existingBest = input.bestPrice !== null && input.bestPrice !== undefined ? money(input.bestPrice) : null;
+  let frontlineBottlePrice = existingFrontline ?? suggestedFrontline;
+  let bestPrice = input.frontlineOnly ? null : existingBest ?? suggestedBest;
   if (input.grwBrokerModel) {
-    frontlineBottlePrice = existingFrontline;
+    frontlineBottlePrice = existingFrontline || 0;
     bestPrice = existingBest;
   }
   const bestGpMargin = bestPrice && bestPrice > 0 ? calculateGpMargin({
     bottlePrice: bestPrice,
-    landedBottleCost,
-    depletionAllowance: input.bestDepletionAllowance
+    landedBottleCost
   }) : null;
   const bestTargetConflict = !input.grwBrokerModel && bestGpMargin !== null && bestGpMargin < BEST_TARGET_MARGIN;
   const grossProfitMargin = frontlineBottlePrice
@@ -512,6 +523,8 @@ export function calculatePricing(input: {
     frontlineBottlePrice,
     bestPrice,
     grossProfitMargin,
+    bestGrossProfitMargin: bestGpMargin,
+    suggestionsReady,
     warnings,
     diagnostics: {
       basis: normalized.pricingBasis,
@@ -519,10 +532,11 @@ export function calculatePricing(input: {
       best_target_margin: BEST_TARGET_MARGIN,
       gp_warning_threshold: GP_WARNING_THRESHOLD,
       frontline_formula: "CEILING(landed_bottle_cost / 0.68)",
-      best_price_rule: "frontline >= 50 none; 20-49 minus 2; under 20 minus 1",
+      best_price_rule: "CEILING(landed_bottle_cost / 0.70), independently rounded upward",
       best_gp_margin: bestGpMargin,
       best_target_conflict: bestTargetConflict,
       informational_only: Boolean(input.grwBrokerModel),
+      suggestions_ready: suggestionsReady,
       warnings
     }
   };
@@ -559,7 +573,10 @@ export function defaultPriceLevelsForPricing(pricing: PricingResult): SupplierCa
       isBest: false,
       displayOrder: 0,
       active: true,
-      solveFor: "gp" as const
+      solveFor: "gp" as const,
+      suggestedPrice: pricing.frontlineBottlePrice,
+      suggestedGpMargin: pricing.grossProfitMargin,
+      isManualOverride: false
     },
     ...(pricing.bestPrice !== null
       ? [
@@ -575,7 +592,10 @@ export function defaultPriceLevelsForPricing(pricing: PricingResult): SupplierCa
             isBest: true,
             displayOrder: 1,
             active: true,
-            solveFor: "gp" as const
+            solveFor: "gp" as const,
+            suggestedPrice: pricing.bestPrice,
+            suggestedGpMargin: pricing.bestGrossProfitMargin,
+            isManualOverride: false
           }
         ]
       : [])
@@ -625,7 +645,8 @@ export function normalizePriceLevels(
         }),
         finalApprovedPrice: level.finalApprovedPrice ?? (level.approvalDecision === "approve_price" ? balanced.bottlePrice : null),
         finalApprovedDa: level.finalApprovedDa ?? (level.approvalDecision === "approve_price" ? balanced.depletionAllowance : null),
-        finalGpMargin: level.finalGpMargin ?? (level.approvalDecision === "approve_price" ? balanced.calculatedGpMargin : null)
+        finalGpMargin: level.finalGpMargin ?? (level.approvalDecision === "approve_price" ? balanced.calculatedGpMargin : null),
+        isManualOverride: Boolean(level.isManualOverride)
       };
     })
     .filter((level) => money(level.bottlePrice) > 0 || Boolean(level.isFrontline))
@@ -672,7 +693,8 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     bestPrice: input.bestPriceOverride,
     bestDepletionAllowance: input.priceLevels?.find((level) => level.isBest)?.depletionAllowance,
     pricingBasis: input.pricingBasis,
-    grwBrokerModel: input.pricingModel === "grw_broker"
+    grwBrokerModel: input.pricingModel === "grw_broker",
+    frontlineOnly: input.frontlineOnly
   });
   const priceLevels = normalizePriceLevels(
     input.priceLevels && input.priceLevels.length > 0 ? input.priceLevels : defaultPriceLevelsForPricing(pricing),
@@ -685,8 +707,7 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
   const bestPrice = bestLevel ? money(bestLevel.bottlePrice) : pricing.bestPrice;
   const grossProfitMargin = calculateGpMargin({
     bottlePrice: frontlineBottlePrice,
-    landedBottleCost: pricing.landedBottleCost,
-    depletionAllowance: frontlineLevel?.depletionAllowance
+    landedBottleCost: pricing.landedBottleCost
   });
   const informationalOnly = input.pricingModel === "grw_broker";
   const warnings = !informationalOnly && frontlineBottlePrice && grossProfitMargin < GP_WARNING_THRESHOLD ? [GP_WARNING_PERSISTED] : [];
@@ -755,6 +776,7 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     quickbooks_item_number: normalizeSpaces(input.quickbooksItemNumber || "") || null,
     quickbooks_sync_status: input.quickbooksItemNumber || input.quickbooksItemId ? "linked" : "not_created",
     product_lifecycle_status: productLifecycleStatus,
+    frontline_only: Boolean(input.frontlineOnly),
     accounting_create_payload: {},
     system_tags: normalizeSystemTags(input.systemTags || []),
     copied_from_supplier_catalog_wine_id: input.copiedFromSupplierCatalogWineId || null,
@@ -799,6 +821,7 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
       final_approved_price: level.finalApprovedPrice ?? null,
       final_approved_da: level.finalApprovedDa ?? null,
       final_gp_margin: level.finalGpMargin ?? null,
+      is_manual_override: Boolean(level.isManualOverride),
       override_reason: level.overrideReason || null,
       approval_owner: level.approvalOwner || null,
       decision_timestamp: level.decisionTimestamp || null,

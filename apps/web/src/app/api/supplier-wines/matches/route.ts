@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
+import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import {
   productRowToCandidate,
   quickbooksItemRowToCandidate,
   recommendationRowToCandidate,
+  dedupeProductIdentityCandidates,
+  latestProductIdentityPriceLevels,
   searchProductIdentityCandidates,
   supplierCatalogRowToCandidate,
   vinosmithWineRowToCandidate,
   type ProductIdentityCandidate
 } from "@/lib/product-identity-search";
 
-const MAX_SOURCE_ROWS = 5000;
 const RECENT_REPORT_RUN_COUNT = 8;
 
 export async function GET(request: Request) {
@@ -63,12 +65,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  const [supplierResult, catalogResult, productsResult, reportRunsResult, vinosmithResult, quickbooksResult] = await Promise.all([
-    searchSupabase
+  let suppliers: any[];
+  let catalogRows: any[];
+  let productRows: any[];
+  let reportRuns: any[];
+  let vinosmithRows: any[];
+  let quickbooksRows: any[];
+  try {
+    [suppliers, catalogRows, productRows, reportRuns, vinosmithRows, quickbooksRows] = await Promise.all([
+    fetchAllExact("supplier match search suppliers", (from, to) => searchSupabase
       .from("suppliers")
-      .select("id,name,trucking_cost_per_bottle")
-      .limit(MAX_SOURCE_ROWS),
-    searchSupabase
+      .select("id,name,trucking_cost_per_bottle", { count: "exact" })
+      .order("id", { ascending: true })
+      .range(from, to) as never),
+    fetchAllExact("supplier catalog match search", (from, to) => searchSupabase
       .from("supplier_catalog_wines")
       .select(`
         id,
@@ -93,21 +103,22 @@ export async function GET(request: Request) {
         product_lifecycle_status,
         system_tags,
         updated_at
-      `)
-      .neq("product_lifecycle_status", "inactive")
-      .limit(MAX_SOURCE_ROWS),
-    searchSupabase
+      `, { count: "exact" })
+      .order("id", { ascending: true })
+      .range(from, to) as never),
+    fetchAllExact("product match search", (from, to) => searchSupabase
       .from("products")
-      .select("id,planning_sku,product_code,name,vintage,pack_size,is_btg,is_core,supplier_id,current_fob,active,updated_at")
-      .eq("active", true)
-      .limit(MAX_SOURCE_ROWS),
+      .select("id,planning_sku,product_code,name,vintage,pack_size,is_btg,is_core,supplier_id,current_fob,active,updated_at", { count: "exact" })
+      .order("id", { ascending: true })
+      .range(from, to) as never),
     searchSupabase
       .from("report_runs")
       .select("id")
       .eq("status", "completed")
       .order("completed_at", { ascending: false })
-      .limit(RECENT_REPORT_RUN_COUNT),
-    searchSupabase
+      .limit(RECENT_REPORT_RUN_COUNT)
+      .then(({ data, error }) => { if (error) throw new Error(error.message); return data || []; }),
+    fetchAllExact("Vinosmith wine match search", (from, to) => searchSupabase
       .from("vinosmith_wines")
       .select(`
         wine_id,
@@ -125,30 +136,28 @@ export async function GET(request: Request) {
         orderable,
         core,
         last_seen_at
-      `)
-      .or("active.is.null,active.eq.true")
-      .limit(MAX_SOURCE_ROWS),
-    searchSupabase
+      `, { count: "exact" })
+      .order("wine_id", { ascending: true })
+      .range(from, to) as never),
+    fetchAllExact("QuickBooks item match search", (from, to) => searchSupabase
       .from("quickbooks_items")
-      .select("list_id,name,full_name,is_active,sales_desc,purchase_desc,sales_price,purchase_cost,custom_fields,time_modified,last_seen_at")
+      .select("list_id,name,full_name,is_active,sales_desc,purchase_desc,sales_price,purchase_cost,custom_fields,raw_data,time_modified,last_seen_at", { count: "exact" })
       .or([
         `name.ilike.${quickBooksSearchPattern}`,
         `full_name.ilike.${quickBooksSearchPattern}`,
         `sales_desc.ilike.${quickBooksSearchPattern}`,
         `purchase_desc.ilike.${quickBooksSearchPattern}`
       ].join(","))
-      .limit(MAX_SOURCE_ROWS)
-  ]);
-
-  const sourceError =
-    supplierResult.error || catalogResult.error || productsResult.error || reportRunsResult.error || vinosmithResult.error || quickbooksResult.error;
-  if (sourceError) {
-    return NextResponse.json({ error: sourceError.message }, { status: 500 });
+      .order("list_id", { ascending: true })
+      .range(from, to) as never)
+    ]);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load product match sources." }, { status: 500 });
   }
 
-  const reportRunIds = (reportRunsResult.data || []).map((run) => run.id).filter(Boolean);
+  const reportRunIds = reportRuns.map((run) => run.id).filter(Boolean);
   const recommendationResult = reportRunIds.length
-    ? await searchSupabase
+    ? await fetchAllExact<any>("recent recommendation match search", (from, to) => searchSupabase
         .from("reorder_recommendations")
         .select(`
           id,
@@ -163,17 +172,14 @@ export async function GET(request: Request) {
           pack_size,
           trucking_cost_per_bottle,
           created_at
-        `)
+        `, { count: "exact" })
         .in("report_run_id", reportRunIds)
-        .limit(MAX_SOURCE_ROWS)
-    : { data: [], error: null };
-
-  if (recommendationResult.error) {
-    return NextResponse.json({ error: recommendationResult.error.message }, { status: 500 });
-  }
+        .order("id", { ascending: true })
+        .range(from, to) as never)
+    : [];
 
   const supplierById = new Map(
-    (supplierResult.data || []).map((supplier) => [
+    suppliers.map((supplier) => [
       String(supplier.id),
       {
         name: String(supplier.name || "No supplier"),
@@ -181,16 +187,27 @@ export async function GET(request: Request) {
       }
     ])
   );
+  const supplierByName = new Map(
+    suppliers.map((supplier) => [String(supplier.name || "").trim().toLowerCase(), supplier])
+  );
 
   const candidates: ProductIdentityCandidate[] = [
-    ...(catalogResult.data || []).map((row) => supplierCatalogRowToCandidate(row)),
-    ...(productsResult.data || []).map((row) => productRowToCandidate(row, supplierById)),
-    ...(quickbooksResult.data || []).map((row) => quickbooksItemRowToCandidate(row)),
-    ...(recommendationResult.data || []).map((row) => recommendationRowToCandidate(row)),
-    ...(vinosmithResult.data || []).map((row) => vinosmithWineRowToCandidate({ ...row, updated_at: row.last_seen_at }))
+    ...catalogRows.map((row) => supplierCatalogRowToCandidate(row)),
+    ...productRows.map((row) => productRowToCandidate(row, supplierById)),
+    ...quickbooksRows.map((row) => {
+      const candidate = quickbooksItemRowToCandidate(row);
+      const supplier = supplierByName.get(candidate.supplierName.trim().toLowerCase());
+      return supplier ? {
+        ...candidate,
+        supplierId: String(supplier.id),
+        laidInPerBottle: Number(supplier.trucking_cost_per_bottle || 0)
+      } : candidate;
+    }),
+    ...recommendationResult.map((row) => recommendationRowToCandidate(row)),
+    ...vinosmithRows.map((row) => vinosmithWineRowToCandidate({ ...row, updated_at: row.last_seen_at }))
   ];
 
-  const matches = searchProductIdentityCandidates(
+  let matches = searchProductIdentityCandidates(
     {
       query,
       producer,
@@ -199,30 +216,82 @@ export async function GET(request: Request) {
       bottleSize,
       supplierId,
       supplierName,
-      limit: 8
+      limit: 20
     },
-    dedupeCandidates(candidates)
+    dedupeProductIdentityCandidates(candidates)
   );
+
+  try {
+    matches = await attachCurrentPriceLevels(searchSupabase, matches);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load current price levels." }, { status: 500 });
+  }
 
   return NextResponse.json({ matches });
 }
 
-function dedupeCandidates(candidates: ProductIdentityCandidate[]) {
-  const byKey = new Map<string, ProductIdentityCandidate>();
-  for (const candidate of candidates) {
-    const key = candidate.planningSku || `${candidate.source}:${candidate.sourceId}`;
-    const existing = byKey.get(key);
-    if (
-      !existing ||
-      (candidate.active && !existing.active) ||
-      (candidate.active === existing.active && sourceRank(candidate.source) < sourceRank(existing.source))
-    ) {
-      byKey.set(key, candidate);
-    }
-  }
-  return Array.from(byKey.values());
-}
+async function attachCurrentPriceLevels(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  matches: ReturnType<typeof searchProductIdentityCandidates>
+) {
+  const catalogIds = matches.filter((match) => match.source === "supplier_catalog").map((match) => match.sourceId);
+  const wineIds = matches.filter((match) => match.source === "vinosmith").map((match) => match.sourceId);
+  const [catalogResult, vinosmithResult] = await Promise.all([
+    catalogIds.length
+      ? supabase.from("supplier_catalog_price_levels")
+          .select("id,supplier_catalog_wine_id,name,bottle_price,depletion_allowance,is_frontline,is_best,active,source_system,updated_at")
+          .in("supplier_catalog_wine_id", catalogIds)
+          .order("display_order", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    wineIds.length
+      ? supabase.from("vinosmith_prices")
+          .select("price_id,wine_id,label,price_cents,bill_back_price_cents,is_default,active,disabled,premise,effective_start_at,effective_end_at,last_seen_at")
+          .in("wine_id", wineIds)
+          .eq("active", true)
+          .or("disabled.is.null,disabled.eq.false")
+          .order("last_seen_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null })
+  ]);
+  if (catalogResult.error) throw new Error(catalogResult.error.message);
+  if (vinosmithResult.error) throw new Error(vinosmithResult.error.message);
 
-function sourceRank(source: ProductIdentityCandidate["source"]) {
-  return ["quickbooks_item", "supplier_catalog", "product", "recommendation", "vinosmith"].indexOf(source);
+  return matches.map((match) => {
+    if (match.source === "supplier_catalog") {
+      const priceLevels = (catalogResult.data || [])
+        .filter((level) => level.supplier_catalog_wine_id === match.sourceId)
+        .map((level) => ({
+          id: level.id,
+          name: level.name,
+          bottlePrice: Number(level.bottle_price || 0),
+          depletionAllowance: Number(level.depletion_allowance || 0),
+          isFrontline: Boolean(level.is_frontline),
+          isBest: Boolean(level.is_best),
+          active: level.active !== false,
+          sourceSystem: level.source_system || "supplier_catalog",
+          updatedAt: level.updated_at || match.updatedAt
+        }));
+      return { ...match, priceLevels };
+    }
+    if (match.source === "vinosmith") {
+      const priceLevels = latestProductIdentityPriceLevels((vinosmithResult.data || [])
+        .filter((level) => level.wine_id === match.sourceId)
+        .map((level) => {
+          const label = String(level.label || "Price level");
+          const normalized = label.toLowerCase();
+          return {
+            id: level.price_id,
+            name: level.premise ? `${label} · ${level.premise}` : label,
+            bottlePrice: Number(level.price_cents || 0) / 100,
+            depletionAllowance: Number(level.bill_back_price_cents || 0) / 100,
+            isFrontline: Boolean(level.is_default) || normalized.includes("front"),
+            isBest: normalized.includes("best"),
+            active: level.active !== false && level.disabled !== true,
+            sourceSystem: "vinosmith",
+            updatedAt: level.last_seen_at || match.updatedAt
+          };
+        }));
+      return { ...match, priceLevels };
+    }
+    return match;
+  });
 }

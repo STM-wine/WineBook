@@ -190,6 +190,9 @@ export type SupplierCatalogWine = {
   laid_in_source_date?: string | null;
   pricing_calculated_at?: string | null;
   pricing_cost_fingerprint?: string | null;
+  frontline_only?: boolean;
+  lock_version?: number | string;
+  updated_by?: string | null;
   fob_bottle: number | string;
   fob_case: number | string;
   laid_in_per_bottle: number | string;
@@ -242,6 +245,7 @@ export type SupplierCatalogPriceLevel = {
   final_approved_price?: number | string | null;
   final_approved_da?: number | string | null;
   final_gp_margin?: number | string | null;
+  is_manual_override?: boolean;
   override_reason?: string | null;
   approval_owner?: string | null;
   decision_timestamp?: string | null;

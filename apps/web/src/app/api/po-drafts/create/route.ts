@@ -149,10 +149,13 @@ export async function POST(request: Request) {
       fetchAllRecommendationsForRun(supabase, reportRunId),
       fetchQuickBooksOnOrderItems(integrationSupabase),
       fetchLiveVinosmithAvailability(),
-      supabase.from("supplier_catalog_wines").select(`*, workbench_items:supplier_catalog_workbench_items (*)`).returns<SupplierCatalogWine[]>()
+      fetchAllExact<SupplierCatalogWine>("supplier catalog wines for PO draft", (from, to) => supabase
+        .from("supplier_catalog_wines")
+        .select(`*, workbench_items:supplier_catalog_workbench_items (*)`, { count: "exact" })
+        .order("id", { ascending: true })
+        .range(from, to) as never)
     ]);
-    if (catalogResult.error) throw new Error(catalogResult.error.message);
-    supplierCatalogWines = catalogResult.data || [];
+    supplierCatalogWines = catalogResult;
 
     const currentSourceData = sourceBacked
       ? await fetchSourceBackedOrderingData(integrationSupabase, {

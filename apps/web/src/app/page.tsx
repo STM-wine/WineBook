@@ -154,16 +154,16 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     .limit(10)
     .returns<ReportRun[]>();
 
-  const supplierCatalogPromise = serviceRoleSupabase
+  const supplierCatalogPromise = fetchAllExact<SupplierCatalogWine>("supplier catalog wines", (from, to) => serviceRoleSupabase
     .from("supplier_catalog_wines")
     .select(`
       *,
       price_levels:supplier_catalog_price_levels (*),
       free_goods:supplier_catalog_free_goods (*),
       workbench_items:supplier_catalog_workbench_items (*)
-    `)
-    .order("updated_at", { ascending: false })
-    .returns<SupplierCatalogWine[]>();
+    `, { count: "exact" })
+    .order("id", { ascending: true })
+    .range(from, to) as never);
 
   const wineRequestsPromise = serviceRoleSupabase
     .from("wine_requests")
@@ -234,7 +234,7 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
 
   const [
     { data: reportRuns },
-    { data: supplierCatalogWines },
+    supplierCatalogWines,
     { data: wineRequests },
     { data: priceChangeEvents },
     quickBooksLastSyncAt,

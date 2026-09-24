@@ -34,6 +34,17 @@ export function quickBooksProducer(item: QuickBooksItemIdentityRow) {
   return customFieldText(item.custom_fields, ["producer", "Producer"]);
 }
 
+export function quickBooksImporter(item: QuickBooksItemIdentityRow) {
+  const customImporter = customFieldText(item.custom_fields, ["importer", "Importer", "supplier", "Supplier", "preferred_vendor", "Preferred Vendor"]);
+  if (customImporter) return customImporter;
+  const rawData = item.raw_data;
+  if (!rawData || typeof rawData !== "object" || Array.isArray(rawData)) return "";
+  const reference = rawData.preferred_vendor_ref ?? rawData.pref_vendor_ref ?? rawData.PrefVendorRef;
+  if (!reference || typeof reference !== "object" || Array.isArray(reference)) return "";
+  const record = reference as Record<string, unknown>;
+  return textValue(record.FullName ?? record.full_name ?? record.name) || "";
+}
+
 export function quickBooksVintage(item: QuickBooksItemIdentityRow) {
   return customFieldText(item.custom_fields, ["vintage", "Vintage"])
     || quickBooksItemDisplayName(item).match(/\b(?:19|20)\d{2}\b/)?.[0]

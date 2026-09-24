@@ -22,6 +22,8 @@ class PricingResult:
     frontline_bottle_price: float
     best_price: float | None
     gross_profit_margin: float
+    best_gross_profit_margin: float | None
+    suggestions_ready: bool
     warnings: list[str]
     diagnostics: dict
 
@@ -73,15 +75,17 @@ def normalize_fob_costs(
     return pack, 0.0, 0.0, basis or "bottle"
 
 
-def calculate_best_price(frontline_bottle_price: float) -> float | None:
-    frontline = _money(frontline_bottle_price)
-    if frontline >= 50:
+def _round_suggested_price_up(raw_price: float) -> float:
+    if raw_price <= 0:
+        return 0.0
+    return _money(ceil(raw_price * 4) / 4 if raw_price < 20 else ceil(raw_price))
+
+
+def calculate_best_price(landed_bottle_cost: float) -> float | None:
+    landed = _money(landed_bottle_cost)
+    if landed <= 0:
         return None
-    if 20 <= frontline < 50:
-        return _money(frontline - 2)
-    if frontline < 20 and frontline > 0:
-        return _money(frontline - 1)
-    return None
+    return _round_suggested_price_up(landed / (1 - BEST_TARGET_MARGIN))
 
 
 def calculate_gp_margin(
@@ -97,14 +101,6 @@ def calculate_gp_margin(
     da = _money(depletion_allowance)
     net_cost = max(0.0, landed - da)
     return round((price - net_cost) / price, 4)
-
-
-def _best_discount(frontline: float) -> float | None:
-    if 0 < frontline < 20:
-        return 1.0
-    if 20 <= frontline < 50:
-        return 2.0
-    return None
 
 
 def required_depletion_allowance_for_target_margin(
@@ -200,12 +196,13 @@ def calculate_pricing(
     pack_size: int | None = None,
     fob_bottle: float | None = None,
     fob_case: float | None = None,
-    laid_in_per_bottle: float = 0.0,
+    laid_in_per_bottle: float | None = None,
     frontline_bottle_price: float | None = None,
     best_price: float | None = None,
     best_depletion_allowance: float | None = None,
     pricing_basis: str | None = None,
     grw_broker_model: bool = False,
+    frontline_only: bool = False,
 ) -> PricingResult:
     """Calculate bottle-level pricing while preserving editable outputs."""
     pack, bottle_fob, case_fob, resolved_basis = normalize_fob_costs(
@@ -214,35 +211,29 @@ def calculate_pricing(
         fob_case=fob_case,
         pricing_basis=pricing_basis,
     )
+    laid_in_supplied = laid_in_per_bottle is not None
     laid_in = _money(laid_in_per_bottle)
     if laid_in < 0:
         raise ValueError("Laid-in cost cannot be negative.")
 
     landed = _money(bottle_fob + laid_in)
-    unrounded_frontline = landed / (1 - FRONTLINE_TARGET_MARGIN) if landed else 0.0
-    base_frontline = ceil(unrounded_frontline * 4) / 4 if 0 < unrounded_frontline < 20 else float(ceil(unrounded_frontline))
-    existing_frontline = _money(frontline_bottle_price)
+    suggestions_ready = bottle_fob > 0 and laid_in_supplied
+    suggested_frontline = _round_suggested_price_up(landed / (1 - FRONTLINE_TARGET_MARGIN)) if suggestions_ready else 0.0
+    suggested_best = calculate_best_price(landed) if suggestions_ready else None
+    if suggested_best is not None and suggested_frontline <= suggested_best:
+        ladder_step = 0.25 if suggested_frontline < 20 and suggested_best < 20 else 1.0
+        suggested_frontline = _money(suggested_best + ladder_step)
+
+    existing_frontline = _money(frontline_bottle_price) if frontline_bottle_price is not None else None
     existing_best = _money(best_price) if best_price is not None else None
-    frontline = max(base_frontline, existing_frontline)
-
-    # A retained Best controls the lower bound of its associated Frontline ladder.
-    if existing_best is not None and frontline < 50:
-        while frontline < 50:
-            discount = _best_discount(frontline)
-            if discount is None or frontline >= existing_best + discount:
-                break
-            frontline += 1
-
-    resolved_best = existing_best if frontline >= 50 else max(calculate_best_price(frontline) or 0, existing_best or 0)
-    if frontline >= 50 and existing_best is None:
-        resolved_best = None
+    frontline = existing_frontline if existing_frontline is not None else suggested_frontline
+    resolved_best = None if frontline_only else (existing_best if existing_best is not None else suggested_best)
     if grw_broker_model:
-        frontline = existing_frontline
+        frontline = existing_frontline or 0.0
         resolved_best = existing_best
     best_margin = calculate_gp_margin(
         bottle_price=resolved_best,
         landed_bottle_cost=landed,
-        depletion_allowance=best_depletion_allowance,
     ) if resolved_best else None
     best_target_conflict = not grw_broker_model and best_margin is not None and best_margin < BEST_TARGET_MARGIN
     margin = round((frontline - landed) / frontline, 4) if frontline else 0.0
@@ -264,14 +255,19 @@ def calculate_pricing(
         frontline_bottle_price=frontline,
         best_price=resolved_best,
         gross_profit_margin=margin,
+        best_gross_profit_margin=best_margin,
+        suggestions_ready=suggestions_ready,
         warnings=warnings,
         diagnostics={
             "basis": resolved_basis,
             "frontline_target_margin": FRONTLINE_TARGET_MARGIN,
             "best_target_margin": BEST_TARGET_MARGIN,
             "gp_warning_threshold": GP_WARNING_THRESHOLD,
-            "frontline_formula": "CEILING(landed_bottle_cost / 0.68)",
-            "best_price_rule": "frontline >= 50 none; 20-49 minus 2; under 20 minus 1",
+            "frontline_formula": "round upward landed_bottle_cost / 0.68",
+            "best_price_rule": "round upward landed_bottle_cost / 0.70 independently",
+            "rounding_rule": "under $20 to next $0.25; $20 or more to next whole dollar",
+            "suggestions_ready": suggestions_ready,
+            "frontline_only": frontline_only,
             "best_gp_margin": best_margin,
             "best_target_conflict": best_target_conflict,
             "informational_only": grw_broker_model,

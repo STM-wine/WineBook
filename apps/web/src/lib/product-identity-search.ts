@@ -2,6 +2,7 @@ import { asNumber } from "./order-data";
 import {
   quickBooksItemCode,
   quickBooksItemDisplayName,
+  quickBooksImporter,
   quickBooksPackFormat,
   quickBooksProducer,
   quickBooksVintage,
@@ -41,6 +42,19 @@ export type ProductIdentityCandidate = {
   quickbooksItemName: string | null;
   systemTags: string[];
   active: boolean;
+  updatedAt: string | null;
+  priceLevels?: ProductIdentityPriceLevel[];
+};
+
+export type ProductIdentityPriceLevel = {
+  id: string;
+  name: string;
+  bottlePrice: number;
+  depletionAllowance: number;
+  isFrontline: boolean;
+  isBest: boolean;
+  active: boolean;
+  sourceSystem: string;
   updatedAt: string | null;
 };
 
@@ -124,6 +138,29 @@ export function searchProductIdentityCandidates(
     .slice(0, Math.max(1, input.limit || 8));
 }
 
+export function dedupeProductIdentityCandidates(candidates: ProductIdentityCandidate[]) {
+  const bySourceIdentity = new Map<string, ProductIdentityCandidate>();
+  for (const candidate of candidates) {
+    // A shared normalized SKU is not proof that two source records are the same
+    // item. QuickBooks can legitimately contain both active and inactive rows.
+    const key = `${candidate.source}:${candidate.sourceId}`;
+    const existing = bySourceIdentity.get(key);
+    if (!existing || (candidate.active && !existing.active) || newestFirst(candidate.updatedAt, existing.updatedAt) < 0) {
+      bySourceIdentity.set(key, candidate);
+    }
+  }
+  return Array.from(bySourceIdentity.values());
+}
+
+export function latestProductIdentityPriceLevels(levels: ProductIdentityPriceLevel[]) {
+  const latest = new Map<string, ProductIdentityPriceLevel>();
+  for (const level of [...levels].sort((a, b) => newestFirst(a.updatedAt, b.updatedAt))) {
+    const key = searchKey(level.name);
+    if (!latest.has(key)) latest.set(key, level);
+  }
+  return Array.from(latest.values());
+}
+
 export function quickbooksItemRowToCandidate(row: Record<string, unknown>): ProductIdentityCandidate {
   const item = {
     list_id: String(row.list_id || row.name || ""),
@@ -133,6 +170,9 @@ export function quickbooksItemRowToCandidate(row: Record<string, unknown>): Prod
     purchase_desc: stringOrNull(row.purchase_desc),
     custom_fields: row.custom_fields && typeof row.custom_fields === "object" && !Array.isArray(row.custom_fields)
       ? row.custom_fields as Record<string, unknown>
+      : null,
+    raw_data: row.raw_data && typeof row.raw_data === "object" && !Array.isArray(row.raw_data)
+      ? row.raw_data as Record<string, unknown>
       : null
   } satisfies QuickBooksItemIdentityRow;
   const name = normalizeSpaces(quickBooksItemDisplayName(item));
@@ -145,6 +185,7 @@ export function quickbooksItemRowToCandidate(row: Record<string, unknown>): Prod
   const packSize = pack.packSize || parsed.packSize || 12;
   const bottleSize = pack.bottleSize || parsed.bottleSize || "750ml";
   const vintage = normalizeVintage(quickBooksVintage(item) || parsed.vintage);
+  const salesPrice = numberValue(row.sales_price);
   const displayName = buildDisplayName({
     producer,
     wineName: nameWithoutProducer || parsed.wineName,
@@ -155,14 +196,15 @@ export function quickbooksItemRowToCandidate(row: Record<string, unknown>): Prod
   const pricing = calculatePricing({
     packSize,
     fobBottle: numberValue(row.purchase_cost),
-    frontlineBottlePrice: numberValue(row.sales_price)
+    laidInPerBottle: 0,
+    frontlineBottlePrice: salesPrice > 0 ? salesPrice : null
   });
 
   return {
     source: "quickbooks_item",
     sourceId: item.list_id || name,
     supplierId: null,
-    supplierName: "QuickBooks Desktop",
+    supplierName: normalizeSpaces(quickBooksImporter(item)) || "No supplier",
     producer,
     wineName: nameWithoutProducer || parsed.wineName,
     vintage,
@@ -182,7 +224,18 @@ export function quickbooksItemRowToCandidate(row: Record<string, unknown>): Prod
     quickbooksItemName: name || null,
     systemTags: [],
     active: row.is_active !== false,
-    updatedAt: stringOrNull(row.last_seen_at) || stringOrNull(row.time_modified)
+    updatedAt: stringOrNull(row.last_seen_at) || stringOrNull(row.time_modified),
+    priceLevels: salesPrice > 0 ? [{
+      id: `quickbooks:${item.list_id || name}:frontline`,
+      name: "Frontline",
+      bottlePrice: salesPrice,
+      depletionAllowance: 0,
+      isFrontline: true,
+      isBest: false,
+      active: row.is_active !== false,
+      sourceSystem: "quickbooks_item",
+      updatedAt: stringOrNull(row.last_seen_at) || stringOrNull(row.time_modified)
+    }] : []
   };
 }
 
@@ -332,7 +385,7 @@ export function vinosmithWineRowToCandidate(row: Record<string, unknown>): Produ
   const wineName = parsed.wineName || normalizeSpaces(textValue(row.name)) || "Unnamed Wine";
   const packSize = Math.max(1, Math.trunc(numberValue(row.unit_set) || parsed.packSize || 12));
   const bottleSize = normalizeSpaces(textValue(row.bottle_size_label) || textValue(row.bottle_size) || parsed.bottleSize || "750ml");
-  const pricing = calculatePricing({ packSize, fobBottle: numberValue(row.fob_price) });
+  const pricing = calculatePricing({ packSize, fobBottle: numberValue(row.fob_price), laidInPerBottle: 0 });
   const displayName = buildDisplayName({
     producer,
     wineName,

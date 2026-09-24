@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   quickBooksItemCode,
   quickBooksItemDisplayName,
+  quickBooksImporter,
   quickBooksPackFormat,
   quickBooksPreferredVendorListId,
   quickBooksProducer,
@@ -30,6 +31,7 @@ describe("QuickBooks item identity fields", () => {
     expect(quickBooksItemDisplayName(item)).toBe("Domaine Vacheron Sancerre Blanc 2025 6/750ml");
     expect(quickBooksProducer(item)).toBe("Domaine Vacheron");
     expect(quickBooksVintage(item)).toBe("2025");
+    expect(quickBooksImporter(item)).toBe("North Berkeley Imports");
     expect(quickBooksPreferredVendorListId(item)).toBe("vendor-1");
     expect(quickBooksPackFormat(item)).toEqual({ packSize: 6, bottleSize: "750ml", label: "6/750ml" });
   });
