@@ -8,6 +8,7 @@ const migrationPath = path.resolve(
 );
 const actionPath = path.resolve(process.cwd(), "src/app/actions.ts");
 const addWineViewPath = path.resolve(process.cwd(), "src/components/supplier-hub-view.tsx");
+const globalStylesPath = path.resolve(process.cwd(), "src/app/globals.css");
 const matchRoutePath = path.resolve(process.cwd(), "src/app/api/supplier-wines/matches/route.ts");
 
 describe("Add Wine database safety contract", () => {
@@ -56,5 +57,19 @@ describe("Add Wine search and price-level UI", () => {
     const view = await readFile(addWineViewPath, "utf8");
     expect(view).not.toContain("<th>Decision</th>");
     expect(view).not.toContain("<th>Owner / approver</th>");
+  });
+
+  it("keeps search matches in a scrolling overlay with one consistent action", async () => {
+    const [view, styles] = await Promise.all([
+      readFile(addWineViewPath, "utf8"),
+      readFile(globalStylesPath, "utf8")
+    ]);
+
+    expect(view).toContain('className="catalog-match-results"');
+    expect(view).toContain('className="button button-small catalog-inactive-search-button"');
+    expect(view).toContain("Start From");
+    expect(view).not.toContain("Link QB");
+    expect(styles).toMatch(/\.catalog-match-suggestions\s*\{[\s\S]*?position:\s*absolute;/);
+    expect(styles).toMatch(/\.catalog-match-results\s*\{[\s\S]*?max-height:\s*332px;[\s\S]*?overflow-y:\s*auto;/);
   });
 });

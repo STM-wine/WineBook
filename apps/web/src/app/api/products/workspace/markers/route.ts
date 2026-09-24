@@ -6,10 +6,7 @@ import {
   reorderSuppressionReason,
   replenishmentPolicy
 } from "@/lib/replenishment-policy";
-
-type PermissionRow = {
-  permission: string;
-};
+import { canManageOrderingMarkers, type OrderingMarkerPermissionRow } from "@/lib/ordering-marker-access";
 
 type MarkerRequestBody = {
   itemCode?: unknown;
@@ -50,7 +47,7 @@ export async function POST(request: Request) {
     .from("app_profile_permissions")
     .select("permission")
     .eq("profile_id", user.id)
-    .returns<PermissionRow[]>();
+    .returns<OrderingMarkerPermissionRow[]>();
 
   if (permissionError) {
     return NextResponse.json({ error: permissionError.message }, { status: 500 });
@@ -209,11 +206,6 @@ export async function POST(request: Request) {
       updatedBy: marker?.updated_by || null
     }
   });
-}
-
-function canManageOrderingMarkers(role: string, permissionRows: PermissionRow[]) {
-  if (role === "admin") return true;
-  return permissionRows.some((row) => row.permission === "draft_logic_changes" || row.permission === "manage_supplier_settings");
 }
 
 function normalizeCode(value: unknown) {

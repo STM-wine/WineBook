@@ -264,12 +264,6 @@ function AddWinePanel({
   const [priceLevelsFollowPricing, setPriceLevelsFollowPricing] = useState(false);
   const [freeGoods, setFreeGoods] = useState<FreeGoodDraft[]>([]);
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
-  const sortedCloneOptions = useMemo(
-    () => wines
-      .filter((wine) => includeInactiveMatches || wine.product_lifecycle_status !== "inactive")
-      .sort(sortNewestVintageFirst),
-    [includeInactiveMatches, wines]
-  );
   const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
   const supplierOptions = useMemo(() => uniqueSorted(suppliers.map((supplier) => supplier.name)), [suppliers]);
   const parsedPackSize = Number(packSize);
@@ -438,13 +432,6 @@ function AddWinePanel({
     setPriceChangeReason(`Editing pending product: ${editWine.display_name}`);
   }, [editWine, pendingEditId]);
 
-  function selectClone(value: string) {
-    const wine = wines.find((row) => row.id === value || row.display_name === value || row.planning_sku === value);
-    if (!wine) return;
-
-    applyWineTemplate(wine, wine.id, { followPricing: true });
-  }
-
   function startNewSku() {
     setPendingEditId(null);
     setPendingEditConversionStatus(null);
@@ -562,12 +549,6 @@ function AddWinePanel({
   function deactivatePriceLevel(id: string) {
     setPriceLevelsFollowPricing(false);
     setPriceLevels((current) => current.map((level) => level.id === id ? { ...level, active: false } : level));
-  }
-
-  function linkQuickbooksItem(match: ProductIdentityMatch) {
-    setQuickbooksItemId(match.quickbooksItemNumber || match.sourceId);
-    setQuickbooksItemName(match.quickbooksItemName || match.displayName);
-    setQuickbooksItemNumber(match.quickbooksItemNumber || match.sourceId);
   }
 
   function patchFreeGood(id: string, patch: Partial<FreeGoodDraft>) {
@@ -710,81 +691,81 @@ function AddWinePanel({
       </div>
 
       <div className="supplier-form-grid">
-        <label className="wide-field">
-          Search Item
-          <input
-            list="supplier-catalog-clone-options"
-            value={searchItem}
-            onChange={(event) => {
-              setSearchItem(event.target.value);
-              setIncludeInactiveMatches(false);
-            }}
-            placeholder="Search active item / SKU"
-          />
-          <datalist id="supplier-catalog-clone-options">
-            {sortedCloneOptions.map((wine) => (
-              <option key={wine.id} value={wine.display_name}>
-                {wine.supplier_name}
-              </option>
-            ))}
-          </datalist>
-        </label>
-        {showWineNameMatches ? (
-          <div className="catalog-match-suggestions">
-            {isSearchingWineMatches ? (
-              <div className="catalog-match-empty">Searching product matches...</div>
-            ) : wineMatchError ? (
-              <div className="catalog-match-empty">{wineMatchError}</div>
-            ) : wineNameMatches.length > 0 ? (
-              wineNameMatches.map((match) => (
-                <div className="catalog-match-suggestion" key={`${match.source}:${match.sourceId}`}>
-                  <div>
-                    <span>{match.sourceLabel}</span>
-                    <strong>{match.displayName}</strong>
-                    <small>
-                      {match.supplierName}
-                      {match.quickbooksItemNumber ? ` · ${match.quickbooksItemNumber}` : ""}
-                    </small>
-                  </div>
-                  <button
-                    className="ghost-button button-small"
-                    onClick={() =>
-                      applyWineTemplate(
-                        productIdentityMatchToTemplateWine(match, searchItem),
-                        match.source === "supplier_catalog" ? match.sourceId : null,
-                        {
-                          followPricing: true,
-                          linkQuickBooks: match.source === "quickbooks_item" && match.active,
-                          preserveSupplier: match.source === "quickbooks_item" && Boolean(supplierName.trim())
-                        }
-                      )
-                    }
-                    type="button"
-                  >
-                    Start From
-                  </button>
-                  {match.active && (match.quickbooksItemNumber || match.source === "quickbooks_item") ? (
-                    <button className="ghost-button button-small" onClick={() => linkQuickbooksItem(match)} type="button">
-                      Link QB
-                    </button>
-                  ) : null}
-                </div>
-              ))
-            ) : (
-              <div className="catalog-match-empty">
-                {includeInactiveMatches ? "No active or inactive product matches found." : "No active product matches found."}
-              </div>
-            )}
-            <button
-              className="ghost-button button-small"
-              disabled={isSearchingWineMatches}
-              onClick={() => setIncludeInactiveMatches((current) => !current)}
-              type="button"
+        <div className="wide-field catalog-match-field">
+          <label>
+            Search Item
+            <input
+              aria-controls="add-wine-search-results"
+              aria-expanded={showWineNameMatches}
+              value={searchItem}
+              onChange={(event) => {
+                setSearchItem(event.target.value);
+                setIncludeInactiveMatches(false);
+              }}
+              placeholder="Search active item / SKU"
+            />
+          </label>
+          {showWineNameMatches ? (
+            <div
+              aria-label="Matching wines"
+              className="catalog-match-suggestions"
+              id="add-wine-search-results"
+              role="region"
             >
-              {includeInactiveMatches ? "Search active items only" : "Search inactive items too"}
-            </button>
-          </div>
-        ) : null}
+              <div className="catalog-match-results">
+                {isSearchingWineMatches ? (
+                  <div className="catalog-match-empty">Searching product matches...</div>
+                ) : wineMatchError ? (
+                  <div className="catalog-match-empty">{wineMatchError}</div>
+                ) : wineNameMatches.length > 0 ? (
+                  wineNameMatches.map((match) => (
+                    <div className="catalog-match-suggestion" key={`${match.source}:${match.sourceId}`}>
+                      <div>
+                        <span>{match.sourceLabel}</span>
+                        <strong>{match.displayName}</strong>
+                        <small>
+                          {match.supplierName}
+                          {match.quickbooksItemNumber ? ` · ${match.quickbooksItemNumber}` : ""}
+                        </small>
+                      </div>
+                      <button
+                        className="button button-outline button-small catalog-start-from-button"
+                        onClick={() =>
+                          applyWineTemplate(
+                            productIdentityMatchToTemplateWine(match, searchItem),
+                            match.source === "supplier_catalog" ? match.sourceId : null,
+                            {
+                              followPricing: true,
+                              linkQuickBooks: match.source === "quickbooks_item" && match.active,
+                              preserveSupplier: match.source === "quickbooks_item" && Boolean(supplierName.trim())
+                            }
+                          )
+                        }
+                        type="button"
+                      >
+                        Start From
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="catalog-match-empty">
+                    {includeInactiveMatches ? "No active or inactive product matches found." : "No active product matches found."}
+                  </div>
+                )}
+              </div>
+              <div className="catalog-match-footer">
+                <button
+                  className="button button-small catalog-inactive-search-button"
+                  disabled={isSearchingWineMatches}
+                  onClick={() => setIncludeInactiveMatches((current) => !current)}
+                  type="button"
+                >
+                  {includeInactiveMatches ? "Search active items only" : "Search inactive items too"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
         <label className="wide-field">
           Supplier
           <input
@@ -1410,18 +1391,6 @@ function defaultPriceLevelDrafts(): PriceLevelDraft[] {
       sourceUpdatedAt: null
     }
   ];
-}
-
-function sortNewestVintageFirst(a: SupplierCatalogWine, b: SupplierCatalogWine) {
-  const vintageA = Number(a.vintage);
-  const vintageB = Number(b.vintage);
-  if (Number.isFinite(vintageA) && Number.isFinite(vintageB) && vintageA !== vintageB) {
-    return vintageB - vintageA;
-  }
-  if (Number.isFinite(vintageA) !== Number.isFinite(vintageB)) {
-    return Number.isFinite(vintageA) ? -1 : 1;
-  }
-  return (b.updated_at || "").localeCompare(a.updated_at || "") || a.display_name.localeCompare(b.display_name);
 }
 
 function priceLevelDraftsFromWine(wine: SupplierCatalogWine, options: { asReference?: boolean } = {}): PriceLevelDraft[] {

@@ -341,6 +341,11 @@ export function OrderDashboard({
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "ordering_item_markers" },
+        () => scheduleDraftRefresh()
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "purchase_order_drafts", filter: `report_run_id=eq.${reportRun.id}` },
         () => scheduleDraftRefresh()
       )
