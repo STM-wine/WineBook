@@ -1,4 +1,5 @@
 import type { Recommendation } from "./types";
+import { canonicalCatalogProductIdentity } from "./catalog-product-identity";
 import { normalizeOrderingItemCode, ORDERING_BUILDER_VERSION, ORDERING_SOURCE } from "./source-backed-ordering";
 
 type OrderingRunLike = {
@@ -13,6 +14,9 @@ type CatalogReconciliationRow = {
   supplier_name: string;
   display_name: string;
   planning_sku: string;
+  vintage?: string | null;
+  pack_size?: number | string | null;
+  bottle_size?: string | null;
   quickbooks_item_number: string | null;
   quickbooks_sync_status: string | null;
 };
@@ -51,6 +55,7 @@ export function catalogReconciliationUpdates(
 ): CatalogReconciliationUpdate[] {
   const sourceBySupplierAndSku = new Map<string, Array<Record<string, any>>>();
   const sourceBySupplierAndName = new Map<string, Array<Record<string, any>>>();
+  const sourceBySupplierAndCatalogIdentity = new Map<string, Array<Record<string, any>>>();
   const sourceByItemCode = new Map<string, Array<Record<string, any>>>();
 
   const addCandidate = (
@@ -72,19 +77,32 @@ export function catalogReconciliationUpdates(
     if (!supplierId) return;
     const sku = normalizedIdentity(row.planning_sku);
     const name = normalizedIdentity(row.product_name);
+    const catalogIdentity = canonicalCatalogProductIdentity({
+      name: row.product_name,
+      vintage: row.diagnostics?.vintage,
+      packSize: row.pack_size
+    });
     const itemCode = normalizeOrderingItemCode(row.product_code);
     if (sku) addCandidate(sourceBySupplierAndSku, `${supplierId}:${sku}`, row);
     if (name) addCandidate(sourceBySupplierAndName, `${supplierId}:${name}`, row);
+    if (catalogIdentity) addCandidate(sourceBySupplierAndCatalogIdentity, `${supplierId}:${catalogIdentity}`, row);
     if (itemCode) addCandidate(sourceByItemCode, itemCode, row);
   });
 
   return catalogRows.flatMap((catalog) => {
     const supplierId = catalog.supplier_id || "";
     const itemCode = normalizeOrderingItemCode(catalog.quickbooks_item_number);
+    const catalogIdentity = canonicalCatalogProductIdentity({
+      name: catalog.display_name,
+      vintage: catalog.vintage,
+      packSize: catalog.pack_size,
+      bottleSize: catalog.bottle_size
+    });
     const source = uniqueCandidate(sourceByItemCode, itemCode) ||
       (supplierId
         ? uniqueCandidate(sourceBySupplierAndSku, `${supplierId}:${normalizedIdentity(catalog.planning_sku)}`) ||
-          uniqueCandidate(sourceBySupplierAndName, `${supplierId}:${normalizedIdentity(catalog.display_name)}`)
+          uniqueCandidate(sourceBySupplierAndName, `${supplierId}:${normalizedIdentity(catalog.display_name)}`) ||
+          uniqueCandidate(sourceBySupplierAndCatalogIdentity, `${supplierId}:${catalogIdentity || ""}`)
         : null);
     const sourceSupplierId = String(source?.diagnostics?.supplier_id || "");
     const canonicalSupplierId = supplierId || sourceSupplierId;

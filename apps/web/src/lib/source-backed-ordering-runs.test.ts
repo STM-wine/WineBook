@@ -147,6 +147,46 @@ describe("source-backed ordering run compatibility", () => {
     )).toEqual([]);
   });
 
+  it("reconciles legacy pack formatting to one authoritative QuickBooks SKU", () => {
+    const updates = catalogReconciliationUpdates(
+      [{
+        id: "catalog-vacheron",
+        supplier_id: "supplier-nbi",
+        supplier_name: "North Berkeley",
+        display_name: "Domaine Vacheron Sancerre Blanc Les Romains 6/750 2024 6/750ml",
+        planning_sku: "domaine vacheron sancerre blanc les romains 6/750 2024 6/750ml",
+        vintage: "2024",
+        pack_size: 6,
+        bottle_size: "750ml",
+        quickbooks_item_number: null,
+        quickbooks_sync_status: "not_created"
+      }],
+      [{
+        product_code: "NBI000392",
+        product_name: "Domaine Vacheron Sancerre Blanc Les Romains 2024 6/750",
+        planning_sku: "NBI000392",
+        pack_size: 6,
+        diagnostics: {
+          vintage: 2024,
+          supplier_id: "supplier-nbi",
+          quickbooks_item_list_id: "qb-les-romains"
+        }
+      }],
+      new Map([["supplier-nbi", "North Berkeley"]])
+    );
+
+    expect(updates).toEqual([{
+      id: "catalog-vacheron",
+      values: expect.objectContaining({
+        quickbooks_item_id: "qb-les-romains",
+        quickbooks_item_number: "NBI000392",
+        quickbooks_sync_status: "linked",
+        conversion_status: "exact_existing_product",
+        product_lifecycle_status: "supplier_available"
+      })
+    }]);
+  });
+
   it("repairs a missing catalog supplier from the exact QuickBooks item number", () => {
     const updates = catalogReconciliationUpdates(
       [{

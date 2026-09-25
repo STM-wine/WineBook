@@ -8,6 +8,7 @@ import type {
   SupplierLogistics,
   SupplierGroup
 } from "./types";
+import { canonicalCatalogProductIdentity } from "./catalog-product-identity";
 import {
   recommendationIsAutomatic,
   replenishmentPolicy,
@@ -450,6 +451,19 @@ export function recommendationMatchesCatalogWine(
   const rowSupplier = normalizeIdentityText(row.supplier_name);
   const wineSupplier = normalizeIdentityText(wine.supplier_name);
   if (!rowSupplier || !wineSupplier || rowSupplier !== wineSupplier) return false;
+
+  const rowCatalogIdentity = canonicalCatalogProductIdentity({
+    name: row.product_name,
+    vintage: row.diagnostics?.vintage,
+    packSize: row.pack_size
+  });
+  const wineCatalogIdentity = canonicalCatalogProductIdentity({
+    name: wine.display_name,
+    vintage: wine.vintage,
+    packSize: wine.pack_size,
+    bottleSize: wine.bottle_size
+  });
+  if (rowCatalogIdentity && rowCatalogIdentity === wineCatalogIdentity) return true;
 
   const rowSku = normalizeIdentityText(row.planning_sku);
   const wineSku = normalizeIdentityText(wine.planning_sku);

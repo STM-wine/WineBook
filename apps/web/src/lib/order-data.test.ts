@@ -95,6 +95,61 @@ describe("supplier catalog recommendation merge", () => {
     expect(mergeSupplierCatalogRows([recommendation()], [catalogWine()], "run-1")).toHaveLength(1);
   });
 
+  it("removes the QuickBooks shadow when QuickBooks omits ml from its pack format", () => {
+    const source = recommendation({
+      product_name: "Domaine Vacheron Sancerre Blanc Chambrates 2024 6/750",
+      product_code: "NBI000390",
+      supplier_name: "North Berkeley",
+      pack_size: 6,
+      diagnostics: { vintage: 2024 }
+    });
+    const pending = catalogWine({
+      supplier_name: "North Berkeley",
+      wine_name: "Sancerre Blanc Chambrates",
+      vintage: "2024",
+      display_name: "Domaine Vacheron Sancerre Blanc Chambrates 2024 6/750ml",
+      planning_sku: "domaine vacheron sancerre blanc chambrates 2024 6/750ml"
+    });
+
+    expect(recommendationMatchesCatalogWine(source, pending)).toBe(true);
+    expect(mergeSupplierCatalogRows([source], [pending], "run-1")).toEqual([source]);
+  });
+
+  it("removes a legacy shadow with a duplicated embedded pack when structured identity is exact", () => {
+    const source = recommendation({
+      product_name: "Domaine Vacheron Sancerre Blanc Les Romains 2024 6/750",
+      product_code: "NBI000392",
+      supplier_name: "North Berkeley",
+      pack_size: 6,
+      diagnostics: { vintage: 2024 }
+    });
+    const pending = catalogWine({
+      supplier_name: "North Berkeley",
+      wine_name: "Sancerre Blanc Les Romains 6/750",
+      vintage: "2024",
+      display_name: "Domaine Vacheron Sancerre Blanc Les Romains 6/750 2024 6/750ml",
+      planning_sku: "domaine vacheron sancerre blanc les romains 6/750 2024 6/750ml"
+    });
+
+    expect(recommendationMatchesCatalogWine(source, pending)).toBe(true);
+    expect(mergeSupplierCatalogRows([source], [pending], "run-1")).toEqual([source]);
+  });
+
+  it("does not merge a structured identity across vintages", () => {
+    expect(recommendationMatchesCatalogWine(
+      recommendation({
+        product_name: "Domaine Vacheron Sancerre Blanc Chambrates 2023 6/750",
+        supplier_name: "North Berkeley",
+        diagnostics: { vintage: 2023 }
+      }),
+      catalogWine({
+        supplier_name: "North Berkeley",
+        vintage: "2024",
+        display_name: "Domaine Vacheron Sancerre Blanc Chambrates 2024 6/750ml"
+      })
+    )).toBe(false);
+  });
+
   it("trusts the matching embedded format when a recommendation retained the default pack size", () => {
     expect(recommendationMatchesCatalogWine(
       recommendation({ pack_size: 12 }),
