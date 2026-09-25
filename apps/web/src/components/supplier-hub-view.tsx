@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { buildSupplierWineMatchPath, shouldIgnoreSupplierWineMatchResult } from "@/lib/add-wine-search";
 import { parseProductIdentityQuery, type ProductIdentityMatch } from "@/lib/product-identity-search";
 import type {
   PriceChangeEvent,
@@ -268,6 +269,7 @@ function AddWinePanel({
   const [wineNameMatches, setWineNameMatches] = useState<ProductIdentityMatch[]>([]);
   const [wineMatchError, setWineMatchError] = useState("");
   const [isSearchingWineMatches, setIsSearchingWineMatches] = useState(false);
+  const wineMatchRequestId = useRef(0);
   const [includeInactiveMatches, setIncludeInactiveMatches] = useState(false);
   const [priceLevels, setPriceLevels] = useState<PriceLevelDraft[]>(() => defaultPriceLevelDrafts());
   const [freeGoods, setFreeGoods] = useState<FreeGoodDraft[]>([]);
@@ -318,6 +320,7 @@ function AddWinePanel({
 
   useEffect(() => {
     const query = searchItem.trim();
+    const requestId = ++wineMatchRequestId.current;
     if (query.length < 3 || templateWine) {
       setWineNameMatches([]);
       setWineMatchError("");
@@ -327,33 +330,43 @@ function AddWinePanel({
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
-      const params = new URLSearchParams({ q: query });
-      if (supplierId) params.set("supplierId", supplierId);
-      if (supplierName) params.set("supplierName", supplierName);
-      if (producer) params.set("producer", producer);
-      if (vintage) params.set("vintage", vintage);
-      if (packSize) params.set("packSize", packSize);
-      if (bottleSize) params.set("bottleSize", bottleSize);
-      if (includeInactiveMatches) params.set("includeInactive", "true");
-
       setIsSearchingWineMatches(true);
       setWineMatchError("");
-      const endpoint = new URL("/api/supplier-wines/matches", window.location.origin);
-      endpoint.search = params.toString();
-      fetch(endpoint.toString(), { signal: controller.signal })
+      const endpoint = buildSupplierWineMatchPath({
+        query,
+        supplierId,
+        supplierName,
+        producer,
+        vintage,
+        packSize,
+        bottleSize,
+        includeInactive: includeInactiveMatches
+      });
+      fetch(endpoint, { signal: controller.signal })
         .then(async (response) => {
           const body = await response.json();
           if (!response.ok) {
             throw new Error(body.error || "Could not search product matches.");
           }
+          if (shouldIgnoreSupplierWineMatchResult({
+            aborted: controller.signal.aborted,
+            requestId,
+            activeRequestId: wineMatchRequestId.current
+          })) return;
           setWineNameMatches(Array.isArray(body.matches) ? body.matches : []);
         })
         .catch((error) => {
-          if (error instanceof DOMException && error.name === "AbortError") return;
+          if (shouldIgnoreSupplierWineMatchResult({
+            aborted: controller.signal.aborted,
+            requestId,
+            activeRequestId: wineMatchRequestId.current
+          })) return;
           setWineNameMatches([]);
           setWineMatchError(error instanceof Error ? error.message : "Could not search product matches.");
         })
-        .finally(() => setIsSearchingWineMatches(false));
+        .finally(() => {
+          if (requestId === wineMatchRequestId.current) setIsSearchingWineMatches(false);
+        });
     }, 220);
 
     return () => {
@@ -604,6 +617,8 @@ function AddWinePanel({
   const existing = wines.find((wine) => wine.planning_sku === preview.planning_sku && wine.id !== pendingEditId);
   const previewDiagnostics = preview.diagnostics as Record<string, unknown>;
   const warnings = Array.isArray(previewDiagnostics.warnings) ? (previewDiagnostics.warnings as string[]) : [];
+  const hasDraftIdentity = Boolean(producer.trim() && wineName.trim());
+  const visibleWarnings = hasDraftIdentity ? warnings : [];
   const isBelowMinimumGp = warnings.some((warning) => warning.includes("below 28%"));
   const lowGpOverridesComplete = draftPriceLevels
     .filter((level) => level.active && level.bottlePrice > 0 && level.calculatedGpMargin < 0.28)
@@ -1099,7 +1114,7 @@ function AddWinePanel({
         ))}
       </div>
 
-      {warnings.map((warning) => (
+      {visibleWarnings.map((warning) => (
         <div className="inline-warning" key={warning}>
           {warning}
         </div>
@@ -1123,7 +1138,7 @@ function AddWinePanel({
           Existing planning SKU found. Save Wine updates the existing supplier wine and creates a draft price-change event if FOB or frontline changed.
         </div>
       ) : null}
-      {!effectiveQuickBooksIdentity.itemNumber ? (
+      {hasDraftIdentity && !effectiveQuickBooksIdentity.itemNumber ? (
         <div className="inline-warning">
           This SKU will be marked as a New Item in Order Review and PO Drafts until a QuickBooks Item Number is attached.
         </div>

@@ -83,7 +83,9 @@ describe("Add Wine search and price-level UI", () => {
     ]);
 
     expect(view).toContain("Search inactive items too");
-    expect(view).toContain('new URL("/api/supplier-wines/matches", window.location.origin)');
+    expect(view).toContain("buildSupplierWineMatchPath");
+    expect(view).toContain("shouldIgnoreSupplierWineMatchResult");
+    expect(view).not.toContain('new URL("/api/supplier-wines/matches", window.location.origin)');
     expect(route).toContain('url.searchParams.get("includeInactive") === "true"');
     expect(route).toContain('request = request.eq("is_active", true)');
   });
@@ -103,6 +105,15 @@ describe("Add Wine search and price-level UI", () => {
     expect(view).not.toContain("<th>Target GP</th>");
     expect(view).not.toContain("<th>Solve for</th>");
     expect(view).not.toContain("Source {formatCurrencyCents");
+  });
+
+  it("does not show saved-draft diagnostics after the form clears", async () => {
+    const view = await readFile(addWineViewPath, "utf8");
+
+    expect(view).toContain("const hasDraftIdentity = Boolean(producer.trim() && wineName.trim())");
+    expect(view).toContain("const visibleWarnings = hasDraftIdentity ? warnings : []");
+    expect(view).toContain("{visibleWarnings.map((warning) => (");
+    expect(view).toContain("{hasDraftIdentity && !effectiveQuickBooksIdentity.itemNumber ? (");
   });
 
   it("keeps search matches in a scrolling overlay with one consistent action", async () => {
