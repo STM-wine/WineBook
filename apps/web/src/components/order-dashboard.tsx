@@ -962,6 +962,11 @@ export function OrderDashboard({
     startTransition(async () => {
       try {
         const result = await saveSupplierCatalogWine(input);
+        if (!result.ok) {
+          setErrorMessage(result.message);
+          setPendingMessage("");
+          return;
+        }
         const changeText = result.priceChangeCreated ? " Price-change draft created." : "";
         setPendingMessage(
           `${result.mode === "updated" ? "Updated" : "Created"} supplier wine: ${result.displayName}.${changeText}`

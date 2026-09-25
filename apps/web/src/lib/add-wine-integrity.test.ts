@@ -34,6 +34,8 @@ describe("Add Wine database safety contract", () => {
     ]);
 
     expect(action).toContain('supabase.rpc("save_supplier_catalog_sku_atomic"');
+    expect(action).toContain("addWineSaveFailure(saveError?.message)");
+    expect(action).toContain("if (expectedFailure) return expectedFailure");
     expect(sql).toContain("security definer");
     expect(sql).toContain("pg_advisory_xact_lock");
     expect(sql).toContain("p_expected_lock_version");

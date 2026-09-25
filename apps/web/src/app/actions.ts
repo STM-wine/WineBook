@@ -2,6 +2,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { revalidatePath, revalidateTag } from "next/cache";
+import { addWineSaveFailure } from "@/lib/add-wine-save-result";
 import { CACHE_TAGS } from "@/lib/cache-tags";
 import { asNumber } from "@/lib/order-data";
 import { isValidPoStatus } from "@/lib/po-status";
@@ -778,6 +779,8 @@ export async function saveSupplierCatalogWine(input: {
   });
 
   if (saveError || !saveResult) {
+    const expectedFailure = addWineSaveFailure(saveError?.message);
+    if (expectedFailure) return expectedFailure;
     throw new Error(saveError?.message || "Could not save supplier wine.");
   }
 
@@ -792,6 +795,7 @@ export async function saveSupplierCatalogWine(input: {
   revalidateSupplierCatalogData();
   revalidatePath("/");
   return {
+    ok: true as const,
     mode: result.mode,
     saved,
     displayName: saved.display_name,
