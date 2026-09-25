@@ -63,6 +63,17 @@ describe("Add Wine search and price-level UI", () => {
     expect(view).not.toContain("<th>Owner / approver</th>");
   });
 
+  it("keeps Add Wine price levels focused on final pricing inputs", async () => {
+    const view = await readFile(addWineViewPath, "utf8");
+    expect(view).toContain("<th>Level</th>");
+    expect(view).toContain("<th>Price</th>");
+    expect(view).toContain("<th>DA</th>");
+    expect(view).toContain("<th>GP</th>");
+    expect(view).not.toContain("<th>Target GP</th>");
+    expect(view).not.toContain("<th>Solve for</th>");
+    expect(view).not.toContain("Source {formatCurrencyCents");
+  });
+
   it("keeps search matches in a scrolling overlay with one consistent action", async () => {
     const [view, styles] = await Promise.all([
       readFile(addWineViewPath, "utf8"),

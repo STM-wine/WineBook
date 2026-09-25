@@ -13,7 +13,6 @@ import {
   APPROVER_NAMES,
   AVAILABILITY_STATUSES,
   PLACEMENT_TYPES,
-  SOLVE_FOR_MODES,
   SYSTEM_TAGS,
   systemTagLabel,
   balancePriceLevel,
@@ -259,7 +258,6 @@ function AddWinePanel({
   const [isSearchingWineMatches, setIsSearchingWineMatches] = useState(false);
   const [includeInactiveMatches, setIncludeInactiveMatches] = useState(false);
   const [priceLevels, setPriceLevels] = useState<PriceLevelDraft[]>(() => defaultPriceLevelDrafts());
-  const [priceLevelsFollowPricing, setPriceLevelsFollowPricing] = useState(false);
   const [freeGoods, setFreeGoods] = useState<FreeGoodDraft[]>([]);
   const [priceChangeReason, setPriceChangeReason] = useState("Manual catalog update");
   const producerOptions = useMemo(() => uniqueSorted(wines.map((wine) => wine.producer)), [wines]);
@@ -415,7 +413,6 @@ function AddWinePanel({
     setQuickbooksItemName(shouldLinkQuickBooks ? wine.quickbooks_item_name || "" : "");
     setQuickbooksItemNumber(shouldLinkQuickBooks ? wine.quickbooks_item_number || wine.quickbooks_item_id || "" : "");
     setPriceLevels(priceLevelDraftsFromWine(wine, { asReference: Boolean(options.followPricing) }));
-    setPriceLevelsFollowPricing(Boolean(options.followPricing));
     setFreeGoods(freeGoodDraftsFromWine(wine, { expirePastPrograms: Boolean(options.followPricing) }));
     setPriceChangeReason(`Matched from ${wine.display_name}`);
   }
@@ -453,7 +450,6 @@ function AddWinePanel({
     setQuickbooksItemName("");
     setQuickbooksItemNumber("");
     setPriceLevels(defaultPriceLevelDrafts());
-    setPriceLevelsFollowPricing(false);
     setFreeGoods([]);
     setPriceChangeReason("Manual catalog update");
     if (supplierId) {
@@ -490,7 +486,6 @@ function AddWinePanel({
     setQuickbooksItemName("");
     setQuickbooksItemNumber("");
     setPriceLevels(defaultPriceLevelDrafts());
-    setPriceLevelsFollowPricing(false);
     setFreeGoods([]);
     setPriceChangeReason("Manual catalog update");
   }
@@ -500,7 +495,6 @@ function AddWinePanel({
   }
 
   function patchPriceLevel(id: string, patch: Partial<PriceLevelDraft>) {
-    setPriceLevelsFollowPricing(false);
     setPriceLevels((current) =>
       current.map((level) => {
         if (level.id !== id) return level;
@@ -513,7 +507,6 @@ function AddWinePanel({
   }
 
   function addPriceLevel() {
-    setPriceLevelsFollowPricing(false);
     setPriceLevels((current) => [
       ...current,
       {
@@ -530,16 +523,12 @@ function AddWinePanel({
         isFrontline: false,
         isBest: false,
         active: true,
-        isManualOverride: true,
-        sourceBottlePrice: null,
-        sourceDepletionAllowance: null,
-        sourceUpdatedAt: null
+        isManualOverride: true
       }
     ]);
   }
 
   function deactivatePriceLevel(id: string) {
-    setPriceLevelsFollowPricing(false);
     setPriceLevels((current) => current.map((level) => level.id === id ? { ...level, active: false } : level));
   }
 
@@ -928,24 +917,11 @@ function AddWinePanel({
       </div>
 
       {vintagePricingComparisonRows.length > 0 ? (
-        <div className="vintage-pricing-comparison">
-          <div className="section-heading compact-heading">
-            <div>
-              <h2>New Vintage Pricing</h2>
-              <p>Previous SKU stays unchanged. New FOB values generate fresh Frontline, Best, and GP suggestions.</p>
-            </div>
-            {priceLevelsFollowPricing ? <span className="pricing-suggestion-pill">Calculated</span> : <span className="pricing-suggestion-pill">Edited</span>}
-          </div>
-          <div className="vintage-comparison-grid">
-            {vintagePricingComparisonRows.map((row) => (
-              <div className={row.changed ? "vintage-comparison-row changed" : "vintage-comparison-row"} key={row.label}>
-                <span>{row.label}</span>
-                <strong>{row.from}</strong>
-                <b>{"->"}</b>
-                <strong>{row.to}</strong>
-              </div>
-            ))}
-          </div>
+        <div className="previous-pricing-summary">
+          <strong>Previous vintage</strong>
+          {vintagePricingComparisonRows.map((row) => (
+            <span key={row.label}>{row.label}: {row.from}</span>
+          ))}
         </div>
       ) : null}
 
@@ -963,31 +939,26 @@ function AddWinePanel({
           <table>
             <thead>
               <tr>
-                <th>Name</th>
+                <th>Level</th>
                 <th>Price</th>
                 <th>DA</th>
-                <th>Target GP</th>
-                <th>Solve for</th>
-                <th>GM</th>
-                <th>Reason</th>
-                <th>FL</th>
-                <th>Best</th>
-                <th>Active</th>
-                <th>Deactivate</th>
+                <th>GP</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {priceLevels.map((level, index) => {
+              {priceLevels.filter((level) => level.active && !(frontlineOnly && level.isBest)).map((level, index) => {
                 const effective = priceLevelDraftToInput(level, index, computedPricing);
                 const bottlePriceEntered = level.bottlePrice.trim().length > 0;
-                const daEntered = level.depletionAllowance.trim().length > 0;
-                const gpEntered = level.targetGpMargin.trim().length > 0;
+                const isBaseLevel = level.isFrontline || level.isBest;
 
                 return (
                   <Fragment key={level.id}>
                   <tr>
                     <td>
-                      <input aria-label="Price level name" value={level.name} onChange={(event) => patchPriceLevel(level.id, { name: event.target.value })} />
+                      {isBaseLevel
+                        ? <strong>{level.isFrontline ? "Frontline" : "Best"}</strong>
+                        : <input aria-label="Price level name" value={level.name} onChange={(event) => patchPriceLevel(level.id, { name: event.target.value })} />}
                     </td>
                     <td>
                       <div className="priced-field">
@@ -997,107 +968,48 @@ function AddWinePanel({
                           placeholder={String(effective.bottlePrice || "")}
                           step={0.01}
                           type="number"
-                          readOnly={level.solveFor === "price"}
                           value={level.bottlePrice}
-                          onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value, isManualOverride: true })}
+                          onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value, solveFor: "gp", isManualOverride: true })}
                         />
-                        <small className={effective.calculatedField === "price" ? "price-suggestion-value" : undefined}>
-                          {effective.calculatedField === "price"
-                            ? `Suggested ${formatCurrencyCents(effective.bottlePrice)} · GP ${formatPercent(effective.suggestedGpMargin)}`
-                            : bottlePriceEntered
-                              ? "Manual override"
-                              : `Suggested ${formatCurrencyCents(effective.suggestedPrice)} · GP ${formatPercent(effective.suggestedGpMargin)}`}
-                        </small>
-                        {level.sourceBottlePrice !== null ? (
-                          <small>
-                            Source {formatCurrencyCents(level.sourceBottlePrice)} · DA {formatCurrencyCents(level.sourceDepletionAllowance || 0)} · GP {formatPercent(calculateGpMargin({ bottlePrice: level.sourceBottlePrice, landedBottleCost: computedPricing.landedBottleCost, depletionAllowance: level.sourceDepletionAllowance }))}
-                            {level.sourceUpdatedAt ? ` · ${level.sourceUpdatedAt.slice(0, 10)}` : ""}
-                          </small>
-                        ) : null}
-                        {(level.isFrontline || level.isBest) && level.isManualOverride ? (
-                          <button className="ghost-button button-small" type="button" onClick={() => patchPriceLevel(level.id, { bottlePrice: "", isManualOverride: false })}>
-                            Reset to suggested
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="priced-field">
-                        <input
-                          aria-label="Depletion allowance"
-                          min={0}
-                          step={0.01}
-                          type="number"
-                          readOnly={level.solveFor === "da"}
-                          placeholder={String(effective.depletionAllowance || "")}
-                          value={level.depletionAllowance}
-                          onChange={(event) => patchPriceLevel(level.id, { depletionAllowance: event.target.value })}
-                        />
-                        <small className={effective.calculatedField === "da" ? "price-suggestion-value" : undefined}>
-                          {effective.calculatedField === "da"
-                            ? `Suggested ${formatCurrencyCents(effective.depletionAllowance)}`
-                            : daEntered
-                              ? "Entered"
-                              : "Calculated"}
+                        <small className={!bottlePriceEntered && isBaseLevel ? "price-suggestion-value" : undefined}>
+                          {bottlePriceEntered
+                            ? "Manual price"
+                            : isBaseLevel
+                              ? `Suggested ${formatCurrencyCents(effective.suggestedPrice)}`
+                              : "Enter price"}
                         </small>
                       </div>
                     </td>
                     <td>
-                      <div className="priced-field">
-                        <input
-                          aria-label="Target GP margin"
-                          min={0}
-                          max={99.99}
-                          step={0.1}
-                          type="number"
-                          value={level.targetGpMargin}
-                          onChange={(event) => patchPriceLevel(level.id, { targetGpMargin: event.target.value })}
-                        />
-                        <small>{gpEntered ? "Entered" : "Calculated"}</small>
-                      </div>
-                    </td>
-                    <td>
-                      <select aria-label="Solve for" value={level.solveFor} onChange={(event) => patchPriceLevel(level.id, { solveFor: event.target.value as PriceLevelDraft["solveFor"] })}>
-                        {SOLVE_FOR_MODES.map((mode) => <option key={mode} value={mode}>{mode.toUpperCase()}</option>)}
-                      </select>
+                      <input
+                        aria-label="Depletion allowance"
+                        min={0}
+                        step={0.01}
+                        type="number"
+                        value={level.depletionAllowance}
+                        onChange={(event) => patchPriceLevel(level.id, { depletionAllowance: event.target.value, solveFor: "gp" })}
+                      />
                     </td>
                     <td className={effective.belowMinimumGp ? "danger-cell" : undefined}>{formatPercent(effective.calculatedGpMargin)}</td>
-                    <td><input aria-label="Price decision reason" value={level.overrideReason} onChange={(event) => patchPriceLevel(level.id, { overrideReason: event.target.value })} /></td>
-                    <td>
-                      <input
-                        aria-label="Frontline"
-                        className="approval-input"
-                        type="checkbox"
-                        checked={level.isFrontline}
-                        onChange={(event) => patchPriceLevel(level.id, { isFrontline: event.target.checked })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label="Best"
-                        className="approval-input"
-                        type="checkbox"
-                        checked={level.isBest}
-                        onChange={(event) => patchPriceLevel(level.id, { isBest: event.target.checked })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label="Active"
-                        className="approval-input"
-                        type="checkbox"
-                        checked={level.active}
-                        onChange={(event) => patchPriceLevel(level.id, { active: event.target.checked })}
-                      />
-                    </td>
-                    <td>
-                      <button className="ghost-button remove-line-button" disabled={!level.active} onClick={() => deactivatePriceLevel(level.id)} type="button">
-                        Deactivate
-                      </button>
+                    <td className="price-level-action-cell">
+                      {isBaseLevel ? (
+                        <button
+                          className="ghost-button button-small"
+                          disabled={!level.isManualOverride && !level.bottlePrice.trim()}
+                          type="button"
+                          onClick={() => patchPriceLevel(level.id, { bottlePrice: "", depletionAllowance: "0", targetGpMargin: "", solveFor: "gp", isManualOverride: false })}
+                        >
+                          Reset
+                        </button>
+                      ) : (
+                        <button className="ghost-button remove-line-button" onClick={() => deactivatePriceLevel(level.id)} type="button">
+                          Remove
+                        </button>
+                      )}
                     </td>
                   </tr>
                   {effective.noDaRequired || effective.daExceedsLandedCost || effective.solveInputsMissing ? (
-                    <tr className="price-level-note-row"><td colSpan={13}>
+                    <tr className="price-level-note-row"><td colSpan={5}>
                       {effective.solveInputsMissing ? `Enter the required inputs before solving for ${level.solveFor.toUpperCase()}. ` : ""}
                       {effective.noDaRequired ? "No DA required. " : ""}
                       {effective.daExceedsLandedCost ? "Warning: DA exceeds landed cost." : ""}
@@ -1235,9 +1147,6 @@ type PriceLevelDraft = {
   isBest: boolean;
   active: boolean;
   isManualOverride: boolean;
-  sourceBottlePrice: number | null;
-  sourceDepletionAllowance: number | null;
-  sourceUpdatedAt: string | null;
 };
 
 type FreeGoodDraft = {
@@ -1351,10 +1260,7 @@ function defaultPriceLevelDrafts(): PriceLevelDraft[] {
       isFrontline: true,
       isBest: false,
       active: true,
-      isManualOverride: false,
-      sourceBottlePrice: null,
-      sourceDepletionAllowance: null,
-      sourceUpdatedAt: null
+      isManualOverride: false
     },
     {
       id: "best",
@@ -1370,18 +1276,18 @@ function defaultPriceLevelDrafts(): PriceLevelDraft[] {
       isFrontline: false,
       isBest: true,
       active: true,
-      isManualOverride: false,
-      sourceBottlePrice: null,
-      sourceDepletionAllowance: null,
-      sourceUpdatedAt: null
+      isManualOverride: false
     }
   ];
 }
 
 function priceLevelDraftsFromWine(wine: SupplierCatalogWine, options: { asReference?: boolean } = {}): PriceLevelDraft[] {
-  const levels = wine.price_levels && wine.price_levels.length > 0
+  const existingLevels = wine.price_levels && wine.price_levels.length > 0
     ? [...wine.price_levels].sort((a, b) => asNumber(a.display_order) - asNumber(b.display_order))
-    : [
+    : [];
+  const levels = [
+    ...(!existingLevels.some((level) => level.active !== false && level.is_frontline)
+      ? [
         {
           id: "frontline",
           name: "Frontline",
@@ -1398,29 +1304,32 @@ function priceLevelDraftsFromWine(wine: SupplierCatalogWine, options: { asRefere
           active: true,
           is_manual_override: true,
           updated_at: wine.updated_at
-        },
-        ...(wine.best_price !== null
-          ? [
-              {
-                id: "best",
-                name: "Best",
-                bottle_price: wine.best_price,
-                depletion_allowance: 0,
-                target_gp_margin: null,
-                solve_for: "gp",
-                approval_decision: null,
-                override_reason: null,
-                approval_owner: null,
-                decision_timestamp: null,
-                is_frontline: false,
-                is_best: true,
-                active: true,
-                is_manual_override: true,
-                updated_at: wine.updated_at
-              }
-            ]
-          : [])
-      ];
+        }
+      ]
+      : []),
+    ...existingLevels,
+    ...(!wine.frontline_only && !existingLevels.some((level) => level.active !== false && level.is_best)
+      ? [
+          {
+            id: "best",
+            name: "Best",
+            bottle_price: wine.best_price,
+            depletion_allowance: 0,
+            target_gp_margin: null,
+            solve_for: "gp",
+            approval_decision: null,
+            override_reason: null,
+            approval_owner: null,
+            decision_timestamp: null,
+            is_frontline: false,
+            is_best: true,
+            active: true,
+            is_manual_override: false,
+            updated_at: wine.updated_at
+          }
+        ]
+      : [])
+  ];
 
   return levels.map((level, index) => ({
     id: `${level.id || "level"}-${index}`,
@@ -1438,10 +1347,7 @@ function priceLevelDraftsFromWine(wine: SupplierCatalogWine, options: { asRefere
     isFrontline: Boolean(level.is_frontline),
     isBest: Boolean(level.is_best),
     active: level.active !== false,
-    isManualOverride: options.asReference ? !(level.is_frontline || level.is_best) : level.is_manual_override !== false,
-    sourceBottlePrice: options.asReference ? asNumber(level.bottle_price) : null,
-    sourceDepletionAllowance: options.asReference ? asNumber(level.depletion_allowance) : null,
-    sourceUpdatedAt: options.asReference ? level.updated_at || wine.updated_at || null : null
+    isManualOverride: options.asReference ? !(level.is_frontline || level.is_best) : level.is_manual_override !== false
   }));
 }
 

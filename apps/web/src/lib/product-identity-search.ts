@@ -11,6 +11,7 @@ import {
 import {
   buildDisplayName,
   buildPlanningSku,
+  calculateGpMargin,
   calculatePricing,
   normalizeSpaces,
   normalizeVintage
@@ -168,6 +169,62 @@ export function latestProductIdentityPriceLevels(levels: ProductIdentityPriceLev
     if (!latest.has(key)) latest.set(key, level);
   }
   return Array.from(latest.values());
+}
+
+export function mergeProductIdentityPriceLevels(
+  matches: ProductIdentityMatch[],
+  candidates: ProductIdentityCandidate[]
+) {
+  return matches.map((match) => {
+    const related = candidates.filter((candidate) => productIdentityMatches(match, candidate));
+    const levels = related
+      .flatMap((candidate) => (candidate.priceLevels || []).map((level) => ({
+        level,
+        authority: candidate.source === "supplier_catalog" ? 3 : candidate.source === "vinosmith" ? 2 : 1
+      })))
+      .filter(({ level }) => level.active !== false)
+      .sort((a, b) => b.authority - a.authority || newestFirst(a.level.updatedAt, b.level.updatedAt));
+    const merged = new Map<string, ProductIdentityPriceLevel>();
+
+    for (const { level } of levels) {
+      const key = level.isFrontline ? "role:frontline" : level.isBest ? "role:best" : `name:${searchKey(level.name)}`;
+      if (!merged.has(key)) merged.set(key, level);
+    }
+
+    const priceLevels = Array.from(merged.values()).sort((a, b) =>
+      priceLevelDisplayOrder(a) - priceLevelDisplayOrder(b) || a.name.localeCompare(b.name)
+    );
+    const frontline = priceLevels.find((level) => level.isFrontline);
+    const best = priceLevels.find((level) => level.isBest);
+    const landedBottleCost = Number((match.fobBottle + match.laidInPerBottle).toFixed(2));
+
+    return {
+      ...match,
+      priceLevels,
+      frontlineBottlePrice: frontline?.bottlePrice ?? match.frontlineBottlePrice,
+      bestPrice: best?.bottlePrice ?? match.bestPrice,
+      grossProfitMargin: frontline
+        ? calculateGpMargin({
+            bottlePrice: frontline.bottlePrice,
+            landedBottleCost,
+            depletionAllowance: frontline.depletionAllowance
+          })
+        : match.grossProfitMargin
+    };
+  });
+}
+
+function productIdentityMatches(left: ProductIdentityCandidate, right: ProductIdentityCandidate) {
+  const leftCode = searchKey(left.quickbooksItemNumber || "");
+  const rightCode = searchKey(right.quickbooksItemNumber || "");
+  if (leftCode && rightCode) return leftCode === rightCode;
+  return searchKey(left.planningSku) === searchKey(right.planningSku);
+}
+
+function priceLevelDisplayOrder(level: ProductIdentityPriceLevel) {
+  if (level.isFrontline) return 0;
+  if (level.isBest) return 1;
+  return 2;
 }
 
 export function quickbooksItemRowToCandidate(row: Record<string, unknown>): ProductIdentityCandidate {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   balancePriceLevel,
+  buildSupplierCatalogWine,
   calculateBestPrice,
   calculateGpMargin,
   calculatePricing,
+  completeRequiredPriceLevels,
   findDuplicateActivePriceLevels,
   hasOfficialQuickBooksProduct,
   normalizeFobCosts,
@@ -99,6 +101,39 @@ describe("production Supplier Hub pricing", () => {
   it("supports explicit Frontline-only pricing without a $50 suppression rule", () => {
     expect(calculatePricing({ packSize: 12, fobBottle: 40, laidInPerBottle: 0 }).bestPrice).toBe(58);
     expect(calculatePricing({ packSize: 12, fobBottle: 40, laidInPerBottle: 0, frontlineOnly: true }).bestPrice).toBeNull();
+  });
+
+  it("completes a partial source list with both required automatic price levels", () => {
+    const pricing = calculatePricing({ packSize: 12, fobBottle: 11, laidInPerBottle: 1 });
+    const levels = completeRequiredPriceLevels([{
+      name: "Frontline",
+      bottlePrice: 18,
+      isFrontline: true,
+      active: true
+    }], pricing);
+
+    expect(levels.filter((level) => level.active !== false).map((level) => level.name)).toEqual(["Frontline", "Best"]);
+    expect(levels.find((level) => level.isBest)?.bottlePrice).toBe(17.25);
+  });
+
+  it("keeps the saved header and price-level rows consistent when the source has only Frontline", () => {
+    const result = buildSupplierCatalogWine({
+      supplierName: "Illahe",
+      producer: "Illahe",
+      wineName: "Viognier",
+      vintage: "2026",
+      packSize: 12,
+      bottleSize: "750ml",
+      fobBottle: 11,
+      laidInPerBottle: 1,
+      availabilityStatus: "available",
+      conversionStatus: "new_vintage",
+      priceLevels: [{ name: "Frontline", bottlePrice: 17.75, isFrontline: true, active: true }]
+    });
+
+    const best = result.price_levels.find((level) => level.is_best && level.active);
+    expect(best?.bottle_price).toBe(17.25);
+    expect(result.best_price).toBe(best?.bottle_price);
   });
 
   it("matches the requested under-$20 acceptance example", () => {

@@ -602,6 +602,31 @@ export function defaultPriceLevelsForPricing(pricing: PricingResult): SupplierCa
   ];
 }
 
+export function completeRequiredPriceLevels(
+  levels: SupplierCatalogPriceLevelInput[] | undefined,
+  pricing: PricingResult,
+  frontlineOnly = false
+) {
+  const current = [...(levels || [])];
+  const defaults = defaultPriceLevelsForPricing(pricing);
+  const frontlineDefault = defaults.find((level) => level.isFrontline);
+  const bestDefault = defaults.find((level) => level.isBest);
+
+  if (!current.some((level) => level.active !== false && level.isFrontline) && frontlineDefault) {
+    current.unshift(frontlineDefault);
+  }
+
+  if (frontlineOnly) {
+    return current.map((level) => level.isBest ? { ...level, active: false } : level);
+  }
+
+  if (!current.some((level) => level.active !== false && level.isBest) && bestDefault) {
+    current.push(bestDefault);
+  }
+
+  return current;
+}
+
 export function normalizePriceLevels(
   levels: SupplierCatalogPriceLevelInput[] = [],
   landedBottleCost = 0
@@ -697,7 +722,7 @@ export function buildSupplierCatalogWine(input: SupplierCatalogWineInput) {
     frontlineOnly: input.frontlineOnly
   });
   const priceLevels = normalizePriceLevels(
-    input.priceLevels && input.priceLevels.length > 0 ? input.priceLevels : defaultPriceLevelsForPricing(pricing),
+    completeRequiredPriceLevels(input.priceLevels, pricing, Boolean(input.frontlineOnly)),
     pricing.landedBottleCost
   );
   const frontlineLevel = priceLevels.find((level) => level.active !== false && level.isFrontline) ||

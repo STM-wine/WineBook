@@ -7,11 +7,13 @@ import {
   recommendationRowToCandidate,
   dedupeProductIdentityCandidates,
   latestProductIdentityPriceLevels,
+  mergeProductIdentityPriceLevels,
   searchProductIdentityCandidates,
   supplierCatalogRowToCandidate,
   vinosmithWineRowToCandidate,
   type ProductIdentityCandidate
 } from "@/lib/product-identity-search";
+import { calculatePricing } from "@/lib/supplier-catalog";
 
 const RECENT_REPORT_RUN_COUNT = 8;
 
@@ -204,11 +206,22 @@ export async function GET(request: Request) {
     ...quickbooksRows.map((row) => {
       const candidate = quickbooksItemRowToCandidate(row);
       const supplier = supplierByName.get(candidate.supplierName.trim().toLowerCase());
-      return supplier ? {
+      if (!supplier) return candidate;
+      const laidInPerBottle = Number(supplier.trucking_cost_per_bottle || 0);
+      const pricing = calculatePricing({
+        packSize: candidate.packSize,
+        fobBottle: candidate.fobBottle,
+        laidInPerBottle,
+        frontlineBottlePrice: candidate.frontlineBottlePrice
+      });
+      return {
         ...candidate,
         supplierId: String(supplier.id),
-        laidInPerBottle: Number(supplier.trucking_cost_per_bottle || 0)
-      } : candidate;
+        laidInPerBottle,
+        fobCase: pricing.fobCase,
+        bestPrice: pricing.bestPrice,
+        grossProfitMargin: pricing.grossProfitMargin
+      };
     }),
     ...recommendationResult.map((row) => recommendationRowToCandidate(row)),
     ...vinosmithRows.map((row) => vinosmithWineRowToCandidate({ ...row, updated_at: row.last_seen_at }))
@@ -230,7 +243,7 @@ export async function GET(request: Request) {
   );
 
   try {
-    matches = await attachCurrentPriceLevels(searchSupabase, matches);
+    matches = await attachCurrentPriceLevels(searchSupabase, matches, candidates);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not load current price levels." }, { status: 500 });
   }
@@ -240,10 +253,11 @@ export async function GET(request: Request) {
 
 async function attachCurrentPriceLevels(
   supabase: ReturnType<typeof createServiceRoleClient>,
-  matches: ReturnType<typeof searchProductIdentityCandidates>
+  matches: ReturnType<typeof searchProductIdentityCandidates>,
+  candidates: ProductIdentityCandidate[]
 ) {
-  const catalogIds = matches.filter((match) => match.source === "supplier_catalog").map((match) => match.sourceId);
-  const wineIds = matches.filter((match) => match.source === "vinosmith").map((match) => match.sourceId);
+  const catalogIds = candidates.filter((candidate) => candidate.source === "supplier_catalog").map((candidate) => candidate.sourceId);
+  const wineIds = candidates.filter((candidate) => candidate.source === "vinosmith").map((candidate) => candidate.sourceId);
   const [catalogResult, vinosmithResult] = await Promise.all([
     catalogIds.length
       ? supabase.from("supplier_catalog_price_levels")
@@ -263,10 +277,10 @@ async function attachCurrentPriceLevels(
   if (catalogResult.error) throw new Error(catalogResult.error.message);
   if (vinosmithResult.error) throw new Error(vinosmithResult.error.message);
 
-  return matches.map((match) => {
-    if (match.source === "supplier_catalog") {
+  const candidatesWithPriceLevels = candidates.map((candidate) => {
+    if (candidate.source === "supplier_catalog") {
       const priceLevels = (catalogResult.data || [])
-        .filter((level) => level.supplier_catalog_wine_id === match.sourceId)
+        .filter((level) => level.supplier_catalog_wine_id === candidate.sourceId)
         .map((level) => ({
           id: level.id,
           name: level.name,
@@ -276,13 +290,13 @@ async function attachCurrentPriceLevels(
           isBest: Boolean(level.is_best),
           active: level.active !== false,
           sourceSystem: level.source_system || "supplier_catalog",
-          updatedAt: level.updated_at || match.updatedAt
+          updatedAt: level.updated_at || candidate.updatedAt
         }));
-      return { ...match, priceLevels };
+      return { ...candidate, priceLevels };
     }
-    if (match.source === "vinosmith") {
+    if (candidate.source === "vinosmith") {
       const priceLevels = latestProductIdentityPriceLevels((vinosmithResult.data || [])
-        .filter((level) => level.wine_id === match.sourceId)
+        .filter((level) => level.wine_id === candidate.sourceId)
         .map((level) => {
           const label = String(level.label || "Price level");
           const normalized = label.toLowerCase();
@@ -295,11 +309,13 @@ async function attachCurrentPriceLevels(
             isBest: normalized.includes("best"),
             active: level.active !== false && level.disabled !== true,
             sourceSystem: "vinosmith",
-            updatedAt: level.last_seen_at || match.updatedAt
+            updatedAt: level.last_seen_at || candidate.updatedAt
           };
         }));
-      return { ...match, priceLevels };
+      return { ...candidate, priceLevels };
     }
-    return match;
+    return candidate;
   });
+
+  return mergeProductIdentityPriceLevels(matches, candidatesWithPriceLevels);
 }

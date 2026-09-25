@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   dedupeProductIdentityCandidates,
   latestProductIdentityPriceLevels,
+  mergeProductIdentityPriceLevels,
   quickbooksItemRowToCandidate,
   recommendationRowToCandidate,
-  searchProductIdentityCandidates
+  searchProductIdentityCandidates,
+  vinosmithWineRowToCandidate
 } from "./product-identity-search";
 
 describe("product identity search", () => {
@@ -150,5 +152,85 @@ describe("product identity search", () => {
     ]);
 
     expect(levels.map((level) => [level.id, level.bottlePrice])).toEqual([["newer", 22], ["best", 21]]);
+  });
+
+  it("merges Vinosmith named levels into a matching QuickBooks result", () => {
+    const quickbooks = {
+      ...quickbooksItemRowToCandidate({
+        list_id: "80002094-1776113791",
+        full_name: "Illahe Viognier 2025 12/750ml",
+        is_active: true,
+        purchase_cost: 10.25,
+        sales_price: 18,
+        custom_fields: { item_number: "ILL000029" }
+      }),
+      quickbooksItemNumber: "ILL000029",
+      laidInPerBottle: 1
+    };
+    const vinosmith = {
+      ...vinosmithWineRowToCandidate({
+        wine_id: "804453",
+        code: "ILL000029",
+        name: "Illahe Viognier 2025 12/750ml",
+        producer_name: "Illahe",
+        vintage: "2025",
+        unit_set: 12,
+        active: true,
+        orderable: true
+      }),
+      priceLevels: [
+        { id: "vs-frontline", name: "Frontline", bottlePrice: 17.5, depletionAllowance: 0, isFrontline: true, isBest: false, active: true, sourceSystem: "vinosmith", updatedAt: "2026-09-24T00:00:00Z" },
+        { id: "vs-best", name: "Best", bottlePrice: 16.5, depletionAllowance: 0, isFrontline: false, isBest: true, active: true, sourceSystem: "vinosmith", updatedAt: "2026-09-24T00:00:00Z" }
+      ]
+    };
+    const [quickbooksMatch] = searchProductIdentityCandidates({ query: "Illahe Viognier", limit: 20 }, [quickbooks]);
+
+    const [merged] = mergeProductIdentityPriceLevels([quickbooksMatch], [quickbooks, vinosmith]);
+
+    expect(merged.priceLevels?.map((level) => [level.name, level.bottlePrice])).toEqual([
+      ["Frontline", 17.5],
+      ["Best", 16.5]
+    ]);
+    expect(merged.frontlineBottlePrice).toBe(17.5);
+    expect(merged.bestPrice).toBe(16.5);
+    expect(merged.grossProfitMargin).toBe(0.3571);
+  });
+
+  it("prefers saved catalog overrides while filling missing roles from Vinosmith", () => {
+    const base = {
+      ...quickbooksItemRowToCandidate({
+        list_id: "qb-1",
+        full_name: "Illahe Viognier 2025 12/750ml",
+        is_active: true,
+        purchase_cost: 10.25,
+        sales_price: 18
+      }),
+      quickbooksItemNumber: "ILL000029"
+    };
+    const catalog = {
+      ...base,
+      source: "supplier_catalog" as const,
+      sourceId: "catalog-1",
+      priceLevels: [
+        { id: "catalog-frontline", name: "Frontline", bottlePrice: 19, depletionAllowance: 0, isFrontline: true, isBest: false, active: true, sourceSystem: "manual", updatedAt: "2026-09-20T00:00:00Z" }
+      ]
+    };
+    const vinosmith = {
+      ...base,
+      source: "vinosmith" as const,
+      sourceId: "wine-1",
+      priceLevels: [
+        { id: "vs-frontline", name: "Frontline", bottlePrice: 17.5, depletionAllowance: 0, isFrontline: true, isBest: false, active: true, sourceSystem: "vinosmith", updatedAt: "2026-09-24T00:00:00Z" },
+        { id: "vs-best", name: "Best", bottlePrice: 16.5, depletionAllowance: 0, isFrontline: false, isBest: true, active: true, sourceSystem: "vinosmith", updatedAt: "2026-09-24T00:00:00Z" }
+      ]
+    };
+    const [match] = searchProductIdentityCandidates({ query: "Illahe Viognier", limit: 20 }, [base]);
+
+    const [merged] = mergeProductIdentityPriceLevels([match], [base, catalog, vinosmith]);
+
+    expect(merged.priceLevels?.map((level) => [level.id, level.bottlePrice])).toEqual([
+      ["catalog-frontline", 19],
+      ["vs-best", 16.5]
+    ]);
   });
 });

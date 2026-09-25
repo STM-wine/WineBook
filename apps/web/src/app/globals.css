@@ -3000,72 +3000,25 @@ th:nth-child(12) .table-sort-button {
   margin-top: 5px;
 }
 
-.vintage-pricing-comparison {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-}
-
-.pricing-suggestion-pill {
-  align-items: center;
-  background: #fff2cc;
-  border: 1px solid #e7c96b;
-  border-radius: 999px;
-  color: #7a5600;
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  padding: 7px 9px;
-  text-transform: uppercase;
-}
-
-.vintage-comparison-grid {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
-}
-
-.vintage-comparison-row {
+.previous-pricing-summary {
   align-items: center;
   background: var(--surface-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr auto 1fr;
-  min-width: 0;
-  padding: 12px;
-}
-
-.vintage-comparison-row.changed {
-  background: #fff8df;
-  border-color: #e7c96b;
-}
-
-.vintage-comparison-row span {
   color: var(--muted);
-  font-size: 11px;
-  font-weight: 900;
-  grid-column: 1 / -1;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 12px 16px;
 }
 
-.vintage-comparison-row strong {
+.previous-pricing-summary strong {
   color: var(--ink);
-  font-size: 16px;
-  overflow-wrap: anywhere;
 }
 
-.vintage-comparison-row b {
-  color: #7a5600;
+.previous-pricing-summary span {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .tag-selector {
@@ -3082,7 +3035,17 @@ th:nth-child(12) .table-sort-button {
 }
 
 .price-level-table-shell table {
-  min-width: 1040px;
+  min-width: 680px;
+}
+
+.price-level-table-shell th:nth-child(1) { width: 22%; }
+.price-level-table-shell th:nth-child(2) { width: 30%; }
+.price-level-table-shell th:nth-child(3) { width: 18%; }
+.price-level-table-shell th:nth-child(4) { width: 14%; }
+.price-level-table-shell th:nth-child(5) { width: 16%; }
+
+.price-level-action-cell {
+  text-align: right;
 }
 
 .price-level-table-shell input,
@@ -6510,7 +6473,6 @@ tr.has-recommendation .sticky-name {
   .supplier-form-grid,
   .request-form-grid,
   .catalog-preview-grid,
-  .vintage-comparison-grid,
   .free-goods-opportunity,
   .grw-summary-grid,
   .rescue-grid-two,
