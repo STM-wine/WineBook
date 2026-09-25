@@ -104,4 +104,15 @@ describe("Add Wine search and price-level UI", () => {
     expect(sql).toContain("old.fob_source_date");
     expect(sql).toContain("old.laid_in_source_date");
   });
+
+  it("preserves source laid-in cost when a historical supplier cannot be resolved", async () => {
+    const view = await readFile(addWineViewPath, "utf8");
+    expect(view).toContain('String(asNumber(wine.laid_in_per_bottle) || "")');
+  });
+
+  it("shows automatic Frontline and Best suggestions in their price inputs", async () => {
+    const view = await readFile(addWineViewPath, "utf8");
+    expect(view).toContain('value={level.isManualOverride ? level.bottlePrice : String(effective.suggestedPrice || "")}');
+    expect(view).toContain('linkQuickBooks: match.active && Boolean(match.quickbooksItemNumber || match.quickbooksItemId)');
+  });
 });

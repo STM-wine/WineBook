@@ -187,17 +187,14 @@ export async function GET(request: Request) {
         .range(from, to) as never)
     : [];
 
-  const supplierById = new Map(
-    suppliers.map((supplier) => [
-      String(supplier.id),
-      {
-        name: String(supplier.name || "No supplier"),
-        truckingCostPerBottle: Number(supplier.trucking_cost_per_bottle || 0)
-      }
-    ])
-  );
+  const normalizedSuppliers = suppliers.map((supplier) => ({
+    id: String(supplier.id),
+    name: String(supplier.name || "No supplier"),
+    truckingCostPerBottle: Number(supplier.trucking_cost_per_bottle || 0)
+  }));
+  const supplierById = new Map(normalizedSuppliers.map((supplier) => [supplier.id, supplier]));
   const supplierByName = new Map(
-    suppliers.map((supplier) => [String(supplier.name || "").trim().toLowerCase(), supplier])
+    normalizedSuppliers.map((supplier) => [supplier.name.trim().toLowerCase(), supplier])
   );
 
   const candidates: ProductIdentityCandidate[] = [
@@ -207,7 +204,7 @@ export async function GET(request: Request) {
       const candidate = quickbooksItemRowToCandidate(row);
       const supplier = supplierByName.get(candidate.supplierName.trim().toLowerCase());
       if (!supplier) return candidate;
-      const laidInPerBottle = Number(supplier.trucking_cost_per_bottle || 0);
+      const laidInPerBottle = supplier.truckingCostPerBottle;
       const pricing = calculatePricing({
         packSize: candidate.packSize,
         fobBottle: candidate.fobBottle,
@@ -224,7 +221,17 @@ export async function GET(request: Request) {
       };
     }),
     ...recommendationResult.map((row) => recommendationRowToCandidate(row)),
-    ...vinosmithRows.map((row) => vinosmithWineRowToCandidate({ ...row, updated_at: row.last_seen_at }))
+    ...vinosmithRows.map((row) => {
+      const candidate = vinosmithWineRowToCandidate({ ...row, updated_at: row.last_seen_at });
+      const supplier = (candidate.supplierId ? supplierById.get(candidate.supplierId) : null) ||
+        supplierByName.get(candidate.supplierName.trim().toLowerCase());
+      return supplier ? {
+        ...candidate,
+        supplierId: candidate.supplierId || String(supplier.id),
+        supplierName: supplier.name,
+        laidInPerBottle: supplier.truckingCostPerBottle
+      } : candidate;
+    })
   ];
 
   let matches = searchProductIdentityCandidates(

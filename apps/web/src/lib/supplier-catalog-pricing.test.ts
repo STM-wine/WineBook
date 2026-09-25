@@ -144,6 +144,13 @@ describe("production Supplier Hub pricing", () => {
     expect(result.grossProfitMargin).toBe(0.3246);
   });
 
+  it("populates the Illahe Pinot Noir suggestions once supplier freight is available", () => {
+    const result = calculatePricing({ packSize: 12, fobBottle: 13.75, laidInPerBottle: 1 });
+    expect(result.suggestionsReady).toBe(true);
+    expect(result.frontlineBottlePrice).toBe(23);
+    expect(result.bestPrice).toBe(22);
+  });
+
   it("rounds raw prices immediately below, equal to, and above $20 upward", () => {
     expect(calculatePricing({ packSize: 12, fobBottle: 13.99, laidInPerBottle: 0 }).bestPrice).toBe(20);
     expect(calculatePricing({ packSize: 12, fobBottle: 14, laidInPerBottle: 0 }).bestPrice).toBe(20);

@@ -211,6 +211,9 @@ describe("product identity search", () => {
       ...base,
       source: "supplier_catalog" as const,
       sourceId: "catalog-1",
+      supplierId: null,
+      supplierName: "No supplier",
+      laidInPerBottle: 1,
       priceLevels: [
         { id: "catalog-frontline", name: "Frontline", bottlePrice: 19, depletionAllowance: 0, isFrontline: true, isBest: false, active: true, sourceSystem: "manual", updatedAt: "2026-09-20T00:00:00Z" }
       ]
@@ -219,6 +222,9 @@ describe("product identity search", () => {
       ...base,
       source: "vinosmith" as const,
       sourceId: "wine-1",
+      supplierId: "supplier-illahe",
+      supplierName: "Illahe",
+      laidInPerBottle: 1,
       priceLevels: [
         { id: "vs-frontline", name: "Frontline", bottlePrice: 17.5, depletionAllowance: 0, isFrontline: true, isBest: false, active: true, sourceSystem: "vinosmith", updatedAt: "2026-09-24T00:00:00Z" },
         { id: "vs-best", name: "Best", bottlePrice: 16.5, depletionAllowance: 0, isFrontline: false, isBest: true, active: true, sourceSystem: "vinosmith", updatedAt: "2026-09-24T00:00:00Z" }
@@ -232,5 +238,10 @@ describe("product identity search", () => {
       ["catalog-frontline", 19],
       ["vs-best", 16.5]
     ]);
+    expect(merged).toMatchObject({
+      supplierId: "supplier-illahe",
+      supplierName: "Illahe",
+      laidInPerBottle: 1
+    });
   });
 });

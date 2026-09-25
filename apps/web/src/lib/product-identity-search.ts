@@ -177,6 +177,9 @@ export function mergeProductIdentityPriceLevels(
 ) {
   return matches.map((match) => {
     const related = candidates.filter((candidate) => productIdentityMatches(match, candidate));
+    const supplier = related
+      .filter(hasUsableSupplier)
+      .sort((a, b) => supplierAuthority(b) - supplierAuthority(a) || newestFirst(a.updatedAt, b.updatedAt))[0];
     const levels = related
       .flatMap((candidate) => (candidate.priceLevels || []).map((level) => ({
         level,
@@ -196,10 +199,14 @@ export function mergeProductIdentityPriceLevels(
     );
     const frontline = priceLevels.find((level) => level.isFrontline);
     const best = priceLevels.find((level) => level.isBest);
-    const landedBottleCost = Number((match.fobBottle + match.laidInPerBottle).toFixed(2));
+    const laidInPerBottle = supplier ? supplier.laidInPerBottle : match.laidInPerBottle;
+    const landedBottleCost = Number((match.fobBottle + laidInPerBottle).toFixed(2));
 
     return {
       ...match,
+      supplierId: supplier?.supplierId || match.supplierId,
+      supplierName: supplier?.supplierName || match.supplierName,
+      laidInPerBottle,
       priceLevels,
       frontlineBottlePrice: frontline?.bottlePrice ?? match.frontlineBottlePrice,
       bestPrice: best?.bottlePrice ?? match.bestPrice,
@@ -212,6 +219,22 @@ export function mergeProductIdentityPriceLevels(
         : match.grossProfitMargin
     };
   });
+}
+
+function hasUsableSupplier(candidate: ProductIdentityCandidate) {
+  const name = searchKey(candidate.supplierName);
+  return Boolean(candidate.supplierId || (name && name !== "no supplier"));
+}
+
+function supplierAuthority(candidate: ProductIdentityCandidate) {
+  const sourceAuthority: Record<ProductIdentitySource, number> = {
+    supplier_catalog: 5,
+    product: 4,
+    vinosmith: 3,
+    recommendation: 2,
+    quickbooks_item: 1
+  };
+  return sourceAuthority[candidate.source] + (candidate.supplierId ? 10 : 0);
 }
 
 function productIdentityMatches(left: ProductIdentityCandidate, right: ProductIdentityCandidate) {

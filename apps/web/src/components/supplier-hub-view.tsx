@@ -406,7 +406,7 @@ function AddWinePanel({
     const selectedSupplier = suppliers.find((row) => row.id === nextSupplierId) || supplierByName(nextSupplierName);
     setLaidInPerBottle(selectedSupplier
       ? String(defaultLaidInForSupplier(suppliers, selectedSupplier.id, selectedSupplier.name))
-      : "");
+      : String(asNumber(wine.laid_in_per_bottle) || ""));
     setSystemTags(wine.system_tags || []);
     const shouldLinkQuickBooks = options.linkQuickBooks ?? wine.source_system === "quickbooks_item";
     setQuickbooksItemId(shouldLinkQuickBooks ? wine.quickbooks_item_id || wine.quickbooks_item_number || "" : "");
@@ -718,7 +718,7 @@ function AddWinePanel({
                             match.source === "supplier_catalog" ? match.sourceId : null,
                             {
                               followPricing: true,
-                              linkQuickBooks: match.source === "quickbooks_item" && match.active,
+                              linkQuickBooks: match.active && Boolean(match.quickbooksItemNumber || match.quickbooksItemId),
                               preserveSupplier: match.source === "quickbooks_item" && Boolean(supplierName.trim())
                             }
                           )
@@ -968,7 +968,7 @@ function AddWinePanel({
                           placeholder={String(effective.bottlePrice || "")}
                           step={0.01}
                           type="number"
-                          value={level.bottlePrice}
+                          value={level.isManualOverride ? level.bottlePrice : String(effective.suggestedPrice || "")}
                           onChange={(event) => patchPriceLevel(level.id, { bottlePrice: event.target.value, solveFor: "gp", isManualOverride: true })}
                         />
                         <small className={!bottlePriceEntered && isBaseLevel ? "price-suggestion-value" : undefined}>
