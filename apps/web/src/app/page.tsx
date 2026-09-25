@@ -31,12 +31,12 @@ import type {
 import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import { applyVinosmithAvailability, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { fetchSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
+import { fetchCurrentSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
 import {
   fetchActiveOrderingRun,
+  isSourceBackedRun,
   orderingSourceMode,
-  overlayCurrentSourceRows,
-  sourceRunNeedsCurrentOverlay
+  overlayCurrentSourceRows
 } from "@/lib/source-backed-ordering-runs";
 
 export const dynamic = "force-dynamic";
@@ -116,6 +116,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       quickBooksLastSyncAt={data.quickBooksLastSyncAt}
       vinosmithLastSyncAt={data.vinosmithLastSyncAt}
       orderingDataWarning={data.orderingDataWarning}
+      salesReferenceDate={data.salesReferenceDate}
       canViewSettings={hasPermission(permissions, "view_settings")}
     />
   );
@@ -137,6 +138,7 @@ type OrderingPageData = {
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
   orderingDataWarning: string | null;
+  salesReferenceDate: string | null;
 };
 
 async function loadOrderingPageData(): Promise<OrderingPageData> {
@@ -271,7 +273,8 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
       quickBooksSupplierMatches: [],
       quickBooksLastSyncAt,
       vinosmithLastSyncAt,
-      orderingDataWarning: null
+      orderingDataWarning: null,
+      salesReferenceDate: null
     };
   }
 
@@ -285,17 +288,22 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     .range(from, to)
     .returns<ApprovalEvent[]>() as never);
   const quickBooksOnOrderItemsPromise = fetchQuickBooksOnOrderItems(serviceRoleSupabase);
-  const currentSourceOverlayPromise = sourceRunNeedsCurrentOverlay(latestRun) && vinosmithAvailabilityResult.data
-    ? fetchSourceBackedOrderingData(serviceRoleSupabase, {
-        referenceDate: latestRun.report_date || undefined,
-        liveAvailability: vinosmithAvailabilityResult.data
+  const sourceBackedRun = isSourceBackedRun(latestRun);
+  const currentSourceOverlayPromise = sourceBackedRun
+    ? fetchCurrentSourceBackedOrderingData(serviceRoleSupabase, {
+        liveAvailability: vinosmithAvailabilityResult.data || undefined
       })
-        .then((data) => ({ rows: data.rows, error: null as string | null }))
+        .then((data) => ({
+          rows: data.rows,
+          diagnostics: data.diagnostics,
+          error: null as string | null
+        }))
         .catch((error) => ({
           rows: null,
+          diagnostics: null,
           error: error instanceof Error ? error.message : "Current QuickBooks sales could not be loaded."
         }))
-    : Promise.resolve({ rows: null, error: null as string | null });
+    : Promise.resolve({ rows: null, diagnostics: null, error: null as string | null });
 
   const poDraftRowsPromise = serviceRoleSupabase
     .from("purchase_order_drafts")
@@ -420,18 +428,22 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
   }));
   const sourceRecommendations = currentSourceOverlayResult.rows
     ? overlayCurrentSourceRows(reportRecommendations || [], currentSourceOverlayResult.rows)
-    : vinosmithAvailabilityResult.data
+    : sourceBackedRun
+      ? []
+      : vinosmithAvailabilityResult.data
       ? applyVinosmithAvailability(reportRecommendations || [], vinosmithAvailabilityResult.data.byProductCode)
       : reportRecommendations || [];
 
-  const recommendations = applyQuickBooksOnOrderToRecommendations(
-    mergeSupplierCatalogRows(
-      sourceRecommendations,
-      supplierCatalogWines || [],
-      latestRun.id
-    ),
-    quickBooksOnOrderItems
-  ).sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0));
+  const recommendations = sourceBackedRun && !currentSourceOverlayResult.rows
+    ? []
+    : applyQuickBooksOnOrderToRecommendations(
+        mergeSupplierCatalogRows(
+          sourceRecommendations,
+          supplierCatalogWines || [],
+          latestRun.id
+        ),
+        quickBooksOnOrderItems
+      ).sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0));
   const orderingWarnings = [
     configuredOrderingSourceMode === "legacy"
       ? "Order Summary is intentionally pinned to the legacy RB6/RADs rollback path by ORDERING_SOURCE_MODE."
@@ -439,15 +451,16 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     latestRun.run_type !== "quickbooks_sync"
       ? "Ordering data is using the legacy RB6/RADs fallback because no completed source-backed run is available."
       : null,
-    vinosmithAvailabilityResult.error
+    vinosmithAvailabilityResult.error && (!sourceBackedRun || !currentSourceOverlayResult.diagnostics)
       ? `Vinosmith Get Available could not be refreshed. Ordering data is showing the saved availability snapshot from the active run. ${vinosmithAvailabilityResult.error}`
       : null,
     currentSourceOverlayResult.error
-      ? `This ordering run predates the complete QuickBooks sales pagination fix, and its corrected sales could not be reloaded. Refresh Ordering Data before relying on sales or suggested quantities. ${currentSourceOverlayResult.error}`
+      ? `Current QuickBooks sales could not be verified, so Order Summary rows are hidden instead of showing stale sales or recommendations. Complete a QuickBooks refresh and reload. ${currentSourceOverlayResult.error}`
       : null,
     quickBooksSyncWarning,
-    latestRun.run_type === "quickbooks_sync" && latestRun.diagnostics?.quickbooks_fresh === false
-      ? `QuickBooks source data was stale when this ordering run was generated (${Math.round(Number(latestRun.diagnostics.quickbooks_freshness_hours) || 0)} hours old). Refresh the QuickBooks mirror before relying on quantities, costs, or sales.`
+    latestRun.run_type === "quickbooks_sync"
+      && (currentSourceOverlayResult.diagnostics || latestRun.diagnostics)?.quickbooks_fresh === false
+      ? `QuickBooks source data is stale (${Math.round(Number((currentSourceOverlayResult.diagnostics || latestRun.diagnostics)?.quickbooks_freshness_hours) || 0)} hours old). Refresh the QuickBooks mirror before relying on quantities, costs, or sales.`
       : null
   ].filter((warning): warning is string => Boolean(warning));
 
@@ -469,7 +482,9 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     quickBooksSupplierMatches,
     quickBooksLastSyncAt,
     vinosmithLastSyncAt: vinosmithAvailabilityResult.data?.snapshotAt || vinosmithLastSyncAt,
-    orderingDataWarning: orderingWarnings.join(" ") || null
+    orderingDataWarning: orderingWarnings.join(" ") || null,
+    salesReferenceDate: currentSourceOverlayResult.diagnostics?.reference_date
+      || (sourceBackedRun ? null : latestRun.report_date)
   };
 }
 

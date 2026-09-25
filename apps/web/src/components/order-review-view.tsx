@@ -31,6 +31,7 @@ import {
 } from "@/lib/replenishment-policy";
 import { auditActorName, formatAuditTimestamp } from "@/lib/audit-trail";
 import { ActionProgress } from "./action-progress";
+import { formatOrderingBusinessDate } from "@/lib/ordering-freshness";
 
 type SaveCatalogWineInput = SupplierCatalogWineInput & {
   existingCatalogWineId?: string | null;
@@ -57,6 +58,7 @@ export function OrderReviewView({
   supplierSort,
   supplierOptions,
   supplierCatalogWines,
+  salesReferenceDate,
   supplierTargetWeeks,
   globalTargetWeeks,
   visibleCount,
@@ -97,6 +99,7 @@ export function OrderReviewView({
   supplierSort: SupplierGroupSortMode;
   supplierOptions: string[];
   supplierCatalogWines: SupplierCatalogWine[];
+  salesReferenceDate: string | null;
   supplierTargetWeeks: Record<string, string>;
   globalTargetWeeks: string;
   visibleCount: number;
@@ -163,7 +166,12 @@ export function OrderReviewView({
         <div className="section-heading">
           <div>
             <h1>Order Summary</h1>
-            <p>Supplier groups sorted by suggested bottles by default. Approval decisions are retained as business history.</p>
+            <p>
+              Supplier groups sorted by suggested bottles by default. Approval decisions are retained as business history.
+              {formatOrderingBusinessDate(salesReferenceDate)
+                ? ` QuickBooks sales are through ${formatOrderingBusinessDate(salesReferenceDate)}.`
+                : ""}
+            </p>
           </div>
         </div>
         <div className="filter-bar">
@@ -278,6 +286,7 @@ export function OrderReviewView({
             auditActorNames={auditActorNames}
             isPending={isPending}
             deletingCatalogWineId={deletingCatalogWineId}
+            salesReferenceDate={salesReferenceDate}
           />
         ))}
       </section>
@@ -390,7 +399,8 @@ function SupplierSection({
   approvalEvents,
   auditActorNames,
   isPending,
-  deletingCatalogWineId
+  deletingCatalogWineId,
+  salesReferenceDate
 }: {
   group: SupplierGroup;
   expandAll: boolean;
@@ -410,6 +420,7 @@ function SupplierSection({
   auditActorNames: Record<string, string>;
   isPending: boolean;
   deletingCatalogWineId: string | null;
+  salesReferenceDate: string | null;
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
@@ -531,6 +542,7 @@ function SupplierSection({
             auditActorNames={auditActorNames}
             isPending={isPending}
             deletingCatalogWineId={deletingCatalogWineId}
+            salesReferenceDate={salesReferenceDate}
           />
         </>
       ) : null}

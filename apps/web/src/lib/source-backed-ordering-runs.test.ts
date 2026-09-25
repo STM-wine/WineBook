@@ -75,6 +75,39 @@ describe("source-backed ordering run compatibility", () => {
     ]);
   });
 
+  it("refreshes Ronchi NBI000363 from the locked Sep 15 total without changing its buyer decision", () => {
+    const saved = {
+      id: "ronchi-recommendation",
+      report_run_id: "locked-sep-15-run",
+      product_code: "NBI000363",
+      product_name: "Ronchi Barbaresco 2022 12/750ml",
+      last_30_day_sales: 21,
+      recommendation_status: "approved",
+      approved_qty: 12,
+      order_path: "stateside"
+    };
+    const current = {
+      product_code: "NBI000363",
+      product_name: "Ronchi Barbaresco 2022 12/750ml",
+      last_30_day_sales: 50,
+      recommendation_status: "rejected",
+      approved_qty: 0,
+      order_path: "di"
+    };
+
+    expect(overlayCurrentSourceRows([saved as never], [current])).toEqual([
+      expect.objectContaining({
+        id: "ronchi-recommendation",
+        report_run_id: "locked-sep-15-run",
+        product_code: "NBI000363",
+        last_30_day_sales: 50,
+        recommendation_status: "approved",
+        approved_qty: 12,
+        order_path: "stateside"
+      })
+    ]);
+  });
+
   it("finds newly discovered QuickBooks items that are absent from a locked ordering run", () => {
     const saved = [{ product_code: "OLD0001", planning_sku: "old wine 2022 12/750ml" }];
     const current = [

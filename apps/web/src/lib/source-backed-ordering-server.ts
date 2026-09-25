@@ -19,6 +19,12 @@ import { fetchLiveVinosmithAvailability, type LatestVinosmithAvailability } from
 import { fetchAllExact } from "./supabase/fetch-all-exact";
 import { fetchLatestCompletedQuickBooksOnOrderSnapshot } from "./supabase/recommendations";
 import { applyCompletedQuickBooksOnOrderSnapshot } from "./quickbooks-on-order-snapshot";
+import {
+  assertCurrentOrderingDiagnostics,
+  orderingBusinessDate
+} from "./ordering-freshness";
+
+export { ORDERING_TIMEZONE, orderingBusinessDate } from "./ordering-freshness";
 
 type SourceClient = SupabaseClient<any, "public", any>;
 
@@ -28,18 +34,6 @@ export type PublishedOrderingConfiguration = {
 };
 
 const PAGE_SIZE = 1000;
-export const ORDERING_TIMEZONE = "America/Denver";
-
-export function orderingBusinessDate(value = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: ORDERING_TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(value);
-  const values = new Map(parts.map((part) => [part.type, part.value]));
-  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
-}
 
 export async function fetchSourceBackedOrderingData(
   supabase: SourceClient,
@@ -103,6 +97,22 @@ export async function fetchSourceBackedOrderingData(
   });
 
   return { ...built, configuration };
+}
+
+export async function fetchCurrentSourceBackedOrderingData(
+  supabase: SourceClient,
+  options: {
+    liveAvailability?: LatestVinosmithAvailability;
+    now?: Date;
+  } = {}
+): Promise<SourceBackedOrderingData & { configuration: PublishedOrderingConfiguration }> {
+  const referenceDate = orderingBusinessDate(options.now);
+  const data = await fetchSourceBackedOrderingData(supabase, {
+    referenceDate,
+    liveAvailability: options.liveAvailability
+  });
+  assertCurrentOrderingDiagnostics(data.diagnostics, referenceDate);
+  return data;
 }
 
 async function assertLatestQuickBooksSyncComplete(supabase: SourceClient) {

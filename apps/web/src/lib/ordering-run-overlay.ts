@@ -1,5 +1,6 @@
 import type { Recommendation } from "./types";
 import { canonicalCatalogProductIdentity } from "./catalog-product-identity";
+import { orderingBusinessDate } from "./ordering-freshness";
 import { normalizeOrderingItemCode, ORDERING_BUILDER_VERSION, ORDERING_SOURCE } from "./source-backed-ordering";
 
 type OrderingRunLike = {
@@ -138,24 +139,13 @@ export function isSourceBackedRun(run: OrderingRunLike | null | undefined) {
 
 export function sourceRunNeedsCurrentOverlay(
   run: OrderingRunLike | null | undefined,
-  businessDate = phoenixBusinessDate()
+  businessDate = orderingBusinessDate()
 ) {
   if (!isSourceBackedRun(run)) return false;
   const builderVersion = Number(run?.diagnostics?.builder_version);
   return !Number.isFinite(builderVersion) ||
     builderVersion < ORDERING_BUILDER_VERSION ||
     Boolean(run?.report_date && run.report_date < businessDate);
-}
-
-function phoenixBusinessDate(value = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Phoenix",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(value);
-  const values = new Map(parts.map((part) => [part.type, part.value]));
-  return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
 }
 
 export function overlayCurrentSourceRows(recommendations: Recommendation[], currentRows: Array<Record<string, any>>) {

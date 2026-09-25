@@ -9,7 +9,7 @@ import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchLiveVinosmithAvailability } from "@/lib/supabase/vinosmith-availability";
-import { fetchSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
+import { fetchCurrentSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
 import { isSourceBackedRun, overlayCurrentSourceRows, type OrderingRun } from "@/lib/source-backed-ordering-runs";
 import { buildOrderingDraftSourceSnapshot, buildOrderingLineSourceSnapshot } from "@/lib/po-source-snapshot";
 import type { ApprovalConflict, PurchaseOrderDraftWithLines, PurchaseOrderLineNote, Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
@@ -158,8 +158,7 @@ export async function POST(request: Request) {
     supplierCatalogWines = catalogResult;
 
     const currentSourceData = sourceBacked
-      ? await fetchSourceBackedOrderingData(integrationSupabase, {
-          referenceDate: orderingRun.report_date || undefined,
+      ? await fetchCurrentSourceBackedOrderingData(integrationSupabase, {
           liveAvailability
         })
       : null;
@@ -173,6 +172,7 @@ export async function POST(request: Request) {
     orderingRun.diagnostics = {
       ...(orderingRun.diagnostics || {}),
       vinosmith_available_as_of: liveAvailability.snapshotAt,
+      reference_date: currentSourceData?.diagnostics.reference_date || orderingRun.diagnostics?.reference_date || null,
       quickbooks_as_of: currentSourceData?.diagnostics.quickbooks_as_of || orderingRun.diagnostics?.quickbooks_as_of || null
     };
   } catch (error) {

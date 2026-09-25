@@ -99,6 +99,7 @@ type Props = {
   quickBooksLastSyncAt: string | null;
   vinosmithLastSyncAt: string | null;
   orderingDataWarning?: string | null;
+  salesReferenceDate: string | null;
   canViewSettings?: boolean;
 };
 
@@ -159,6 +160,7 @@ export function OrderDashboard({
   quickBooksLastSyncAt,
   vinosmithLastSyncAt,
   orderingDataWarning,
+  salesReferenceDate,
   canViewSettings
 }: Props) {
   const router = useRouter();
@@ -1093,6 +1095,7 @@ export function OrderDashboard({
           supplierSort={supplierSort}
           supplierOptions={supplierOptions}
           supplierCatalogWines={supplierCatalogWines}
+          salesReferenceDate={salesReferenceDate}
           supplierTargetWeeks={supplierTargetWeeks}
           globalTargetWeeks={globalTargetWeeks}
           visibleCount={visibleRecommendations.length}

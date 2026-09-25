@@ -35,6 +35,7 @@ import {
 } from "@/lib/order-data";
 import { replenishmentPolicyLabel } from "@/lib/replenishment-policy";
 import { ActionProgress } from "./action-progress";
+import { formatOrderingBusinessDate } from "@/lib/ordering-freshness";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -53,6 +54,7 @@ type WorkbenchGridProps = {
   deletingCatalogWineId: string | null;
   approvalEvents: ApprovalEvent[];
   auditActorNames: Record<string, string>;
+  salesReferenceDate: string | null;
 };
 
 type WorkbenchRow = Recommendation & {
@@ -225,7 +227,8 @@ export function WorkbenchGrid({
   isPending,
   deletingCatalogWineId,
   approvalEvents,
-  auditActorNames
+  auditActorNames,
+  salesReferenceDate
 }: WorkbenchGridProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [manualEditedCells, setManualEditedCells] = useState<ManualEditState>({});
@@ -235,6 +238,7 @@ export function WorkbenchGrid({
   }, []);
 
   const approvalEventsBySource = useMemo(() => latestApprovalEvents(approvalEvents), [approvalEvents]);
+  const salesThroughLabel = formatOrderingBusinessDate(salesReferenceDate) || "the verified QuickBooks cutoff";
   const rowData = useMemo<WorkbenchRow[]>(
     () => {
       const sortedRankValues = Array.from(new Set(rows.map(rankBasis))).sort((a, b) => b - a);
@@ -421,7 +425,7 @@ export function WorkbenchGrid({
         field: "last_30_day_sales",
         sort: "desc",
         width: 96,
-        headerTooltip: "Trailing 30-day bottle sales anchored to the latest RADs sales date.",
+        headerTooltip: `Trailing 30-day bottle sales through ${salesThroughLabel}. QuickBooks invoices minus credits, matched by exact item identity.`,
         headerClass: "number-header",
         cellStyle: CENTER_CELL_STYLE,
         cellRenderer: centeredRenderer,
@@ -433,7 +437,7 @@ export function WorkbenchGrid({
               headerName: "60d Sales",
               field: "last_60_day_sales" as const,
               width: 96,
-              headerTooltip: "Trailing 60-day bottle sales anchored to the latest RADs sales date.",
+              headerTooltip: `Trailing 60-day bottle sales through ${salesThroughLabel}. QuickBooks invoices minus credits, matched by exact item identity.`,
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
               cellRenderer: centeredRenderer,
@@ -443,7 +447,7 @@ export function WorkbenchGrid({
               headerName: "90d Sales",
               field: "last_90_day_sales" as const,
               width: 96,
-              headerTooltip: "Trailing 90-day bottle sales anchored to the latest RADs sales date.",
+              headerTooltip: `Trailing 90-day bottle sales through ${salesThroughLabel}. QuickBooks invoices minus credits, matched by exact item identity.`,
               headerClass: "number-header",
               cellStyle: CENTER_CELL_STYLE,
               cellRenderer: centeredRenderer,
@@ -534,7 +538,7 @@ export function WorkbenchGrid({
     ];
       return columns;
     },
-    [manualEditedCells, onDeleteNewItem, onEditNewItem, onSaveOrderPath, rows, showForecast, showHistory]
+    [manualEditedCells, onDeleteNewItem, onEditNewItem, onSaveOrderPath, rows, salesThroughLabel, showForecast, showHistory]
   );
 
   const defaultColDef = useMemo<ColDef<WorkbenchRow>>(
