@@ -4,7 +4,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_ORDERING_LOGIC_SETTINGS, normalizeOrderingLogicSettings, type OrderingLogicSettings } from "./ordering-logic";
 import {
   buildSourceBackedOrderingRows,
+  emptySalesWindows,
   normalizeOrderingItemCode,
+  refreshSourceBackedRecommendation,
   type SourceBackedOrderingData,
   type SourceOrderingMarker,
   type SourceQuickBooksItem,
@@ -14,10 +16,13 @@ import {
   type SourceVendorMapping,
   type SourceVinosmithWine
 } from "./source-backed-ordering";
+import type { Recommendation } from "./types";
 import { fetchQuickBooksItemSalesWindows } from "./supabase/quickbooks-item-sales-windows";
 import { fetchLiveVinosmithAvailability, type LatestVinosmithAvailability } from "./supabase/vinosmith-availability";
 import { fetchAllExact } from "./supabase/fetch-all-exact";
-import { fetchLatestCompletedQuickBooksOnOrderSnapshot } from "./supabase/recommendations";
+import {
+  fetchLatestCompletedQuickBooksOnOrderSnapshot
+} from "./supabase/recommendations";
 import { applyCompletedQuickBooksOnOrderSnapshot } from "./quickbooks-on-order-snapshot";
 import {
   assertCurrentOrderingDiagnostics,
@@ -115,21 +120,98 @@ export async function fetchCurrentSourceBackedOrderingData(
   return data;
 }
 
+export async function fetchCurrentOrderingOverlay(
+  supabase: SourceClient,
+  recommendations: Recommendation[],
+  options: {
+    liveAvailability?: LatestVinosmithAvailability;
+    now?: Date;
+  } = {}
+) {
+  const referenceDate = orderingBusinessDate(options.now);
+  const availability = options.liveAvailability || await fetchLiveVinosmithAvailability();
+  const [quickBooksAsOf, configuration, onOrderSnapshot, activeItems, salesRows] = await Promise.all([
+    assertLatestQuickBooksSyncComplete(supabase),
+    fetchPublishedOrderingConfiguration(supabase),
+    fetchLatestCompletedQuickBooksOnOrderSnapshot(supabase),
+    fetchAllExact<{ list_id: string }>("active QuickBooks inventory identities", (from, to) => supabase
+      .from("quickbooks_items")
+      .select("list_id", { count: "exact" })
+      .eq("is_active", true)
+      .eq("item_type", "Inventory")
+      .order("list_id", { ascending: true })
+      .range(from, to)
+      .returns<Array<{ list_id: string }>>() as never),
+    fetchQuickBooksItemSalesWindows(supabase, referenceDate)
+  ]);
+  if (onOrderSnapshot === null) {
+    throw new Error("The latest completed QuickBooks refresh has no inventory snapshot.");
+  }
+  const itemCodeByListId = new Map<string, string>();
+  for (const row of recommendations) {
+    const listId = String(row.diagnostics?.quickbooks_item_list_id || "").trim();
+    const code = normalizeOrderingItemCode(row.product_code);
+    if (listId && code) itemCodeByListId.set(listId, code);
+  }
+  const onOrderByListId = new Map(onOrderSnapshot.map((row) => [row.item_list_id, numeric(row.quantity_on_order)]));
+  const activeItemListIds = new Set(activeItems.map((item) => item.list_id));
+  const salesByCode = new Map<string, SourceSalesWindows>();
+  for (const row of salesRows) {
+    const code = normalizeOrderingItemCode(itemCodeByListId.get(row.item_list_id || "") || row.item_full_name || "");
+    if (!code) continue;
+    const current = salesByCode.get(code) || emptySalesWindows();
+    current.last30 += numeric(row.last_30_quantity);
+    current.last60 += numeric(row.last_60_quantity);
+    current.last90 += numeric(row.last_90_quantity);
+    current.prior30 += numeric(row.prior_30_quantity);
+    current.next30Ly += numeric(row.last_year_next_30_quantity);
+    current.next60Ly += numeric(row.last_year_next_60_quantity);
+    current.next90Ly += numeric(row.last_year_next_90_quantity);
+    salesByCode.set(code, current);
+  }
+
+  const rows = recommendations.flatMap((row) => {
+    const code = normalizeOrderingItemCode(row.product_code);
+    const listId = String(row.diagnostics?.quickbooks_item_list_id || "").trim();
+    if (!code || !listId || !activeItemListIds.has(listId)) return [];
+    return [refreshSourceBackedRecommendation(row, {
+      sales: salesByCode.get(code) || emptySalesWindows(),
+      trueAvailable: numeric(availability.byProductCode.get(code)),
+      onOrder: Math.max(0, onOrderByListId.get(listId) || 0),
+      quickBooksItemAsOf: quickBooksAsOf,
+      vinosmithAvailableAsOf: availability.snapshotAt
+    }, configuration.values, referenceDate)];
+  });
+  const quickBooksFreshnessHours = ageHours(quickBooksAsOf);
+  const diagnostics = {
+    reference_date: referenceDate,
+    quickbooks_as_of: quickBooksAsOf,
+    quickbooks_freshness_hours: quickBooksFreshnessHours,
+    quickbooks_fresh: quickBooksFreshnessHours !== null && quickBooksFreshnessHours <= 72
+  };
+  assertCurrentOrderingDiagnostics(diagnostics, referenceDate);
+  return { rows, diagnostics };
+}
+
 async function assertLatestQuickBooksSyncComplete(supabase: SourceClient) {
   const { data, error } = await supabase
     .from("source_sync_runs")
-    .select("status,started_at,error_message")
+    .select("status,started_at,completed_at,error_message")
     .eq("source_system", "quickbooks_desktop")
     .eq("worker_name", "quickbooks_web_connector")
     .order("started_at", { ascending: false })
     .limit(1)
-    .maybeSingle<{ status: string; started_at: string; error_message: string | null }>();
+    .maybeSingle<{ status: string; started_at: string; completed_at: string | null; error_message: string | null }>();
   if (error) throw new Error(error.message);
   if (data && data.status !== "completed") {
     throw new Error(
       `The latest QuickBooks Web Connector refresh is ${data.status}, not complete. ${data.error_message || "Finish a successful Web Connector pull before refreshing ordering data."}`
     );
   }
+  if (!data?.completed_at) {
+    throw new Error("The latest QuickBooks Web Connector refresh has no completed timestamp.");
+  }
+  return data.completed_at;
 }
 
 export async function fetchPublishedOrderingConfiguration(supabase: SourceClient): Promise<PublishedOrderingConfiguration> {
@@ -171,7 +253,7 @@ async function fetchAll<Row>(supabase: SourceClient, table: string, columns: str
   );
 }
 
-function itemCode(item: SourceQuickBooksItem) {
+function itemCode(item: Pick<SourceQuickBooksItem, "custom_fields" | "name" | "full_name" | "list_id">) {
   const fields = item.custom_fields || {};
   const normalized = new Map(Object.entries(fields).map(([key, value]) => [key.toLowerCase().replace(/[^a-z0-9]+/g, "_"), value]));
   for (const key of ["item_number", "sku", "product_code"]) {
@@ -194,4 +276,10 @@ function emptySales(): SourceSalesWindows {
 function numeric(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function ageHours(value: string | null) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? Math.max(0, (Date.now() - timestamp) / 3_600_000) : null;
 }

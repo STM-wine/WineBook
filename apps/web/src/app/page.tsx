@@ -31,12 +31,11 @@ import type {
 import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import { applyVinosmithAvailability, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { fetchCurrentSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
+import { fetchCurrentOrderingOverlay } from "@/lib/source-backed-ordering-server";
 import {
   fetchActiveOrderingRun,
   isSourceBackedRun,
-  orderingSourceMode,
-  overlayCurrentSourceRows
+  orderingSourceMode
 } from "@/lib/source-backed-ordering-runs";
 
 export const dynamic = "force-dynamic";
@@ -287,12 +286,16 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     .order("id", { ascending: false })
     .range(from, to)
     .returns<ApprovalEvent[]>() as never);
-  const quickBooksOnOrderItemsPromise = fetchQuickBooksOnOrderItems(serviceRoleSupabase);
   const sourceBackedRun = isSourceBackedRun(latestRun);
+  const quickBooksOnOrderItemsPromise = sourceBackedRun
+    ? Promise.resolve([])
+    : fetchQuickBooksOnOrderItems(serviceRoleSupabase);
   const currentSourceOverlayPromise = sourceBackedRun
-    ? fetchCurrentSourceBackedOrderingData(serviceRoleSupabase, {
-        liveAvailability: vinosmithAvailabilityResult.data || undefined
-      })
+    ? reportRecommendationsPromise.then((recommendations) => fetchCurrentOrderingOverlay(
+        serviceRoleSupabase,
+        recommendations,
+        { liveAvailability: vinosmithAvailabilityResult.data || undefined }
+      ))
         .then((data) => ({
           rows: data.rows,
           diagnostics: data.diagnostics,
@@ -427,23 +430,24 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     line_notes: lineNotesByDraft.get(draft.id) || []
   }));
   const sourceRecommendations = currentSourceOverlayResult.rows
-    ? overlayCurrentSourceRows(reportRecommendations || [], currentSourceOverlayResult.rows)
+    ? currentSourceOverlayResult.rows
     : sourceBackedRun
       ? []
       : vinosmithAvailabilityResult.data
       ? applyVinosmithAvailability(reportRecommendations || [], vinosmithAvailabilityResult.data.byProductCode)
       : reportRecommendations || [];
 
-  const recommendations = sourceBackedRun && !currentSourceOverlayResult.rows
+  const mergedRecommendations = mergeSupplierCatalogRows(
+    sourceRecommendations,
+    supplierCatalogWines || [],
+    latestRun.id
+  );
+  const recommendations = (sourceBackedRun && !currentSourceOverlayResult.rows
     ? []
-    : applyQuickBooksOnOrderToRecommendations(
-        mergeSupplierCatalogRows(
-          sourceRecommendations,
-          supplierCatalogWines || [],
-          latestRun.id
-        ),
-        quickBooksOnOrderItems
-      ).sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0));
+    : sourceBackedRun
+      ? mergedRecommendations
+      : applyQuickBooksOnOrderToRecommendations(mergedRecommendations, quickBooksOnOrderItems)
+  ).sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0));
   const orderingWarnings = [
     configuredOrderingSourceMode === "legacy"
       ? "Order Summary is intentionally pinned to the legacy RB6/RADs rollback path by ORDERING_SOURCE_MODE."

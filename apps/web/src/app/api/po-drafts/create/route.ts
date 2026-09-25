@@ -9,8 +9,8 @@ import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchLiveVinosmithAvailability } from "@/lib/supabase/vinosmith-availability";
-import { fetchCurrentSourceBackedOrderingData } from "@/lib/source-backed-ordering-server";
-import { isSourceBackedRun, overlayCurrentSourceRows, type OrderingRun } from "@/lib/source-backed-ordering-runs";
+import { fetchCurrentOrderingOverlay } from "@/lib/source-backed-ordering-server";
+import { isSourceBackedRun, type OrderingRun } from "@/lib/source-backed-ordering-runs";
 import { buildOrderingDraftSourceSnapshot, buildOrderingLineSourceSnapshot } from "@/lib/po-source-snapshot";
 import type { ApprovalConflict, PurchaseOrderDraftWithLines, PurchaseOrderLineNote, Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
 
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
   try {
     const [fetchedRecommendations, quickBooksOnOrderItems, liveAvailability, catalogResult] = await Promise.all([
       fetchAllRecommendationsForRun(supabase, reportRunId),
-      fetchQuickBooksOnOrderItems(integrationSupabase),
+      sourceBacked ? Promise.resolve([]) : fetchQuickBooksOnOrderItems(integrationSupabase),
       fetchLiveVinosmithAvailability(),
       fetchAllExact<SupplierCatalogWine>("supplier catalog wines for PO draft", (from, to) => supabase
         .from("supplier_catalog_wines")
@@ -158,17 +158,15 @@ export async function POST(request: Request) {
     supplierCatalogWines = catalogResult;
 
     const currentSourceData = sourceBacked
-      ? await fetchCurrentSourceBackedOrderingData(integrationSupabase, {
-          liveAvailability
-        })
+      ? await fetchCurrentOrderingOverlay(integrationSupabase, fetchedRecommendations, { liveAvailability })
       : null;
     const currentRecommendations = sourceBacked
-      ? overlayCurrentSourceRows(fetchedRecommendations, currentSourceData?.rows || [])
+      ? currentSourceData?.rows || []
       : applyVinosmithAvailability(fetchedRecommendations, liveAvailability.byProductCode);
-    recommendations = applyQuickBooksOnOrderToRecommendations(
-      mergeSupplierCatalogRows(currentRecommendations, supplierCatalogWines, reportRunId),
-      quickBooksOnOrderItems
-    );
+    const mergedRecommendations = mergeSupplierCatalogRows(currentRecommendations, supplierCatalogWines, reportRunId);
+    recommendations = sourceBacked
+      ? mergedRecommendations
+      : applyQuickBooksOnOrderToRecommendations(mergedRecommendations, quickBooksOnOrderItems);
     orderingRun.diagnostics = {
       ...(orderingRun.diagnostics || {}),
       vinosmith_available_as_of: liveAvailability.snapshotAt,

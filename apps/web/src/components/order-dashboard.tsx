@@ -57,7 +57,7 @@ import {
   filterRecommendations,
   mergeSupplierCatalogRows,
   removeSupplierCatalogWineFromWorkbench,
-  replaceSupplierCatalogWineInWorkbench,
+  upsertSupplierCatalogWineInWorkbench,
   sortSupplierGroups,
   type SupplierGroupSortMode,
   rowRecommendedQty,
@@ -973,11 +973,12 @@ export function OrderDashboard({
         setPendingMessage(
           `${result.mode === "updated" ? "Updated" : "Created"} supplier wine: ${result.displayName}.${changeText}`
         );
-        if (input.existingCatalogWineId) {
-          setRows((currentRows) =>
-            replaceSupplierCatalogWineInWorkbench(currentRows, result.saved, reportRun.id)
-          );
-        }
+        setRows((currentRows) =>
+          applySupplierTdmAssignments(
+            upsertSupplierCatalogWineInWorkbench(currentRows, result.saved, reportRun.id),
+            suppliers
+          )
+        );
         onSuccess?.();
         router.refresh();
       } catch (error) {

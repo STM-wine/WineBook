@@ -8,7 +8,7 @@ import {
   formatVelocityTrend,
   mergeSupplierCatalogRows,
   removeSupplierCatalogWineFromWorkbench,
-  replaceSupplierCatalogWineInWorkbench,
+  upsertSupplierCatalogWineInWorkbench,
   recommendationMatchesCatalogWine,
   sortSupplierGroups
 } from "./order-data";
@@ -212,6 +212,9 @@ describe("supplier catalog recommendation merge", () => {
 
   it("only surfaces an inactive catalog item when it was explicitly restored for this report", () => {
     const inactive = catalogWine({
+      quickbooks_item_id: "qb-inactive-1",
+      quickbooks_item_number: "VC25001",
+      quickbooks_sync_status: "linked",
       product_lifecycle_status: "inactive",
       workbench_items: [{
         id: "workbench-1",
@@ -231,6 +234,32 @@ describe("supplier catalog recommendation merge", () => {
 
     expect(mergeSupplierCatalogRows([], [inactive], "another-run")).toHaveLength(0);
     expect(mergeSupplierCatalogRows([], [inactive], "run-1")).toHaveLength(1);
+  });
+
+  it("removes a restored inactive workbench row when the active QuickBooks recommendation appears", () => {
+    const restored = catalogWine({
+      quickbooks_item_id: "qb-inactive-1",
+      quickbooks_item_number: "VC25001",
+      quickbooks_sync_status: "linked",
+      product_lifecycle_status: "inactive",
+      workbench_items: [{
+        id: "workbench-1",
+        report_run_id: "run-1",
+        supplier_catalog_wine_id: "catalog-1",
+        recommendation_status: "rejected",
+        recommended_qty: 6,
+        approved_qty: 0,
+        order_path: "stateside",
+        active: true,
+        notes: null,
+        created_by: null,
+        created_at: "2026-09-13T00:00:00Z",
+        updated_at: "2026-09-13T00:00:00Z"
+      }]
+    });
+    const activeQuickBooksRow = recommendation({ product_code: "VC25001" });
+
+    expect(mergeSupplierCatalogRows([activeQuickBooksRow], [restored], "run-1")).toEqual([activeQuickBooksRow]);
   });
 
   it("does not duplicate the same catalog row when its supplier is blank", () => {
@@ -262,7 +291,7 @@ describe("supplier catalog recommendation merge", () => {
       laid_in_per_bottle: 2
     });
 
-    const [updated] = replaceSupplierCatalogWineInWorkbench([original], editedWine, "run-1");
+    const [updated] = upsertSupplierCatalogWineInWorkbench([original], editedWine, "run-1");
 
     expect(updated.product_name).toBe(editedWine.display_name);
     expect(updated.id).toBe("workbench-1");
@@ -271,6 +300,24 @@ describe("supplier catalog recommendation merge", () => {
     expect(updated.order_path).toBe("di");
     expect(updated.order_cost).toBe(120);
     expect(updated.landed_cost).toBe(144);
+  });
+
+  it("adds a newly saved catalog wine to the current workbench immediately", () => {
+    const existing = recommendation({ id: "rec-existing", supplier_catalog_wine_id: null });
+    const savedWine = catalogWine({ id: "catalog-new" });
+
+    const updated = upsertSupplierCatalogWineInWorkbench([existing], savedWine, "run-1");
+
+    expect(updated).toHaveLength(2);
+    expect(updated[0]).toBe(existing);
+    expect(updated[1]).toMatchObject({
+      id: "manual-catalog:catalog-new",
+      report_run_id: "run-1",
+      supplier_catalog_wine_id: "catalog-new",
+      product_name: savedWine.display_name,
+      supplier_name: savedWine.supplier_name,
+      is_new_item: true
+    });
   });
 
   it("removes a deleted catalog wine from the visible workbench", () => {

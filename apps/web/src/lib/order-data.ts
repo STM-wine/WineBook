@@ -382,12 +382,16 @@ export function supplierCatalogWineToRecommendation(wine: SupplierCatalogWine, r
   };
 }
 
-export function replaceSupplierCatalogWineInWorkbench(
+export function upsertSupplierCatalogWineInWorkbench(
   rows: Recommendation[],
   wine: SupplierCatalogWine,
   reportRunId: string
 ): Recommendation[] {
   const catalogRow = supplierCatalogWineToRecommendation(wine, reportRunId);
+
+  if (!rows.some((row) => row.supplier_catalog_wine_id === wine.id)) {
+    return [...rows, catalogRow];
+  }
 
   return rows.map((row) => {
     if (row.supplier_catalog_wine_id !== wine.id) return row;
@@ -423,7 +427,7 @@ export function removeSupplierCatalogWineFromWorkbench(
 
 export function mergeSupplierCatalogRows(recommendations: Recommendation[], catalogWines: SupplierCatalogWine[], reportRunId: string): Recommendation[] {
   const manualRows = catalogWines
-    .filter((wine) => !hasAuthoritativeQuickBooksIdentity(wine))
+    .filter((wine) => !hasAuthoritativeQuickBooksIdentity(wine) || Boolean(workbenchItemForRun(wine, reportRunId)))
     .filter((wine) =>
       wine.product_lifecycle_status !== "inactive" || Boolean(workbenchItemForRun(wine, reportRunId))
     )

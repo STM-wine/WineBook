@@ -1,4 +1,5 @@
 import type { OrderingLogicSettings } from "./ordering-logic";
+import type { Recommendation } from "./types";
 import {
   recommendationIsAutomatic,
   recommendationsAreSuppressed,
@@ -84,6 +85,14 @@ export type SourceSalesWindows = {
   next30Ly: number;
   next60Ly: number;
   next90Ly: number;
+};
+
+export type CurrentRecommendationFacts = {
+  sales: SourceSalesWindows;
+  trueAvailable: number;
+  onOrder: number;
+  quickBooksItemAsOf: string | null;
+  vinosmithAvailableAsOf: string;
 };
 
 export type SourceBackedRecommendationRow = {
@@ -499,6 +508,81 @@ export function calculateSourceRecommendation(input: {
   };
 }
 
+export function refreshSourceBackedRecommendation(
+  row: Recommendation,
+  facts: CurrentRecommendationFacts,
+  settings: OrderingLogicSettings,
+  referenceDate: string
+): Recommendation {
+  const weeklyVelocity = facts.sales.last30 / 4.345;
+  const policy = replenishmentPolicy(row.replenishment_policy);
+  const suppressed = recommendationsAreSuppressed(
+    row.recommendations_suppressed,
+    row.suppression_reason,
+    row.suppressed_until,
+    referenceDate
+  );
+  const olderVintageSuppressed = row.diagnostics?.older_vintage_suppressed === true;
+  const calculation = calculateSourceRecommendation({
+    weeklyVelocity,
+    trueAvailable: facts.trueAvailable,
+    onOrder: facts.onOrder,
+    isBtg: row.is_btg === true,
+    isCore: row.is_core === true,
+    automaticRecommendation: recommendationIsAutomatic(policy, suppressed) && !olderVintageSuppressed,
+    packSize: numberValue(row.pack_size) || settings.default_pack_size,
+    settings,
+    referenceDate
+  });
+  const velocityTrendPct = facts.sales.prior30 > 0
+    ? ((facts.sales.last30 - facts.sales.prior30) / facts.sales.prior30) * 100
+    : null;
+  const fob = Math.max(0, numberValue(row.fob));
+  const trucking = Math.max(0, numberValue(row.trucking_cost_per_bottle));
+
+  return {
+    ...row,
+    last_30_day_sales: facts.sales.last30,
+    last_60_day_sales: facts.sales.last60,
+    last_90_day_sales: facts.sales.last90,
+    next_30_day_forecast: facts.sales.next30Ly,
+    next_60_day_forecast: facts.sales.next60Ly,
+    next_90_day_forecast: facts.sales.next90Ly,
+    weekly_velocity: weeklyVelocity,
+    velocity_trend_pct: velocityTrendPct,
+    velocity_trend_label: velocityTrendLabel(velocityTrendPct, facts.sales.last30, facts.sales.prior30),
+    weeks_on_hand: weeklyVelocity > 0 ? round(facts.trueAvailable / weeklyVelocity, 2) : null,
+    weeks_on_hand_with_on_order: weeklyVelocity > 0
+      ? round((facts.trueAvailable + facts.onOrder) / weeklyVelocity, 2)
+      : null,
+    ...calculation,
+    true_available: facts.trueAvailable,
+    on_order: facts.onOrder,
+    order_cost: round(calculation.recommended_qty_rounded * fob, 2),
+    landed_cost: round(calculation.recommended_qty_rounded * (fob + trucking), 2),
+    reorder_status: reorderStatus(
+      weeklyVelocity,
+      facts.trueAvailable,
+      calculation.target_days,
+      settings.urgent_weeks_threshold
+    ),
+    risk_level: riskLevel(
+      weeklyVelocity,
+      facts.trueAvailable + facts.onOrder,
+      calculation.target_qty,
+      settings
+    ),
+    recommendations_suppressed: suppressed,
+    diagnostics: {
+      ...(row.diagnostics || {}),
+      quickbooks_item_as_of: facts.quickBooksItemAsOf,
+      vinosmith_available_as_of: facts.vinosmithAvailableAsOf,
+      automatic_recommendation: recommendationIsAutomatic(policy, suppressed) && !olderVintageSuppressed,
+      recommendations_suppressed: suppressed
+    }
+  };
+}
+
 export function quickBooksPackSize(item: SourceQuickBooksItem, defaultPackSize: number) {
   const custom = customFieldText(item.custom_fields, ["PACK SIZE", "Pack Size", "pack_size", "packSize", "PackSize", "pack"]);
   const customSize = integerPackSize(custom);
@@ -590,7 +674,7 @@ function velocityTrendLabel(pct: number | null, current: number, prior: number) 
   return "Flat";
 }
 
-function emptySalesWindows(): SourceSalesWindows {
+export function emptySalesWindows(): SourceSalesWindows {
   return { last30: 0, last60: 0, last90: 0, prior30: 0, next30Ly: 0, next60Ly: 0, next90Ly: 0 };
 }
 

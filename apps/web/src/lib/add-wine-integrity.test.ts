@@ -147,6 +147,16 @@ describe("Add Wine search and price-level UI", () => {
     expect(sql).toContain("old.laid_in_source_date");
   });
 
+  it("adds a successful save to the current order summary before the server refresh completes", async () => {
+    const dashboard = await readFile(orderDashboardPath, "utf8");
+
+    expect(dashboard).toContain("upsertSupplierCatalogWineInWorkbench(currentRows, result.saved, reportRun.id)");
+    expect(dashboard).toContain("applySupplierTdmAssignments(");
+    expect(dashboard).toContain("onSuccess?.();");
+    expect(dashboard).toContain("router.refresh();");
+    expect(dashboard).not.toContain("if (input.existingCatalogWineId) {");
+  });
+
   it("preserves source laid-in cost when a historical supplier cannot be resolved", async () => {
     const view = await readFile(addWineViewPath, "utf8");
     expect(view).toContain('String(asNumber(wine.laid_in_per_bottle) || "")');

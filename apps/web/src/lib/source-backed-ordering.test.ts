@@ -6,9 +6,11 @@ import {
   calculateSourceRecommendation,
   carryForwardBuyerState,
   quickBooksPackSize,
+  refreshSourceBackedRecommendation,
   type SourceQuickBooksItem,
   type SourceSalesWindows
 } from "./source-backed-ordering";
+import type { Recommendation } from "./types";
 
 const settings = { ...DEFAULT_ORDERING_LOGIC_SETTINGS, monthly_mode_enabled: false };
 
@@ -328,5 +330,74 @@ describe("recommendation math and buyer state", () => {
     expect(carried.carried).toBe(1);
     expect(carried.rows[0]).toMatchObject({ recommendation_status: "edited", approved_qty: 18, order_path: "di" });
     expect(carryForwardBuyerState(rows, prior, new Set(["AB12345"])).carried).toBe(0);
+  });
+
+  it("refreshes current source facts without replacing the saved row or buyer decision", () => {
+    const saved = {
+      ...build().rows[0],
+      id: "saved-recommendation",
+      report_run_id: "saved-run",
+      recommendation_status: "edited",
+      approved_qty: 18,
+      order_path: "di"
+    } as Recommendation;
+    const currentSales = sales({ last30: 50, last60: 70, last90: 90, prior30: 20 });
+    const refreshed = refreshSourceBackedRecommendation(saved, {
+      sales: currentSales,
+      trueAvailable: 18,
+      onOrder: 6,
+      quickBooksItemAsOf: "2026-09-25T19:00:00Z",
+      vinosmithAvailableAsOf: "2026-09-25T19:05:00Z"
+    }, settings, "2026-09-25");
+    const expected = calculateSourceRecommendation({
+      weeklyVelocity: 50 / 4.345,
+      trueAvailable: 18,
+      onOrder: 6,
+      isBtg: false,
+      isCore: true,
+      packSize: 6,
+      settings,
+      referenceDate: "2026-09-25"
+    });
+
+    expect(refreshed).toMatchObject({
+      id: "saved-recommendation",
+      report_run_id: "saved-run",
+      recommendation_status: "edited",
+      approved_qty: 18,
+      order_path: "di",
+      last_30_day_sales: 50,
+      last_60_day_sales: 70,
+      last_90_day_sales: 90,
+      true_available: 18,
+      on_order: 6,
+      recommended_qty_rounded: expected.recommended_qty_rounded
+    });
+  });
+
+  it("keeps recommendation suppression and older-vintage safeguards during a current-data refresh", () => {
+    const saved = {
+      ...build().rows[0],
+      id: "saved-recommendation",
+      report_run_id: "saved-run",
+      recommendations_suppressed: true,
+      suppression_reason: "Supplier OOS",
+      suppressed_until: "2026-09-30",
+      diagnostics: { ...build().rows[0].diagnostics, older_vintage_suppressed: true }
+    } as Recommendation;
+    const refreshed = refreshSourceBackedRecommendation(saved, {
+      sales: sales({ last30: 100 }),
+      trueAvailable: 0,
+      onOrder: 0,
+      quickBooksItemAsOf: "2026-09-25T19:00:00Z",
+      vinosmithAvailableAsOf: "2026-09-25T19:05:00Z"
+    }, settings, "2026-09-25");
+
+    expect(refreshed.recommendations_suppressed).toBe(true);
+    expect(refreshed.recommended_qty_rounded).toBe(0);
+    expect(refreshed.diagnostics).toMatchObject({
+      older_vintage_suppressed: true,
+      automatic_recommendation: false
+    });
   });
 });
