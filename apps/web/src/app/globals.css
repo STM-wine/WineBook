@@ -1624,6 +1624,29 @@ textarea {
   width: 34px;
 }
 
+.button-action-progress {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.button-action-spinner {
+  animation: processing-spin 0.75s linear infinite;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  border-right-color: transparent;
+  flex: 0 0 auto;
+  height: 14px;
+  width: 14px;
+}
+
+button[aria-busy="true"] {
+  cursor: wait;
+  opacity: 1;
+}
+
 @keyframes processing-spin {
   to {
     transform: rotate(360deg);

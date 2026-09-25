@@ -8,6 +8,9 @@ const migrationPath = path.resolve(
 );
 const actionPath = path.resolve(process.cwd(), "src/app/actions.ts");
 const addWineViewPath = path.resolve(process.cwd(), "src/components/supplier-hub-view.tsx");
+const orderDashboardPath = path.resolve(process.cwd(), "src/components/order-dashboard.tsx");
+const orderReviewViewPath = path.resolve(process.cwd(), "src/components/order-review-view.tsx");
+const workbenchGridPath = path.resolve(process.cwd(), "src/components/workbench-grid.tsx");
 const globalStylesPath = path.resolve(process.cwd(), "src/app/globals.css");
 const matchRoutePath = path.resolve(process.cwd(), "src/app/api/supplier-wines/matches/route.ts");
 const automaticSourceDatesMigrationPath = path.resolve(
@@ -17,6 +20,10 @@ const automaticSourceDatesMigrationPath = path.resolve(
 const identityRepairMigrationPath = path.resolve(
   process.cwd(),
   "../../supabase/migrations/20260925050000_supplier_catalog_identity_repairs.sql"
+);
+const atomicDeleteMigrationPath = path.resolve(
+  process.cwd(),
+  "../../supabase/migrations/20260925053000_atomic_pending_catalog_deletion.sql"
 );
 
 describe("Add Wine database safety contract", () => {
@@ -45,6 +52,24 @@ describe("Add Wine database safety contract", () => {
     expect(sql).toContain("trg_supplier_catalog_events_immutable");
     expect(sql).toContain("revoke insert, update, delete on public.supplier_catalog_events");
     expect(sql).toContain("revoke execute on function public.save_supplier_catalog_sku");
+  });
+
+  it("deletes draft-only wines atomically without deleting their audit history", async () => {
+    const [sql, action, databaseTest] = await Promise.all([
+      readFile(atomicDeleteMigrationPath, "utf8"),
+      readFile(actionPath, "utf8"),
+      readFile(path.resolve(process.cwd(), "../../supabase/tests/add_wine_pricing_integrity.sql"), "utf8")
+    ]);
+
+    expect(action).toContain('supabase.rpc("delete_pending_supplier_catalog_sku_atomic"');
+    expect(sql).toContain("pg_advisory_xact_lock");
+    expect(sql).toContain("p_expected_lock_version");
+    expect(sql).toContain("supplier_catalog_delete_requests");
+    expect(sql).toContain("'deleted'");
+    expect(sql).toContain("drop constraint if exists supplier_catalog_events_supplier_catalog_wine_id_fkey");
+    expect(sql).toContain("revoke delete on public.supplier_catalog_wines from authenticated");
+    expect(databaseTest).toContain("idempotent Add Wine delete retry changed its response");
+    expect(databaseTest).toContain("Add Wine delete did not preserve complete catalog audit history");
   });
 });
 
@@ -124,8 +149,38 @@ describe("Add Wine search and price-level UI", () => {
     const view = await readFile(addWineViewPath, "utf8");
 
     expect(view).toContain('onSubmit={(event) => event.preventDefault()}');
-    expect(view).toContain('onClick={saveWine} type="button"');
+    expect(view).toContain("onClick={saveWine}");
     expect(view).not.toContain('onSubmit={saveWine}');
+  });
+
+  it("sends deletion lock and idempotency values from both Add Wine entry points", async () => {
+    const [addWineView, orderReviewView] = await Promise.all([
+      readFile(addWineViewPath, "utf8"),
+      readFile(path.resolve(process.cwd(), "src/components/order-review-view.tsx"), "utf8")
+    ]);
+
+    expect(addWineView).toContain("expectedLockVersion: asNumber(wine.lock_version)");
+    expect(addWineView).toContain("idempotencyKey: crypto.randomUUID()");
+    expect(orderReviewView).toContain("expectedLockVersion: Number(wine.lock_version || 0)");
+    expect(orderReviewView).toContain("idempotencyKey: crypto.randomUUID()");
+  });
+
+  it("shows row-specific progress on catalog save and delete buttons", async () => {
+    const [dashboard, addWineView, orderReviewView, workbenchGrid, styles] = await Promise.all([
+      readFile(orderDashboardPath, "utf8"),
+      readFile(addWineViewPath, "utf8"),
+      readFile(orderReviewViewPath, "utf8"),
+      readFile(workbenchGridPath, "utf8"),
+      readFile(globalStylesPath, "utf8")
+    ]);
+
+    expect(dashboard).toContain('setCatalogMutation({ kind: "saving"');
+    expect(dashboard).toContain('setCatalogMutation({ kind: "deleting"');
+    expect(addWineView).toContain("<ActionProgress>Saving...</ActionProgress>");
+    expect(addWineView).toContain("deletingCatalogWineId === wine.id");
+    expect(orderReviewView).toContain("<ActionProgress>Saving...</ActionProgress>");
+    expect(workbenchGrid).toContain("row.is_deleting ? <ActionProgress>Deleting...</ActionProgress>");
+    expect(styles).toContain(".button-action-spinner");
   });
 
   it("does not persist a hidden QuickBooks link without an authoritative item number", async () => {

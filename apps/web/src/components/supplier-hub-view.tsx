@@ -26,6 +26,7 @@ import {
   normalizeWineIdentity,
   type SupplierCatalogWineInput
 } from "@/lib/supplier-catalog";
+import { ActionProgress } from "./action-progress";
 
 type HubArea = "search" | "add" | "requests" | "pending" | "price-changes" | "logistics";
 type SaveCatalogWineInput = Parameters<typeof buildSupplierCatalogWine>[0] & {
@@ -34,6 +35,8 @@ type SaveCatalogWineInput = Parameters<typeof buildSupplierCatalogWine>[0] & {
 };
 type DeleteCatalogWineInput = {
   id: string;
+  expectedLockVersion: number;
+  idempotencyKey: string;
 };
 type CreateWineRequestInput = {
   sourceType: "net_new_wine" | "supplier_available_wine";
@@ -96,6 +99,8 @@ export function SupplierHubView({
   priceChangeEvents,
   quickBooksSupplierMatches,
   isPending,
+  isCatalogSaving,
+  deletingCatalogWineId,
   onCreateWineRequest,
   onDeleteCatalogWine,
   onSaveCatalogWine,
@@ -109,6 +114,8 @@ export function SupplierHubView({
   priceChangeEvents: PriceChangeEvent[];
   quickBooksSupplierMatches: SupplierQuickBooksVendorMatch[];
   isPending: boolean;
+  isCatalogSaving: boolean;
+  deletingCatalogWineId: string | null;
   onCreateWineRequest: (input: CreateWineRequestInput) => void;
   onDeleteCatalogWine: (input: DeleteCatalogWineInput) => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput, onSuccess?: () => void) => void;
@@ -176,6 +183,7 @@ export function SupplierHubView({
           suppliers={suppliers}
           wines={searchableCatalogWines}
           isPending={isPending}
+          isSaving={isCatalogSaving}
           editWine={supplierCatalogWines.find((wine) => wine.id === pendingEditWineId) || null}
           onClearPendingEdit={() => setPendingEditWineId(null)}
           onSaveCatalogWine={onSaveCatalogWine}
@@ -195,6 +203,7 @@ export function SupplierHubView({
           wines={supplierCatalogWines}
           requests={wineRequests}
           isPending={isPending}
+          deletingCatalogWineId={deletingCatalogWineId}
           onDeleteCatalogWine={onDeleteCatalogWine}
           onEditCatalogWine={(wine) => {
             setPendingEditWineId(wine.id);
@@ -220,6 +229,7 @@ function AddWinePanel({
   suppliers,
   wines,
   isPending,
+  isSaving,
   editWine,
   onClearPendingEdit,
   onSaveCatalogWine
@@ -228,6 +238,7 @@ function AddWinePanel({
   suppliers: SupplierLogistics[];
   wines: SupplierCatalogWine[];
   isPending: boolean;
+  isSaving: boolean;
   editWine: SupplierCatalogWine | null;
   onClearPendingEdit: () => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput, onSuccess?: () => void) => void;
@@ -1129,8 +1140,16 @@ function AddWinePanel({
       ) : null}
 
       <div className="form-actions">
-        <button className="button" disabled={isPending || lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder || !producer.trim() || !wineName.trim() || !hasValidPack || !computedPricing.suggestionsReady} onClick={saveWine} type="button">
-          {pendingEditId ? "Save Changes" : existing ? "Update Wine" : "Save Wine"}
+        <button
+          aria-busy={isSaving}
+          className="button"
+          disabled={isPending || isSaving || lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder || !producer.trim() || !wineName.trim() || !hasValidPack || !computedPricing.suggestionsReady}
+          onClick={saveWine}
+          type="button"
+        >
+          {isSaving
+            ? <ActionProgress>Saving...</ActionProgress>
+            : pendingEditId ? "Save Changes" : existing ? "Update Wine" : "Save Wine"}
         </button>
       </div>
     </form>
@@ -1748,12 +1767,14 @@ function PendingProductCreationPanel({
   wines,
   requests,
   isPending,
+  deletingCatalogWineId,
   onDeleteCatalogWine,
   onEditCatalogWine
 }: {
   wines: SupplierCatalogWine[];
   requests: WineRequest[];
   isPending: boolean;
+  deletingCatalogWineId: string | null;
   onDeleteCatalogWine: (input: DeleteCatalogWineInput) => void;
   onEditCatalogWine: (wine: SupplierCatalogWine) => void;
 }) {
@@ -1765,7 +1786,11 @@ function PendingProductCreationPanel({
   function confirmDelete(wine: SupplierCatalogWine) {
     const message = `Delete pending product "${wine.display_name}"? This removes only the pending catalog draft and draft-only pricing/free-good/workbench records.`;
     if (!window.confirm(message)) return;
-    onDeleteCatalogWine({ id: wine.id });
+    onDeleteCatalogWine({
+      id: wine.id,
+      expectedLockVersion: asNumber(wine.lock_version),
+      idempotencyKey: crypto.randomUUID()
+    });
   }
 
   return (
@@ -1800,8 +1825,16 @@ function PendingProductCreationPanel({
                     <button className="ghost-button button-tiny" disabled={isPending} onClick={() => onEditCatalogWine(wine)} type="button">
                       Edit
                     </button>
-                    <button className="ghost-button button-tiny danger-button" disabled={isPending} onClick={() => confirmDelete(wine)} type="button">
-                      Delete
+                    <button
+                      aria-busy={deletingCatalogWineId === wine.id}
+                      className="ghost-button button-tiny danger-button"
+                      disabled={isPending || deletingCatalogWineId === wine.id}
+                      onClick={() => confirmDelete(wine)}
+                      type="button"
+                    >
+                      {deletingCatalogWineId === wine.id
+                        ? <ActionProgress>Deleting...</ActionProgress>
+                        : "Delete"}
                     </button>
                   </div>
                 </td>

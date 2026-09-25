@@ -9,6 +9,7 @@ declare
     first_key constant uuid := '62000000-0000-0000-0000-000000000001';
     update_key constant uuid := '62000000-0000-0000-0000-000000000002';
     stale_key constant uuid := '62000000-0000-0000-0000-000000000003';
+    delete_key constant uuid := '62000000-0000-0000-0000-000000000004';
     catalog jsonb := jsonb_build_object(
         'supplier_name', 'Add Wine Test Supplier',
         'producer', 'Test Producer',
@@ -59,6 +60,7 @@ declare
     replay jsonb;
     wine_id uuid;
     original_version bigint;
+    updated_version bigint;
 begin
     insert into auth.users (
         id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -100,6 +102,7 @@ begin
     if result->>'mode' <> 'updated' or not (result->>'price_change_created')::boolean then
         raise exception 'Add Wine update did not atomically create price history: %', result;
     end if;
+    updated_version := (result->'saved'->>'lock_version')::bigint;
 
     begin
         perform public.save_supplier_catalog_sku_atomic(
@@ -114,6 +117,32 @@ begin
 
     if (select count(*) from public.supplier_catalog_events where supplier_catalog_wine_id = wine_id) <> 2 then
         raise exception 'Add Wine catalog audit history is incomplete';
+    end if;
+
+    result := public.delete_pending_supplier_catalog_sku_atomic(
+        wine_id, updated_version, delete_key, 'delete-hash'
+    );
+    if not coalesce((result->>'deleted')::boolean, false) then
+        raise exception 'Add Wine delete returned unexpected result: %', result;
+    end if;
+    replay := public.delete_pending_supplier_catalog_sku_atomic(
+        wine_id, updated_version, delete_key, 'delete-hash'
+    );
+    if replay <> result then raise exception 'idempotent Add Wine delete retry changed its response'; end if;
+    if exists (select 1 from public.supplier_catalog_wines where id = wine_id) then
+        raise exception 'Add Wine delete left the catalog row behind';
+    end if;
+    if exists (select 1 from public.supplier_catalog_price_levels where supplier_catalog_wine_id = wine_id) then
+        raise exception 'Add Wine delete left price levels behind';
+    end if;
+    if (select count(*) from public.supplier_catalog_events where supplier_catalog_wine_id = wine_id) <> 3 then
+        raise exception 'Add Wine delete did not preserve complete catalog audit history';
+    end if;
+    if (select count(*) from public.supplier_catalog_events where supplier_catalog_wine_id = wine_id and operation = 'deleted') <> 1 then
+        raise exception 'Add Wine delete audit event is missing';
+    end if;
+    if (select count(*) from public.supplier_catalog_delete_requests where actor_id = buyer_id and idempotency_key = delete_key) <> 1 then
+        raise exception 'Add Wine delete idempotency record is missing';
     end if;
 end;
 $$;

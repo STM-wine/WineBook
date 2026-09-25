@@ -191,6 +191,9 @@ export function OrderDashboard({
   const [globalTargetWeeks, setGlobalTargetWeeks] = useState("");
   const [pendingMessage, setPendingMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [catalogMutation, setCatalogMutation] = useState<
+    { kind: "saving"; wineId: string | null } | { kind: "deleting"; wineId: string } | null
+  >(null);
   const [showPoDraftProgress, setShowPoDraftProgress] = useState(false);
   const realtimeSupabase = useMemo(() => createBrowserClient(), []);
   const approvalQueueRef = useRef(new Map<string, ApprovalQueueItem>());
@@ -954,6 +957,7 @@ export function OrderDashboard({
   function saveCatalogWine(input: Parameters<typeof saveSupplierCatalogWine>[0], onSuccess?: () => void) {
     setPendingMessage("Saving supplier wine...");
     setErrorMessage("");
+    setCatalogMutation({ kind: "saving", wineId: input.existingCatalogWineId || null });
 
     startTransition(async () => {
       try {
@@ -972,6 +976,8 @@ export function OrderDashboard({
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save supplier wine.");
         setPendingMessage("");
+      } finally {
+        setCatalogMutation(null);
       }
     });
   }
@@ -979,6 +985,7 @@ export function OrderDashboard({
   function deleteCatalogWine(input: Parameters<typeof deletePendingSupplierCatalogWine>[0]) {
     setPendingMessage("Deleting pending product...");
     setErrorMessage("");
+    setCatalogMutation({ kind: "deleting", wineId: input.id });
 
     startTransition(async () => {
       try {
@@ -989,6 +996,8 @@ export function OrderDashboard({
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not delete pending product.");
         setPendingMessage("");
+      } finally {
+        setCatalogMutation(null);
       }
     });
   }
@@ -1095,6 +1104,8 @@ export function OrderDashboard({
           onSaveReplenishmentPolicy={saveReplenishmentPolicy}
           canManageMarkers={canViewSettings}
           isPending={isPending}
+          isCatalogSaving={catalogMutation?.kind === "saving"}
+          deletingCatalogWineId={catalogMutation?.kind === "deleting" ? catalogMutation.wineId : null}
           approvalEvents={approvalEvents}
           auditActorNames={auditActorNames}
         />
@@ -1109,6 +1120,8 @@ export function OrderDashboard({
           priceChangeEvents={priceChangeEvents}
           quickBooksSupplierMatches={quickBooksSupplierMatches}
           isPending={isPending}
+          isCatalogSaving={catalogMutation?.kind === "saving"}
+          deletingCatalogWineId={catalogMutation?.kind === "deleting" ? catalogMutation.wineId : null}
           onCreateWineRequest={createWineRequest}
           onDeleteCatalogWine={deleteCatalogWine}
           onSaveCatalogWine={saveCatalogWine}

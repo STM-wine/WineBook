@@ -30,6 +30,7 @@ import {
   type ReorderSuppressionReason
 } from "@/lib/replenishment-policy";
 import { auditActorName, formatAuditTimestamp } from "@/lib/audit-trail";
+import { ActionProgress } from "./action-progress";
 
 type SaveCatalogWineInput = SupplierCatalogWineInput & {
   existingCatalogWineId?: string | null;
@@ -73,7 +74,9 @@ export function OrderReviewView({
   canManageMarkers,
   approvalEvents,
   auditActorNames,
-  isPending
+  isPending,
+  isCatalogSaving,
+  deletingCatalogWineId
 }: {
   brandManager: string;
   brandManagerOptions: string[];
@@ -105,7 +108,7 @@ export function OrderReviewView({
   onSetGlobalTargetWeeks: (value: string) => void;
   onRestoreInactiveWine: (listId: string) => void;
   onSaveCatalogWine: (input: SaveCatalogWineInput, onSuccess?: () => void) => void;
-  onDeleteCatalogWine: (input: { id: string }) => void;
+  onDeleteCatalogWine: (input: { id: string; expectedLockVersion: number; idempotencyKey: string }) => void;
   onAddWine: (supplierName: string) => void;
   onSaveReplenishmentPolicy: (
     row: Recommendation,
@@ -118,6 +121,8 @@ export function OrderReviewView({
   approvalEvents: ApprovalEvent[];
   auditActorNames: Record<string, string>;
   isPending: boolean;
+  isCatalogSaving: boolean;
+  deletingCatalogWineId: string | null;
 }) {
   const [editingWine, setEditingWine] = useState<SupplierCatalogWine | null>(null);
   const [editingReplenishment, setEditingReplenishment] = useState<Recommendation | null>(null);
@@ -132,9 +137,15 @@ export function OrderReviewView({
 
   function deleteNewItem(row: Recommendation) {
     if (!row.supplier_catalog_wine_id) return;
+    const wine = supplierCatalogWines.find((candidate) => candidate.id === row.supplier_catalog_wine_id);
+    if (!wine) return;
     const name = row.product_name || row.planning_sku || "this new item";
     if (!window.confirm(`Delete ${name}? This removes the draft item from the workbench and Supplier Hub.`)) return;
-    onDeleteCatalogWine({ id: row.supplier_catalog_wine_id });
+    onDeleteCatalogWine({
+      id: row.supplier_catalog_wine_id,
+      expectedLockVersion: Number(wine.lock_version || 0),
+      idempotencyKey: crypto.randomUUID()
+    });
   }
 
   return (
@@ -266,6 +277,7 @@ export function OrderReviewView({
             approvalEvents={approvalEvents}
             auditActorNames={auditActorNames}
             isPending={isPending}
+            deletingCatalogWineId={deletingCatalogWineId}
           />
         ))}
       </section>
@@ -273,6 +285,7 @@ export function OrderReviewView({
         <NewItemEditDialog
           wine={editingWine}
           isPending={isPending}
+          isSaving={isCatalogSaving}
           onClose={() => setEditingWine(null)}
           onSave={(input) => onSaveCatalogWine(input, () => setEditingWine(null))}
         />
@@ -376,7 +389,8 @@ function SupplierSection({
   onAddWine,
   approvalEvents,
   auditActorNames,
-  isPending
+  isPending,
+  deletingCatalogWineId
 }: {
   group: SupplierGroup;
   expandAll: boolean;
@@ -395,6 +409,7 @@ function SupplierSection({
   approvalEvents: ApprovalEvent[];
   auditActorNames: Record<string, string>;
   isPending: boolean;
+  deletingCatalogWineId: string | null;
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
@@ -514,6 +529,8 @@ function SupplierSection({
             onDeleteNewItem={onDeleteNewItem}
             approvalEvents={approvalEvents}
             auditActorNames={auditActorNames}
+            isPending={isPending}
+            deletingCatalogWineId={deletingCatalogWineId}
           />
         </>
       ) : null}
@@ -524,11 +541,13 @@ function SupplierSection({
 function NewItemEditDialog({
   wine,
   isPending,
+  isSaving,
   onClose,
   onSave
 }: {
   wine: SupplierCatalogWine;
   isPending: boolean;
+  isSaving: boolean;
   onClose: () => void;
   onSave: (input: SaveCatalogWineInput) => void;
 }) {
@@ -559,7 +578,7 @@ function NewItemEditDialog({
   }
 
   return (
-    <div className="new-item-edit-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="new-item-edit-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !isSaving && onClose()}>
       <form className="new-item-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="new-item-edit-title" onSubmit={submit}>
         <div className="new-item-edit-header">
           <div>
@@ -599,8 +618,10 @@ function NewItemEditDialog({
           </label>
         </div>
         <div className="new-item-edit-footer">
-          <button className="ghost-button" disabled={isPending} type="button" onClick={onClose}>Cancel</button>
-          <button className="primary-button" disabled={isPending} type="submit">Save Changes</button>
+          <button className="ghost-button" disabled={isPending || isSaving} type="button" onClick={onClose}>Cancel</button>
+          <button aria-busy={isSaving} className="primary-button" disabled={isPending || isSaving} type="submit">
+            {isSaving ? <ActionProgress>Saving...</ActionProgress> : "Save Changes"}
+          </button>
         </div>
       </form>
     </div>

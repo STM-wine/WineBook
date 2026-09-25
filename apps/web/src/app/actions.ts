@@ -16,7 +16,6 @@ import {
   buildOrderingWorkflowPayload,
   buildSupplierCatalogWine,
   decisionToRequestStatus,
-  hasOfficialQuickBooksProduct,
   MINIMUM_GP_MARGIN,
   type ApprovalDecision,
   type AvailabilityStatus,
@@ -801,85 +800,36 @@ export async function saveSupplierCatalogWine(input: {
   };
 }
 
-export async function deletePendingSupplierCatalogWine(input: { id: string }) {
+export async function deletePendingSupplierCatalogWine(input: {
+  id: string;
+  expectedLockVersion: number;
+  idempotencyKey: string;
+}) {
   if (!input.id) {
     throw new Error("Missing supplier wine id.");
   }
-
-  await requireWriteAccess();
-  const supabase = createServiceRoleClient();
-  const { data: wine, error: wineError } = await supabase
-    .from("supplier_catalog_wines")
-    .select("*")
-    .eq("id", input.id)
-    .single<SupplierCatalogWine>();
-
-  if (wineError || !wine) {
-    throw new Error(wineError?.message || "Supplier wine not found.");
+  if (!input.idempotencyKey) {
+    throw new Error("Missing deletion idempotency key.");
   }
 
-  const hasOfficialProduct = hasOfficialQuickBooksProduct(wine);
-  const isDraftOnlyProduct =
-    !hasOfficialProduct &&
-    (wine.product_lifecycle_status === "pending_product_creation" ||
-      wine.quickbooks_sync_status === "not_created" ||
-      ["new_vintage", "new_format", "possible_match_needs_review", "net_new_product"].includes(wine.conversion_status));
-
-  if (!isDraftOnlyProduct) {
-    throw new Error("Only draft-only pending product-creation records can be deleted here.");
+  const { supabase } = await requireWriteAccess();
+  const requestHash = createHash("sha256")
+    .update(JSON.stringify({ id: input.id, expectedLockVersion: input.expectedLockVersion }))
+    .digest("hex");
+  const { data: deleteResult, error: deleteError } = await supabase.rpc("delete_pending_supplier_catalog_sku_atomic", {
+    p_supplier_catalog_wine_id: input.id,
+    p_expected_lock_version: Number(input.expectedLockVersion || 0),
+    p_idempotency_key: input.idempotencyKey,
+    p_request_hash: requestHash
+  });
+  if (deleteError || !deleteResult) {
+    throw new Error(deleteError?.message || "Could not delete the pending product.");
   }
-  if (hasOfficialProduct) {
-    throw new Error("This record is linked to an official or QuickBooks item and cannot be deleted here.");
-  }
-
-  const { data: blockingPriceChanges, error: priceChangeReadError } = await supabase
-    .from("price_change_events")
-    .select("id,status")
-    .eq("supplier_catalog_wine_id", input.id)
-    .not("status", "in", "(draft,pending_review)");
-
-  if (priceChangeReadError) {
-    throw new Error(priceChangeReadError.message);
-  }
-  if ((blockingPriceChanges || []).length > 0) {
-    throw new Error("This record has approved or communicated price changes and cannot be deleted here.");
-  }
-
-  const { error: copiedWineError } = await supabase
-    .from("supplier_catalog_wines")
-    .update({ copied_from_supplier_catalog_wine_id: null })
-    .eq("copied_from_supplier_catalog_wine_id", input.id);
-  if (copiedWineError) {
-    throw new Error(copiedWineError.message);
-  }
-
-  const childDeletes = await Promise.all([
-    supabase.from("price_change_events").delete().eq("supplier_catalog_wine_id", input.id).in("status", ["draft", "pending_review"]),
-    supabase.from("supplier_catalog_price_levels").delete().eq("supplier_catalog_wine_id", input.id),
-    supabase.from("supplier_catalog_free_goods").delete().eq("supplier_catalog_wine_id", input.id),
-    supabase.from("supplier_catalog_workbench_items").delete().eq("supplier_catalog_wine_id", input.id)
-  ]);
-  const childDeleteError = childDeletes.find((result) => result.error)?.error;
-  if (childDeleteError) {
-    throw new Error(childDeleteError.message);
-  }
-
-  const { data: deletedWine, error: deleteError } = await supabase
-    .from("supplier_catalog_wines")
-    .delete()
-    .eq("id", input.id)
-    .select("id")
-    .maybeSingle<{ id: string }>();
-  if (deleteError) {
-    throw new Error(deleteError.message);
-  }
-  if (!deletedWine) {
-    throw new Error("The pending product was not deleted. Please reload and try again.");
-  }
+  const result = deleteResult as { display_name: string };
 
   revalidateSupplierCatalogData();
   revalidatePath("/");
-  return { displayName: wine.display_name };
+  return { displayName: result.display_name };
 }
 
 export async function updateSupplierCatalogWorkbenchItems(input: {

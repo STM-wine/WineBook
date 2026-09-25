@@ -34,6 +34,7 @@ import {
   rowRecommendedQty
 } from "@/lib/order-data";
 import { replenishmentPolicyLabel } from "@/lib/replenishment-policy";
+import { ActionProgress } from "./action-progress";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -48,6 +49,8 @@ type WorkbenchGridProps = {
   onEditReplenishment: (row: Recommendation) => void;
   onEditNewItem: (row: Recommendation) => void;
   onDeleteNewItem: (row: Recommendation) => void;
+  isPending: boolean;
+  deletingCatalogWineId: string | null;
   approvalEvents: ApprovalEvent[];
   auditActorNames: Record<string, string>;
 };
@@ -61,6 +64,7 @@ type WorkbenchRow = Recommendation & {
   estimated_cost: number;
   free_goods_summary: string;
   approval_activity: { label: string; actor: string; at: string } | null;
+  is_deleting: boolean;
 };
 
 type ManualEditState = Record<string, { qty?: boolean; weeks?: boolean }>;
@@ -133,25 +137,30 @@ const NewItemActionsRenderer = (params: ICellRendererParams<WorkbenchRow>) => {
 
   return (
     <span className="new-item-actions">
+      {!row.is_deleting ? (
+        <button
+          className="new-item-action-button"
+          disabled={params.context.isPending}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            params.context.onEditNewItem(row);
+          }}
+        >
+          Edit
+        </button>
+      ) : null}
       <button
-        className="new-item-action-button"
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          params.context.onEditNewItem(row);
-        }}
-      >
-        Edit
-      </button>
-      <button
+        aria-busy={row.is_deleting}
         className="new-item-action-button is-delete"
+        disabled={params.context.isPending || row.is_deleting}
         type="button"
         onClick={(event) => {
           event.stopPropagation();
           params.context.onDeleteNewItem(row);
         }}
       >
-        Delete
+        {row.is_deleting ? <ActionProgress>Deleting...</ActionProgress> : "Delete"}
       </button>
     </span>
   );
@@ -213,6 +222,8 @@ export function WorkbenchGrid({
   onEditReplenishment,
   onEditNewItem,
   onDeleteNewItem,
+  isPending,
+  deletingCatalogWineId,
   approvalEvents,
   auditActorNames
 }: WorkbenchGridProps) {
@@ -243,11 +254,12 @@ export function WorkbenchGrid({
             label: approvalEventLabel(event),
             actor: auditActorName(event.actor_id, auditActorNames),
             at: event.created_at
-          } : null
+          } : null,
+          is_deleting: deletingCatalogWineId === row.supplier_catalog_wine_id
         };
       });
     },
-    [approvalEventsBySource, auditActorNames, rows]
+    [approvalEventsBySource, auditActorNames, deletingCatalogWineId, rows]
   );
 
   const columnDefs = useMemo<ColDef<WorkbenchRow>[]>(
@@ -597,7 +609,7 @@ export function WorkbenchGrid({
         animateRows={false}
         enableBrowserTooltips
         tooltipShowDelay={0}
-        context={{ onDeleteNewItem, onEditNewItem, onEditReplenishment, onSaveOrderPath }}
+        context={{ isPending, onDeleteNewItem, onEditNewItem, onEditReplenishment, onSaveOrderPath }}
       />
     </div>
   );
