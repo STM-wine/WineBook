@@ -22,11 +22,17 @@ describe("current QuickBooks sales cutoff contract", () => {
     expect(poCreateRoute).not.toContain("referenceDate: orderingRun.report_date");
   });
 
-  it("fails closed instead of falling back to stored source-run sales", async () => {
-    const page = await readFile(orderingPagePath, "utf8");
+  it("uses the last verified page snapshot only during a running refresh and keeps PO creation strict", async () => {
+    const [page, poCreateRoute] = await Promise.all([
+      readFile(orderingPagePath, "utf8"),
+      readFile(poCreateRoutePath, "utf8")
+    ]);
 
     expect(page).toContain("sourceBackedRun && !currentSourceOverlayResult.rows");
     expect(page).toContain("Order Summary rows are hidden instead of showing stale sales or recommendations");
+    expect(page).toContain("allowVerifiedFallbackDuringRefresh: true");
+    expect(page).toContain("Order Summary is showing the last verified snapshot");
+    expect(poCreateRoute).not.toContain("allowVerifiedFallbackDuringRefresh: true");
   });
 
   it("keeps full catalog reconstruction out of normal page and PO requests", async () => {

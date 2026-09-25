@@ -485,6 +485,130 @@ function orderingVintageIdentity(item: SourceQuickBooksItem, wine: SourceVinosmi
   };
 }
 
+export function applyCurrentOrderingPolicies(
+  rows: Recommendation[],
+  markers: SourceOrderingMarker[],
+  referenceDate: string
+): Recommendation[] {
+  const markersByCode = new Map(markers.map((marker) => [normalizeOrderingItemCode(marker.item_code), marker]));
+  const familyDefaults = new Map<string, ReplenishmentPolicy>();
+  for (const marker of markers) {
+    if (!marker.policy_family_key || familyDefaults.has(marker.policy_family_key)) continue;
+    familyDefaults.set(marker.policy_family_key, replenishmentPolicy(marker.family_default_policy || marker.replenishment_policy));
+  }
+
+  return rows.map((row) => {
+    const marker = markersByCode.get(normalizeOrderingItemCode(row.product_code)) || null;
+    const familyKey = marker?.policy_family_key
+      || row.policy_family_key?.trim()
+      || replenishmentPolicyFamilyKey(row.product_name);
+    const familyPolicy = marker?.family_default_policy || (familyKey ? familyDefaults.get(familyKey) : null);
+    if (!marker && !familyPolicy) return row;
+
+    const legacyPolicy = marker?.is_core === true || marker?.is_btg === true ? "Core" : null;
+    const exactPolicy = marker?.replenishment_policy || legacyPolicy || row.replenishment_policy;
+    const hasManualPolicyOverride = marker?.note_source === "manual";
+    const policy = replenishmentPolicy(hasManualPolicyOverride ? exactPolicy : familyPolicy || exactPolicy);
+    const suppressed = marker
+      ? recommendationsAreSuppressed(
+          marker.recommendations_suppressed,
+          marker.suppression_reason,
+          marker.suppressed_until,
+          referenceDate
+        )
+      : recommendationsAreSuppressed(
+          row.recommendations_suppressed,
+          row.suppression_reason,
+          row.suppressed_until,
+          referenceDate
+        );
+
+    return {
+      ...row,
+      is_btg: false,
+      is_core: policy === "Core",
+      replenishment_policy: policy,
+      policy_family_key: familyKey || null,
+      recommendations_suppressed: suppressed,
+      suppression_reason: marker ? marker.suppression_reason || null : row.suppression_reason || null,
+      suppressed_until: marker ? marker.suppressed_until || null : row.suppressed_until || null,
+      suppression_changed_at: marker ? marker.suppression_changed_at || null : row.suppression_changed_at || null,
+      suppression_changed_by: marker ? marker.suppression_changed_by || null : row.suppression_changed_by || null,
+      diagnostics: {
+        ...(row.diagnostics || {}),
+        replenishment_policy: policy,
+        policy_source: hasManualPolicyOverride
+          ? "item_manual_override"
+          : familyPolicy
+            ? "family_inherited"
+            : marker
+              ? "item"
+              : row.diagnostics?.policy_source,
+        automatic_recommendation: recommendationIsAutomatic(policy, suppressed),
+        recommendations_suppressed: suppressed
+      }
+    } satisfies Recommendation;
+  });
+}
+
+export function applyCurrentVintageSafeguards(rows: Recommendation[]): Recommendation[] {
+  const identities = rows.map((row) => recommendationVintageIdentity(row));
+  const latestVintageByFamily = new Map<string, number>();
+  for (const identity of identities) {
+    if (!identity.familyKey || identity.vintage === null) continue;
+    const current = latestVintageByFamily.get(identity.familyKey);
+    if (current === undefined || identity.vintage > current) {
+      latestVintageByFamily.set(identity.familyKey, identity.vintage);
+    }
+  }
+
+  return rows.map((row, index) => {
+    const identity = identities[index];
+    const latestVintage = identity.familyKey
+      ? latestVintageByFamily.get(identity.familyKey) ?? null
+      : null;
+    const isLatestVintage = identity.vintage === null || latestVintage === null
+      ? true
+      : identity.vintage === latestVintage;
+    const olderVintageSuppressed = !isLatestVintage;
+    return {
+      ...row,
+      ...(olderVintageSuppressed ? {
+        recommended_qty_rounded: 0,
+        order_cost: 0,
+        landed_cost: 0
+      } : {}),
+      diagnostics: {
+        ...(row.diagnostics || {}),
+        vintage: identity.vintage,
+        latest_active_vintage: latestVintage,
+        is_latest_active_vintage: isLatestVintage,
+        older_vintage_suppressed: olderVintageSuppressed,
+        automatic_recommendation: olderVintageSuppressed
+          ? false
+          : row.diagnostics?.automatic_recommendation
+      }
+    } satisfies Recommendation;
+  });
+}
+
+function recommendationVintageIdentity(row: Recommendation) {
+  const name = row.product_name?.trim() || row.planning_sku?.trim() || "";
+  const diagnosticVintage = String(row.diagnostics?.vintage || "").trim();
+  const vintageText = /^(?:19|20)\d{2}$/.test(diagnosticVintage)
+    ? diagnosticVintage
+    : name.match(/\b(?:19|20)\d{2}\b/)?.[0] || "";
+  const vintage = /^(?:19|20)\d{2}$/.test(vintageText) ? Number(vintageText) : null;
+  const policyFamilyKey = replenishmentPolicyFamilyKey(name, vintageText) || row.policy_family_key?.trim() || "";
+  const format = name.match(/\b\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\s*(?:ml|l)\s*$/i)?.[0]
+    ?.toLowerCase()
+    .replace(/\s+/g, "") || "";
+  return {
+    vintage,
+    familyKey: policyFamilyKey ? `${policyFamilyKey}|${format}` : ""
+  };
+}
+
 export function calculateSourceRecommendation(input: {
   weeklyVelocity: number;
   trueAvailable: number;

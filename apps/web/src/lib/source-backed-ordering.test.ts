@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_ORDERING_LOGIC_SETTINGS } from "./ordering-logic";
 import { MANUAL_RECOMMENDATION_PAUSE_REASON } from "./replenishment-policy";
 import {
+  applyCurrentOrderingPolicies,
+  applyCurrentVintageSafeguards,
   buildSourceBackedOrderingRows,
   calculateSourceRecommendation,
   carryForwardBuyerState,
   quickBooksPackSize,
   recommendationAllowsSourceAssignmentRefresh,
   refreshSourceBackedRecommendation,
+  type SourceOrderingMarker,
   type SourceQuickBooksItem,
   type SourceSalesWindows
 } from "./source-backed-ordering";
@@ -167,7 +170,7 @@ describe("source-backed ordering rows", () => {
         replenishment_policy: "Limited Core", policy_family_key: "pavette pinot noir", family_default_policy: "Core",
         note_source: "initial_upload"
       }
-    ];
+    ] satisfies SourceOrderingMarker[];
     const common = {
       quickBooksItems,
       vinosmithWines,
@@ -204,6 +207,77 @@ describe("source-backed ordering rows", () => {
     expect(inactiveNewest.rows).toHaveLength(1);
     expect(inactiveNewest.rows[0].recommended_qty_rounded).toBeGreaterThan(0);
     expect(inactiveNewest.rows[0].diagnostics).toMatchObject({ is_latest_active_vintage: true, latest_active_vintage: 2024 });
+  });
+
+  it("recomputes current policy and vintage safeguards for saved Truchard rows", () => {
+    const base = build().rows[0];
+    const storedRows = [
+      {
+        ...base,
+        id: "truchard-2023",
+        report_run_id: "saved-run",
+        product_code: "TV000002",
+        product_name: "Truchard Vineyards Pinot Noir 2023 12/750ml",
+        planning_sku: "TV000002",
+        replenishment_policy: "Core",
+        policy_family_key: "truchard vineyards pinot noir",
+        recommended_qty_rounded: 204,
+        diagnostics: { ...base.diagnostics, automatic_recommendation: true }
+      },
+      {
+        ...base,
+        id: "truchard-2024",
+        report_run_id: "saved-run",
+        product_code: "TV000011",
+        product_name: "Truchard Vineyards Pinot Noir 2024 12/750ml",
+        planning_sku: "TV000011",
+        replenishment_policy: "Special Order",
+        policy_family_key: "truchard vineyards pinot noir",
+        recommended_qty_rounded: 0,
+        diagnostics: { ...base.diagnostics, automatic_recommendation: false }
+      }
+    ] as Recommendation[];
+    const markers = [
+      {
+        item_code: "TV000002", quickbooks_item_list_id: "qb-2023", is_btg: false, is_core: true,
+        replenishment_policy: "Core", policy_family_key: "truchard vineyards pinot noir", family_default_policy: "Core",
+        note_source: "initial_upload"
+      },
+      {
+        item_code: "TV000011", quickbooks_item_list_id: "qb-2024", is_btg: false, is_core: true,
+        replenishment_policy: "Core", policy_family_key: "truchard vineyards pinot noir", family_default_policy: "Core",
+        note_source: "manual"
+      }
+    ];
+
+    const guarded = applyCurrentVintageSafeguards(
+      applyCurrentOrderingPolicies(storedRows, markers, "2026-09-25")
+    );
+    const refreshed = guarded.map((row) => refreshSourceBackedRecommendation(row, {
+      sales: sales({ last30: row.product_code === "TV000002" ? 168 : 307 }),
+      trueAvailable: row.product_code === "TV000002" ? 0 : 107,
+      onOrder: 0,
+      quickBooksItemAsOf: "2026-09-25T21:45:20Z",
+      vinosmithAvailableAsOf: "2026-09-25T22:49:45Z"
+    }, settings, "2026-09-25"));
+    const older = refreshed.find((row) => row.product_code === "TV000002")!;
+    const newer = refreshed.find((row) => row.product_code === "TV000011")!;
+
+    expect(older.recommended_qty_rounded).toBe(0);
+    expect(older.diagnostics).toMatchObject({
+      vintage: 2023,
+      latest_active_vintage: 2024,
+      older_vintage_suppressed: true,
+      automatic_recommendation: false
+    });
+    expect(newer).toMatchObject({ replenishment_policy: "Core", is_core: true });
+    expect(newer.recommended_qty_rounded).toBeGreaterThan(0);
+    expect(newer.diagnostics).toMatchObject({
+      vintage: 2024,
+      latest_active_vintage: 2024,
+      is_latest_active_vintage: true,
+      policy_source: "item_manual_override"
+    });
   });
 
   it("keeps legacy Core and BTG markers compatible during rollback", () => {

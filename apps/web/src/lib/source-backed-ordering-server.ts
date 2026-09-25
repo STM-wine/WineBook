@@ -3,6 +3,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_ORDERING_LOGIC_SETTINGS, normalizeOrderingLogicSettings, type OrderingLogicSettings } from "./ordering-logic";
 import {
+  applyCurrentOrderingPolicies,
+  applyCurrentVintageSafeguards,
   buildSourceBackedOrderingRows,
   emptySalesWindows,
   normalizeOrderingItemCode,
@@ -127,13 +129,40 @@ export async function fetchCurrentOrderingOverlay(
   options: {
     liveAvailability?: LatestVinosmithAvailability;
     now?: Date;
+    allowVerifiedFallbackDuringRefresh?: boolean;
+    verifiedReferenceDate?: string | null;
   } = {}
 ) {
   const referenceDate = orderingBusinessDate(options.now);
+  const syncState = await fetchQuickBooksSyncState(supabase);
+  if (syncState.latest?.status !== "completed") {
+    if (
+      syncState.latest?.status === "running"
+      && options.allowVerifiedFallbackDuringRefresh
+      && syncState.latestCompletedAt
+    ) {
+      const quickBooksFreshnessHours = ageHours(syncState.latestCompletedAt);
+      return {
+        rows: applyCurrentVintageSafeguards(recommendations),
+        diagnostics: {
+          reference_date: options.verifiedReferenceDate || "",
+          quickbooks_as_of: syncState.latestCompletedAt,
+          quickbooks_freshness_hours: quickBooksFreshnessHours,
+          quickbooks_fresh: quickBooksFreshnessHours !== null && quickBooksFreshnessHours <= 72,
+          quickbooks_refresh_in_progress: true,
+          using_saved_recommendations: true
+        }
+      };
+    }
+    throw new Error(incompleteQuickBooksSyncMessage(syncState.latest));
+  }
+  const quickBooksAsOf = syncState.latest.completed_at;
+  if (!quickBooksAsOf) {
+    throw new Error("The latest QuickBooks Web Connector refresh has no completed timestamp.");
+  }
   const availability = options.liveAvailability || await fetchLiveVinosmithAvailability();
   const reportRunIds = Array.from(new Set(recommendations.map((row) => row.report_run_id).filter(Boolean)));
-  const [quickBooksAsOf, configuration, onOrderSnapshot, activeItems, vendorMappings, suppliers, commitments, salesRows] = await Promise.all([
-    assertLatestQuickBooksSyncComplete(supabase),
+  const [configuration, onOrderSnapshot, activeItems, vendorMappings, suppliers, markers, commitments, salesRows] = await Promise.all([
     fetchPublishedOrderingConfiguration(supabase),
     fetchLatestCompletedQuickBooksOnOrderSnapshot(supabase),
     fetchAllExact<{ list_id: string; raw_data: Record<string, unknown> | null }>("active QuickBooks inventory identities", (from, to) => supabase
@@ -146,6 +175,7 @@ export async function fetchCurrentOrderingOverlay(
       .returns<Array<{ list_id: string; raw_data: Record<string, unknown> | null }>>() as never),
     fetchAll<SourceVendorMapping>(supabase, "quickbooks_vendor_mappings", "quickbooks_vendor_list_id,supplier_id,vendor_classification", "quickbooks_vendor_list_id"),
     fetchAll<SourceSupplier>(supabase, "suppliers", "id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,active", "name"),
+    fetchOrderingMarkers(supabase),
     reportRunIds.length > 0
       ? fetchAllExact<{ source_id: string }>("ordering approval commitments", (from, to) => supabase
           .from("approval_commitments")
@@ -196,10 +226,17 @@ export async function fetchCurrentOrderingOverlay(
     salesByCode.set(code, current);
   }
 
-  const rows = recommendations.flatMap((row) => {
+  const activeRecommendations = recommendations.filter((row) => {
     const code = normalizeOrderingItemCode(row.product_code);
     const listId = String(row.diagnostics?.quickbooks_item_list_id || "").trim();
-    if (!code || !listId || !activeItemListIds.has(listId)) return [];
+    return Boolean(code && listId && activeItemListIds.has(listId));
+  });
+  const currentRecommendations = applyCurrentVintageSafeguards(
+    applyCurrentOrderingPolicies(activeRecommendations, markers, referenceDate)
+  );
+  const rows = currentRecommendations.map((row) => {
+    const code = normalizeOrderingItemCode(row.product_code);
+    const listId = String(row.diagnostics?.quickbooks_item_list_id || "").trim();
     const preferredVendor = preferredVendorByItemListId.get(listId) || null;
     const currentSupplier = preferredVendor ? supplierByVendorId.get(preferredVendor.id) || null : null;
     const refreshSupplier = currentSupplier && preferredVendor && recommendationAllowsSourceAssignmentRefresh(
@@ -219,14 +256,14 @@ export async function fetchCurrentOrderingOverlay(
           preferredVendorName: preferredVendor.name
         }
       : undefined;
-    return [refreshSourceBackedRecommendation(row, {
+    return refreshSourceBackedRecommendation(row, {
       sales: salesByCode.get(code) || emptySalesWindows(),
       trueAvailable: numeric(availability.byProductCode.get(code)),
       onOrder: Math.max(0, onOrderByListId.get(listId) || 0),
       quickBooksItemAsOf: quickBooksAsOf,
       vinosmithAvailableAsOf: availability.snapshotAt,
       supplier: refreshSupplier
-    }, configuration.values, referenceDate)];
+    }, configuration.values, referenceDate);
   });
   const quickBooksFreshnessHours = ageHours(quickBooksAsOf);
   const diagnostics = {
@@ -240,24 +277,54 @@ export async function fetchCurrentOrderingOverlay(
 }
 
 async function assertLatestQuickBooksSyncComplete(supabase: SourceClient) {
-  const { data, error } = await supabase
-    .from("source_sync_runs")
-    .select("status,started_at,completed_at,error_message")
-    .eq("source_system", "quickbooks_desktop")
-    .eq("worker_name", "quickbooks_web_connector")
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ status: string; started_at: string; completed_at: string | null; error_message: string | null }>();
-  if (error) throw new Error(error.message);
-  if (data && data.status !== "completed") {
-    throw new Error(
-      `The latest QuickBooks Web Connector refresh is ${data.status}, not complete. ${data.error_message || "Finish a successful Web Connector pull before refreshing ordering data."}`
-    );
+  const state = await fetchQuickBooksSyncState(supabase);
+  if (state.latest?.status !== "completed") {
+    throw new Error(incompleteQuickBooksSyncMessage(state.latest));
   }
-  if (!data?.completed_at) {
+  if (!state.latest.completed_at) {
     throw new Error("The latest QuickBooks Web Connector refresh has no completed timestamp.");
   }
-  return data.completed_at;
+  return state.latest.completed_at;
+}
+
+type QuickBooksSyncRow = {
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+};
+
+async function fetchQuickBooksSyncState(supabase: SourceClient) {
+  const [latestResult, completedResult] = await Promise.all([
+    supabase
+      .from("source_sync_runs")
+      .select("status,started_at,completed_at,error_message")
+      .eq("source_system", "quickbooks_desktop")
+      .eq("worker_name", "quickbooks_web_connector")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<QuickBooksSyncRow>(),
+    supabase
+      .from("source_sync_runs")
+      .select("completed_at")
+      .eq("source_system", "quickbooks_desktop")
+      .eq("worker_name", "quickbooks_web_connector")
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ completed_at: string | null }>()
+  ]);
+  if (latestResult.error) throw new Error(latestResult.error.message);
+  if (completedResult.error) throw new Error(completedResult.error.message);
+  return {
+    latest: latestResult.data,
+    latestCompletedAt: completedResult.data?.completed_at || null
+  };
+}
+
+function incompleteQuickBooksSyncMessage(run: QuickBooksSyncRow | null) {
+  if (!run) return "No QuickBooks Web Connector refresh has completed.";
+  return `The latest QuickBooks Web Connector refresh is ${run.status}, not complete. ${run.error_message || "Finish a successful Web Connector pull before refreshing ordering data."}`;
 }
 
 export async function fetchPublishedOrderingConfiguration(supabase: SourceClient): Promise<PublishedOrderingConfiguration> {

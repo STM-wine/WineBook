@@ -218,7 +218,7 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
         .maybeSingle<{ status: string; started_at: string; completed_at: string | null; error_message: string | null }>();
       if (error || !data || data.status === "completed") return null;
       if (data.status === "running") {
-        return "QuickBooks refresh is still in progress. Items and purchase orders are not considered current until every page finishes.";
+        return "QuickBooks refresh is still in progress. Order Summary is showing the last verified snapshot; creating or refreshing PO drafts remains blocked until every page finishes.";
       }
       return `The latest QuickBooks refresh ${data.status}. The last complete item and purchase-order data remains in use. ${data.error_message || "Run Web Connector again before relying on On Order."}`;
     } catch {
@@ -294,7 +294,11 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     ? reportRecommendationsPromise.then((recommendations) => fetchCurrentOrderingOverlay(
         serviceRoleSupabase,
         recommendations,
-        { liveAvailability: vinosmithAvailabilityResult.data || undefined }
+        {
+          liveAvailability: vinosmithAvailabilityResult.data || undefined,
+          allowVerifiedFallbackDuringRefresh: true,
+          verifiedReferenceDate: latestRun.report_date
+        }
       ))
         .then((data) => ({
           rows: data.rows,
