@@ -8,6 +8,7 @@ import {
   poDraftOrderPath,
   poLineCollaborationKey,
   poLineCosts,
+  poLineItemNumber,
   poOrderPathLabel,
   supplierLaidInForDraft,
   supplierLogisticsLookup
@@ -418,8 +419,7 @@ function PoDraftLinesTable({
         <thead>
           <tr>
             <th>Wine</th>
-            <th>Code</th>
-            <th>Item</th>
+            <th>Item Number</th>
             <th>Quantity</th>
             <th>FOB</th>
             <th>Laid In / Bottle</th>
@@ -445,8 +445,7 @@ function PoDraftLinesTable({
                   {line.product_name || "Unnamed wine"}
                   {line.is_new_item ? <span className="new-item-badge">New Item</span> : null}
                 </td>
-                <td>{line.product_code || ""}</td>
-                <td>{line.is_new_item ? line.new_item_warning || "QuickBooks Item Number required." : ""}</td>
+                <td>{poLineItemNumber(line)}</td>
                 <td>{formatInteger(qty)}</td>
                 <td>{formatCurrency(fob)}</td>
                 <td>{formatCurrencyCents(laidIn)}</td>

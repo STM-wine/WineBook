@@ -96,6 +96,10 @@ export function poLineCollaborationKey(line: PurchaseOrderLine) {
   return `line:${line.id}`;
 }
 
+export function poLineItemNumber(line: Pick<PurchaseOrderLine, "is_new_item" | "product_code">) {
+  return line.is_new_item ? "NEW" : line.product_code?.trim() || "";
+}
+
 export function supplierLogisticsLookup(suppliers: SupplierLogistics[] = []) {
   return new Map(suppliers.map((supplier) => [supplierKey(supplier.name), supplier]));
 }
