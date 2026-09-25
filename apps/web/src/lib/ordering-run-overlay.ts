@@ -49,9 +49,23 @@ export function catalogReconciliationUpdates(
   currentRows: Array<Record<string, any>>,
   canonicalSupplierNames: ReadonlyMap<string, string>
 ): CatalogReconciliationUpdate[] {
-  const sourceBySupplierAndSku = new Map<string, Record<string, any>>();
-  const sourceBySupplierAndName = new Map<string, Record<string, any>>();
-  const sourceByItemCode = new Map<string, Record<string, any>>();
+  const sourceBySupplierAndSku = new Map<string, Array<Record<string, any>>>();
+  const sourceBySupplierAndName = new Map<string, Array<Record<string, any>>>();
+  const sourceByItemCode = new Map<string, Array<Record<string, any>>>();
+
+  const addCandidate = (
+    index: Map<string, Array<Record<string, any>>>,
+    key: string,
+    row: Record<string, any>
+  ) => {
+    if (!key) return;
+    index.set(key, [...(index.get(key) || []), row]);
+  };
+
+  const uniqueCandidate = (index: Map<string, Array<Record<string, any>>>, key: string) => {
+    const candidates = key ? index.get(key) || [] : [];
+    return candidates.length === 1 ? candidates[0] : null;
+  };
 
   currentRows.forEach((row) => {
     const supplierId = String(row.diagnostics?.supplier_id || "");
@@ -59,18 +73,18 @@ export function catalogReconciliationUpdates(
     const sku = normalizedIdentity(row.planning_sku);
     const name = normalizedIdentity(row.product_name);
     const itemCode = normalizeOrderingItemCode(row.product_code);
-    if (sku) sourceBySupplierAndSku.set(`${supplierId}:${sku}`, row);
-    if (name) sourceBySupplierAndName.set(`${supplierId}:${name}`, row);
-    if (itemCode) sourceByItemCode.set(itemCode, row);
+    if (sku) addCandidate(sourceBySupplierAndSku, `${supplierId}:${sku}`, row);
+    if (name) addCandidate(sourceBySupplierAndName, `${supplierId}:${name}`, row);
+    if (itemCode) addCandidate(sourceByItemCode, itemCode, row);
   });
 
   return catalogRows.flatMap((catalog) => {
     const supplierId = catalog.supplier_id || "";
     const itemCode = normalizeOrderingItemCode(catalog.quickbooks_item_number);
-    const source = (itemCode ? sourceByItemCode.get(itemCode) : null) ||
+    const source = uniqueCandidate(sourceByItemCode, itemCode) ||
       (supplierId
-        ? sourceBySupplierAndSku.get(`${supplierId}:${normalizedIdentity(catalog.planning_sku)}`) ||
-          sourceBySupplierAndName.get(`${supplierId}:${normalizedIdentity(catalog.display_name)}`)
+        ? uniqueCandidate(sourceBySupplierAndSku, `${supplierId}:${normalizedIdentity(catalog.planning_sku)}`) ||
+          uniqueCandidate(sourceBySupplierAndName, `${supplierId}:${normalizedIdentity(catalog.display_name)}`)
         : null);
     const sourceSupplierId = String(source?.diagnostics?.supplier_id || "");
     const canonicalSupplierId = supplierId || sourceSupplierId;

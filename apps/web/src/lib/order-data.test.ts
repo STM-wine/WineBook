@@ -121,6 +121,21 @@ describe("supplier catalog recommendation merge", () => {
     )).toBe(true);
   });
 
+  it("removes the catalog shadow row as soon as QuickBooks becomes authoritative", () => {
+    const linked = catalogWine({
+      quickbooks_item_id: "qb-list-1",
+      quickbooks_item_number: "VC25001",
+      quickbooks_sync_status: "linked",
+      product_lifecycle_status: "supplier_available"
+    });
+
+    expect(mergeSupplierCatalogRows([], [linked], "run-1")).toEqual([]);
+  });
+
+  it("keeps an unlinked New Item visible until an authoritative QuickBooks SKU exists", () => {
+    expect(mergeSupplierCatalogRows([], [catalogWine()], "run-1")).toHaveLength(1);
+  });
+
   it("uses an exact QuickBooks item number even when the catalog supplier is missing", () => {
     const wine = catalogWine({ supplier_id: null, supplier_name: "", quickbooks_item_number: "ILL000030" });
     const source = recommendation({

@@ -121,6 +121,32 @@ describe("source-backed ordering run compatibility", () => {
     }]);
   });
 
+  it("does not auto-link a New Item when duplicate QuickBooks rows make the identity ambiguous", () => {
+    const catalog = {
+      id: "catalog-duplicate",
+      supplier_id: "supplier-1",
+      supplier_name: "Illahe",
+      display_name: "Illahe Viognier 2027 12/750ml",
+      planning_sku: "illahe viognier 2027 12/750ml",
+      quickbooks_item_number: null,
+      quickbooks_sync_status: "not_created"
+    };
+    const source = {
+      product_name: catalog.display_name,
+      planning_sku: catalog.planning_sku,
+      diagnostics: { supplier_id: "supplier-1" }
+    };
+
+    expect(catalogReconciliationUpdates(
+      [catalog],
+      [
+        { ...source, product_code: "ILL000031", diagnostics: { ...source.diagnostics, quickbooks_item_list_id: "qb-1" } },
+        { ...source, product_code: "ILL000032", diagnostics: { ...source.diagnostics, quickbooks_item_list_id: "qb-2" } }
+      ],
+      new Map([["supplier-1", "Illahe"]])
+    )).toEqual([]);
+  });
+
   it("repairs a missing catalog supplier from the exact QuickBooks item number", () => {
     const updates = catalogReconciliationUpdates(
       [{

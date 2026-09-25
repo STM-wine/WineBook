@@ -422,6 +422,7 @@ export function removeSupplierCatalogWineFromWorkbench(
 
 export function mergeSupplierCatalogRows(recommendations: Recommendation[], catalogWines: SupplierCatalogWine[], reportRunId: string): Recommendation[] {
   const manualRows = catalogWines
+    .filter((wine) => !hasAuthoritativeQuickBooksIdentity(wine))
     .filter((wine) =>
       wine.product_lifecycle_status !== "inactive" || Boolean(workbenchItemForRun(wine, reportRunId))
     )
@@ -429,6 +430,11 @@ export function mergeSupplierCatalogRows(recommendations: Recommendation[], cata
     .map((wine) => supplierCatalogWineToRecommendation(wine, reportRunId));
 
   return [...recommendations, ...manualRows];
+}
+
+function hasAuthoritativeQuickBooksIdentity(wine: SupplierCatalogWine): boolean {
+  if (!["linked", "created"].includes(wine.quickbooks_sync_status || "")) return false;
+  return Boolean(wine.quickbooks_item_number?.trim() || wine.quickbooks_item_id?.trim());
 }
 
 export function recommendationMatchesCatalogWine(
