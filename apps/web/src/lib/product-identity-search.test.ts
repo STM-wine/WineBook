@@ -3,6 +3,7 @@ import {
   dedupeProductIdentityCandidates,
   latestProductIdentityPriceLevels,
   quickbooksItemRowToCandidate,
+  recommendationRowToCandidate,
   searchProductIdentityCandidates
 } from "./product-identity-search";
 
@@ -60,6 +61,84 @@ describe("product identity search", () => {
     );
 
     expect(matches.map((match) => match.sourceId)).toEqual(["qb-active", "qb-inactive"]);
+  });
+
+  it("collapses historical recommendation snapshots by QuickBooks item code and keeps the newest", () => {
+    const base = {
+      planning_sku: "illahe viognier 2025 12/750ml",
+      product_name: "Illahe Viognier 2025 12/750ml",
+      product_code: "ILL000029",
+      supplier_name: "Illahe",
+      pack_size: 12,
+      trucking_cost_per_bottle: 1
+    };
+    const older = recommendationRowToCandidate({
+      ...base,
+      id: "recommendation-older",
+      fob: 13,
+      created_at: "2026-09-23T00:00:00Z"
+    });
+    const newer = recommendationRowToCandidate({
+      ...base,
+      id: "recommendation-newer",
+      fob: 14,
+      created_at: "2026-09-24T00:00:00Z"
+    });
+
+    const deduped = dedupeProductIdentityCandidates([older, newer]);
+
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]).toMatchObject({
+      sourceId: "recommendation-newer",
+      quickbooksItemNumber: "ILL000029",
+      fobBottle: 14
+    });
+  });
+
+  it("uses the full planning SKU when a recommendation has no QuickBooks item code", () => {
+    const common = {
+      product_name: "Illahe Viognier 2025 12/750ml",
+      supplier_name: "Illahe",
+      pack_size: 12,
+      fob: 14,
+      created_at: "2026-09-24T00:00:00Z"
+    };
+    const sameSkuOlder = recommendationRowToCandidate({
+      ...common,
+      id: "same-sku-older",
+      planning_sku: "illahe viognier 2025 12/750ml",
+      created_at: "2026-09-23T00:00:00Z"
+    });
+    const sameSkuNewer = recommendationRowToCandidate({
+      ...common,
+      id: "same-sku-newer",
+      planning_sku: "illahe viognier 2025 12/750ml"
+    });
+    const differentVintage = recommendationRowToCandidate({
+      ...common,
+      id: "different-vintage",
+      planning_sku: "illahe viognier 2024 12/750ml",
+      product_name: "Illahe Viognier 2024 12/750ml"
+    });
+
+    const deduped = dedupeProductIdentityCandidates([sameSkuOlder, differentVintage, sameSkuNewer]);
+
+    expect(deduped.map((candidate) => candidate.sourceId)).toEqual(["same-sku-newer", "different-vintage"]);
+  });
+
+  it("keeps distinct recommendation item codes even when their display names match", () => {
+    const base = {
+      planning_sku: "illahe viognier 2025 12/750ml",
+      product_name: "Illahe Viognier 2025 12/750ml",
+      supplier_name: "Illahe",
+      pack_size: 12,
+      fob: 14,
+      created_at: "2026-09-24T00:00:00Z"
+    };
+    const first = recommendationRowToCandidate({ ...base, id: "first", product_code: "ILL000029" });
+    const second = recommendationRowToCandidate({ ...base, id: "second", product_code: "ILL999999" });
+
+    expect(dedupeProductIdentityCandidates([first, second])).toHaveLength(2);
   });
 
   it("uses the most recent record for a repeated source price-level name", () => {

@@ -145,7 +145,14 @@ export function dedupeProductIdentityCandidates(candidates: ProductIdentityCandi
   for (const candidate of candidates) {
     // A shared normalized SKU is not proof that two source records are the same
     // item. QuickBooks can legitimately contain both active and inactive rows.
-    const key = `${candidate.source}:${candidate.sourceId}`;
+    // Recommendation rows are historical report snapshots, so their row IDs
+    // change on every run even when the underlying QuickBooks SKU does not.
+    const recommendationIdentity = candidate.source === "recommendation"
+      ? normalizeSpaces(candidate.quickbooksItemNumber || candidate.planningSku).toLowerCase()
+      : "";
+    const key = candidate.source === "recommendation" && recommendationIdentity
+      ? `${candidate.source}:${recommendationIdentity}`
+      : `${candidate.source}:${candidate.sourceId}`;
     const existing = bySourceIdentity.get(key);
     if (!existing || (candidate.active && !existing.active) || newestFirst(candidate.updatedAt, existing.updatedAt) < 0) {
       bySourceIdentity.set(key, candidate);
