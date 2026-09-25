@@ -612,10 +612,8 @@ export function refreshSourceBackedRecommendation(
   };
 }
 
-export function recommendationAllowsSourceAssignmentRefresh(row: Recommendation, hasCommitment: boolean) {
-  return !hasCommitment
-    && row.recommendation_status === "rejected"
-    && numberValue(row.approved_qty) === 0;
+export function recommendationAllowsSourceAssignmentRefresh(_row: Recommendation, hasCommitment: boolean) {
+  return !hasCommitment;
 }
 
 export function quickBooksPackSize(item: SourceQuickBooksItem, defaultPackSize: number) {

@@ -449,7 +449,7 @@ describe("recommendation math and buyer state", () => {
     );
   });
 
-  it("only allows current supplier reassignment for rejected, unapproved, uncommitted rows", () => {
+  it("uses the current supplier for every uncommitted row and freezes committed history", () => {
     const row = {
       ...build().rows[0],
       id: "saved-recommendation",
@@ -459,7 +459,9 @@ describe("recommendation math and buyer state", () => {
     } as Recommendation;
 
     expect(recommendationAllowsSourceAssignmentRefresh(row, false)).toBe(true);
-    expect(recommendationAllowsSourceAssignmentRefresh({ ...row, recommendation_status: "approved", approved_qty: 6 }, false)).toBe(false);
+    expect(recommendationAllowsSourceAssignmentRefresh({ ...row, recommendation_status: "approved", approved_qty: 6 }, false)).toBe(true);
+    expect(recommendationAllowsSourceAssignmentRefresh({ ...row, recommendation_status: "edited", approved_qty: 18 }, false)).toBe(true);
     expect(recommendationAllowsSourceAssignmentRefresh(row, true)).toBe(false);
+    expect(recommendationAllowsSourceAssignmentRefresh({ ...row, recommendation_status: "edited", approved_qty: 18 }, true)).toBe(false);
   });
 });

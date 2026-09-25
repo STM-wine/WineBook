@@ -36,13 +36,44 @@ def parse_currency_value(value: str | None) -> float | None:
     """Convert a currency-like string into a float."""
     if not value:
         return None
-    cleaned = value.replace(",", "").replace("$", "").strip()
+    cleaned = value.replace(",", "").replace("$", "").replace(" ", "").strip()
     if not cleaned:
         return None
     try:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def extract_invoice_adjustments(text: str) -> list[Dict[str, Any]]:
+    """Extract signed discount/credit rows that reduce the invoice subtotal."""
+    compact_text = clean_text(text)
+    adjustment_pattern = re.compile(
+        r'\b(?P<line_number>\d+)\s+'
+        r'(?P<type>Discount|Credit)\s+'
+        r'(?P<label>.*?)'
+        r'(?P<amount>(?:-\s*\$\s*|\$\s*-\s*|\(\s*\$\s*)[\d,]+\.\d{2}\s*\)?)'
+        r'(?=\s|$)',
+        re.IGNORECASE,
+    )
+
+    adjustments: list[Dict[str, Any]] = []
+    for match in adjustment_pattern.finditer(compact_text):
+        parsed_amount = parse_currency_value(match.group("amount").replace("(", "").replace(")", ""))
+        if parsed_amount is None:
+            continue
+        adjustments.append(
+            {
+                "line_number": int(match.group("line_number")),
+                "type": match.group("type").title(),
+                "description": clean_text(match.group("label")),
+                # Discount and credit rows reduce the merchandise total even
+                # when a PDF extractor separates the printed minus from "$".
+                "amount": -abs(parsed_amount),
+            }
+        )
+
+    return adjustments
 
 
 def clean_text(text: str) -> str:
@@ -79,6 +110,14 @@ def extract_invoice_summary_from_text(text: str) -> Dict[str, Any]:
         return summary
 
     compact_text = clean_text(text)
+
+    adjustments = extract_invoice_adjustments(text)
+    if adjustments:
+        summary["adjustments"] = adjustments
+        summary["adjustment_total"] = round(
+            sum(adjustment["amount"] for adjustment in adjustments),
+            2,
+        )
 
     credit_match = re.search(
         r'(\d{2}/\d{2}/\d{4})\s+Credit\s+\$\s*([\d,]+\.\d{2})',

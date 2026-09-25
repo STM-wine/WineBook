@@ -252,6 +252,31 @@ def write_to_updated_template(
 
         rows: list[tuple[str, Any]] = []
         shipping_amount = summary.get("shipping_amount") or 0
+        adjustment_total = summary.get("adjustment_total") or 0
+
+        if isinstance(adjustment_total, (int, float)) and adjustment_total != 0:
+            wine_subtotal = round(
+                sum(
+                    item.get("Ext Cost", item.get("ext_cost", 0)) or 0
+                    for item in items
+                ),
+                2,
+            )
+            rows.extend(
+                [
+                    ("Wine Subtotal", wine_subtotal),
+                    ("Invoice Credits", adjustment_total),
+                ]
+            )
+            if isinstance(shipping_amount, (int, float)) and shipping_amount > 0:
+                rows.append(("Shipping", shipping_amount))
+            if summary.get("subtotal") is not None:
+                rows.append(("Subtotal", summary["subtotal"]))
+            if summary.get("paid_amount") not in (None, "", 0.0):
+                rows.append(("Paid", summary["paid_amount"]))
+            if summary.get("balance_due") not in (None, ""):
+                rows.append(("Balance Due", summary["balance_due"]))
+            return rows
 
         if isinstance(shipping_amount, (int, float)) and shipping_amount > 0:
             wine_subtotal = round(

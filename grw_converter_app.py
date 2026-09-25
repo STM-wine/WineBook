@@ -874,6 +874,10 @@ def render_invoice_summary(invoice_summary: dict[str, Any]) -> None:
     summary_items: list[tuple[str, str]] = []
     if invoice_summary.get("subtotal") is not None:
         summary_items.append(("Subtotal", f"${invoice_summary['subtotal']:,.2f}"))
+    if invoice_summary.get("adjustment_total") not in (None, 0, 0.0):
+        summary_items.append(
+            ("Invoice Credits", f"${abs(invoice_summary['adjustment_total']):,.2f}")
+        )
     if invoice_summary.get("credit_amount") is not None:
         credit_label = "Credit Applied"
         if invoice_summary.get("credit_date"):
@@ -962,7 +966,10 @@ def render_success_state(result: ConversionSuccess) -> None:
         st.warning(f"Some item numbers were not detected during parsing: {missing}")
 
     st.markdown("### Extracted line items")
-    if result.invoice_summary.get("credit_amount") is not None:
+    if (
+        result.invoice_summary.get("credit_amount") is not None
+        or result.invoice_summary.get("adjustment_total") not in (None, 0, 0.0)
+    ):
         st.info(
             "This invoice includes a credit/payment entry. It is shown above in Invoice details and is not merged into the wine line items below."
         )
@@ -1025,13 +1032,21 @@ def convert_uploaded_pdf(uploaded_pdf, resolution: FileResolution) -> Conversion
 
         status.text("Validating workbook data")
         progress_bar.progress(75)
+        adjustment_total = invoice_summary.get("adjustment_total") or 0.0
         expected_subtotal = invoice_summary.get("subtotal")
         if expected_subtotal is None:
-            expected_subtotal = sum(item.get("ext_cost", 0) for item in priced_items)
+            expected_subtotal = (
+                sum(item.get("ext_cost", 0) for item in priced_items)
+                + adjustment_total
+            )
         else:
             # Shipping is an invoice charge, not a wine inventory line.
             expected_subtotal -= invoice_summary.get("shipping_amount") or 0
-        validation_result = validate_invoice(priced_items, expected_subtotal)
+        validation_result = validate_invoice(
+            priced_items,
+            expected_subtotal,
+            adjustment_total,
+        )
 
         status.text("Preparing Excel output")
         progress_bar.progress(88)

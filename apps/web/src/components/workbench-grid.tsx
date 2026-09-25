@@ -36,6 +36,7 @@ import {
 import { replenishmentPolicyLabel } from "@/lib/replenishment-policy";
 import { ActionProgress } from "./action-progress";
 import { formatOrderingBusinessDate } from "@/lib/ordering-freshness";
+import { commitPendingQuantityForApproval } from "@/lib/workbench-approval";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -579,7 +580,16 @@ export function WorkbenchGrid({
     }
 
     if (event.colDef.field === "approved") {
-      onSaveApproval(row, Boolean(event.newValue), row.working_qty);
+      const quantityEditor = event.api.getCellEditorInstances({
+        rowNodes: [event.node],
+        columns: ["working_qty"]
+      })[0];
+      const qty = commitPendingQuantityForApproval(
+        () => quantityEditor?.getValue(),
+        () => event.api.stopEditing(),
+        event.node.data?.working_qty ?? row.working_qty
+      );
+      onSaveApproval(row, Boolean(event.newValue), qty);
     }
   }
 

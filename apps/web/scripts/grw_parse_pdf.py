@@ -23,6 +23,7 @@ from modules.po_tools.grw_invoice_converter.parser import (  # noqa: E402
     parse_grw_pdf,
 )
 from modules.po_tools.grw_invoice_converter.pricing import apply_pricing  # noqa: E402
+from modules.po_tools.grw_invoice_converter.validator import duplicate_item_key  # noqa: E402
 
 
 def as_float(value):
@@ -74,6 +75,14 @@ def extract_order_date(text, order_number):
 
 def build_payment_rows(summary):
     rows = []
+    for adjustment in summary.get("adjustments") or []:
+        rows.append(
+            {
+                "date": f"Line {adjustment.get('line_number')}" if adjustment.get("line_number") else "",
+                "type": adjustment.get("type") or "Invoice adjustment",
+                "amount": abs(as_float(adjustment.get("amount")) or 0.0),
+            }
+        )
     if summary.get("credit_amount") is not None:
         rows.append(
             {
@@ -98,7 +107,7 @@ def build_duplicate_warnings(items):
     warnings = []
 
     for index, item in enumerate(items, 1):
-        key = f"{item.get('clean_description', '')}_{item.get('vintage', 0)}"
+        key = duplicate_item_key(item)
         if key in seen:
             first_item = seen[key]
             warnings.append(

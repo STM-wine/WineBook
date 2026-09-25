@@ -145,7 +145,11 @@ def resolve_item_number(
     return "NEW"
 
 
-def validate_invoice_for_export(items: list[dict[str, Any]], expected_subtotal: float) -> dict[str, Any]:
+def validate_invoice_for_export(
+    items: list[dict[str, Any]],
+    expected_subtotal: float,
+    adjustment_total: float = 0.0,
+) -> dict[str, Any]:
     warnings: list[dict[str, str]] = []
 
     validate_required_fields(items)
@@ -164,12 +168,17 @@ def validate_invoice_for_export(items: list[dict[str, Any]], expected_subtotal: 
 
     validate_pack_math(items)
     validate_bordeaux_markup(items)
-    validate_ext_cost_sum(items, expected_subtotal)
+    validate_ext_cost_sum(items, expected_subtotal, adjustment_total)
 
     return {
         "valid": True,
         "line_count": len(items),
         "total_ext_cost": round(sum(item.get("ext_cost", 0) for item in items), 2),
+        "adjustment_total": round(adjustment_total, 2),
+        "reconciled_subtotal": round(
+            sum(item.get("ext_cost", 0) for item in items) + adjustment_total,
+            2,
+        ),
         "checks_passed": [
             "required_fields",
             duplicate_check,
@@ -260,13 +269,21 @@ def build_export(
         raise RuntimeError("No line items were found in the PDF.")
 
     priced_items = apply_pricing(items)
+    adjustment_total = invoice_summary.get("adjustment_total") or 0.0
     expected_subtotal = invoice_summary.get("subtotal")
     if expected_subtotal is None:
-        expected_subtotal = sum(item.get("ext_cost", 0) for item in priced_items)
+        expected_subtotal = (
+            sum(item.get("ext_cost", 0) for item in priced_items)
+            + adjustment_total
+        )
     else:
         # Shipping is an invoice charge, not a wine inventory line.
         expected_subtotal -= invoice_summary.get("shipping_amount") or 0
-    validation_result = validate_invoice_for_export(priced_items, expected_subtotal)
+    validation_result = validate_invoice_for_export(
+        priced_items,
+        expected_subtotal,
+        adjustment_total,
+    )
 
     resolution = resolve_file_details(pdf_path, original_filename)
     item_number_overrides = load_item_number_overrides(item_numbers_path)

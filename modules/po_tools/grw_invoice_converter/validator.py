@@ -4,12 +4,46 @@ GRW Invoice Validator
 Validates parsed and priced invoice data.
 """
 
+import re
 from typing import List, Dict, Any
 
 
 class ValidationError(Exception):
     """Raised when invoice validation fails."""
     pass
+
+
+def normalize_bottle_size(value: Any) -> str:
+    """Return a stable milliliter identity for common GRW bottle-size values."""
+    raw_value = str(value or "750").strip().lower().replace(" ", "")
+    named_sizes = {
+        "magnum": "1500ml",
+        "doublemagnum": "3000ml",
+    }
+    if raw_value in named_sizes:
+        return named_sizes[raw_value]
+
+    liter_match = re.fullmatch(r"(\d+(?:\.\d+)?)l", raw_value)
+    if liter_match:
+        milliliters = float(liter_match.group(1)) * 1000
+        if milliliters.is_integer():
+            return f"{int(milliliters)}ml"
+
+    milliliter_match = re.fullmatch(r"0*(\d+)(?:ml)?", raw_value)
+    if milliliter_match:
+        return f"{int(milliliter_match.group(1))}ml"
+
+    return raw_value
+
+
+def duplicate_item_key(item: Dict[str, Any]) -> tuple[str, Any, int, str]:
+    """Build the product identity used by duplicate checks and warnings."""
+    return (
+        item.get('clean_description', ''),
+        item.get('vintage', 0),
+        int(item.get('pack_size') or 1),
+        normalize_bottle_size(item.get('size')),
+    )
 
 
 def validate_required_fields(items: List[Dict[str, Any]]) -> None:
@@ -51,8 +85,9 @@ def validate_no_duplicate_skus(items: List[Dict[str, Any]]) -> None:
     seen = {}
     
     for i, item in enumerate(items, 1):
-        # Create a unique key from description + vintage
-        key = f"{item.get('clean_description', '')}_{item.get('vintage', 0)}"
+        # Pack and bottle size are part of the product identity. A 750ml bottle
+        # and a 1500ml bottle of the same wine/vintage are different items.
+        key = duplicate_item_key(item)
         
         if key in seen:
             raise ValidationError(
@@ -126,26 +161,38 @@ def validate_bordeaux_markup(items: List[Dict[str, Any]]) -> None:
                 )
 
 
-def validate_ext_cost_sum(items: List[Dict[str, Any]], expected_total: float = 8736.75) -> None:
-    """Validate that sum of Ext Cost matches invoice subtotal."""
+def validate_ext_cost_sum(
+    items: List[Dict[str, Any]],
+    expected_total: float = 8736.75,
+    adjustment_total: float = 0.0,
+) -> None:
+    """Validate that merchandise plus invoice adjustments matches the subtotal."""
     total_ext_cost = sum(item.get('ext_cost', 0) for item in items)
+    reconciled_total = total_ext_cost + adjustment_total
     
     # Allow for small rounding differences
-    if abs(total_ext_cost - expected_total) > 0.01:
+    if abs(reconciled_total - expected_total) > 0.01:
         raise ValidationError(
             f"Total Ext Cost mismatch. "
-            f"Expected ${expected_total:.2f}, got ${total_ext_cost:.2f}. "
-            f"Difference: ${abs(total_ext_cost - expected_total):.2f}"
+            f"Expected ${expected_total:.2f}, got ${reconciled_total:.2f} "
+            f"from ${total_ext_cost:.2f} in line items and "
+            f"${adjustment_total:.2f} in invoice adjustments. "
+            f"Difference: ${abs(reconciled_total - expected_total):.2f}"
         )
 
 
-def validate_invoice(items: List[Dict[str, Any]], expected_subtotal: float = 8736.75) -> Dict[str, Any]:
+def validate_invoice(
+    items: List[Dict[str, Any]],
+    expected_subtotal: float = 8736.75,
+    adjustment_total: float = 0.0,
+) -> Dict[str, Any]:
     """
     Validate all aspects of the priced invoice data.
     
     Args:
         items: List of priced line items
         expected_subtotal: Expected sum of Ext Cost (default: 8736.75)
+        adjustment_total: Signed invoice-level credits or discounts
         
     Returns:
         Dictionary with validation results
@@ -158,12 +205,17 @@ def validate_invoice(items: List[Dict[str, Any]], expected_subtotal: float = 873
     validate_no_duplicate_skus(items)
     validate_pack_math(items)
     validate_bordeaux_markup(items)
-    validate_ext_cost_sum(items, expected_subtotal)
+    validate_ext_cost_sum(items, expected_subtotal, adjustment_total)
     
     return {
         'valid': True,
         'line_count': len(items),
         'total_ext_cost': round(sum(item.get('ext_cost', 0) for item in items), 2),
+        'adjustment_total': round(adjustment_total, 2),
+        'reconciled_subtotal': round(
+            sum(item.get('ext_cost', 0) for item in items) + adjustment_total,
+            2,
+        ),
         'checks_passed': [
             'required_fields',
             'no_duplicates',

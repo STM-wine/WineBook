@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from openpyxl import load_workbook
 
+from apps.web.scripts.grw_parse_pdf import build_duplicate_warnings, build_payment_rows
 from grw_converter_app import (
     FileResolution,
     build_export_rows,
@@ -21,7 +22,11 @@ from modules.po_tools.grw_invoice_converter.parser import (
     parse_grw_pdf,
     parse_item_block,
 )
-from modules.po_tools.grw_invoice_converter.validator import validate_no_duplicate_skus
+from modules.po_tools.grw_invoice_converter.validator import (
+    ValidationError,
+    validate_ext_cost_sum,
+    validate_no_duplicate_skus,
+)
 
 
 class GrwParserTests(unittest.TestCase):
@@ -148,6 +153,33 @@ class GrwParserTests(unittest.TestCase):
         self.assertNotEqual(item_one["clean_description"], item_two["clean_description"])
 
         validate_no_duplicate_skus([item_one, item_two])
+
+    def test_bottle_sizes_are_distinct_for_duplicate_validation_and_warnings(self):
+        base_item = {
+            "clean_description": "Arnaud Ente Volnay Les Santenots de - Milieu",
+            "vintage": 2020,
+            "pack_size": 1,
+            "line_number": 1,
+        }
+        magnum = {**base_item, "size": "1500", "line_number": 2}
+        standard = {**base_item, "size": "750mL"}
+
+        validate_no_duplicate_skus([standard, magnum])
+        self.assertEqual(build_duplicate_warnings([standard, magnum]), [])
+
+    def test_equivalent_bottle_size_formats_still_warn_as_duplicates(self):
+        base_item = {
+            "clean_description": "Arnaud Ente Volnay Les Santenots de - Milieu",
+            "vintage": 2020,
+            "pack_size": 1,
+            "line_number": 1,
+        }
+        same_item = {**base_item, "size": "0.75L", "line_number": 2}
+        standard = {**base_item, "size": "750ml"}
+
+        with self.assertRaisesRegex(ValidationError, "Duplicate item found"):
+            validate_no_duplicate_skus([standard, same_item])
+        self.assertEqual(len(build_duplicate_warnings([standard, same_item])), 1)
 
     def test_wrapped_description_with_mixed_price_and_qty_text_is_preserved(self):
         block = (
@@ -334,6 +366,35 @@ class GrwParserTests(unittest.TestCase):
         self.assertEqual(summary["balance_due"], 146.25)
         self.assertEqual(summary["shipping_amount"], 25.68)
 
+    def test_invoice_line_credit_reconciles_merchandise_to_printed_subtotal(self):
+        text = """
+        1 Sale USR:DAL:DVON- Dalla Valle DVO Napa Valley Red 2019 $252.00 3 750 $ 756.00
+        0750-2019-F0L0C0 750mL
+        2 Sale USR:DAN:HELM- Dana Estate Helms Vineyard 2015 $409.50 3 750 $ 1,228.50
+        0750-2015-F0L0C0 750mL
+        3 Discount Bad Bottle Credit Bad Bottle Credit - 2013 Dujac Bonnes -$ 892.50
+        Mares
+        Subtotal: $1,092.00
+        Paid: $0.00
+        Balance Due: $1,092.00
+        """
+
+        summary = extract_invoice_summary_from_text(text)
+
+        self.assertEqual(summary["adjustment_total"], -892.50)
+        self.assertEqual(summary["adjustments"][0]["line_number"], 3)
+        self.assertEqual(summary["adjustments"][0]["type"], "Discount")
+        self.assertEqual(build_payment_rows(summary)[0]["amount"], 892.50)
+
+        items = [{"ext_cost": 756.0}, {"ext_cost": 1228.5}]
+        validate_ext_cost_sum(items, summary["subtotal"], summary["adjustment_total"])
+
+    def test_invoice_line_credit_is_required_for_reconciliation(self):
+        items = [{"ext_cost": 756.0}, {"ext_cost": 1228.5}]
+
+        with self.assertRaisesRegex(ValidationError, "Difference: \\$892.50"):
+            validate_ext_cost_sum(items, 1092.0)
+
     def test_credit_footer_lines_do_not_pollute_last_item_description(self):
         block = (
             "2 Sale BDX:PAV:PAVM- Pavie Macquin 2005 750mL $175.00 5 750 $ 875.00\n"
@@ -401,6 +462,37 @@ class GrwParserTests(unittest.TestCase):
             self.assertIn("$1,553.75", values.values())
             self.assertIn("Balance Due", values.values())
             self.assertIn("$146.25", values.values())
+
+    def test_excel_export_shows_invoice_line_credit_reconciliation(self):
+        items = [
+            {"Item Number": "NEW", "Item Description": "Wine One", "Ext Cost": 756.0},
+            {"Item Number": "NEW", "Item Description": "Wine Two", "Ext Cost": 1228.5},
+        ]
+        invoice_summary = {
+            "subtotal": 1092.0,
+            "adjustment_total": -892.5,
+            "paid_amount": 0.0,
+            "balance_due": 1092.0,
+        }
+
+        with TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "test.xlsx"
+            workbook_path = write_to_updated_template(
+                items,
+                "modules/po_tools/grw_invoice_converter/templates/GRW_Template_Updated.xlsx",
+                str(output_path),
+                "S63760",
+                "SNGC",
+                invoice_summary=invoice_summary,
+            )
+            sheet = load_workbook(workbook_path).active
+            values = [sheet.cell(row=row, column=col).value for row in range(1, 20) for col in range(1, 3)]
+
+            self.assertIn("Wine Subtotal", values)
+            self.assertIn(1984.5, values)
+            self.assertIn("Invoice Credits", values)
+            self.assertIn(-892.5, values)
+            self.assertIn(1092.0, values)
 
     def test_excel_export_breaks_shipping_out_from_wine_subtotal(self):
         items = [

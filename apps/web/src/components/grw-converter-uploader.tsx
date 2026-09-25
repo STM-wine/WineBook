@@ -70,6 +70,13 @@ type InvoiceSummary = {
   credit_date?: string | null;
   balance_due?: number | null;
   shipping_amount?: number | null;
+  adjustment_total?: number | null;
+  adjustments?: Array<{
+    line_number?: number | null;
+    type?: string;
+    description?: string;
+    amount?: number | null;
+  }>;
   payment_rows?: PaymentRow[];
 };
 
@@ -273,8 +280,12 @@ export function GrwConverterUploader() {
   const paymentRows = invoiceSummary?.payment_rows || [];
   const parseWarnings = metadata?.warnings || [];
   const hasCreditOrPayment = Boolean(
-    paymentRows.length > 0 || invoiceSummary?.paid_amount || invoiceSummary?.credit_amount
+    paymentRows.length > 0 || invoiceSummary?.paid_amount || invoiceSummary?.credit_amount || invoiceSummary?.adjustment_total
   );
+  const creditOrPaidAmount =
+    invoiceSummary?.paid_amount ||
+    invoiceSummary?.credit_amount ||
+    Math.abs(invoiceSummary?.adjustment_total || 0);
 
   return (
     <div className="grw-converter-grid">
@@ -378,8 +389,8 @@ export function GrwConverterUploader() {
               <strong>{formatMoney(invoiceSummary?.total)}</strong>
             </div>
             <div>
-              <span>Credit / Paid</span>
-              <strong>{formatMoney(invoiceSummary?.paid_amount ?? invoiceSummary?.credit_amount)}</strong>
+              <span>{invoiceSummary?.adjustment_total ? "Invoice Credits" : "Credit / Paid"}</span>
+              <strong>{formatMoney(creditOrPaidAmount)}</strong>
             </div>
             <div>
               <span>Balance Due</span>
