@@ -6,6 +6,7 @@ import {
   calculateSourceRecommendation,
   carryForwardBuyerState,
   quickBooksPackSize,
+  recommendationAllowsSourceAssignmentRefresh,
   refreshSourceBackedRecommendation,
   type SourceQuickBooksItem,
   type SourceSalesWindows
@@ -399,5 +400,66 @@ describe("recommendation math and buyer state", () => {
       older_vintage_suppressed: true,
       automatic_recommendation: false
     });
+  });
+
+  it("refreshes a safe row to the currently mapped QuickBooks supplier and logistics", () => {
+    const saved = {
+      ...build().rows[0],
+      id: "saved-recommendation",
+      report_run_id: "saved-run",
+      supplier_name: "Old Vendor Alias",
+      brand_manager: null,
+      trucking_cost_per_bottle: 0,
+      recommendation_status: "rejected",
+      approved_qty: 0
+    } as Recommendation;
+    const refreshed = refreshSourceBackedRecommendation(saved, {
+      sales: sales({ last30: 20 }),
+      trueAvailable: 5,
+      onOrder: 3,
+      quickBooksItemAsOf: "2026-09-25T21:32:58Z",
+      vinosmithAvailableAsOf: "2026-09-25T21:34:00Z",
+      supplier: {
+        id: "canonical-supplier",
+        name: "Grand Cru Selections",
+        tdm: "Bethany",
+        truckingCostPerBottle: 0.88,
+        pickupLocation: "New Jersey",
+        etaDays: 21,
+        freightForwarder: "Dist Trans",
+        orderFrequency: "as_needed",
+        preferredVendorId: "active-qb-vendor",
+        preferredVendorName: "Grand Cru Selections"
+      }
+    }, settings, "2026-09-25");
+
+    expect(refreshed).toMatchObject({
+      supplier_name: "Grand Cru Selections",
+      brand_manager: "Bethany",
+      pickup_location: "New Jersey",
+      trucking_cost_per_bottle: 0.88,
+      diagnostics: expect.objectContaining({
+        supplier_id: "canonical-supplier",
+        supplier_source: "quickbooks_preferred_vendor",
+        quickbooks_preferred_vendor_list_id: "active-qb-vendor"
+      })
+    });
+    expect(refreshed.landed_cost).toBeCloseTo(
+      Number(refreshed.recommended_qty_rounded) * (Number(refreshed.fob) + 0.88)
+    );
+  });
+
+  it("only allows current supplier reassignment for rejected, unapproved, uncommitted rows", () => {
+    const row = {
+      ...build().rows[0],
+      id: "saved-recommendation",
+      report_run_id: "saved-run",
+      recommendation_status: "rejected",
+      approved_qty: 0
+    } as Recommendation;
+
+    expect(recommendationAllowsSourceAssignmentRefresh(row, false)).toBe(true);
+    expect(recommendationAllowsSourceAssignmentRefresh({ ...row, recommendation_status: "approved", approved_qty: 6 }, false)).toBe(false);
+    expect(recommendationAllowsSourceAssignmentRefresh(row, true)).toBe(false);
   });
 });

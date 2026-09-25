@@ -40,7 +40,9 @@ describe("current QuickBooks sales cutoff contract", () => {
     expect(page).toContain("sourceBackedRun\n    ? Promise.resolve([])\n    : fetchQuickBooksOnOrderItems");
     expect(poCreateRoute).toContain("sourceBacked ? Promise.resolve([]) : fetchQuickBooksOnOrderItems");
     expect(sourceServer).toContain("fetchCurrentOrderingOverlay");
-    expect(sourceServer).toContain('select("list_id", { count: "exact" })');
+    expect(sourceServer).toContain('select("list_id,raw_data", { count: "exact" })');
+    expect(sourceServer).toContain('from("approval_commitments")');
+    expect(sourceServer).toContain("recommendationAllowsSourceAssignmentRefresh");
     expect(sourceRuns).toContain("fetchSourceBackedOrderingData");
   });
 });

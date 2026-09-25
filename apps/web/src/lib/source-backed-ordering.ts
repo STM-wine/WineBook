@@ -93,6 +93,18 @@ export type CurrentRecommendationFacts = {
   onOrder: number;
   quickBooksItemAsOf: string | null;
   vinosmithAvailableAsOf: string;
+  supplier?: {
+    id: string;
+    name: string;
+    tdm: string | null;
+    truckingCostPerBottle: number;
+    pickupLocation: string | null;
+    etaDays: number | null;
+    freightForwarder: string | null;
+    orderFrequency: string | null;
+    preferredVendorId: string;
+    preferredVendorName: string | null;
+  };
 };
 
 export type SourceBackedRecommendationRow = {
@@ -538,7 +550,9 @@ export function refreshSourceBackedRecommendation(
     ? ((facts.sales.last30 - facts.sales.prior30) / facts.sales.prior30) * 100
     : null;
   const fob = Math.max(0, numberValue(row.fob));
-  const trucking = Math.max(0, numberValue(row.trucking_cost_per_bottle));
+  const trucking = facts.supplier
+    ? Math.max(0, facts.supplier.truckingCostPerBottle)
+    : Math.max(0, numberValue(row.trucking_cost_per_bottle));
 
   return {
     ...row,
@@ -556,6 +570,12 @@ export function refreshSourceBackedRecommendation(
       ? round((facts.trueAvailable + facts.onOrder) / weeklyVelocity, 2)
       : null,
     ...calculation,
+    ...(facts.supplier ? {
+      supplier_name: facts.supplier.name,
+      brand_manager: facts.supplier.tdm?.trim() || null,
+      pickup_location: facts.supplier.pickupLocation,
+      trucking_cost_per_bottle: trucking
+    } : {}),
     true_available: facts.trueAvailable,
     on_order: facts.onOrder,
     order_cost: round(calculation.recommended_qty_rounded * fob, 2),
@@ -578,9 +598,24 @@ export function refreshSourceBackedRecommendation(
       quickbooks_item_as_of: facts.quickBooksItemAsOf,
       vinosmith_available_as_of: facts.vinosmithAvailableAsOf,
       automatic_recommendation: recommendationIsAutomatic(policy, suppressed) && !olderVintageSuppressed,
-      recommendations_suppressed: suppressed
+      recommendations_suppressed: suppressed,
+      ...(facts.supplier ? {
+        supplier_id: facts.supplier.id,
+        supplier_source: "quickbooks_preferred_vendor",
+        supplier_eta_days: facts.supplier.etaDays,
+        supplier_order_frequency: facts.supplier.orderFrequency,
+        supplier_freight_forwarder: facts.supplier.freightForwarder,
+        quickbooks_preferred_vendor_list_id: facts.supplier.preferredVendorId,
+        quickbooks_preferred_vendor_name: facts.supplier.preferredVendorName
+      } : {})
     }
   };
+}
+
+export function recommendationAllowsSourceAssignmentRefresh(row: Recommendation, hasCommitment: boolean) {
+  return !hasCommitment
+    && row.recommendation_status === "rejected"
+    && numberValue(row.approved_qty) === 0;
 }
 
 export function quickBooksPackSize(item: SourceQuickBooksItem, defaultPackSize: number) {

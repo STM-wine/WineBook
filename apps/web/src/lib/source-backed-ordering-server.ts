@@ -6,6 +6,7 @@ import {
   buildSourceBackedOrderingRows,
   emptySalesWindows,
   normalizeOrderingItemCode,
+  recommendationAllowsSourceAssignmentRefresh,
   refreshSourceBackedRecommendation,
   type SourceBackedOrderingData,
   type SourceOrderingMarker,
@@ -130,18 +131,31 @@ export async function fetchCurrentOrderingOverlay(
 ) {
   const referenceDate = orderingBusinessDate(options.now);
   const availability = options.liveAvailability || await fetchLiveVinosmithAvailability();
-  const [quickBooksAsOf, configuration, onOrderSnapshot, activeItems, salesRows] = await Promise.all([
+  const reportRunIds = Array.from(new Set(recommendations.map((row) => row.report_run_id).filter(Boolean)));
+  const [quickBooksAsOf, configuration, onOrderSnapshot, activeItems, vendorMappings, suppliers, commitments, salesRows] = await Promise.all([
     assertLatestQuickBooksSyncComplete(supabase),
     fetchPublishedOrderingConfiguration(supabase),
     fetchLatestCompletedQuickBooksOnOrderSnapshot(supabase),
-    fetchAllExact<{ list_id: string }>("active QuickBooks inventory identities", (from, to) => supabase
+    fetchAllExact<{ list_id: string; raw_data: Record<string, unknown> | null }>("active QuickBooks inventory identities", (from, to) => supabase
       .from("quickbooks_items")
-      .select("list_id", { count: "exact" })
+      .select("list_id,raw_data", { count: "exact" })
       .eq("is_active", true)
       .eq("item_type", "Inventory")
       .order("list_id", { ascending: true })
       .range(from, to)
-      .returns<Array<{ list_id: string }>>() as never),
+      .returns<Array<{ list_id: string; raw_data: Record<string, unknown> | null }>>() as never),
+    fetchAll<SourceVendorMapping>(supabase, "quickbooks_vendor_mappings", "quickbooks_vendor_list_id,supplier_id,vendor_classification", "quickbooks_vendor_list_id"),
+    fetchAll<SourceSupplier>(supabase, "suppliers", "id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,active", "name"),
+    reportRunIds.length > 0
+      ? fetchAllExact<{ source_id: string }>("ordering approval commitments", (from, to) => supabase
+          .from("approval_commitments")
+          .select("source_id", { count: "exact" })
+          .in("report_run_id", reportRunIds)
+          .eq("source_type", "recommendation")
+          .order("source_id", { ascending: true })
+          .range(from, to)
+          .returns<Array<{ source_id: string }>>() as never)
+      : Promise.resolve([]),
     fetchQuickBooksItemSalesWindows(supabase, referenceDate)
   ]);
   if (onOrderSnapshot === null) {
@@ -155,6 +169,18 @@ export async function fetchCurrentOrderingOverlay(
   }
   const onOrderByListId = new Map(onOrderSnapshot.map((row) => [row.item_list_id, numeric(row.quantity_on_order)]));
   const activeItemListIds = new Set(activeItems.map((item) => item.list_id));
+  const preferredVendorByItemListId = new Map(activeItems.flatMap((item) => {
+    const reference = preferredVendorReference(item.raw_data);
+    return reference ? [[item.list_id, reference] as const] : [];
+  }));
+  const supplierById = new Map(suppliers.map((supplier) => [supplier.id, supplier]));
+  const supplierByVendorId = new Map(vendorMappings.flatMap((mapping) => {
+    const supplier = mapping.vendor_classification === "inventory_wine" && mapping.supplier_id
+      ? supplierById.get(mapping.supplier_id) || null
+      : null;
+    return supplier ? [[mapping.quickbooks_vendor_list_id, supplier] as const] : [];
+  }));
+  const committedRecommendationIds = new Set(commitments.map((commitment) => commitment.source_id));
   const salesByCode = new Map<string, SourceSalesWindows>();
   for (const row of salesRows) {
     const code = normalizeOrderingItemCode(itemCodeByListId.get(row.item_list_id || "") || row.item_full_name || "");
@@ -174,12 +200,32 @@ export async function fetchCurrentOrderingOverlay(
     const code = normalizeOrderingItemCode(row.product_code);
     const listId = String(row.diagnostics?.quickbooks_item_list_id || "").trim();
     if (!code || !listId || !activeItemListIds.has(listId)) return [];
+    const preferredVendor = preferredVendorByItemListId.get(listId) || null;
+    const currentSupplier = preferredVendor ? supplierByVendorId.get(preferredVendor.id) || null : null;
+    const refreshSupplier = currentSupplier && preferredVendor && recommendationAllowsSourceAssignmentRefresh(
+      row,
+      committedRecommendationIds.has(row.id)
+    )
+      ? {
+          id: currentSupplier.id,
+          name: currentSupplier.name,
+          tdm: currentSupplier.tdm,
+          truckingCostPerBottle: numeric(currentSupplier.trucking_cost_per_bottle),
+          pickupLocation: currentSupplier.pick_up_location,
+          etaDays: nullableNumeric(currentSupplier.eta_days),
+          freightForwarder: currentSupplier.freight_forwarder,
+          orderFrequency: currentSupplier.order_frequency,
+          preferredVendorId: preferredVendor.id,
+          preferredVendorName: preferredVendor.name
+        }
+      : undefined;
     return [refreshSourceBackedRecommendation(row, {
       sales: salesByCode.get(code) || emptySalesWindows(),
       trueAvailable: numeric(availability.byProductCode.get(code)),
       onOrder: Math.max(0, onOrderByListId.get(listId) || 0),
       quickBooksItemAsOf: quickBooksAsOf,
-      vinosmithAvailableAsOf: availability.snapshotAt
+      vinosmithAvailableAsOf: availability.snapshotAt,
+      supplier: refreshSupplier
     }, configuration.values, referenceDate)];
   });
   const quickBooksFreshnessHours = ageHours(quickBooksAsOf);
@@ -276,6 +322,23 @@ function emptySales(): SourceSalesWindows {
 function numeric(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function nullableNumeric(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function preferredVendorReference(rawData: Record<string, unknown> | null) {
+  if (!rawData || Array.isArray(rawData)) return null;
+  const value = rawData.preferred_vendor_ref ?? rawData.pref_vendor_ref ?? rawData.PrefVendorRef;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const id = String(record.ListID ?? record.list_id ?? record.value ?? "").trim();
+  if (!id) return null;
+  const name = String(record.FullName ?? record.full_name ?? record.name ?? "").trim() || null;
+  return { id, name };
 }
 
 function ageHours(value: string | null) {
