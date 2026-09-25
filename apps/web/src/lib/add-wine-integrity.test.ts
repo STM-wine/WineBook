@@ -14,6 +14,10 @@ const automaticSourceDatesMigrationPath = path.resolve(
   process.cwd(),
   "../../supabase/migrations/20260924233000_supplier_catalog_automatic_source_dates.sql"
 );
+const identityRepairMigrationPath = path.resolve(
+  process.cwd(),
+  "../../supabase/migrations/20260925050000_supplier_catalog_identity_repairs.sql"
+);
 
 describe("Add Wine database safety contract", () => {
   it("uses one versioned and idempotent transaction for the entire save", async () => {
@@ -114,5 +118,25 @@ describe("Add Wine search and price-level UI", () => {
     const view = await readFile(addWineViewPath, "utf8");
     expect(view).toContain('value={level.isManualOverride ? level.bottlePrice : String(effective.suggestedPrice || "")}');
     expect(view).toContain('linkQuickBooks: match.active && Boolean(match.quickbooksItemNumber || match.quickbooksItemId)');
+  });
+
+  it("requires an explicit Save Wine action instead of submitting from a field with Enter", async () => {
+    const view = await readFile(addWineViewPath, "utf8");
+
+    expect(view).toContain('onSubmit={(event) => event.preventDefault()}');
+    expect(view).toContain('onClick={saveWine} type="button"');
+    expect(view).not.toContain('onSubmit={saveWine}');
+  });
+
+  it("does not persist a hidden QuickBooks link without an authoritative item number", async () => {
+    const [action, sql] = await Promise.all([
+      readFile(actionPath, "utf8"),
+      readFile(identityRepairMigrationPath, "utf8")
+    ]);
+
+    expect(action).toContain("const quickbooksItemNumber = input.quickbooksItemNumber?.trim() || null");
+    expect(action).toContain("quickbooksItemId: quickbooksItemNumber ? input.quickbooksItemId || quickbooksItemNumber : null");
+    expect(sql).toContain("supplier_catalog_linked_requires_item_number");
+    expect(sql).toContain("quickbooks_sync_status = 'not_created'");
   });
 });

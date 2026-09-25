@@ -121,6 +121,25 @@ describe("supplier catalog recommendation merge", () => {
     )).toBe(true);
   });
 
+  it("uses an exact QuickBooks item number even when the catalog supplier is missing", () => {
+    const wine = catalogWine({ supplier_id: null, supplier_name: "", quickbooks_item_number: "ILL000030" });
+    const source = recommendation({
+      product_code: "ill000030",
+      supplier_name: "Illahe",
+      product_name: "Illahe Willamette Valley Pinot Noir 2024 12/750ml"
+    });
+
+    expect(recommendationMatchesCatalogWine(source, wine)).toBe(true);
+    expect(mergeSupplierCatalogRows([source], [wine], "run-1")).toEqual([source]);
+  });
+
+  it("does not merge different QuickBooks item numbers even when names and suppliers match", () => {
+    expect(recommendationMatchesCatalogWine(
+      recommendation({ product_code: "VC25001" }),
+      catalogWine({ quickbooks_item_number: "VC25002" })
+    )).toBe(false);
+  });
+
   it("only surfaces an inactive catalog item when it was explicitly restored for this report", () => {
     const inactive = catalogWine({
       product_lifecycle_status: "inactive",

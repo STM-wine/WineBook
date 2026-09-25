@@ -658,6 +658,7 @@ export async function saveSupplierCatalogWine(input: {
     if (supplierError) throw new Error(supplierError.message);
     if (supplier?.name) canonicalSupplierName = supplier.name;
   }
+  const quickbooksItemNumber = input.quickbooksItemNumber?.trim() || null;
   const payload = buildSupplierCatalogWine({
     supplierId: input.supplierId || null,
     supplierName: canonicalSupplierName,
@@ -673,9 +674,9 @@ export async function saveSupplierCatalogWine(input: {
     bestPriceOverride: input.bestPriceOverride,
     systemTags: input.systemTags || [],
     copiedFromSupplierCatalogWineId: input.copiedFromSupplierCatalogWineId || null,
-    quickbooksItemId: input.quickbooksItemId || null,
-    quickbooksItemName: input.quickbooksItemName || null,
-    quickbooksItemNumber: input.quickbooksItemNumber || null,
+    quickbooksItemId: quickbooksItemNumber ? input.quickbooksItemId || quickbooksItemNumber : null,
+    quickbooksItemName: quickbooksItemNumber ? input.quickbooksItemName || null : null,
+    quickbooksItemNumber,
     sourceSystem: input.sourceSystem || null,
     sourceId: input.sourceId || null,
     priceLevels: input.priceLevels,

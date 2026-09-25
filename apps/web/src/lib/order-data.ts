@@ -437,13 +437,13 @@ export function recommendationMatchesCatalogWine(
 ): boolean {
   if (row.supplier_catalog_wine_id && row.supplier_catalog_wine_id === wine.id) return true;
 
+  const rowItemNumber = normalizeIdentityText(row.product_code);
+  const wineItemNumber = normalizeIdentityText(wine.quickbooks_item_number);
+  if (rowItemNumber && wineItemNumber) return rowItemNumber === wineItemNumber;
+
   const rowSupplier = normalizeIdentityText(row.supplier_name);
   const wineSupplier = normalizeIdentityText(wine.supplier_name);
   if (!rowSupplier || !wineSupplier || rowSupplier !== wineSupplier) return false;
-
-  const rowItemNumber = normalizeIdentityText(row.product_code);
-  const wineItemNumber = normalizeIdentityText(wine.quickbooks_item_number);
-  if (rowItemNumber && wineItemNumber && rowItemNumber === wineItemNumber) return true;
 
   const rowSku = normalizeIdentityText(row.planning_sku);
   const wineSku = normalizeIdentityText(wine.planning_sku);

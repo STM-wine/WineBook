@@ -93,6 +93,7 @@ describe("source-backed ordering run compatibility", () => {
         supplier_name: "Amulet",
         display_name: "Amulet Estate Proprietary Red Wine 2022 3/750ml",
         planning_sku: "amulet estate proprietary red wine 2022 3/750ml",
+        quickbooks_item_number: null,
         quickbooks_sync_status: "not_created"
       }],
       [{
@@ -117,6 +118,38 @@ describe("source-backed ordering run compatibility", () => {
         conversion_status: "exact_existing_product",
         product_lifecycle_status: "supplier_available"
       })
+    }]);
+  });
+
+  it("repairs a missing catalog supplier from the exact QuickBooks item number", () => {
+    const updates = catalogReconciliationUpdates(
+      [{
+        id: "catalog-illahe",
+        supplier_id: null,
+        supplier_name: "",
+        display_name: "Illahe Willamette Valley Pinot Noir 2024 12/750ml",
+        planning_sku: "illahe willamette valley pinot noir 2024 12/750ml",
+        quickbooks_item_number: "ILL000030",
+        quickbooks_sync_status: "linked"
+      }],
+      [{
+        product_code: "ill000030",
+        product_name: "Illahe Willamette Valley Pinot Noir 2024 12/750ml",
+        planning_sku: "illahe willamette valley pinot noir 2024 12/750ml",
+        diagnostics: {
+          supplier_id: "supplier-illahe",
+          quickbooks_item_list_id: "qb-illahe-pinot"
+        }
+      }],
+      new Map([["supplier-illahe", "Illahe"]])
+    );
+
+    expect(updates).toEqual([{
+      id: "catalog-illahe",
+      values: {
+        supplier_id: "supplier-illahe",
+        supplier_name: "Illahe"
+      }
     }]);
   });
 });

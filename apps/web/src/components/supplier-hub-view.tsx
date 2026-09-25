@@ -20,6 +20,7 @@ import {
   calculateGpMargin,
   calculatePricing,
   defaultLaidInForSupplier,
+  detachInheritedQuickBooksIdentity,
   findDuplicateActivePriceLevels,
   money,
   normalizeWineIdentity,
@@ -282,11 +283,16 @@ function AddWinePanel({
     packSize: Math.max(1, Math.trunc(Number(packSize) || 12)),
     bottleSize
   });
-  const copiedSkuChanged = Boolean(copiedFromWine && currentIdentity.planningSku !== copiedFromWine.planning_sku);
-  const effectiveQuickbooksItemNumber =
-    copiedSkuChanged && quickbooksItemNumber.trim() === (copiedFromWine?.quickbooks_item_number || "").trim()
-      ? ""
-      : quickbooksItemNumber;
+  const effectiveQuickBooksIdentity = detachInheritedQuickBooksIdentity({
+    currentPlanningSku: currentIdentity.planningSku,
+    templatePlanningSku: copiedFromWine?.planning_sku,
+    quickbooksItemId,
+    quickbooksItemName,
+    quickbooksItemNumber,
+    templateQuickbooksItemId: copiedFromWine?.quickbooks_item_id,
+    templateQuickbooksItemName: copiedFromWine?.quickbooks_item_name,
+    templateQuickbooksItemNumber: copiedFromWine?.quickbooks_item_number
+  });
   const conversionStatus =
     pendingEditId && pendingEditConversionStatus
       ? pendingEditConversionStatus
@@ -570,9 +576,9 @@ function AddWinePanel({
     conversionStatus,
     systemTags,
     copiedFromSupplierCatalogWineId,
-    quickbooksItemId: quickbooksItemId || effectiveQuickbooksItemNumber,
-    quickbooksItemName,
-    quickbooksItemNumber: effectiveQuickbooksItemNumber,
+    quickbooksItemId: effectiveQuickBooksIdentity.itemId || effectiveQuickBooksIdentity.itemNumber,
+    quickbooksItemName: effectiveQuickBooksIdentity.itemName,
+    quickbooksItemNumber: effectiveQuickBooksIdentity.itemNumber,
     priceLevels: draftPriceLevels,
     freeGoods: freeGoods.map(freeGoodDraftToInput),
     priceChangeReason,
@@ -636,8 +642,7 @@ function AddWinePanel({
       ]
     : [];
 
-  function saveWine(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function saveWine() {
     if (lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder) return;
     onSaveCatalogWine(
       {
@@ -652,7 +657,7 @@ function AddWinePanel({
   }
 
   return (
-    <form className="supplier-hub-workspace" onSubmit={saveWine}>
+    <form className="supplier-hub-workspace" onSubmit={(event) => event.preventDefault()}>
       <div className="supplier-form-header">
         <div>
           <h2>{pendingEditId ? "Edit Pending Product" : "Add Wine"}</h2>
@@ -852,7 +857,7 @@ function AddWinePanel({
         <label>
           QB Item #
           <input
-            value={quickbooksItemNumber}
+            value={effectiveQuickBooksIdentity.itemNumber || ""}
             onChange={(event) => {
               setQuickbooksItemNumber(event.target.value);
               setQuickbooksItemId(event.target.value);
@@ -861,10 +866,10 @@ function AddWinePanel({
             placeholder="Leave blank for New Item"
           />
         </label>
-        {quickbooksItemName ? (
+        {effectiveQuickBooksIdentity.itemName ? (
           <label className="wide-field">
             Linked QuickBooks Item
-            <input readOnly value={quickbooksItemName} />
+            <input readOnly value={effectiveQuickBooksIdentity.itemName} />
           </label>
         ) : null}
         <label className="wide-field">
@@ -912,7 +917,7 @@ function AddWinePanel({
         <div>
           <span>Status</span>
           <strong>{conversionStatus.replace(/_/g, " ")}</strong>
-          <small>{effectiveQuickbooksItemNumber.trim() ? "Linked Item" : "New Item"}</small>
+          <small>{effectiveQuickBooksIdentity.itemNumber ? "Linked Item" : "New Item"}</small>
         </div>
       </div>
 
@@ -1107,7 +1112,7 @@ function AddWinePanel({
           Existing planning SKU found. Save Wine updates the existing supplier wine and creates a draft price-change event if FOB or frontline changed.
         </div>
       ) : null}
-      {!effectiveQuickbooksItemNumber.trim() ? (
+      {!effectiveQuickBooksIdentity.itemNumber ? (
         <div className="inline-warning">
           This SKU will be marked as a New Item in Order Review and PO Drafts until a QuickBooks Item Number is attached.
         </div>
@@ -1124,7 +1129,7 @@ function AddWinePanel({
       ) : null}
 
       <div className="form-actions">
-        <button className="button" disabled={isPending || lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder || !producer.trim() || !wineName.trim() || !hasValidPack || !computedPricing.suggestionsReady} type="submit">
+        <button className="button" disabled={isPending || lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder || !producer.trim() || !wineName.trim() || !hasValidPack || !computedPricing.suggestionsReady} onClick={saveWine} type="button">
           {pendingEditId ? "Save Changes" : existing ? "Update Wine" : "Save Wine"}
         </button>
       </div>

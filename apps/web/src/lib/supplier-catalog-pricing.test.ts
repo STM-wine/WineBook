@@ -6,6 +6,7 @@ import {
   calculateGpMargin,
   calculatePricing,
   completeRequiredPriceLevels,
+  detachInheritedQuickBooksIdentity,
   findDuplicateActivePriceLevels,
   hasOfficialQuickBooksProduct,
   normalizeFobCosts,
@@ -200,6 +201,42 @@ describe("production Supplier Hub pricing", () => {
       { name: "On 1 Case", bottlePrice: 19, active: true },
       { name: "On 1 Case", bottlePrice: 18, active: false }
     ])).toEqual(["On 1 Case"]);
+  });
+
+  it("detaches every inherited QuickBooks reference when the copied SKU changes", () => {
+    expect(detachInheritedQuickBooksIdentity({
+      currentPlanningSku: "illahe viognier 2026 12/750ml",
+      templatePlanningSku: "illahe viognier 2025 12/750ml",
+      quickbooksItemId: "80002094-1776113791",
+      quickbooksItemName: "Illahe Viognier 2025 12/750ml",
+      quickbooksItemNumber: "ILL000029",
+      templateQuickbooksItemId: "80002094-1776113791",
+      templateQuickbooksItemName: "Illahe Viognier 2025 12/750ml",
+      templateQuickbooksItemNumber: "ILL000029"
+    })).toEqual({ itemId: null, itemName: null, itemNumber: null });
+  });
+
+  it("clears an inherited list ID used as the visible item number but preserves a replacement item number", () => {
+    expect(detachInheritedQuickBooksIdentity({
+      currentPlanningSku: "illahe viognier 2026 12/750ml",
+      templatePlanningSku: "illahe viognier 2025 12/750ml",
+      quickbooksItemId: "80002094-1776113791",
+      quickbooksItemName: "Illahe Viognier 2025 12/750ml",
+      quickbooksItemNumber: "80002094-1776113791",
+      templateQuickbooksItemId: "80002094-1776113791",
+      templateQuickbooksItemName: "Illahe Viognier 2025 12/750ml"
+    })).toEqual({ itemId: null, itemName: null, itemNumber: null });
+
+    expect(detachInheritedQuickBooksIdentity({
+      currentPlanningSku: "illahe viognier 2026 12/750ml",
+      templatePlanningSku: "illahe viognier 2025 12/750ml",
+      quickbooksItemId: "ILL000099",
+      quickbooksItemName: null,
+      quickbooksItemNumber: "ILL000099",
+      templateQuickbooksItemId: "80002094-1776113791",
+      templateQuickbooksItemName: "Illahe Viognier 2025 12/750ml",
+      templateQuickbooksItemNumber: "ILL000029"
+    })).toEqual({ itemId: "ILL000099", itemName: null, itemNumber: "ILL000099" });
   });
 
   it("preserves catalog metadata when a draft is edited from Order Summary", () => {

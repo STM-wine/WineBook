@@ -147,7 +147,7 @@ async function reconcileSupplierCatalog(
     supabase.from("suppliers").select("id,name"),
     supabase
       .from("supplier_catalog_wines")
-      .select("id,supplier_id,supplier_name,display_name,planning_sku,quickbooks_sync_status")
+      .select("id,supplier_id,supplier_name,display_name,planning_sku,quickbooks_item_number,quickbooks_sync_status")
   ]);
   if (supplierError) throw new Error(supplierError.message);
   if (catalogError) throw new Error(catalogError.message);

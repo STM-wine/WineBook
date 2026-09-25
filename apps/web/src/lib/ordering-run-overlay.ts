@@ -13,6 +13,7 @@ type CatalogReconciliationRow = {
   supplier_name: string;
   display_name: string;
   planning_sku: string;
+  quickbooks_item_number: string | null;
   quickbooks_sync_status: string | null;
 };
 
@@ -50,27 +51,37 @@ export function catalogReconciliationUpdates(
 ): CatalogReconciliationUpdate[] {
   const sourceBySupplierAndSku = new Map<string, Record<string, any>>();
   const sourceBySupplierAndName = new Map<string, Record<string, any>>();
+  const sourceByItemCode = new Map<string, Record<string, any>>();
 
   currentRows.forEach((row) => {
     const supplierId = String(row.diagnostics?.supplier_id || "");
     if (!supplierId) return;
     const sku = normalizedIdentity(row.planning_sku);
     const name = normalizedIdentity(row.product_name);
+    const itemCode = normalizeOrderingItemCode(row.product_code);
     if (sku) sourceBySupplierAndSku.set(`${supplierId}:${sku}`, row);
     if (name) sourceBySupplierAndName.set(`${supplierId}:${name}`, row);
+    if (itemCode) sourceByItemCode.set(itemCode, row);
   });
 
   return catalogRows.flatMap((catalog) => {
-    const canonicalSupplierName = catalog.supplier_id
-      ? canonicalSupplierNames.get(catalog.supplier_id) || catalog.supplier_name
-      : catalog.supplier_name;
     const supplierId = catalog.supplier_id || "";
-    const source = supplierId
-      ? sourceBySupplierAndSku.get(`${supplierId}:${normalizedIdentity(catalog.planning_sku)}`) ||
-        sourceBySupplierAndName.get(`${supplierId}:${normalizedIdentity(catalog.display_name)}`)
-      : null;
+    const itemCode = normalizeOrderingItemCode(catalog.quickbooks_item_number);
+    const source = (itemCode ? sourceByItemCode.get(itemCode) : null) ||
+      (supplierId
+        ? sourceBySupplierAndSku.get(`${supplierId}:${normalizedIdentity(catalog.planning_sku)}`) ||
+          sourceBySupplierAndName.get(`${supplierId}:${normalizedIdentity(catalog.display_name)}`)
+        : null);
+    const sourceSupplierId = String(source?.diagnostics?.supplier_id || "");
+    const canonicalSupplierId = supplierId || sourceSupplierId;
+    const canonicalSupplierName = canonicalSupplierId
+      ? canonicalSupplierNames.get(canonicalSupplierId) || catalog.supplier_name
+      : catalog.supplier_name;
     const values: Record<string, unknown> = {};
 
+    if (!catalog.supplier_id && sourceSupplierId) {
+      values.supplier_id = sourceSupplierId;
+    }
     if (canonicalSupplierName && canonicalSupplierName !== catalog.supplier_name) {
       values.supplier_name = canonicalSupplierName;
     }

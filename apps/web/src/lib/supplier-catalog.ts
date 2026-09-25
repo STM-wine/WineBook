@@ -153,6 +153,42 @@ export type SupplierCatalogWineInput = {
   idempotencyKey?: string | null;
 };
 
+export function detachInheritedQuickBooksIdentity(input: {
+  currentPlanningSku: string;
+  templatePlanningSku?: string | null;
+  quickbooksItemId?: string | null;
+  quickbooksItemName?: string | null;
+  quickbooksItemNumber?: string | null;
+  templateQuickbooksItemId?: string | null;
+  templateQuickbooksItemName?: string | null;
+  templateQuickbooksItemNumber?: string | null;
+}) {
+  const current = {
+    itemId: normalizeSpaces(input.quickbooksItemId) || null,
+    itemName: normalizeSpaces(input.quickbooksItemName) || null,
+    itemNumber: normalizeSpaces(input.quickbooksItemNumber) || null
+  };
+  if (!input.templatePlanningSku || input.currentPlanningSku === input.templatePlanningSku) {
+    return current;
+  }
+
+  const inheritedReferences = new Set(
+    [input.templateQuickbooksItemId, input.templateQuickbooksItemNumber]
+      .map((value) => normalizeSpaces(value).toLowerCase())
+      .filter(Boolean)
+  );
+  const inheritedName = normalizeSpaces(input.templateQuickbooksItemName).toLowerCase();
+  const itemIdWasInherited = Boolean(current.itemId && inheritedReferences.has(current.itemId.toLowerCase()));
+  const itemNumberWasInherited = Boolean(current.itemNumber && inheritedReferences.has(current.itemNumber.toLowerCase()));
+  const itemNameWasInherited = Boolean(current.itemName && inheritedName && current.itemName.toLowerCase() === inheritedName);
+
+  return {
+    itemId: itemIdWasInherited ? null : current.itemId,
+    itemName: itemIdWasInherited || itemNumberWasInherited || itemNameWasInherited ? null : current.itemName,
+    itemNumber: itemNumberWasInherited ? null : current.itemNumber
+  };
+}
+
 export function supplierCatalogWineToInput(wine: SupplierCatalogWine): SupplierCatalogWineInput {
   return {
     supplierId: wine.supplier_id,
