@@ -272,6 +272,7 @@ async function receiveResponseXML(soapRequest: string) {
         session.requests.splice(session.requestIndex + 1, 0, continuationRequest);
       }
     }
+    await recordQuickBooksSyncActivity(session, receivedAt);
   } catch (error) {
     session.lastError = "QuickBooks response processing failed: " + (error instanceof Error ? error.message : "unknown processing error");
     if (request.recoveryJob) {
@@ -354,7 +355,11 @@ async function startQuickBooksSyncRun(username: string, startedAt: string, reque
       started_at: startedAt,
       worker_name: "quickbooks_web_connector",
       parameters: { username, request_count: requestCount },
-      diagnostics: { request_count: requestCount, completed_request_count: 0 }
+      diagnostics: {
+        request_count: requestCount,
+        completed_request_count: 0,
+        last_activity_at: startedAt
+      }
     })
     .select("id")
     .single<{ id: string }>();
@@ -379,6 +384,22 @@ async function finishQuickBooksSyncRun(
         completed_request_count: session.responses.length,
         complete: status === "completed",
         resources: summarizeSessionResources(session.responses)
+      }
+    })
+    .eq("id", session.sourceSyncRunId)
+    .eq("status", "running");
+  if (error) throw new Error(error.message);
+}
+
+async function recordQuickBooksSyncActivity(session: QuickBooksWebConnectorSession, receivedAt: string) {
+  if (!session.sourceSyncRunId) return;
+  const { error } = await createServiceRoleClient()
+    .from("source_sync_runs")
+    .update({
+      diagnostics: {
+        request_count: session.requests.length,
+        completed_request_count: session.responses.length,
+        last_activity_at: receivedAt
       }
     })
     .eq("id", session.sourceSyncRunId)

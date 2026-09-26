@@ -32,6 +32,7 @@ import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import { applyVinosmithAvailability, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchCurrentOrderingOverlay } from "@/lib/source-backed-ordering-server";
+import { isQuickBooksSyncActivelyRunning } from "@/lib/quickbooks-sync-state";
 import {
   fetchActiveOrderingRun,
   isSourceBackedRun,
@@ -210,15 +211,17 @@ async function loadOrderingPageData(): Promise<OrderingPageData> {
     try {
       const { data, error } = await serviceRoleSupabase
         .from("source_sync_runs")
-        .select("status,started_at,completed_at,error_message")
+        .select("status,started_at,completed_at,error_message,diagnostics")
         .eq("source_system", "quickbooks_desktop")
         .eq("worker_name", "quickbooks_web_connector")
         .order("started_at", { ascending: false })
         .limit(1)
-        .maybeSingle<{ status: string; started_at: string; completed_at: string | null; error_message: string | null }>();
+        .maybeSingle<{ status: string; started_at: string; completed_at: string | null; error_message: string | null; diagnostics: Record<string, unknown> | null }>();
       if (error || !data || data.status === "completed") return null;
       if (data.status === "running") {
-        return "QuickBooks refresh is still in progress. Order Summary is showing the last verified snapshot; creating or refreshing PO drafts remains blocked until every page finishes.";
+        return isQuickBooksSyncActivelyRunning(data)
+          ? "QuickBooks refresh is still in progress. Order Summary is showing the last verified snapshot; creating or refreshing PO drafts remains blocked until every page finishes."
+          : "The latest QuickBooks refresh stopped without finishing. Order Summary is showing the last verified snapshot; creating or refreshing PO drafts remains blocked until a successful refresh completes.";
       }
       return `The latest QuickBooks refresh ${data.status}. The last complete item and purchase-order data remains in use. ${data.error_message || "Run Web Connector again before relying on On Order."}`;
     } catch {

@@ -31,6 +31,7 @@ import {
   assertCurrentOrderingDiagnostics,
   orderingBusinessDate
 } from "./ordering-freshness";
+import { isQuickBooksSyncActivelyRunning } from "./quickbooks-sync-state";
 
 export { ORDERING_TIMEZONE, orderingBusinessDate } from "./ordering-freshness";
 
@@ -134,11 +135,10 @@ export async function fetchCurrentOrderingOverlay(
   } = {}
 ) {
   const referenceDate = orderingBusinessDate(options.now);
-  const syncState = await fetchQuickBooksSyncState(supabase);
+  const syncState = await fetchQuickBooksSyncState(supabase, options.now);
   if (syncState.latest?.status !== "completed") {
     if (
-      syncState.latest?.status === "running"
-      && options.allowVerifiedFallbackDuringRefresh
+      options.allowVerifiedFallbackDuringRefresh
       && syncState.latestCompletedAt
     ) {
       const quickBooksFreshnessHours = ageHours(syncState.latestCompletedAt);
@@ -149,7 +149,8 @@ export async function fetchCurrentOrderingOverlay(
           quickbooks_as_of: syncState.latestCompletedAt,
           quickbooks_freshness_hours: quickBooksFreshnessHours,
           quickbooks_fresh: quickBooksFreshnessHours !== null && quickBooksFreshnessHours <= 72,
-          quickbooks_refresh_in_progress: true,
+          quickbooks_refresh_in_progress: syncState.latestActivelyRunning,
+          quickbooks_refresh_incomplete_status: syncState.latest?.status || "missing",
           using_saved_recommendations: true
         }
       };
@@ -288,17 +289,19 @@ async function assertLatestQuickBooksSyncComplete(supabase: SourceClient) {
 }
 
 type QuickBooksSyncRow = {
+  id: string;
   status: string;
   started_at: string;
   completed_at: string | null;
   error_message: string | null;
+  diagnostics: Record<string, unknown> | null;
 };
 
-async function fetchQuickBooksSyncState(supabase: SourceClient) {
+async function fetchQuickBooksSyncState(supabase: SourceClient, now = new Date()) {
   const [latestResult, completedResult] = await Promise.all([
     supabase
       .from("source_sync_runs")
-      .select("status,started_at,completed_at,error_message")
+      .select("id,status,started_at,completed_at,error_message,diagnostics")
       .eq("source_system", "quickbooks_desktop")
       .eq("worker_name", "quickbooks_web_connector")
       .order("started_at", { ascending: false })
@@ -316,9 +319,29 @@ async function fetchQuickBooksSyncState(supabase: SourceClient) {
   ]);
   if (latestResult.error) throw new Error(latestResult.error.message);
   if (completedResult.error) throw new Error(completedResult.error.message);
+  let latest = latestResult.data;
+  const latestActivelyRunning = isQuickBooksSyncActivelyRunning(latest, now);
+  if (latest?.status === "running" && !latestActivelyRunning) {
+    const completedAt = now.toISOString();
+    const errorMessage = "QuickBooks Web Connector stopped sending data before the refresh completed.";
+    const { data, error } = await supabase
+      .from("source_sync_runs")
+      .update({
+        status: "failed",
+        completed_at: completedAt,
+        error_message: errorMessage
+      })
+      .eq("id", latest.id)
+      .eq("status", "running")
+      .select("id,status,started_at,completed_at,error_message,diagnostics")
+      .maybeSingle<QuickBooksSyncRow>();
+    if (error) throw new Error(error.message);
+    latest = data || latest;
+  }
   return {
-    latest: latestResult.data,
-    latestCompletedAt: completedResult.data?.completed_at || null
+    latest,
+    latestCompletedAt: completedResult.data?.completed_at || null,
+    latestActivelyRunning
   };
 }
 

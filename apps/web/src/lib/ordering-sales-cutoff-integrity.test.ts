@@ -22,7 +22,7 @@ describe("current QuickBooks sales cutoff contract", () => {
     expect(poCreateRoute).not.toContain("referenceDate: orderingRun.report_date");
   });
 
-  it("uses the last verified page snapshot only during a running refresh and keeps PO creation strict", async () => {
+  it("uses the last verified page snapshot during an incomplete refresh and keeps PO creation strict", async () => {
     const [page, poCreateRoute] = await Promise.all([
       readFile(orderingPagePath, "utf8"),
       readFile(poCreateRoutePath, "utf8")
@@ -32,6 +32,7 @@ describe("current QuickBooks sales cutoff contract", () => {
     expect(page).toContain("Order Summary rows are hidden instead of showing stale sales or recommendations");
     expect(page).toContain("allowVerifiedFallbackDuringRefresh: true");
     expect(page).toContain("Order Summary is showing the last verified snapshot");
+    expect(page).toContain("The latest QuickBooks refresh stopped without finishing");
     expect(poCreateRoute).not.toContain("allowVerifiedFallbackDuringRefresh: true");
   });
 
