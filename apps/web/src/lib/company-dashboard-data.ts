@@ -59,6 +59,8 @@ export type CompanyDashboardData = {
   byRep: QuickBooksSalesSummaryRow[];
   byAccount: QuickBooksSalesSummaryRow[];
   breakdownsLoaded: boolean;
+  repBreakdownLoaded?: boolean;
+  accountBreakdownLoaded?: boolean;
   selectedRep: string | null;
   unavailableReason: string | null;
 };
@@ -85,6 +87,8 @@ async function fetchDashboardData(
     includeComparison?: boolean;
     includeGrossProfit?: boolean;
     includeBreakdowns?: boolean;
+    includeRepBreakdown?: boolean;
+    includeAccountBreakdown?: boolean;
     businessLine?: string;
   } = {}
 ): Promise<CompanyDashboardData> {
@@ -94,16 +98,19 @@ async function fetchDashboardData(
       : rangeForPeriod(period);
   const includeGrossProfit = filters.includeGrossProfit !== false;
   const includeBreakdowns = filters.includeBreakdowns !== false;
+  const includeRepBreakdown = filters.includeRepBreakdown ?? includeBreakdowns;
+  const includeAccountBreakdown = filters.includeAccountBreakdown ?? includeBreakdowns;
   const businessLine = parseCompanyDashboardBusinessLine(filters.businessLine);
   const comparisonRange = filters.includeComparison === false ? null : comparableLastYearRange(range);
   const includeComparisonGrossProfit = includeGrossProfit && canAutoLoadGrossProfitRange(range);
 
   const [current, comparison, salesThroughDate] = await Promise.all([
-    fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit, includeBreakdowns, businessLine }),
+    fetchPeriodDashboardData(supabase, range, filters.rep, { includeGrossProfit, includeRepBreakdown, includeAccountBreakdown, businessLine }),
     comparisonRange
       ? fetchPeriodDashboardData(supabase, comparisonRange, filters.rep, {
           includeGrossProfit: includeComparisonGrossProfit,
-          includeBreakdowns,
+          includeRepBreakdown,
+          includeAccountBreakdown,
           businessLine
         })
       : Promise.resolve(null),
@@ -134,7 +141,9 @@ async function fetchDashboardData(
     businessLineSummaries: currentRows.businessLineSummaries,
     byRep: currentRows.byRep,
     byAccount: currentRows.byAccount,
-    breakdownsLoaded: includeBreakdowns,
+    breakdownsLoaded: includeRepBreakdown && includeAccountBreakdown,
+    repBreakdownLoaded: includeRepBreakdown,
+    accountBreakdownLoaded: includeAccountBreakdown,
     selectedRep: cleanFilter(filters.rep) || null,
     unavailableReason: current.unavailableReason
   };
@@ -207,19 +216,22 @@ async function fetchPeriodDashboardData(
   options: {
     includeGrossProfit?: boolean;
     includeBreakdowns?: boolean;
+    includeRepBreakdown?: boolean;
+    includeAccountBreakdown?: boolean;
     businessLine?: CompanyDashboardBusinessLine;
   } = {}
 ): Promise<PeriodDashboardData> {
   const businessLine = options.businessLine || "all";
-  const includeBreakdowns = options.includeBreakdowns !== false;
+  const includeRepBreakdown = options.includeRepBreakdown ?? options.includeBreakdowns !== false;
+  const includeAccountBreakdown = options.includeAccountBreakdown ?? options.includeBreakdowns !== false;
   if (options.includeGrossProfit !== false) {
-    const grossProfit = await fetchGrossProfitRollups(supabase, range, rep, businessLine, includeBreakdowns);
+    const grossProfit = await fetchGrossProfitRollups(supabase, range, rep, businessLine, includeRepBreakdown, includeAccountBreakdown);
     if (!grossProfit.unavailableReason) {
       return {
         calculatedAt: grossProfit.calculatedAt,
         periodState: grossProfit.periodState,
-        byRep: includeBreakdowns ? grossProfit.byRepRows : [],
-        byAccount: includeBreakdowns ? grossProfit.byAccountRows : [],
+        byRep: includeRepBreakdown ? grossProfit.byRepRows : [],
+        byAccount: includeAccountBreakdown ? grossProfit.byAccountRows : [],
         businessLineSummaries: grossProfit.businessLineSummaries,
         unavailableReason: null,
         summary: grossProfit.summary
@@ -234,8 +246,8 @@ async function fetchPeriodDashboardData(
       includeItems: false
     });
     return {
-      byRep: includeBreakdowns ? mergeGrossProfitRows(sales.byRep, grossProfit.byRep) : [],
-      byAccount: includeBreakdowns ? mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount) : [],
+      byRep: includeRepBreakdown ? mergeGrossProfitRows(sales.byRep, grossProfit.byRep) : [],
+      byAccount: includeAccountBreakdown ? mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount) : [],
       businessLineSummaries: grossProfit.businessLineSummaries,
       unavailableReason: sales.unavailableReason || null,
       summary: {
@@ -262,8 +274,8 @@ async function fetchPeriodDashboardData(
   });
   const grossProfit = emptyGrossProfitRollups();
   return {
-    byRep: includeBreakdowns ? mergeGrossProfitRows(sales.byRep, grossProfit.byRep) : [],
-    byAccount: includeBreakdowns ? mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount) : [],
+    byRep: includeRepBreakdown ? mergeGrossProfitRows(sales.byRep, grossProfit.byRep) : [],
+    byAccount: includeAccountBreakdown ? mergeGrossProfitRows(sales.byAccount, grossProfit.byAccount) : [],
     businessLineSummaries: grossProfit.businessLineSummaries,
     unavailableReason: sales.unavailableReason || null,
     summary: {
@@ -375,7 +387,8 @@ async function fetchGrossProfitRollups(
   range: { from: string; to: string },
   rep?: string,
   businessLine: CompanyDashboardBusinessLine = "all",
-  includeBreakdowns = true
+  includeRepBreakdown = true,
+  includeAccountBreakdown = true
 ): Promise<GrossProfitRollups> {
   const snapshot = await completedReadModel<MarginSnapshot>(supabase, "margins", `${range.from}:${range.to}`,
     MARGIN_SNAPSHOT_FORMULA, range);
@@ -385,8 +398,8 @@ async function fetchGrossProfitRollups(
   return {
     ...result, calculatedAt: snapshot.calculatedAt, periodState: snapshot.periodState,
     byRep: new Map(), byAccount: new Map(),
-    byRepRows: includeBreakdowns ? result.byRepRows : [],
-    byAccountRows: includeBreakdowns ? result.byAccountRows : []
+    byRepRows: includeRepBreakdown ? result.byRepRows : [],
+    byAccountRows: includeAccountBreakdown ? result.byAccountRows : []
   };
 }
 

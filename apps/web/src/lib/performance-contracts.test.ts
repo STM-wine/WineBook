@@ -12,6 +12,17 @@ function dashboard(overrides: Partial<CompanyDashboardData> = {}): CompanyDashbo
     breakdownsLoaded: false, byRep: [], byAccount: [], comparison: null, ...overrides } as CompanyDashboardData;
 }
 describe("snapshot composition", () => {
+  it("merges independently completed rep and account tables in either response order", () => {
+    const rep = dashboard({ repBreakdownLoaded: true, accountBreakdownLoaded: false, byRep: [{ key: "rep" }] as never });
+    const account = dashboard({ repBreakdownLoaded: false, accountBreakdownLoaded: true, byAccount: [{ key: "account" }] as never });
+    for (const result of [mergeDashboardSnapshot(rep, account), mergeDashboardSnapshot(account, rep)]) {
+      expect(result.byRep).toEqual(rep.byRep);
+      expect(result.byAccount).toEqual(account.byAccount);
+      expect(result.breakdownsLoaded).toBe(true);
+      expect(mergeDashboardSnapshot(result, dashboard()).byAccount).toEqual(account.byAccount);
+    }
+    expect(mergeDashboardSnapshot(dashboard(), rep).accountBreakdownLoaded).toBe(false);
+  });
   it("retains completed breakdowns when a slower summary arrives from the same source", () => {
     const previous = dashboard({ breakdownsLoaded: true, byRep: [{ key: "a" }] as never, comparison: { label: "LY" } as never });
     expect(mergeDashboardSnapshot(previous, dashboard()).byRep).toEqual(previous.byRep);

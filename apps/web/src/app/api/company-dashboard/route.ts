@@ -42,7 +42,9 @@ export async function GET(request: NextRequest) {
       businessLine: cleanParam(params.get("businessLine")),
       includeComparison: params.get("includeComparison") !== "false",
       includeGrossProfit: params.get("includeProfit") !== "false",
-      includeBreakdowns: params.get("includeBreakdowns") !== "false"
+      includeBreakdowns: params.get("includeBreakdowns") !== "false",
+      includeRepBreakdown: params.has("includeRepBreakdown") ? params.get("includeRepBreakdown") === "true" : undefined,
+      includeAccountBreakdown: params.has("includeAccountBreakdown") ? params.get("includeAccountBreakdown") === "true" : undefined
     });
     return noStoreJson(data, { headers: { "Server-Timing": `dashboard;dur=${(performance.now() - startedAt).toFixed(1)}` } });
   } catch (error) {
