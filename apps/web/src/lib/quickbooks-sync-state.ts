@@ -16,6 +16,12 @@ export function quickBooksSyncCompletedRequestCount(run: QuickBooksSyncActivityR
   return null;
 }
 
+export function quickBooksSyncProgressMessage(run: QuickBooksSyncActivityRow) {
+  return quickBooksSyncCompletedRequestCount(run) === 0
+    ? "QuickBooks Web Connector connected but has not sent any data yet. Order Summary is showing the last verified snapshot while the connection is checked."
+    : "QuickBooks refresh is still in progress. Order Summary is showing the last verified snapshot; creating or refreshing PO drafts remains blocked until every page finishes.";
+}
+
 export function isQuickBooksSyncNonMaterialFailure(run: QuickBooksSyncActivityRow | null) {
   return Boolean(
     run

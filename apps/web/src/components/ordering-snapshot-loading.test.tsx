@@ -27,6 +27,40 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("ordering summary during background preparation", () => {
+  it("rechecks a loaded warning and clears it only after a verified replacement arrives", async () => {
+    await respond(0,200,{...summary,isStale:false,warning:"QuickBooks refresh is still in progress."});
+    await act(async()=>vi.advanceTimersByTimeAsync(30_000));
+    expect(requests).toHaveLength(2);
+    expect(host.textContent).toContain("QuickBooks refresh is still in progress.");
+    expect(host.textContent).not.toContain("Loading supplier summaries");
+    // A slow refresh must not be aborted/restarted by the next interval or focus.
+    await act(async()=>{window.dispatchEvent(new Event('focus'));await vi.advanceTimersByTimeAsync(30_000);});
+    expect(requests).toHaveLength(2);
+    expect(requests[1].signal.aborted).toBe(false);
+    await respond(1,202,{pending:true,stage:"Verifying sources"});
+    expect(host.textContent).toContain("QuickBooks refresh is still in progress.");
+    await act(async()=>vi.advanceTimersByTimeAsync(2000));
+    await respond(2,200,{...summary,isStale:false,snapshotId:"updated",warning:null});
+    expect(host.textContent).not.toContain("QuickBooks refresh is still in progress.");
+    expect(host.textContent).not.toContain("Verifying sources");
+  });
+  it("refreshes on return to a visible tab, skips hidden checks, and cleans up on navigation", async () => {
+    await respond(0,200,{...summary,isStale:false});
+    const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');
+    await act(async()=>{await vi.advanceTimersByTimeAsync(60_000);window.dispatchEvent(new Event('focus'));});
+    expect(requests).toHaveLength(1);
+    visibility.mockReturnValue('visible');
+    await act(async()=>{document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});
+    expect(requests).toHaveLength(2);
+    await respond(1,200,{...summary,isStale:false});
+    await act(async()=>vi.advanceTimersByTimeAsync(60_000));
+    expect(requests).toHaveLength(3);
+    await act(async()=>root.render(<div>Another page</div>));
+    expect(requests[2].signal.aborted).toBe(true);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(120_000);window.dispatchEvent(new Event('focus'));});
+    expect(requests).toHaveLength(3);
+    visibility.mockRestore();
+  });
   it("renders the previous overview without enabling stale supplier editing, then enables current data", async () => {
     await respond(0,202,{pending:true,stage:"Verifying sources",previousSummary:summary});
     expect(host.textContent).toContain("Example supplier");

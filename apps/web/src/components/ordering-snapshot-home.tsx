@@ -2,7 +2,7 @@
 import { flushAllApprovals } from "@/lib/approval-navigation";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { OrderingSnapshotSummary } from "@/lib/ordering-snapshot";
 import type { OrderingPageData } from "@/lib/ordering-page-data";
 import { formatCurrency, formatInteger } from "@/lib/order-data";
@@ -24,22 +24,48 @@ export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-r
   const [filters, setFilters] = useState<OrderingSummaryFilters>(defaultOrderingFilters);
   const [queryFilters, setQueryFilters] = useState(filters);
   const [creatingDrafts, setCreatingDrafts] = useState(false);
+  const overviewRequestPending = useRef(false);
+  const automaticRefresh = useRef(false);
   useEffect(() => {
     const timer = setTimeout(() => setQueryFilters(filters), 250);
     return () => clearTimeout(timer);
   }, [filters]);
   useEffect(() => {
     const controller = new AbortController();
-    setError(""); setStage("Loading supplier summaries");
+    overviewRequestPending.current = true;
+    setError(""); setStage(automaticRefresh.current ? "" : "Loading supplier summaries");
+    automaticRefresh.current = false;
     const query = new URLSearchParams({ supplierFilter: queryFilters.supplier, tdm: queryFilters.brandManager,
       search: queryFilters.search, suggestedOnly: String(queryFilters.suggestedOnly) });
     waitForOrdering<OrderingSnapshotSummary>(query.toString(), controller.signal, setStage, (previous) => {
       if (!controller.signal.aborted) setData((current) => !current || current.isStale ? previous : current);
     })
       .then(async (result) => { await flushAllApprovals(); if (!controller.signal.aborted) { setData(result); setStage(""); performance.mark("winebook:ordering-usable"); } })
-      .catch((error) => { if (!controller.signal.aborted) { setError(error.message); setStage(""); } });
+      .catch((error) => { if (!controller.signal.aborted) { setError(error.message); setStage(""); } })
+      .finally(() => { if (!controller.signal.aborted) overviewRequestPending.current = false; });
     return () => controller.abort();
   }, [retry, queryFilters]);
+  const hasSummary = Boolean(data);
+  const hasSourceWarning = Boolean(data?.warning);
+  useEffect(() => {
+    if (!hasSummary) return;
+    // A completed snapshot is a point-in-time read. Sync completion does not
+    // emit an approval event, so keep open tabs from retaining old warnings.
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || overviewRequestPending.current) return;
+      overviewRequestPending.current = true;
+      automaticRefresh.current = true;
+      setRetry((n) => n + 1);
+    };
+    const timer = setInterval(refresh, hasSourceWarning ? 30_000 : 60_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [hasSummary, hasSourceWarning]);
   useEffect(() => {
     if (!data?.reportRun.id) return;
     const db = createClient();

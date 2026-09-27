@@ -31,6 +31,7 @@ import { fetchCurrentOrderingOverlay } from "@/lib/source-backed-ordering-server
 import {
   isQuickBooksSyncActivelyRunning,
   isQuickBooksSyncNonMaterialFailure,
+  quickBooksSyncProgressMessage,
   quickBooksSyncCompletedRequestCount
 } from "@/lib/quickbooks-sync-state";
 import {
@@ -143,7 +144,7 @@ export async function loadOrderingPageData(view: ActiveView, serviceRoleSupabase
       if (error || !data || data.status === "completed") return null;
       if (data.status === "running") {
         if (isQuickBooksSyncActivelyRunning(data)) {
-          return "QuickBooks refresh is still in progress. Order Summary is showing the last verified snapshot; creating or refreshing PO drafts remains blocked until every page finishes.";
+          return quickBooksSyncProgressMessage(data);
         }
         return quickBooksSyncCompletedRequestCount(data) === 0
           ? null

@@ -4,6 +4,7 @@ import {
   isQuickBooksSyncActivelyRunning,
   quickBooksSyncCompletedRequestCount,
   quickBooksSyncLastActivityAt,
+  quickBooksSyncProgressMessage,
   QUICKBOOKS_SYNC_ACTIVITY_TIMEOUT_MS
 } from "./quickbooks-sync-state";
 
@@ -16,6 +17,14 @@ describe("QuickBooks sync activity", () => {
       started_at: "2026-09-26T00:29:00.000Z",
       diagnostics: { completed_request_count: 0 }
     }, now)).toBe(true);
+  });
+
+  it("distinguishes a connection with no pages from a partial data refresh", () => {
+    const run = { status: "running", started_at: now.toISOString(), diagnostics: { completed_request_count: 0 } };
+    expect(quickBooksSyncProgressMessage(run)).toContain("has not sent any data yet");
+    expect(quickBooksSyncProgressMessage(run)).not.toContain("refresh is still in progress");
+    expect(quickBooksSyncProgressMessage({ ...run, diagnostics: { completed_request_count: 1 } })).toContain("blocked until every page finishes");
+    expect(quickBooksSyncProgressMessage({ ...run, diagnostics: {} })).toContain("blocked until every page finishes");
   });
 
   it("treats a silent run past the activity timeout as abandoned", () => {
