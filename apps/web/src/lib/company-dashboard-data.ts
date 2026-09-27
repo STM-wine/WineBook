@@ -931,7 +931,7 @@ function cleanFilter(value: string | undefined) {
   return trimmed || undefined;
 }
 
-export const MARGIN_SNAPSHOT_FORMULA = `${GROSS_PROFIT_FORMULA_VERSION}:snapshot-v1`;
+export const MARGIN_SNAPSHOT_FORMULA = `${GROSS_PROFIT_FORMULA_VERSION}:snapshot-v2-stable-rollups`;
 type SerializableMarginRollups = Omit<GrossProfitRollups, "byRep" | "byAccount">;
 type MarginSnapshot = {
   calculatedAt: string;
@@ -939,10 +939,13 @@ type MarginSnapshot = {
   scopes: Record<CompanyDashboardBusinessLine, { company: SerializableMarginRollups; reps: Record<string, SerializableMarginRollups> }>;
 };
 
-// Worker only: one line-matching pass supplies every company, rep and account view.
+// Worker only: match provisional lines once; finalized days retain the existing
+// stored-rollup basis instead of being recalculated with today's source inputs.
 export async function buildMarginSnapshot(supabase: SupabaseClient, range: { from: string; to: string }): Promise<MarginSnapshot> {
-  const report = await buildGrossProfitCenterWithRetry(supabase, range);
-  const reps = Array.from(new Set(report.lines.map((line) => cleanLabel(line.salesRep, "Unassigned Rep"))));
+  const cutoff = stableGrossProfitCutoff();
+  const storedRange = range.from <= cutoff ? { from: range.from, to: range.to < cutoff ? range.to : cutoff } : null;
+  const liveRange = range.to > cutoff ? { from: range.from > cutoff ? range.from : addDays(cutoff, 1), to: range.to } : null;
+  const report = liveRange ? await buildGrossProfitCenterWithRetry(supabase, liveRange) : null;
   function summarize(lines: GrossProfitCenterLine[], businessLine: CompanyDashboardBusinessLine): SerializableMarginRollups {
     const filtered = filterGrossProfitLinesByBusinessLine(lines, businessLine);
     return {
@@ -952,13 +955,32 @@ export async function buildMarginSnapshot(supabase: SupabaseClient, range: { fro
       businessLineSummaries: summarizeBusinessLineSplits(lines), unavailableReason: null
     };
   }
+  async function collect(businessLine: CompanyDashboardBusinessLine, rep?: string): Promise<SerializableMarginRollups> {
+    const stored = storedRange ? await fetchStoredGrossProfitRollups(supabase, storedRange, { businessLine, rep, includeBreakdowns: true }) : null;
+    // Preserve the existing unavailable state if historical coverage is missing.
+    if (stored?.unavailableReason) {
+      if (!rep) throw new Error(stored.unavailableReason);
+      return stored;
+    }
+    const live = report ? { ...summarize(filterGrossProfitLines(report.lines, rep), businessLine), byRep: new Map(), byAccount: new Map() } : null;
+    const { byRep, byAccount, ...serializable } = mergeGrossProfitRollupResults(stored ? grossProfitRollupsFromStored(stored) : null, live);
+    return serializable;
+  }
+  const scopes = {} as MarginSnapshot["scopes"];
+  for (const businessLine of ["all", "stem", "grw"] as const) {
+    const company = await collect(businessLine);
+    const repNames = Array.from(new Set([
+      ...company.byRepRows.map((rep) => rep.label),
+      ...(report?.lines || []).map((line) => cleanLabel(line.salesRep, "Unassigned Rep"))
+    ]));
+    const reps: Record<string, SerializableMarginRollups> = {};
+    for (const rep of repNames) reps[rep] = await collect(businessLine, rep);
+    scopes[businessLine] = { company, reps };
+  }
   return {
     calculatedAt: new Date().toISOString(),
-    periodState: range.to > stableGrossProfitCutoff() ? "provisional" : "finalized",
-    scopes: Object.fromEntries((["all", "stem", "grw"] as const).map((line) => [line, {
-      company: summarize(report.lines, line),
-      reps: Object.fromEntries(reps.map((rep) => [rep, summarize(filterGrossProfitLines(report.lines, rep), line)]))
-    }])) as MarginSnapshot["scopes"]
+    periodState: liveRange ? "provisional" : "finalized",
+    scopes
   };
 }
 

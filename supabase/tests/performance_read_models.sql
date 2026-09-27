@@ -5,9 +5,13 @@ declare j public.read_model_jobs; claimed public.read_model_jobs; second public.
   page jsonb; counts jsonb; detail jsonb; rows jsonb; ok boolean; rejected boolean;
 begin
   j := public.request_read_model('products','performance-test','test-v1','{}');
-  claimed := public.claim_read_model();
-  if claimed.id <> j.id then raise exception 'Use an empty disposable jobs table for this test'; end if;
   second := public.claim_read_model();
+  if second.id is not null then raise exception 'Unversioned worker claimed work'; end if;
+  second := public.claim_read_model('{"products":"wrong-formula"}');
+  if second.id is not null then raise exception 'Wrong formula worker claimed work'; end if;
+  claimed := public.claim_read_model('{"products":"test-v1","margins":"test-v1"}');
+  if claimed.id <> j.id then raise exception 'Use an empty disposable jobs table for this test'; end if;
+  second := public.claim_read_model('{"products":"test-v1","margins":"test-v1"}');
   if second.id is not null then raise exception 'Concurrent claim duplicated work'; end if;
   select jsonb_agg(jsonb_build_object('id', 'item-'||n, 'itemCode', lpad(n::text,5,'0'),
     'productName', 'Same name', 'supplierName','Supplier', 'active', n <> 1001, 'fob', n,
@@ -37,20 +41,20 @@ begin
     = public.read_product_workspace(j.id,'{}',0,75,'productName','asc','page')#>>'{data,0,id}' then raise exception 'Unstable pagination'; end if;
   -- Invalid source generation may never publish as current.
   j := public.request_read_model('products','obsolete-test','test-v1','{}');
-  claimed := public.claim_read_model();
+  claimed := public.claim_read_model('{"products":"test-v1","margins":"test-v1"}');
   update public.read_model_versions set version=version+1 where kind='products';
   if public.publish_read_model(j.id,claimed.lease_token,'{}',rows) then raise exception 'Obsolete work published'; end if;
   if not (public.read_product_workspace((select id from public.read_model_jobs where cache_key='performance-test'),'{}') ->> 'isStale')::boolean then raise exception 'Stale snapshot not labelled'; end if;
   -- A stolen/expired lease cannot publish or override a winner.
-  j := public.request_read_model('margins','lease-test','test-v1','{}'); claimed := public.claim_read_model();
+  j := public.request_read_model('margins','lease-test','test-v1','{}'); claimed := public.claim_read_model('{"products":"test-v1","margins":"test-v1"}');
   if public.publish_read_model(j.id,gen_random_uuid(),'{}') then raise exception 'Wrong worker published'; end if;
   update public.read_model_jobs set lease_until=now()-interval '1 second' where id=j.id;
   if public.publish_read_model(j.id,claimed.lease_token,'{}') then raise exception 'Expired lease published'; end if;
-  second := public.claim_read_model();
+  second := public.claim_read_model('{"products":"test-v1","margins":"test-v1"}');
   if second.lease_token=claimed.lease_token then raise exception 'Reclaim reused lease'; end if;
   if not public.publish_read_model(j.id,second.lease_token,'{"complete":true}') then raise exception 'Reclaimed job did not publish'; end if;
   -- Uploading a catalog in batches must never make a partial generation readable.
-  j := public.request_read_model('products','batched-test','test-v1','{}'); claimed := public.claim_read_model();
+  j := public.request_read_model('products','batched-test','test-v1','{}'); claimed := public.claim_read_model('{"products":"test-v1","margins":"test-v1"}');
   if public.stage_product_read_model(j.id,gen_random_uuid(),'[{"id":"wrong"}]',true) then raise exception 'Wrong lease staged rows'; end if;
   if not public.stage_product_read_model(j.id,claimed.lease_token,'[{"id":"first"}]',true) then raise exception 'Batch rejected'; end if;
   rejected := false;
@@ -65,11 +69,11 @@ begin
   if public.stage_product_read_model(j.id,claimed.lease_token,'[]',true) then raise exception 'Completed snapshot overwritten'; end if;
   counts := public.read_product_workspace(j.id,'{}',0,75,'productName','asc','counts');
   if (counts#>>'{data,visible}')::int <> 2 then raise exception 'Batch retry duplicated rows'; end if;
-  j := public.request_read_model('products','batch-reclaim-test','test-v1','{}'); claimed := public.claim_read_model();
+  j := public.request_read_model('products','batch-reclaim-test','test-v1','{}'); claimed := public.claim_read_model('{"products":"test-v1","margins":"test-v1"}');
   perform public.stage_product_read_model(j.id,claimed.lease_token,'[{"id":"old"}]',true);
   update public.read_model_jobs set lease_until=now()-interval '1 second' where id=j.id;
   if public.stage_product_read_model(j.id,claimed.lease_token,'[]',true) then raise exception 'Expired upload accepted'; end if;
-  second := public.claim_read_model();
+  second := public.claim_read_model('{"products":"test-v1","margins":"test-v1"}');
   perform public.stage_product_read_model(j.id,second.lease_token,'[{"id":"new"}]',true);
   if public.finish_product_read_model(j.id,claimed.lease_token,1) then raise exception 'Former lease published'; end if;
   update public.read_model_versions set version=version+1 where kind='products';

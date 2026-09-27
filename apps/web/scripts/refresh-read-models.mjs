@@ -24,7 +24,9 @@ async function warm() {
 }
 async function drain() {
   for (;;) {
-    const { data: claimed, error } = await supabase.rpc('claim_read_model');
+    const { data: claimed, error } = await supabase.rpc('claim_read_model', { p_formulas: {
+      products: PRODUCT_FORMULA_VERSION, margins: MARGIN_SNAPSHOT_FORMULA, ordering: ORDERING_READ_FORMULA
+    } });
     const job = Array.isArray(claimed) ? claimed[0] : claimed;
     if (error) throw new Error(error.message);
     if (!job?.id) return;
