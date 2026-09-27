@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import type { OrderingSnapshotSummary } from "@/lib/ordering-snapshot";
 import type { OrderingPageData } from "@/lib/ordering-page-data";
 import { formatCurrency, formatInteger } from "@/lib/order-data";
+import { OrderSummaryMetrics, SummaryTable } from "./order-summary-overview";
+import type { SupplierGroup } from "@/lib/types";
 import { AppTopbar } from "./app-topbar";
 import { WineLoadingProgress } from "./wine-loading-progress";
 import { OrderDashboard } from "./order-dashboard";
@@ -48,20 +50,33 @@ export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-r
     {stage ? <WineLoadingProgress inline message={stage} detail="Navigation remains available. Source checks run in the shared worker." /> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
     {data ? <>
-      <p>Verified snapshot {new Date(data.generatedAt).toLocaleString()} · sales through {data.salesReferenceDate} <button onClick={() => setRetry((n) => n + 1)}>Refresh summaries</button></p>
+      <div className="ordering-snapshot-status"><span>Verified {new Date(data.generatedAt).toLocaleString()} · sales through {data.salesReferenceDate}</span><button className="ghost-button" onClick={() => setRetry((n) => n + 1)}>Refresh summaries</button></div>
       {data.warning ? <p role="status">{data.warning}</p> : null}
-      {view === "freight" ? <FreightView rows={[]} suppliers={[]} readModel={data.freight} /> : <section className="panel">
-        <h1>Order Summary</h1>
-        <p>All suppliers: {formatInteger(data.metrics.recommendedBottles)} recommended bottles · {formatInteger(data.metrics.approvedBottles)} outstanding approved bottles · {formatCurrency(data.metrics.poValue)} approved value.</p>
-        <p>Expand a supplier to review and edit its complete row set. Row filters and bulk approval actions apply to that supplier. Create PO Drafts uses all saved approvals in this report run.</p>
-        <label>Find supplier <input value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-        {data.groups.map((group) => <SupplierExpansion hidden={!group.supplier.toLowerCase().includes(search.toLowerCase())} snapshotId={data.snapshotId} key={group.supplier} supplier={group.supplier} label={`${group.supplier} · ${group.skuCount} SKUs · ${formatInteger(group.recommendedBottles)} suggested bottles · ${formatCurrency(group.suggestedValue)}`} />)}
-      </section>}
+      {view === "freight" ? <FreightView rows={[]} suppliers={[]} readModel={data.freight} /> : <>
+        <OrderSummaryMetrics metrics={data.metrics} />
+        <section className="panel">
+          <div className="section-heading"><div>
+            <h1>Order Summary</h1>
+            <p>Review supplier totals below, then expand a supplier to work with its wines and approvals.</p>
+          </div></div>
+          <div className="filter-bar">
+            <label className="search-field">Find supplier
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search suppliers" />
+            </label>
+          </div>
+          <SummaryTable groups={data.groups.filter((group) => group.supplier.toLowerCase().includes(search.toLowerCase()))} />
+          {!data.groups.some((group) => group.supplier.toLowerCase().includes(search.toLowerCase())) ? <p className="empty-inline">No suppliers match your search.</p> : null}
+        </section>
+        <section className="supplier-stack" aria-label="Supplier workbenches">
+          {data.groups.map((group) => <SupplierExpansion hidden={!group.supplier.toLowerCase().includes(search.toLowerCase())} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
+        </section>
+      </>}
     </> : null}
   </main>;
 }
 
-function SupplierExpansion({ supplier, label, hidden, snapshotId }: { supplier: string; label: string; hidden: boolean; snapshotId: string }) {
+function SupplierExpansion({ group, hidden, snapshotId }: { group: Omit<SupplierGroup, "rows">; hidden: boolean; snapshotId: string }) {
+  const { supplier } = group;
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<(OrderingPageData & { generatedAt?: string }) | null>(null);
   const [error, setError] = useState("");
@@ -76,8 +91,17 @@ function SupplierExpansion({ supplier, label, hidden, snapshotId }: { supplier: 
       .catch((error) => { if (!controller.signal.aborted) { setError(error.message); setStage(""); } });
     return () => controller.abort();
   }, [open, supplier, retry, snapshotId]);
-  return <details hidden={hidden} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{label}</summary>
+  return <details className="supplier-section ordering-supplier-section" hidden={hidden} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>
+      <div className="ordering-supplier-totals">
+        <span className="supplier-chip">{supplier}</span>
+        <strong>{formatInteger(group.recommendedBottles)} bottles</strong>
+        <span>{formatCurrency(group.suggestedValue)} suggested</span>
+        <span className={group.approvedBottles !== 0 ? "supplier-approved-value" : "supplier-approved-value is-empty"}>{formatCurrency(group.approvedValue)} approved</span>
+        {group.freeGoodProgramCount > 0 ? <span className="free-goods-chip">{formatInteger(group.freeGoodProgramCount)} free-goods</span> : null}
+      </div>
+      <div className="supplier-summary-actions"><span>{formatInteger(group.skuCount)} SKUs</span><span className="ordering-supplier-chevron" aria-hidden="true">⌄</span></div>
+    </summary>
     {stage ? <WineLoadingProgress inline message={stage} /> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
     {data?.generatedAt ? <p>Supplier rows verified {new Date(data.generatedAt).toLocaleString()}; live approvals are merged below.</p> : null}
