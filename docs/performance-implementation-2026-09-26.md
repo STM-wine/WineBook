@@ -1,8 +1,8 @@
 # Loading performance implementation — September 26, 2026
 
-Implemented locally for review; **not deployed and not release-ready**. The new read paths and local verification are in place. The 300–500 ms feedback and production p95 <3 s first-usable targets remain unverified. The two initially failing SQL safety suites are now resolved locally: one stale test was corrected and one audit foreign-key bug was repaired. See [the follow-up investigation](database-safety-investigation-2026-09-26.md).
+Initial implementation evidence is recorded below. The user subsequently authorized a direct production release; see [the production release record](performance-production-release-2026-09-26.md) for deployed commits, follow-up fixes and live verification. The new read paths and local verification are in place. The 300–500 ms feedback and production p95 <3 s first-usable targets remain unverified. The two initially failing SQL safety suites are now resolved locally: one stale test was corrected and one audit foreign-key bug was repaired. See [the follow-up investigation](database-safety-investigation-2026-09-26.md).
 
-Existing uncommitted sync-warning/sales-cutoff changes were preserved, including their move from `page.tsx` to `ordering-page-data.ts`. Existing audit, handoff, chart, and output artifacts were not changed. No production database writes or deployments were performed. Source probes were read-only; migration and mutation tests used disposable local PostgreSQL databases.
+Existing uncommitted sync-warning/sales-cutoff changes were preserved, including their move from `page.tsx` to `ordering-page-data.ts`. Existing audit, handoff, chart, and output artifacts were not changed. During the initial implementation phase, source probes were read-only and migration/mutation tests used disposable local PostgreSQL databases. Subsequent authorized production activity is recorded separately.
 
 ## Review stages
 
@@ -56,7 +56,7 @@ Additional local PostgreSQL 14 measurements used the 8,882-record product snapsh
 | Complete default counts | 165.73 ms | 171.03 ms | 1,576 |
 | Search for GRW | 42.74 ms | 45.20 ms | 112,223 |
 
-Local probe files are ignored under `tmp/performance/`; they can contain business records and are not part of the review artifact. Aggregate measurements are recorded above. Reproduce source probes with `npm --prefix apps/web run performance:probe` or append `-- --margins`; these read configured sources but do not publish snapshots. The worker refresh command **does write** to its configured database and was not run against the remote environment.
+Local probe files are ignored under `tmp/performance/`; they can contain business records and are not part of the review artifact. Aggregate measurements are recorded above. Reproduce source probes with `npm --prefix apps/web run performance:probe` or append `-- --margins`; these read configured sources but do not publish snapshots. The worker refresh command **does write** to its configured database. Its later production execution is documented in the release record.
 
 Set `NEXT_PUBLIC_PERFORMANCE_DIAGNOSTICS=true` for a staging production build to capture `winebook:*` marks, navigation and supported browser long-task entries in `window.winebookPerformance` (bounded to 500 entries; no network telemetry). Home/Product/ordering usable marks and loader-visible marks support paired interaction measurements. No browser long-task or paint results were collected in this implementation run. DOM tests verify behavior, not real elapsed performance.
 
@@ -83,7 +83,7 @@ Those were the initial results. The subsequent investigation found that the PO a
 
 ## Migrations and deployment order
 
-Prepared only; no deployment was executed.
+Original staging proposal, subsequently superseded by the user’s explicit instruction to commit, push to main and deploy directly. The final production sequence and extra batch-publication migration are in the release record.
 
 1. Review the standalone audit-retention repair and the corrected/expanded safety tests, then rehearse in staging with representative data. Local repaired/current SQL suites now pass.
 2. Apply these expand-only migrations in timestamp order:
@@ -105,8 +105,8 @@ Rollback web to the prior compatible build and stop the new worker if needed. Le
 - Ordering dependency epochs include approval/workbench changes. Sustained buyer activity can invalidate an in-flight ordering generation repeatedly, delaying fresh totals. Source correctness is favored over publishing a mismatched result. This is an explicit load-test risk; partitioning calculation dependencies is a likely next optimization if measured contention is material.
 - Source invalidation is broad and synchronous per SQL statement. Large syncs may serialize on epoch rows and obsolete intermediate work. Lock/write overhead has not been load-tested.
 - Product predicates/numeric sorts/counts still inspect JSON records; late offsets are slower. The local samples quantify this for the current dataset, not larger deployments. Typed indexed columns/keyset pagination may be needed at larger scale.
-- Margin worker calculation still reads the full matching inputs, and finalized ranges are recalculated on a new generation. Historical rollup optimization remains available for future work, but correctness parity must precede changing that path.
+- The deployed margin worker retains the existing finalized daily rollups and calculates only recent inputs. It still performs repeated stored-rollup reads for representative/account scopes; cold YTD preparation can take substantially longer than MTD. The release record documents real-source historical and mixed-range parity.
 - Expanded supplier rows retain calculation/identity safeguards and some bulky diagnostics. Many simultaneous expansions increase browser work and run-scoped subscription fan-out. Supplier Hub loads one complete supplier catalog, not an arbitrarily capped page. These need actual browser profiling.
 - Full exports are complete but assembled in server memory. Larger workbooks can exceed hosting memory/time budgets; no streaming-export performance claim is made.
 - Explicit report regeneration and inactive-wine restoration retain intentional refreshes. Ordinary approval/audit/PO/catalog realtime events no longer invoke the full page loader.
-- Local verification did not include authenticated production browser timings, real Realtime delivery, two separate buyer browser sessions, successful live Vinosmith ordering verification, or a deployed worker. The local token limitation prevented an honest live ordering benchmark. No production p95 or end-to-end multi-buyer sign-off is claimed.
+- Initial local verification did not include authenticated production browser timings, real Realtime delivery, two separate buyer browser sessions, successful live Vinosmith ordering verification, or a deployed worker. Later release checks are recorded separately. No production p95 or end-to-end multi-buyer sign-off is claimed.
