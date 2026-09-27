@@ -160,7 +160,6 @@ function SupplierExpansion({ group, filters, snapshotId, unavailable }: { group:
     </summary>
     {stage ? <WineLoadingProgress inline message={stage} /> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
-    {data?.generatedAt ? <p>Supplier rows verified {new Date(data.generatedAt).toLocaleString()}; live approvals are merged below.</p> : null}
     {data?.latestRun ? <OrderDashboard embedded summaryFilters={filters} reportRun={data.latestRun} recommendations={data.recommendations}
       approvalEvents={data.approvalEvents} approvalCommitments={data.approvalCommitments} auditActorNames={data.auditActorNames}
       poDrafts={[]} suppliers={data.suppliers} supplierCatalogWines={data.supplierCatalogWines}
