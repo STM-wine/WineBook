@@ -78,3 +78,21 @@ Regression tests cover failed-to-ready API recovery, requesting-job timeouts, su
 The lazy-loaded overview had omitted the existing summary UI, leaving plain disclosure rows. Commits `0821f0d` and `28c2f52` restore the original six metric cards, supplier summary table, styled search and supplier cards. The overview and expanded editor share the same metrics/table components. Supplier detail fetching and the loading/retry sequence are unchanged. Approved currency values use a smaller responsive type size to fit their cards.
 
 All 243 tests passed, along with typecheck and the production build. Final web deployment `dep-das9enh7lnhs73870030` is Live at `28c2f52a1ee1101ee1f1da39589e75992b9bd35b`. Authenticated Safari visual checks confirmed the restored cards/table and complete currency value. Searching Illahe filtered the table and supplier cards to one supplier; expanding it displayed loading feedback and then its verified details. No business data was edited.
+
+## Follow-up: publication timeout and blank-screen wait
+
+The next user report reproduced a long blank-screen verification wait. The sanitized deployed-worker logs conclusively identified repeated SQLSTATE 57014 failures at `POST /rest/v1/rpc/publish_ordering_read_model`, after calculation had succeeded. A current snapshot contained about 9.0 MB of supplier JSON. Prior read retries did not fix this publication bottleneck.
+
+Migration `20260926230000_batched_ordering_publication` was applied transactionally with its migration-history record. The worker stages supplier groups in approximately 384 KiB batches (at most 20 suppliers; an oversized supplier is isolated). Final publication verifies the exact supplier identity set against the summary, plus the existing lease, source-version and business-date guards. Staged rows remain private until completion. Tests cover interrupted uploads, duplicate retries, wrong/expired/reclaimed leases, mismatched identities, source invalidation and access control.
+
+The overview API can now return a previous same-day, same-formula summary, at most one hour old, as explicitly stale while polling continues. It preserves the old timestamp and source version. That fallback is read-only: supplier expansion waits for current data, and supplier API requests never receive stale action inputs. Component tests cover the pending-to-ready transition, disabled stale editing and cancellation on navigation. This behavior avoids a blank overview when a new dependency generation is being prepared.
+
+Production verification:
+
+- Three complete builds and publications from this computer succeeded with 86 suppliers / 23 batches each, in 9.595, 9.581 and 8.017 seconds. Publication alone took 6.513, 5.663 and 4.689 seconds. These are background-work samples, not browser p95.
+- Final worker deployment `dep-das9qoojo6nc73arvpe0` and web deployment `dep-das9qsnpn0mc73ffnfkg` are Live at `e74118fdb6170b78cb7567b11c75bf587ae7fb67`.
+- Two requested verification jobs completed on the deployed worker on their first attempts at 04:39:18 and 04:39:28 UTC. Its next normal five-minute job, `active:5968280`, completed on the first attempt at 04:40:17 UTC, source version 272, with no error.
+- Authenticated Safari completed three consecutive overview loads and then expanded Illahe successfully. The UI fallback transition was tested locally; no production source failures were injected.
+- All 250 tests / 44 files, typecheck and production build pass. All 73 migrations and five current local SQL suites pass; the unchanged 65-migration audit-deletion failure remains the expected baseline control.
+
+Source data, approvals and PO contents were not edited. The existing source-verification/fallback warnings remain separate from snapshot publication. Sustained browser p95 and real multi-buyer mutation validation are still not claimed.
