@@ -123,7 +123,7 @@ export function OrderReviewView({
     suppressionReason: ReorderSuppressionReason | null,
     suppressedUntil: string | null
   ) => Promise<void>;
-  canManageMarkers?: boolean;
+  canManageMarkers: boolean;
   approvalEvents: ApprovalEvent[];
   auditActorNames: Record<string, string>;
   isPending: boolean;

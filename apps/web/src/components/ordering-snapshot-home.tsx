@@ -16,7 +16,7 @@ import { OrderDashboard } from "./order-dashboard";
 import { FreightView } from "./freight-view";
 import { unavailableVinosmithExplorerData } from "@/lib/vinosmith-explorer-empty";
 
-export function OrderingSnapshotHome({ view, canViewSettings, initialQuickBooksLastSyncAt, initialVinosmithLastSyncAt }: { view: "order-review" | "freight"; canViewSettings: boolean; initialQuickBooksLastSyncAt?: string | null; initialVinosmithLastSyncAt?: string | null }) {
+export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, initialQuickBooksLastSyncAt, initialVinosmithLastSyncAt }: { view: "order-review" | "freight"; canViewSettings: boolean; canManageMarkers: boolean; initialQuickBooksLastSyncAt?: string | null; initialVinosmithLastSyncAt?: string | null }) {
   const router = useRouter();
   const [data, setData] = useState<OrderingSnapshotSummary | null>(null);
   const [error, setError] = useState("");
@@ -131,14 +131,14 @@ export function OrderingSnapshotHome({ view, canViewSettings, initialQuickBooksL
           {!data.groups.length ? <p className="empty-inline">No wines match these filters.</p> : null}
         </section>
         <section className="supplier-stack" aria-label="Supplier workbenches">
-          {data.groups.map((group) => <SupplierExpansion filters={data.filters || defaultOrderingFilters} unavailable={Boolean(data.isStale)} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
+          {data.groups.map((group) => <SupplierExpansion canManageMarkers={canManageMarkers} filters={data.filters || defaultOrderingFilters} unavailable={Boolean(data.isStale)} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
         </section>
       </>}
     </> : null}
   </main>;
 }
 
-function SupplierExpansion({ group, filters, snapshotId, unavailable }: { group: Omit<SupplierGroup, "rows">; filters: OrderingSummaryFilters; snapshotId: string; unavailable: boolean }) {
+function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageMarkers }: { group: Omit<SupplierGroup, "rows">; filters: OrderingSummaryFilters; snapshotId: string; unavailable: boolean; canManageMarkers: boolean }) {
   const { supplier } = group;
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<(OrderingPageData & { generatedAt?: string }) | null>(null);
@@ -167,7 +167,7 @@ function SupplierExpansion({ group, filters, snapshotId, unavailable }: { group:
     </summary>
     {stage ? <WineLoadingProgress inline message={stage} /> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
-    {data?.latestRun ? <OrderDashboard embedded summaryFilters={filters} reportRun={data.latestRun} recommendations={data.recommendations}
+    {data?.latestRun ? <OrderDashboard canManageMarkers={canManageMarkers} embedded summaryFilters={filters} reportRun={data.latestRun} recommendations={data.recommendations}
       approvalEvents={data.approvalEvents} approvalCommitments={data.approvalCommitments} auditActorNames={data.auditActorNames}
       poDrafts={[]} suppliers={data.suppliers} supplierCatalogWines={data.supplierCatalogWines}
       wineRequests={[]} priceChangeEvents={[]} quickBooksSupplierMatches={[]} initialView="order-review"

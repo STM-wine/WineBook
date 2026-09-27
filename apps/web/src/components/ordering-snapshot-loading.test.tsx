@@ -5,7 +5,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { OrderingSnapshotHome } from "./ordering-snapshot-home";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("./app-topbar", () => ({ AppTopbar: ({ qbDataLabel, dataLabel }: { qbDataLabel?: string; dataLabel?: string }) => <nav>Navigation {dataLabel} {qbDataLabel}</nav> }));
-vi.mock("./order-dashboard", () => ({ OrderDashboard: ({ summaryFilters }: { summaryFilters?: { search: string; brandManager: string } }) => <div data-testid="supplier-editor" data-search={summaryFilters?.search} data-tdm={summaryFilters?.brandManager}>Supplier editor</div> }));
+vi.mock("./order-dashboard", () => ({ OrderDashboard: ({ summaryFilters, canManageMarkers }: { canManageMarkers: boolean; summaryFilters?: { search: string; brandManager: string } }) => <div data-testid="supplier-editor" data-can-manage={canManageMarkers} data-search={summaryFilters?.search} data-tdm={summaryFilters?.brandManager}>Supplier editor</div> }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => {
   const channel = { on: () => channel, subscribe: () => channel };
   return { channel: () => channel, removeChannel: vi.fn() };
@@ -23,7 +23,7 @@ beforeEach(async () => {
   vi.useFakeTimers(); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); requests = [];
   vi.stubGlobal("fetch", vi.fn((url: string, init: {signal: AbortSignal}) => new Promise((resolve) => requests.push({url, signal:init.signal,resolve}))));
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-  await act(async () => root.render(<OrderingSnapshotHome view="order-review" canViewSettings={false} initialQuickBooksLastSyncAt="2026-09-26T23:28:45Z" initialVinosmithLastSyncAt="2026-09-27T02:37:00Z" />));
+  await act(async () => root.render(<OrderingSnapshotHome canManageMarkers={true} view="order-review" canViewSettings={false} initialQuickBooksLastSyncAt="2026-09-26T23:28:45Z" initialVinosmithLastSyncAt="2026-09-27T02:37:00Z" />));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("ordering summary during background preparation", () => {
@@ -110,6 +110,7 @@ describe("ordering summary during background preparation", () => {
     await act(async()=>{const details=host.querySelector('details')!;details.open=true;details.dispatchEvent(new Event('toggle'));});
     await respond(2,200,{latestRun:{id:'run'},generatedAt:summary.generatedAt});
     const editor=host.querySelector('[data-testid="supplier-editor"]') as HTMLElement;
+    expect(editor.dataset.canManage).toBe('true');
     expect(editor.dataset.search).toBe('Pinot');expect(editor.dataset.tdm).toBe('ROJO');
     expect(host.querySelectorAll('h1')).toHaveLength(1);
   });

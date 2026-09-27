@@ -56,7 +56,7 @@ const STATUS_FILTERS: Array<{ label: string; value: StatusFilter }> = [
   { label: "Inactive match", value: "inactive_match" }
 ];
 
-export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers?: boolean; previewRows?: Recommendation[] }) {
+export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers: boolean; previewRows?: Recommendation[] }) {
   const [data, setData] = useState<ProductWorkspacePage | null>(null);
   const [counts, setCounts] = useState<ProductWorkspaceCounts | null>(null);
   const [includeInactive, onSetIncludeInactive] = useState(false);

@@ -2,13 +2,14 @@
 import { act, type ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
+import type { Recommendation } from '@/lib/types';
 import { OrderReviewView } from './order-review-view';
-vi.mock('./workbench-grid',()=>({WorkbenchGrid:()=> <div>Wine editing grid</div>}));
+vi.mock('./workbench-grid',()=>({WorkbenchGrid:({onEditReplenishment}:{onEditReplenishment:(row:Recommendation)=>void})=> <div>Wine editing grid<button onClick={()=>onEditReplenishment({id:'wine',product_code:'WINE',product_name:'Wine',replenishment_policy:'Core',recommendations_suppressed:false} as Recommendation)}>Edit policy</button></div>}));
 it('renders a supplier editor directly without a duplicate overview, filters or disclosure',async()=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
   const host=document.createElement('div');const root=createRoot(host);
   const noop=vi.fn();
-  const props={workbenchOnly:true, brandManager:'All',brandManagerOptions:['All'],expandAll:false,search:'',suggestedOnly:false,supplier:'All',supplierSort:'default',
+  const props={canManageMarkers:true,workbenchOnly:true, brandManager:'All',brandManagerOptions:['All'],expandAll:false,search:'',suggestedOnly:false,supplier:'All',supplierSort:'default',
     replenishmentPolicyFilter:'All',supplierOptions:['All'], supplierCatalogWines:[],salesReferenceDate:'2026-09-26',supplierTargetWeeks:{},globalTargetWeeks:'',visibleCount:1,
     approvalEvents:[],auditActorNames:{},isPending:false,isCatalogSaving:false,deletingCatalogWineId:null,
     metrics:{urgent:0,low:0,recommendedBottles:12,approvedBottles:0,poValue:0,supplierCount:1},
@@ -23,5 +24,13 @@ it('renders a supplier editor directly without a duplicate overview, filters or 
   expect(host.textContent).not.toContain('Order Summary');
   expect(host.textContent).toContain('Wine editing grid');
   expect(host.textContent).toContain('Target weeks');
+  await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent==='Edit policy')!.click());
+  const dialog=host.querySelector('[role="dialog"]')!;
+  expect((dialog.querySelector('select') as HTMLSelectElement).disabled).toBe(false);
+  expect((dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(false);
+  expect(dialog.textContent).not.toContain('You do not have permission');
+  await act(async()=>root.render(<OrderReviewView {...props} canManageMarkers={false}/>));
+  expect((dialog.querySelector('select') as HTMLSelectElement).disabled).toBe(true);
+  expect((dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(true);
   await act(async()=>root.unmount());
 });

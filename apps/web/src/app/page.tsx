@@ -1,3 +1,4 @@
+import { canManageOrderingMarkers } from "@/lib/ordering-marker-access";
 import { OrderingSnapshotHome } from "@/components/ordering-snapshot-home";
 import { fetchLastCompletedQuickBooksUpload } from "@/lib/supabase/quickbooks-upload";
 import { OrderDashboard } from "@/components/order-dashboard";
@@ -27,6 +28,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     return <AccountPending email={context.pendingEmail} />;
   }
   const { permissions } = context;
+  const canManageMarkers = canManageOrderingMarkers(context.profile.role, permissions.map((permission) => ({ permission })));
   const params = await searchParams;
   const requestedView = singleParam(params.view);
   const initialView: ActiveView = isActiveView(requestedView) ? requestedView : DEFAULT_VIEW;
@@ -43,7 +45,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   }
 
   if (initialView === "product-workspace") {
-    return <ProductWorkspaceHome canViewSettings={hasPermission(permissions, "view_settings")} />;
+    return <ProductWorkspaceHome canManageMarkers={canManageMarkers} canViewSettings={hasPermission(permissions, "view_settings")} />;
   }
 
   if (initialView === "order-review" || initialView === "freight") {
@@ -52,15 +54,15 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       fetchLastCompletedQuickBooksUpload(db).catch(() => null),
       fetchLatestVinosmithPullAt(db)
     ]);
-    return <OrderingSnapshotHome view={initialView} initialQuickBooksLastSyncAt={quickBooksLastSyncAt} initialVinosmithLastSyncAt={vinosmithLastSyncAt} canViewSettings={hasPermission(permissions, "view_settings")} />;
+    return <OrderingSnapshotHome canManageMarkers={canManageMarkers} view={initialView} initialQuickBooksLastSyncAt={quickBooksLastSyncAt} initialVinosmithLastSyncAt={vinosmithLastSyncAt} canViewSettings={hasPermission(permissions, "view_settings")} />;
   }
 
   return <Suspense fallback={<main className="app-shell"><AppTopbar activeView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} /><SectionLoading title={initialView === "po-drafts" ? "PO Drafts" : initialView === "supplier-hub" ? "Supplier Hub" : "Ordering"} message="Loading this workspace" /></main>}>
-    <OrderingScreen initialView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} />
+    <OrderingScreen canManageMarkers={canManageMarkers} initialView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} />
   </Suspense>;
 }
 
-async function OrderingScreen({ initialView, canViewSettings }: { initialView: ActiveView; canViewSettings: boolean }) {
+async function OrderingScreen({ initialView, canViewSettings, canManageMarkers }: { initialView: ActiveView; canViewSettings: boolean; canManageMarkers: boolean }) {
   const data = await loadOrderingPageData(initialView, createServiceRoleClient());
   const latestRun = data.latestRun;
 
@@ -83,6 +85,7 @@ async function OrderingScreen({ initialView, canViewSettings }: { initialView: A
 
   return (
     <OrderDashboard
+      canManageMarkers={canManageMarkers}
       reportRun={latestRun}
       recommendations={data.recommendations}
       approvalEvents={data.approvalEvents}

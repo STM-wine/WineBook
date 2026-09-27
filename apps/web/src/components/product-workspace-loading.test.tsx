@@ -32,7 +32,7 @@ beforeEach(async () => {
     return new Promise((resolve) => requests.push({ url: String(url), resolve, signal: init.signal }));
   }));
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-  await act(async () => { root.render(<ProductWorkspaceView />); }); await tick();
+  await act(async () => { root.render(<ProductWorkspaceView canManageMarkers={false} />); }); await tick();
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("Product Workspace loading", () => {

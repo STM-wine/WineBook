@@ -43,17 +43,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Account is not enabled." }, { status: 403 });
   }
 
-  const { data: permissionRows, error: permissionError } = await authSupabase
-    .from("app_profile_permissions")
-    .select("permission")
-    .eq("profile_id", user.id)
-    .returns<OrderingMarkerPermissionRow[]>();
+  // Buyer/admin marker access is intrinsic to the role, independent of optional
+  // settings grants (and of whether that optional lookup is available).
+  if (!canManageOrderingMarkers(profile.role, [])) {
+    const { data: permissionRows, error: permissionError } = await authSupabase
+      .from("app_profile_permissions")
+      .select("permission")
+      .eq("profile_id", user.id)
+      .returns<OrderingMarkerPermissionRow[]>();
 
-  if (permissionError) {
-    return NextResponse.json({ error: permissionError.message }, { status: 500 });
-  }
-  if (!canManageOrderingMarkers(profile.role, permissionRows || [])) {
-    return NextResponse.json({ error: "You do not have permission to update ordering markers." }, { status: 403 });
+    if (permissionError) {
+      return NextResponse.json({ error: permissionError.message }, { status: 500 });
+    }
+    if (!canManageOrderingMarkers(profile.role, permissionRows || [])) {
+      return NextResponse.json({ error: "You do not have permission to update ordering markers." }, { status: 403 });
+    }
   }
 
   const body = await request.json().catch(() => null) as MarkerRequestBody | null;

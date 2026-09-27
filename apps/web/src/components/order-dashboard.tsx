@@ -109,6 +109,7 @@ type Props = {
   orderingDataWarning?: string | null;
   salesReferenceDate: string | null;
   canViewSettings?: boolean;
+  canManageMarkers: boolean;
 };
 
 type ApprovalQueueItem = {
@@ -170,6 +171,7 @@ export function OrderDashboard({
   orderingDataWarning,
   salesReferenceDate,
   canViewSettings,
+  canManageMarkers,
   embedded = false,
   summaryFilters
 }: Props) {
@@ -1129,7 +1131,7 @@ export function OrderDashboard({
 
       {isRefreshingShared ? <WineLoadingProgress inline message="Refreshing shared draft summaries" /> : null}
       {activeView === "product-workspace" ? (
-        <ProductWorkspaceView canManageMarkers={canViewSettings} previewRows={displayRows} />
+        <ProductWorkspaceView canManageMarkers={canManageMarkers} previewRows={displayRows} />
       ) : null}
 
       {activeView === "order-review" ? (
@@ -1169,7 +1171,7 @@ export function OrderDashboard({
           onDeleteCatalogWine={deleteCatalogWine}
           onAddWine={openSupplierAddWine}
           onSaveReplenishmentPolicy={saveReplenishmentPolicy}
-          canManageMarkers={canViewSettings}
+          canManageMarkers={canManageMarkers}
           isPending={isPending}
           isCatalogSaving={catalogMutation?.kind === "saving"}
           deletingCatalogWineId={catalogMutation?.kind === "deleting" ? catalogMutation.wineId : null}
