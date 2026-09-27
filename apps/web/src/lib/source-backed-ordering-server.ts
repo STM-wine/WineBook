@@ -29,6 +29,7 @@ import {
 import { applyCompletedQuickBooksOnOrderSnapshot } from "./quickbooks-on-order-snapshot";
 import {
   assertCurrentOrderingDiagnostics,
+  orderingSalesReferenceDate,
   orderingBusinessDate
 } from "./ordering-freshness";
 import {
@@ -137,7 +138,6 @@ export async function fetchCurrentOrderingOverlay(
     verifiedReferenceDate?: string | null;
   } = {}
 ) {
-  const referenceDate = orderingBusinessDate(options.now);
   const syncState = await fetchQuickBooksSyncState(supabase, options.now);
   if (syncState.latest?.status !== "completed" && !syncState.latestNonMaterialFailure) {
     if (
@@ -166,6 +166,8 @@ export async function fetchCurrentOrderingOverlay(
   if (!quickBooksAsOf) {
     throw new Error("The latest QuickBooks Web Connector refresh has no completed timestamp.");
   }
+  const referenceDate = orderingSalesReferenceDate(quickBooksAsOf);
+  const businessDate = orderingBusinessDate(options.now);
   if (options.liveAvailability === null) throw new Error("The background inventory verification failed. Retry source refresh before using current recommendations.");
   const availability = options.liveAvailability || await fetchLiveVinosmithAvailability();
   const reportRunIds = Array.from(new Set(recommendations.map((row) => row.report_run_id).filter(Boolean)));
@@ -239,7 +241,7 @@ export async function fetchCurrentOrderingOverlay(
     return Boolean(code && listId && activeItemListIds.has(listId));
   });
   const currentRecommendations = applyCurrentVintageSafeguards(
-    applyCurrentOrderingPolicies(activeRecommendations, markers, referenceDate)
+    applyCurrentOrderingPolicies(activeRecommendations, markers, businessDate)
   );
   const rows = currentRecommendations.map((row) => {
     const code = normalizeOrderingItemCode(row.product_code);
@@ -270,7 +272,7 @@ export async function fetchCurrentOrderingOverlay(
       quickBooksItemAsOf: quickBooksAsOf,
       vinosmithAvailableAsOf: availability.snapshotAt,
       supplier: refreshSupplier
-    }, configuration.values, referenceDate);
+    }, configuration.values, businessDate);
   });
   const quickBooksFreshnessHours = ageHours(quickBooksAsOf);
   const diagnostics = {

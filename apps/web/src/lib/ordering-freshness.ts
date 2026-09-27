@@ -16,6 +16,24 @@ export function orderingBusinessDate(value = new Date()) {
   return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
 }
 
+// Sales windows follow the last completed upload, including weekends and days
+// when Web Connector has not run. Wall-clock age is informational, not a gate.
+export function orderingSalesReferenceDate(completedAt: string | null | undefined) {
+  const date = new Date(completedAt || "");
+  if (!completedAt || Number.isNaN(date.getTime())) {
+    throw new Error("QuickBooks has no valid completed-upload timestamp.");
+  }
+  return orderingBusinessDate(date);
+}
+
+export function quickBooksUploadLabel(completedAt: string | null | undefined) {
+  if (!completedAt || Number.isNaN(Date.parse(completedAt))) return "QB upload unavailable";
+  return `QB Updated ${new Intl.DateTimeFormat("en-US", {
+    timeZone: ORDERING_TIMEZONE, month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit"
+  }).format(new Date(completedAt))}`;
+}
+
 export function assertCurrentOrderingDiagnostics(
   diagnostics: OrderingFreshnessDiagnostics,
   expectedReferenceDate: string

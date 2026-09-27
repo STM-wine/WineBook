@@ -1,5 +1,6 @@
 "use client";
 import { flushAllApprovals } from "@/lib/approval-navigation";
+import { quickBooksUploadLabel } from "@/lib/ordering-freshness";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useRef, useState } from "react";
@@ -15,7 +16,7 @@ import { OrderDashboard } from "./order-dashboard";
 import { FreightView } from "./freight-view";
 import { unavailableVinosmithExplorerData } from "@/lib/vinosmith-explorer-empty";
 
-export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-review" | "freight"; canViewSettings: boolean }) {
+export function OrderingSnapshotHome({ view, canViewSettings, initialQuickBooksLastSyncAt }: { view: "order-review" | "freight"; canViewSettings: boolean; initialQuickBooksLastSyncAt?: string | null }) {
   const router = useRouter();
   const [data, setData] = useState<OrderingSnapshotSummary | null>(null);
   const [error, setError] = useState("");
@@ -93,7 +94,10 @@ export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-r
     finally { setCreatingDrafts(false); }
   }
   return <main className="app-shell">
-    <AppTopbar activeView={view} canViewSettings={canViewSettings} onSelectView={(next) => {
+    <AppTopbar activeView={view} canViewSettings={canViewSettings}
+      qbDataLabel={quickBooksUploadLabel(data?.quickBooksLastSyncAt || initialQuickBooksLastSyncAt)}
+      qbDataTitle="Last completed QuickBooks Web Connector upload (Arizona time). Sales calculations use this upload's date."
+      onSelectView={(next) => {
       void flushAllApprovals().then(() => router.push(next === "company-dashboard" ? "/" : `/?view=${next}`, { scroll: false })).catch((error) => setError(error.message));
     }} />
     {!data ? <h1>{view === "freight" ? "Freight" : "Order Summary"}</h1> : null}
@@ -101,7 +105,7 @@ export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-r
     {stage ? <WineLoadingProgress inline message={stage} detail="Navigation remains available. Source checks run in the shared worker." /> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
     {data ? <>
-      <div className="ordering-snapshot-status"><span>Verified {new Date(data.generatedAt).toLocaleString()} · sales through {data.salesReferenceDate}</span><button className="ghost-button" onClick={() => setRetry((n) => n + 1)}>Refresh summaries</button></div>
+      <div className="ordering-snapshot-status"><button className="ghost-button" onClick={() => setRetry((n) => n + 1)}>Refresh summaries</button></div>
       {data.warning ? <p role="status">{data.warning}</p> : null}
       {view === "freight" ? <FreightView rows={[]} suppliers={[]} readModel={data.freight} /> : <>
         <OrderSummaryMetrics metrics={data.metrics} />

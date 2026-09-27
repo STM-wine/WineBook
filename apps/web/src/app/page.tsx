@@ -1,4 +1,5 @@
 import { OrderingSnapshotHome } from "@/components/ordering-snapshot-home";
+import { fetchLastCompletedQuickBooksUpload } from "@/lib/supabase/quickbooks-upload";
 import { OrderDashboard } from "@/components/order-dashboard";
 import { Suspense } from "react";
 import { AppTopbar } from "@/components/app-topbar";
@@ -46,7 +47,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   }
 
   if (initialView === "order-review" || initialView === "freight") {
-    return <OrderingSnapshotHome view={initialView} canViewSettings={hasPermission(permissions, "view_settings")} />;
+    const quickBooksLastSyncAt = await fetchLastCompletedQuickBooksUpload(createServiceRoleClient()).catch(() => null);
+    return <OrderingSnapshotHome view={initialView} initialQuickBooksLastSyncAt={quickBooksLastSyncAt} canViewSettings={hasPermission(permissions, "view_settings")} />;
   }
 
   return <Suspense fallback={<main className="app-shell"><AppTopbar activeView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} /><SectionLoading title={initialView === "po-drafts" ? "PO Drafts" : initialView === "supplier-hub" ? "Supplier Hub" : "Ordering"} message="Loading this workspace" /></main>}>

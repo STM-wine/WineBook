@@ -1,4 +1,5 @@
 import "server-only";
+import { fetchLastCompletedQuickBooksUpload } from "./supabase/quickbooks-upload";
 import { fetchSupplierHubData } from "./supplier-hub-reads";
 import type { ActiveView } from "@/components/dashboard-types";
 import { fetchDraftSummaries } from "./ordering-draft-reads";
@@ -95,33 +96,7 @@ export async function loadOrderingPageData(view: ActiveView, serviceRoleSupabase
   const wineRequestsPromise = hubDataPromise.then((data) => ({ data: data.requests }));
   const priceChangeEventsPromise = hubDataPromise.then((data) => ({ data: data.priceChanges }));
 
-  const quickBooksLastSyncPromise = (async () => {
-    try {
-      const { data: completedRun, error: runError } = await serviceRoleSupabase
-        .from("source_sync_runs")
-        .select("completed_at")
-        .eq("source_system", "quickbooks_desktop")
-        .eq("worker_name", "quickbooks_web_connector")
-        .eq("status", "completed")
-        .order("completed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle<{ completed_at: string | null }>();
-      if (!runError && completedRun?.completed_at) return completedRun.completed_at;
-
-      const { data, error } = await serviceRoleSupabase
-        .from("source_api_responses")
-        .select("fetched_at")
-        .eq("source_system", "quickbooks_desktop")
-        .in("endpoint", ["InvoiceQueryRq", "CreditMemoQueryRq"])
-        .order("fetched_at", { ascending: false })
-        .limit(1)
-        .maybeSingle<{ fetched_at: string | null }>();
-      if (error) return null;
-      return data?.fetched_at || null;
-    } catch {
-      return null;
-    }
-  })();
+  const quickBooksLastSyncPromise = fetchLastCompletedQuickBooksUpload(serviceRoleSupabase).catch(() => null);
   const quickBooksSyncWarningPromise = (async () => {
     try {
       const { data, error } = await serviceRoleSupabase
