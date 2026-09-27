@@ -83,7 +83,7 @@ export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-r
           <div className="section-heading"><div>
             <h1>Order Summary</h1>
             <p>Review supplier totals below, then expand a supplier to work with its wines and approvals.</p>
-          </div><button className="primary-button" disabled={creatingDrafts || Boolean(data.isStale)} onClick={() => void createDrafts()}>{creatingDrafts ? "Creating PO drafts..." : "Create PO Drafts"}</button></div>
+          </div><button className="button" disabled={creatingDrafts || Boolean(data.isStale)} onClick={() => void createDrafts()}>{creatingDrafts ? "Creating PO drafts..." : "Create PO Drafts"}</button></div>
           <div className="filter-bar">
             <label>Supplier<select value={filters.supplier} onChange={(event) => setFilters({ ...filters, supplier: event.target.value })}>
               <option>All</option>{data.filterOptions?.suppliers.map((supplier) => <option key={supplier}>{supplier}</option>)}
