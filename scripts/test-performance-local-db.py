@@ -74,7 +74,7 @@ with tempfile.TemporaryDirectory(prefix="winebook-performance-pg-") as directory
             if name == "repair_only":
                 repair_sql = (ROOT / "supabase/migrations/20260926200000_preserve_deleted_catalog_price_audit.sql").read_text()
                 results["repair_only_reapply_audit_fix"] = sql(name, repair_sql, f"{name}-schema.log")
-            for test in ("multi_buyer_safety", "add_wine_pricing_integrity", "performance_read_models", "performance_po_reads"):
+            for test in ("multi_buyer_safety", "add_wine_pricing_integrity", "performance_read_models", "performance_po_reads", "performance_ordering_publication"):
                 if name != "current" and test.startswith("performance_"):
                     continue
                 logfile = f"{name}-{test}.log"

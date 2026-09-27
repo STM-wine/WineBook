@@ -31,4 +31,4 @@ export async function buildOrderingSnapshot(db: SupabaseClient) {
     suppliers
   };
 }
-export type OrderingSnapshotSummary = Awaited<ReturnType<typeof buildOrderingSnapshot>>["result"] & { snapshotId: string };
+export type OrderingSnapshotSummary = Awaited<ReturnType<typeof buildOrderingSnapshot>>["result"] & { snapshotId: string; isStale?: boolean };

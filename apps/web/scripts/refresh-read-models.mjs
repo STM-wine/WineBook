@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { loadEnvironment, loadServerModule } from './read-model-runtime.mjs';
 import { limitConcurrentFetch } from './limited-fetch.mjs';
 import { retryDatabaseReads } from './retry-database-reads.mjs';
+import { publishOrderingSnapshot } from './publish-ordering-snapshot.mjs';
 await loadEnvironment();
 const supabase = createClient(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: limitConcurrentFetch(retryDatabaseReads(fetch), 2) } });
@@ -43,10 +44,7 @@ async function drain() {
       }
       if (job.kind === 'ordering') {
         const snapshot = await buildOrderingSnapshot(supabase);
-        const { data: published, error } = await supabase.rpc('publish_ordering_read_model', {
-          p_id: job.id, p_token: job.lease_token, p_result: snapshot.result, p_suppliers: snapshot.suppliers
-        });
-        if (error) throw new Error(error.message);
+        const published = await publishOrderingSnapshot(supabase, job, snapshot);
         console.log(JSON.stringify({ kind: job.kind, published, durationMs: Math.round(performance.now() - start) }));
         continue;
       }
