@@ -10,7 +10,7 @@ import { DEFAULT_VIEW, isActiveView, type ActiveView } from "@/components/dashbo
 import { refreshOrderingDataFromForm } from "@/app/actions";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { fetchCompanyDashboardData, unavailableCompanyDashboardData } from "@/lib/company-dashboard-data";
-import { loadOrderingPageData } from "@/lib/ordering-page-data";
+import { fetchLatestVinosmithPullAt, loadOrderingPageData } from "@/lib/ordering-page-data";
 import { unavailableVinosmithExplorerData } from "@/lib/supabase/vinosmith-explorer";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
@@ -47,8 +47,12 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   }
 
   if (initialView === "order-review" || initialView === "freight") {
-    const quickBooksLastSyncAt = await fetchLastCompletedQuickBooksUpload(createServiceRoleClient()).catch(() => null);
-    return <OrderingSnapshotHome view={initialView} initialQuickBooksLastSyncAt={quickBooksLastSyncAt} canViewSettings={hasPermission(permissions, "view_settings")} />;
+    const db = createServiceRoleClient();
+    const [quickBooksLastSyncAt, vinosmithLastSyncAt] = await Promise.all([
+      fetchLastCompletedQuickBooksUpload(db).catch(() => null),
+      fetchLatestVinosmithPullAt(db)
+    ]);
+    return <OrderingSnapshotHome view={initialView} initialQuickBooksLastSyncAt={quickBooksLastSyncAt} initialVinosmithLastSyncAt={vinosmithLastSyncAt} canViewSettings={hasPermission(permissions, "view_settings")} />;
   }
 
   return <Suspense fallback={<main className="app-shell"><AppTopbar activeView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} /><SectionLoading title={initialView === "po-drafts" ? "PO Drafts" : initialView === "supplier-hub" ? "Supplier Hub" : "Ordering"} message="Loading this workspace" /></main>}>

@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { OrderingSnapshotHome } from "./ordering-snapshot-home";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("./app-topbar", () => ({ AppTopbar: ({ qbDataLabel }: { qbDataLabel?: string }) => <nav>Navigation {qbDataLabel}</nav> }));
+vi.mock("./app-topbar", () => ({ AppTopbar: ({ qbDataLabel, dataLabel }: { qbDataLabel?: string; dataLabel?: string }) => <nav>Navigation {dataLabel} {qbDataLabel}</nav> }));
 vi.mock("./order-dashboard", () => ({ OrderDashboard: ({ summaryFilters }: { summaryFilters?: { search: string; brandManager: string } }) => <div data-testid="supplier-editor" data-search={summaryFilters?.search} data-tdm={summaryFilters?.brandManager}>Supplier editor</div> }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => {
   const channel = { on: () => channel, subscribe: () => channel };
@@ -23,17 +23,20 @@ beforeEach(async () => {
   vi.useFakeTimers(); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); requests = [];
   vi.stubGlobal("fetch", vi.fn((url: string, init: {signal: AbortSignal}) => new Promise((resolve) => requests.push({url, signal:init.signal,resolve}))));
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
-  await act(async () => root.render(<OrderingSnapshotHome view="order-review" canViewSettings={false} initialQuickBooksLastSyncAt="2026-09-26T23:28:45Z" />));
+  await act(async () => root.render(<OrderingSnapshotHome view="order-review" canViewSettings={false} initialQuickBooksLastSyncAt="2026-09-26T23:28:45Z" initialVinosmithLastSyncAt="2026-09-27T02:37:00Z" />));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("ordering summary during background preparation", () => {
   it("shows the completed upload in the toolbar while loading, after errors, and after a new snapshot", async () => {
     expect(host.querySelector('nav')?.textContent).toContain("QB Updated Sep 26, 2026, 4:28 PM");
+    expect(host.querySelector('nav')?.textContent).toContain("Vinosmith Updated Sep 26, 2026, 7:37 PM");
     await respond(0,503,{error:"Temporarily unavailable"});
     expect(host.querySelector('nav')?.textContent).toContain("QB Updated Sep 26, 2026, 4:28 PM");
+    expect(host.querySelector('nav')?.textContent).toContain("Vinosmith Updated Sep 26, 2026, 7:37 PM");
     await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Retry')!.click());
-    await respond(1,200,{...summary,isStale:false,quickBooksLastSyncAt:"2026-09-28T23:00:00Z"});
+    await respond(1,200,{...summary,isStale:false,quickBooksLastSyncAt:"2026-09-28T23:00:00Z",vinosmithLastSyncAt:"2026-09-28T23:15:00Z"});
     expect(host.querySelector('nav')?.textContent).toContain("QB Updated Sep 28, 2026, 4:00 PM");
+    expect(host.querySelector('nav')?.textContent).toContain("Vinosmith Updated Sep 28, 2026, 4:15 PM");
     expect(host.textContent).not.toContain("sales through");
   });
   it("rechecks a loaded warning and clears it only after a verified replacement arrives", async () => {

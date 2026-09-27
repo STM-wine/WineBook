@@ -1,6 +1,6 @@
 "use client";
 import { flushAllApprovals } from "@/lib/approval-navigation";
-import { quickBooksUploadLabel } from "@/lib/ordering-freshness";
+import { quickBooksUploadLabel, vinosmithUpdateLabel } from "@/lib/ordering-freshness";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useRef, useState } from "react";
@@ -16,7 +16,7 @@ import { OrderDashboard } from "./order-dashboard";
 import { FreightView } from "./freight-view";
 import { unavailableVinosmithExplorerData } from "@/lib/vinosmith-explorer-empty";
 
-export function OrderingSnapshotHome({ view, canViewSettings, initialQuickBooksLastSyncAt }: { view: "order-review" | "freight"; canViewSettings: boolean; initialQuickBooksLastSyncAt?: string | null }) {
+export function OrderingSnapshotHome({ view, canViewSettings, initialQuickBooksLastSyncAt, initialVinosmithLastSyncAt }: { view: "order-review" | "freight"; canViewSettings: boolean; initialQuickBooksLastSyncAt?: string | null; initialVinosmithLastSyncAt?: string | null }) {
   const router = useRouter();
   const [data, setData] = useState<OrderingSnapshotSummary | null>(null);
   const [error, setError] = useState("");
@@ -95,6 +95,9 @@ export function OrderingSnapshotHome({ view, canViewSettings, initialQuickBooksL
   }
   return <main className="app-shell">
     <AppTopbar activeView={view} canViewSettings={canViewSettings}
+      dataLabel={vinosmithUpdateLabel(data?.vinosmithLastSyncAt || initialVinosmithLastSyncAt)}
+      dataTitle="Last Vinosmith update used by this view (Arizona time)."
+      dataHref="/settings/data-sync"
       qbDataLabel={quickBooksUploadLabel(data?.quickBooksLastSyncAt || initialQuickBooksLastSyncAt)}
       qbDataTitle="Last completed QuickBooks Web Connector upload (Arizona time). Sales calculations use this upload's date."
       onSelectView={(next) => {

@@ -337,7 +337,7 @@ function singleParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] || null : value || null;
 }
 
-async function fetchLatestVinosmithPullAt(supabase: SupabaseClient) {
+export async function fetchLatestVinosmithPullAt(supabase: SupabaseClient) {
   try {
     const { data: latestRun, error: runError } = await supabase
       .from("source_sync_runs")

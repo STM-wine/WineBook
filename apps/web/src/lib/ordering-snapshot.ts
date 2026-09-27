@@ -29,7 +29,8 @@ export async function buildOrderingSnapshot(db: SupabaseClient) {
     result: { searchIndex: buildOrderingSearchIndex(display), groups: groups.map(({ rows, ...summary }) => summary), metrics: buildMetrics(display),
       freight: buildFreightReadModel(display, data.suppliers), reportRun: data.latestRun,
       warning: data.orderingDataWarning, salesReferenceDate: data.salesReferenceDate,
-      quickBooksLastSyncAt: data.quickBooksLastSyncAt, generatedAt: new Date().toISOString() },
+      quickBooksLastSyncAt: data.quickBooksLastSyncAt, vinosmithLastSyncAt: data.vinosmithLastSyncAt,
+      generatedAt: new Date().toISOString() },
     suppliers
   };
 }

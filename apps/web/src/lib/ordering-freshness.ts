@@ -27,11 +27,21 @@ export function orderingSalesReferenceDate(completedAt: string | null | undefine
 }
 
 export function quickBooksUploadLabel(completedAt: string | null | undefined) {
-  if (!completedAt || Number.isNaN(Date.parse(completedAt))) return "QB upload unavailable";
-  return `QB Updated ${new Intl.DateTimeFormat("en-US", {
+  const formatted = formatOrderingSourceUpdatedAt(completedAt);
+  return formatted ? `QB Updated ${formatted}` : "QB upload unavailable";
+}
+
+export function vinosmithUpdateLabel(updatedAt: string | null | undefined) {
+  const formatted = formatOrderingSourceUpdatedAt(updatedAt);
+  return formatted ? `Vinosmith Updated ${formatted}` : "Vinosmith update unavailable";
+}
+
+function formatOrderingSourceUpdatedAt(value: string | null | undefined) {
+  if (!value || Number.isNaN(Date.parse(value))) return null;
+  return new Intl.DateTimeFormat("en-US", {
     timeZone: ORDERING_TIMEZONE, month: "short", day: "numeric", year: "numeric",
     hour: "numeric", minute: "2-digit"
-  }).format(new Date(completedAt))}`;
+  }).format(new Date(value));
 }
 
 export function assertCurrentOrderingDiagnostics(
