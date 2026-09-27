@@ -4021,6 +4021,10 @@ th:nth-child(12) .table-sort-button {
   margin-bottom: 18px;
 }
 
+.order-summary-metrics > .tone-plum strong {
+  font-size: clamp(20px, 2vw, 32px);
+}
+
 .ordering-supplier-section > summary {
   gap: 18px;
   min-height: 44px;

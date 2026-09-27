@@ -6,7 +6,7 @@ import { MetricCard } from "./metric-card";
 
 export function OrderSummaryMetrics({ metrics }: { metrics: DashboardMetrics }) {
   return (
-    <section className="metric-grid">
+    <section className="metric-grid order-summary-metrics">
       <MetricCard label="Urgent" value={formatInteger(metrics.urgent)} detail="SKUs need action" tone="red" />
       <MetricCard label="Low" value={formatInteger(metrics.low)} detail="Below target" tone="gold" />
       <MetricCard label="Recommended" value={formatInteger(metrics.recommendedBottles)} detail="Bottles" tone="green" />
