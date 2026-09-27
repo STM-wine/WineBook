@@ -28,7 +28,7 @@ The corrected calculation worker went Live at `541502e` (`dep-das81lt9fdbs73c8t9
 
 Ordering refreshes continued to hit SQL statement timeouts after the concurrent source sync ended. Instrumented reads identified the QuickBooks sales-window RPC and item reads timing out during a burst of parallel requests; the same queries succeeded individually. Commit `0c92e9d` bounds worker database concurrency to two requests and releases permits on success or failure. A real-source snapshot build and guarded publication succeeded in 23.169 seconds; a second read-only build completed in 8.522 seconds, both with 82 suppliers and no source warning. These are individual background-work samples, not browser timings.
 
-The final worker deployment `dep-das8bbm0tbcc73e8vl90` is Live at `0c92e9d7209bb7a904ae8e882f6d5fb355556059`. After deployment, its normal scheduled ordering job `active:5968259` completed automatically at 02:56:49 UTC (September 27), source version 267, with no error. No local watch worker was running.
+The final worker deployment `dep-das8bbm0tbcc73e8vl90` is Live at `0c92e9d7209bb7a904ae8e882f6d5fb355556059`. During the rolling-deployment overlap, the outgoing worker completed normal ordering job `active:5968259` at 02:56:49 UTC (September 27). The new worker’s next normal job, `active:5968260`, hit a SQL statement timeout on its first attempt, then retried automatically and completed at 03:02:05 UTC, source version 267, with no final error. This refreshed the snapshot before the previous one’s ten-minute serving window expired. No local watch worker was running. The concurrency limit does **not** eliminate all intermittent database timeouts; automatic recovery was verified, but sustained refresh reliability remains a production limitation.
 
 ## Validation
 
@@ -56,6 +56,8 @@ These checks were read-only. Production approval/PO mutation flows were not exer
 A concurrent Vinosmith rescue sync ran from 02:34:23 to 02:37:39 UTC (September 27). It was not initiated by this release. Source changes correctly rejected intermediate generations. Some ordering queries timed out during rebuilding; subsequent retries completed. Afterward, product source version 613 contained 8,882 records, all six margin ranges completed under the corrected formula at version 668, and ordering version 267 completed with 82 suppliers and no warning at 02:41:39 UTC. Source-version numbers are observations, not fixed configuration.
 
 An unauthenticated request to the Products API returned HTTP 401. No browser service-role access was introduced.
+
+Web Auto-Deploy was temporarily disabled for the controlled rollout and restored to its original **On Commit** setting after the release documentation was pushed. Release commits use `[skip render]`; the web and worker deployments above were started manually.
 
 ## Limits
 
