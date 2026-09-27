@@ -40,6 +40,7 @@ type SaveCatalogWineInput = SupplierCatalogWineInput & {
 };
 
 export function OrderReviewView({
+  workbenchOnly = false,
   brandManager,
   brandManagerOptions,
   expandAll,
@@ -81,6 +82,7 @@ export function OrderReviewView({
   isCatalogSaving,
   deletingCatalogWineId
 }: {
+  workbenchOnly?: boolean;
   brandManager: string;
   brandManagerOptions: string[];
   expandAll: boolean;
@@ -154,6 +156,7 @@ export function OrderReviewView({
 
   return (
     <>
+      {!workbenchOnly ? <>
       <OrderSummaryMetrics metrics={metrics} />
 
       <section className="panel">
@@ -254,11 +257,13 @@ export function OrderReviewView({
         <span>{formatInteger(visibleCount)} visible SKUs</span>
       </div>
 
-      <section className="supplier-stack">
+      </> : null}
+      <section className={workbenchOnly ? "supplier-workbench-content" : "supplier-stack"}>
         {supplierGroups.map((group) => (
           <SupplierSection
             key={group.supplier}
             group={group}
+            inline={workbenchOnly}
             expandAll={expandAll || supplier !== "All"}
             onSaveApproval={onSaveApproval}
             onSaveOrderPath={onSaveOrderPath}
@@ -317,6 +322,7 @@ export function OrderReviewView({
 
 
 function SupplierSection({
+  inline = false,
   group,
   expandAll,
   onSaveApproval,
@@ -338,6 +344,7 @@ function SupplierSection({
   salesReferenceDate
 }: {
   group: SupplierGroup;
+  inline?: boolean;
   expandAll: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
   onSaveOrderPath: (row: Recommendation, orderPath: "stateside" | "di") => void;
@@ -374,9 +381,10 @@ function SupplierSection({
     setIsOpen(expandAll);
   }, [expandAll]);
 
+  const SupplierRoot = inline ? "section" : "details";
   return (
-    <details className="supplier-section" open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)}>
-      <summary>
+    <SupplierRoot className={inline ? "supplier-workbench-inline" : "supplier-section"} open={inline ? undefined : isOpen} onToggle={inline ? undefined : (event) => setIsOpen((event.currentTarget as HTMLDetailsElement).open)}>
+      {!inline ? <summary>
         <div>
           <span className="supplier-chip">{group.supplier}</span>
           <span className="supplier-chip supplier-chip-muted">{tdmLabel}</span>
@@ -403,8 +411,8 @@ function SupplierSection({
           ) : null}
           <span>{formatInteger(group.skuCount)} SKUs</span>
         </div>
-      </summary>
-      {isOpen ? (
+      </summary> : <div className="supplier-inline-actions"><span className="supplier-chip supplier-chip-muted">{tdmLabel}</span>{group.supplier !== "Unknown Supplier" ? <button className="ghost-button" type="button" onClick={() => onAddWine(group.supplier)}>Add Wine</button> : null}</div>}
+      {inline || isOpen ? (
         <>
           <div className="supplier-metrics">
             <MetricCard label="SKUs" value={formatInteger(group.skuCount)} detail="In this supplier" tone="ink" />
@@ -481,7 +489,7 @@ function SupplierSection({
           />
         </>
       ) : null}
-    </details>
+    </SupplierRoot>
   );
 }
 

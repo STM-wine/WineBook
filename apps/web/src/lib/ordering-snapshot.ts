@@ -1,4 +1,5 @@
 import "server-only";
+import { buildOrderingSearchIndex } from "./ordering-summary-search";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadOrderingPageData, type OrderingPageData } from "./ordering-page-data";
 import { applyApprovalCommitments, applySupplierTdmAssignments, enrichRecommendationsWithSupplierCatalogPrograms,
@@ -6,7 +7,7 @@ import { applyApprovalCommitments, applySupplierTdmAssignments, enrichRecommenda
 import { applyDiContainerRecommendations } from "./di-planning";
 import { buildFreightReadModel } from "./freight-read-model";
 export function orderingReadKey(now = Date.now()) { return `active:${Math.floor(now / 300_000)}`; }
-export const ORDERING_READ_FORMULA = "ordering-read-v1";
+export const ORDERING_READ_FORMULA = "ordering-read-v2-search";
 export async function buildOrderingSnapshot(db: SupabaseClient) {
   const data = await loadOrderingPageData("order-review", db);
   if (!data.latestRun) throw new Error("No completed ordering run is available.");
@@ -25,10 +26,10 @@ export async function buildOrderingSnapshot(db: SupabaseClient) {
       approvalCommitments: data.approvalCommitments.filter((event) => ids.has(event.source_id)) } satisfies OrderingPageData };
   });
   return {
-    result: { groups: groups.map(({ rows, ...summary }) => summary), metrics: buildMetrics(display),
+    result: { searchIndex: buildOrderingSearchIndex(display), groups: groups.map(({ rows, ...summary }) => summary), metrics: buildMetrics(display),
       freight: buildFreightReadModel(display, data.suppliers), reportRun: data.latestRun,
       warning: data.orderingDataWarning, salesReferenceDate: data.salesReferenceDate, generatedAt: new Date().toISOString() },
     suppliers
   };
 }
-export type OrderingSnapshotSummary = Awaited<ReturnType<typeof buildOrderingSnapshot>>["result"] & { snapshotId: string; isStale?: boolean };
+export type OrderingSnapshotSummary = Omit<Awaited<ReturnType<typeof buildOrderingSnapshot>>["result"], "searchIndex"> & { snapshotId: string; isStale?: boolean; filters?: import("./ordering-summary-search").OrderingSummaryFilters; filterOptions?: { suppliers: string[]; tdms: string[] } };

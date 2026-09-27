@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { ORDERING_READ_FORMULA, orderingReadKey } from "@/lib/ordering-snapshot";
+import { orderingSummaryResponse } from "@/lib/ordering-summary-search";
 export const dynamic = "force-dynamic";
 const isTemporaryFailure = (message: string) => /statement timeout|fetch failed|ECONNRESET|temporarily unavailable/i.test(message);
 const retryStage = "Source verification is taking longer than usual. Retrying automatically.";
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
   if (profileError || !profile) return NextResponse.json({ error: "Account is not enabled." }, { status: 403 });
   const db = createServiceRoleClient();
   const params = new URL(request.url).searchParams;
+  const filters = { supplier: params.get("supplierFilter") || "All", brandManager: params.get("tdm") || "All", search: params.get("search") || "", suggestedOnly: params.get("suggestedOnly") === "true" };
   const headers = { "Cache-Control": "no-store" };
   try {
     // Only the current dependency generation is eligible. No stale ordering action inputs are served.
@@ -34,7 +36,7 @@ export async function GET(request: Request) {
           .eq("business_date", requested.business_date).eq("formula_version", ORDERING_READ_FORMULA)
           .gte("completed_at", new Date(Date.now() - 3_600_000).toISOString())
           .order("completed_at", { ascending: false }).limit(1).maybeSingle();
-        if (previous) previousSummary = { ...previous.result, snapshotId: previous.id,
+        if (previous) previousSummary = { ...orderingSummaryResponse(previous.result, filters), snapshotId: previous.id,
           sourceVersion: previous.source_version, generatedAt: previous.completed_at, isStale: true };
       }
       return NextResponse.json({ pending: true, stage, previousSummary }, { status: 202, headers });
@@ -52,7 +54,7 @@ export async function GET(request: Request) {
       if (supplierError) throw new Error(supplierError.message);
       return NextResponse.json({ ...data.data, snapshotId: job.id, sourceVersion: requested.source_version, generatedAt: job.completed_at }, { headers });
     }
-    return NextResponse.json({ ...job.result, snapshotId: job.id, sourceVersion: requested.source_version, generatedAt: job.completed_at }, { headers });
+    return NextResponse.json({ ...orderingSummaryResponse(job.result, filters), snapshotId: job.id, sourceVersion: requested.source_version, generatedAt: job.completed_at }, { headers });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Ordering snapshot unavailable.";
     if (isTemporaryFailure(message)) return NextResponse.json({ pending: true, stage: retryStage }, { status: 202, headers });

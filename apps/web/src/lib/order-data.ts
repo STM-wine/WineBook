@@ -578,7 +578,7 @@ function fuzzyTokenMatches(searchToken: string, candidateToken: string): boolean
   return levenshteinDistance(searchToken, candidateToken) <= maxDistance;
 }
 
-function fuzzyTextMatches(search: string, values: Array<string | null | undefined>): boolean {
+export function fuzzyTextMatches(search: string, values: Array<string | null | undefined>): boolean {
   const searchText = normalizeSearchText(search);
   if (!searchText) return true;
 

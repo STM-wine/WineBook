@@ -7566,3 +7566,16 @@ th.numeric .company-sort-button {
 @media (prefers-reduced-motion: reduce) {
   .wine-loader-bar span, .product-workspace-preview-spinner, .processing-spinner { animation: none !important; }
 }
+
+.supplier-workbench-embedded {
+  min-width: 0;
+  padding-top: 12px;
+}
+
+.supplier-inline-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}

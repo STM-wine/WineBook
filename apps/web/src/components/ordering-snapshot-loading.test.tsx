@@ -5,7 +5,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { OrderingSnapshotHome } from "./ordering-snapshot-home";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("./app-topbar", () => ({ AppTopbar: () => <nav>Navigation</nav> }));
-vi.mock("./order-dashboard", () => ({ OrderDashboard: () => <div>Supplier editor</div> }));
+vi.mock("./order-dashboard", () => ({ OrderDashboard: ({ summaryFilters }: { summaryFilters?: { search: string; brandManager: string } }) => <div data-testid="supplier-editor" data-search={summaryFilters?.search} data-tdm={summaryFilters?.brandManager}>Supplier editor</div> }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => {
   const channel = { on: () => channel, subscribe: () => channel };
   return { channel: () => channel, removeChannel: vi.fn() };
@@ -13,6 +13,7 @@ vi.mock("@/lib/supabase/client", () => ({ createClient: () => {
 let host: HTMLDivElement, root: Root;
 let requests: Array<{ url: string; signal: AbortSignal; resolve: (value: unknown) => void }>;
 const summary = { snapshotId: "previous", isStale: true, generatedAt: "2026-09-27T04:25:00Z", salesReferenceDate: "2026-09-26",
+  filterOptions: { suppliers: ["Example supplier"], tdms: ["ROJO"] },
   reportRun: { id: "run" }, metrics: { urgent: 1, low: 2, recommendedBottles: 12, approvedBottles: 6, poValue: 60, supplierCount: 1 },
   groups: [{ supplier: "Example supplier", skuCount: 1, urgentCount: 1, freeGoodProgramCount: 0, recommendedBottles: 12, approvedBottles: 6, suggestedValue: 120, approvedValue: 60 }] };
 async function respond(index: number, status: number, body: unknown) {
@@ -44,6 +45,27 @@ describe("ordering summary during background preparation", () => {
       details.open = true; details.dispatchEvent(new Event('toggle'));
     });
     expect(requests[2].url).toContain('supplier=Example%20supplier');
+  });
+  it("searches unopened suppliers globally and passes the selected TDM and wine query to an opened editor", async () => {
+    await respond(0,200,{...summary,isStale:false});
+    const tdm = [...host.querySelectorAll('select')].find((select)=>select.parentElement?.textContent?.startsWith('TDM'))!;
+    const input = host.querySelector('input[placeholder="Wine, supplier, item #"]') as HTMLInputElement;
+    await act(async()=>{
+      tdm.value='ROJO';tdm.dispatchEvent(new Event('change',{bubbles:true}));
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Pinot');
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    await act(async()=>vi.advanceTimersByTimeAsync(250));
+    expect(requests).toHaveLength(2);
+    expect(requests[1].url).toContain('tdm=ROJO');expect(requests[1].url).toContain('search=Pinot');
+    expect(requests.some((r)=>r.url.includes('?supplier='))).toBe(false);
+    const filters={supplier:'All',brandManager:'ROJO',search:'Pinot',suggestedOnly:false};
+    await respond(1,200,{...summary,isStale:false,filters});
+    await act(async()=>{const details=host.querySelector('details')!;details.open=true;details.dispatchEvent(new Event('toggle'));});
+    await respond(2,200,{latestRun:{id:'run'},generatedAt:summary.generatedAt});
+    const editor=host.querySelector('[data-testid="supplier-editor"]') as HTMLElement;
+    expect(editor.dataset.search).toBe('Pinot');expect(editor.dataset.tdm).toBe('ROJO');
+    expect(host.querySelectorAll('h1')).toHaveLength(1);
   });
   it("stops polling when navigating away while a previous overview is displayed", async () => {
     await respond(0,202,{pending:true,stage:"Verifying sources",previousSummary:summary});

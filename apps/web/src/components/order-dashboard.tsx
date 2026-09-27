@@ -90,6 +90,7 @@ function ViewLoading() {
 
 type Props = {
   embedded?: boolean;
+  summaryFilters?: import("@/lib/ordering-summary-search").OrderingSummaryFilters;
   catalogSupplier?: string | null;
   reportRun: ReportRun;
   recommendations: Recommendation[];
@@ -171,6 +172,7 @@ export function OrderDashboard({
   salesReferenceDate,
   canViewSettings,
   embedded = false,
+  summaryFilters,
   catalogSupplier = null
 }: Props) {
   const router = useRouter();
@@ -484,8 +486,8 @@ export function OrderDashboard({
     [displayRows]
   );
   const visibleRecommendations = useMemo(
-    () => filterRecommendations(displayRows, { supplier, brandManager, search, suggestedOnly, replenishmentPolicy: replenishmentPolicyFilter }),
-    [displayRows, supplier, brandManager, search, suggestedOnly, replenishmentPolicyFilter]
+    () => filterRecommendations(displayRows, { ...(summaryFilters || { supplier, brandManager, search, suggestedOnly }), replenishmentPolicy: replenishmentPolicyFilter }),
+    [displayRows, supplier, brandManager, search, suggestedOnly, replenishmentPolicyFilter, summaryFilters]
   );
   const metrics = useMemo(() => buildMetrics(visibleRecommendations), [visibleRecommendations]);
   const supplierGroups = useMemo(
@@ -1097,9 +1099,10 @@ export function OrderDashboard({
     });
   }
 
+  const DashboardRoot = embedded ? "div" : "main";
   return (
-    <main className="app-shell">
-      {embedded ? <button className="button" disabled={isPending} onClick={createDrafts}>Create PO drafts from all saved approvals</button> : <AppTopbar
+    <DashboardRoot className={embedded ? "supplier-workbench-embedded" : "app-shell"}>
+      {embedded ? null : <AppTopbar
         activeView={activeView}
         canViewSettings={canViewSettings}
         dataLabel={dataLabel}
@@ -1113,7 +1116,7 @@ export function OrderDashboard({
         onSelectView={selectView}
       />}
 
-      <StatusMessages isPending={isPending} errorMessage={errorMessage || orderingDataWarning || ""} pendingMessage={isPending ? pendingMessage || "Working..." : pendingMessage} />
+      <StatusMessages isPending={isPending} errorMessage={errorMessage || (!embedded ? orderingDataWarning : "") || ""} pendingMessage={isPending ? pendingMessage || "Working..." : pendingMessage} />
       {showPoDraftProgress ? (
         <div className="processing-modal" role="status" aria-live="assertive">
           <div className="processing-modal-panel">
@@ -1133,6 +1136,7 @@ export function OrderDashboard({
 
       {activeView === "order-review" ? (
         <OrderReviewView
+          workbenchOnly={embedded}
           brandManager={brandManager}
           brandManagerOptions={brandManagerOptions}
           expandAll={expandAll}
@@ -1220,6 +1224,6 @@ export function OrderDashboard({
           onStatusChange={changeDraftStatus}
         />
       ) : null}
-    </main>
+    </DashboardRoot>
   );
 }

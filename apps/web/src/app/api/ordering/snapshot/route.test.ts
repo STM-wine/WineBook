@@ -34,14 +34,14 @@ describe("ordering snapshot recovery", () => {
     expect(await pending.json()).toMatchObject({ pending: true });
     expect(state.eq).toHaveBeenCalledWith("source_version", 269);
     expect(state.eq).toHaveBeenCalledWith("formula_version", "test-formula");
-    state.completed = { id: "recovered", result: { groups: [{ supplier: "Example" }] }, completed_at: "2026-09-27T03:28:59Z" };
+    state.completed = { id: "recovered", result: { searchIndex: [{ supplier: "Example", hasSupplier: true, tdm: "ROJO", text: ["Pinot"], urgent: 0, low: 0, recommended: 12, approved: 0, suggestedValue: 120, approvedValue: 0, freeGoods: 0 }] }, completed_at: "2026-09-27T03:28:59Z" };
     const ready = await GET(new Request("https://example.com/api/ordering/snapshot"));
     expect(ready.status).toBe(200);
     expect(await ready.json()).toMatchObject({ snapshotId: "recovered", sourceVersion: 269, groups: [{ supplier: "Example" }] });
   });
   it("shows a labeled previous overview but never returns previous supplier action inputs", async () => {
     state.requested.status = "running";
-    state.previous = { id: "previous", source_version: 268, result: { groups: [{ supplier: "Example" }] }, completed_at: "2026-09-27T03:28:59Z" };
+    state.previous = { id: "previous", source_version: 268, result: { searchIndex: [{ supplier: "Example", hasSupplier: true, tdm: "ROJO", text: ["Pinot"], urgent: 0, low: 0, recommended: 12, approved: 0, suggestedValue: 120, approvedValue: 0, freeGoods: 0 }] }, completed_at: "2026-09-27T03:28:59Z" };
     const overview = await GET(new Request("https://example.com/api/ordering/snapshot"));
     expect(overview.status).toBe(202);
     expect(await overview.json()).toMatchObject({ pending: true, previousSummary: { snapshotId: "previous", sourceVersion: 268, isStale: true } });

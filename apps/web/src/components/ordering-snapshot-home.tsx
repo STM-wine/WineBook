@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import type { OrderingSnapshotSummary } from "@/lib/ordering-snapshot";
 import type { OrderingPageData } from "@/lib/ordering-page-data";
 import { formatCurrency, formatInteger } from "@/lib/order-data";
+import { defaultOrderingFilters, type OrderingSummaryFilters } from "@/lib/ordering-summary-search";
 import { OrderSummaryMetrics, SummaryTable } from "./order-summary-overview";
 import type { SupplierGroup } from "@/lib/types";
 import { AppTopbar } from "./app-topbar";
@@ -20,17 +21,25 @@ export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-r
   const [error, setError] = useState("");
   const [stage, setStage] = useState("Loading supplier summaries");
   const [retry, setRetry] = useState(0);
-  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<OrderingSummaryFilters>(defaultOrderingFilters);
+  const [queryFilters, setQueryFilters] = useState(filters);
+  const [creatingDrafts, setCreatingDrafts] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setQueryFilters(filters), 250);
+    return () => clearTimeout(timer);
+  }, [filters]);
   useEffect(() => {
     const controller = new AbortController();
     setError(""); setStage("Loading supplier summaries");
-    waitForOrdering<OrderingSnapshotSummary>("", controller.signal, setStage, (previous) => {
+    const query = new URLSearchParams({ supplierFilter: queryFilters.supplier, tdm: queryFilters.brandManager,
+      search: queryFilters.search, suggestedOnly: String(queryFilters.suggestedOnly) });
+    waitForOrdering<OrderingSnapshotSummary>(query.toString(), controller.signal, setStage, (previous) => {
       if (!controller.signal.aborted) setData((current) => !current || current.isStale ? previous : current);
     })
-      .then((result) => { if (!controller.signal.aborted) { setData(result); setStage(""); performance.mark("winebook:ordering-usable"); } })
+      .then(async (result) => { await flushAllApprovals(); if (!controller.signal.aborted) { setData(result); setStage(""); performance.mark("winebook:ordering-usable"); } })
       .catch((error) => { if (!controller.signal.aborted) { setError(error.message); setStage(""); } });
     return () => controller.abort();
-  }, [retry]);
+  }, [retry, queryFilters]);
   useEffect(() => {
     if (!data?.reportRun.id) return;
     const db = createClient();
@@ -43,6 +52,20 @@ export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-r
       .subscribe();
     return () => { clearTimeout(timer); void db.removeChannel(channel); };
   }, [data?.reportRun.id]);
+  async function createDrafts() {
+    if (!data || data.isStale || creatingDrafts) return;
+    setCreatingDrafts(true); setError("");
+    try {
+      await flushAllApprovals();
+      const response = await fetch("/api/po-drafts/create", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportRunId: data.reportRun.id, idempotencyKey: crypto.randomUUID() }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not create PO drafts. Refresh and review saved approvals.");
+      if (result.errors?.length) throw new Error(result.errors.join("; "));
+      router.push("/?view=po-drafts");
+    } catch (error) { setError(error instanceof Error ? error.message : "Could not create PO drafts."); }
+    finally { setCreatingDrafts(false); }
+  }
   return <main className="app-shell">
     <AppTopbar activeView={view} canViewSettings={canViewSettings} onSelectView={(next) => {
       void flushAllApprovals().then(() => router.push(next === "company-dashboard" ? "/" : `/?view=${next}`, { scroll: false })).catch((error) => setError(error.message));
@@ -60,24 +83,29 @@ export function OrderingSnapshotHome({ view, canViewSettings }: { view: "order-r
           <div className="section-heading"><div>
             <h1>Order Summary</h1>
             <p>Review supplier totals below, then expand a supplier to work with its wines and approvals.</p>
-          </div></div>
+          </div><button className="primary-button" disabled={creatingDrafts || Boolean(data.isStale)} onClick={() => void createDrafts()}>{creatingDrafts ? "Creating PO drafts..." : "Create PO Drafts"}</button></div>
           <div className="filter-bar">
-            <label className="search-field">Find supplier
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search suppliers" />
-            </label>
+            <label>Supplier<select value={filters.supplier} onChange={(event) => setFilters({ ...filters, supplier: event.target.value })}>
+              <option>All</option>{data.filterOptions?.suppliers.map((supplier) => <option key={supplier}>{supplier}</option>)}
+            </select></label>
+            <label>TDM<select value={filters.brandManager} onChange={(event) => setFilters({ ...filters, brandManager: event.target.value })}>
+              <option>All</option>{data.filterOptions?.tdms.map((tdm) => <option key={tdm}>{tdm}</option>)}
+            </select></label>
+            <label className="search-field">Search<input value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} placeholder="Wine, supplier, item #" /></label>
+            <label className="check-control"><input type="checkbox" checked={filters.suggestedOnly} onChange={(event) => setFilters({ ...filters, suggestedOnly: event.target.checked })} />Suggested only</label>
           </div>
-          <SummaryTable groups={data.groups.filter((group) => group.supplier.toLowerCase().includes(search.toLowerCase()))} />
-          {!data.groups.some((group) => group.supplier.toLowerCase().includes(search.toLowerCase())) ? <p className="empty-inline">No suppliers match your search.</p> : null}
+          <SummaryTable groups={data.groups} />
+          {!data.groups.length ? <p className="empty-inline">No wines match these filters.</p> : null}
         </section>
         <section className="supplier-stack" aria-label="Supplier workbenches">
-          {data.groups.map((group) => <SupplierExpansion unavailable={Boolean(data.isStale)} hidden={!group.supplier.toLowerCase().includes(search.toLowerCase())} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
+          {data.groups.map((group) => <SupplierExpansion filters={data.filters || defaultOrderingFilters} unavailable={Boolean(data.isStale)} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
         </section>
       </>}
     </> : null}
   </main>;
 }
 
-function SupplierExpansion({ group, hidden, snapshotId, unavailable }: { group: Omit<SupplierGroup, "rows">; hidden: boolean; snapshotId: string; unavailable: boolean }) {
+function SupplierExpansion({ group, filters, snapshotId, unavailable }: { group: Omit<SupplierGroup, "rows">; filters: OrderingSummaryFilters; snapshotId: string; unavailable: boolean }) {
   const { supplier } = group;
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<(OrderingPageData & { generatedAt?: string }) | null>(null);
@@ -89,11 +117,11 @@ function SupplierExpansion({ group, hidden, snapshotId, unavailable }: { group: 
     const controller = new AbortController();
     setError(""); setStage("Loading supplier rows");
     waitForOrdering<OrderingPageData & { generatedAt?: string }>(`supplier=${encodeURIComponent(supplier)}`, controller.signal, setStage)
-      .then((result) => { if (!controller.signal.aborted) { setData(result); setStage(""); } })
+      .then(async (result) => { await flushAllApprovals(); if (!controller.signal.aborted) { setData(result); setStage(""); } })
       .catch((error) => { if (!controller.signal.aborted) { setError(error.message); setStage(""); } });
     return () => controller.abort();
   }, [open, supplier, retry, snapshotId, unavailable]);
-  return <details className="supplier-section ordering-supplier-section" hidden={hidden} open={open && !unavailable} onToggle={(event) => setOpen(event.currentTarget.open)}>
+  return <details className="supplier-section ordering-supplier-section" open={open && !unavailable} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary aria-disabled={unavailable} onClick={(event) => { if (unavailable) event.preventDefault(); }}>
       <div className="ordering-supplier-totals">
         <span className="supplier-chip">{supplier}</span>
@@ -107,7 +135,7 @@ function SupplierExpansion({ group, hidden, snapshotId, unavailable }: { group: 
     {stage ? <WineLoadingProgress inline message={stage} /> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
     {data?.generatedAt ? <p>Supplier rows verified {new Date(data.generatedAt).toLocaleString()}; live approvals are merged below.</p> : null}
-    {data?.latestRun ? <OrderDashboard embedded reportRun={data.latestRun} recommendations={data.recommendations}
+    {data?.latestRun ? <OrderDashboard embedded summaryFilters={filters} reportRun={data.latestRun} recommendations={data.recommendations}
       approvalEvents={data.approvalEvents} approvalCommitments={data.approvalCommitments} auditActorNames={data.auditActorNames}
       poDrafts={[]} suppliers={data.suppliers} supplierCatalogWines={data.supplierCatalogWines}
       wineRequests={[]} priceChangeEvents={[]} quickBooksSupplierMatches={[]} initialView="order-review"
