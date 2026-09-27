@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 import { loadEnvironment, loadServerModule } from './read-model-runtime.mjs';
 import { limitConcurrentFetch } from './limited-fetch.mjs';
+import { retryDatabaseReads } from './retry-database-reads.mjs';
 await loadEnvironment();
 const supabase = createClient(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY,
-  { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: limitConcurrentFetch(fetch, 2) } });
+  { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: limitConcurrentFetch(retryDatabaseReads(fetch), 2) } });
 const { buildProductWorkspace } = await loadServerModule('src/lib/product-workspace-builder.ts');
 const { buildMarginSnapshot, MARGIN_SNAPSHOT_FORMULA, warmMarginRanges } = await loadServerModule('src/lib/company-dashboard-data.ts');
 const { PRODUCT_FORMULA_VERSION } = await loadServerModule('src/lib/product-workspace-reader.ts');

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { ORDERING_READ_FORMULA, orderingReadKey } from "@/lib/ordering-snapshot";
 export const dynamic = "force-dynamic";
+const isTemporaryFailure = (message: string) => /statement timeout|fetch failed|ECONNRESET|temporarily unavailable/i.test(message);
+const retryStage = "Source verification is taking longer than usual. Retrying automatically.";
 export async function GET(request: Request) {
   const auth = await createClient();
   const { data: { user } } = await auth.auth.getUser();
@@ -22,6 +24,11 @@ export async function GET(request: Request) {
       .gte("completed_at", new Date(Date.now() - 600_000).toISOString()).order("completed_at", { ascending: false }).limit(1).maybeSingle();
     if (completedError) throw new Error(completedError.message);
     const job = completed ? { ...completed, status: "completed" } : requested;
+    // Failed jobs are automatically requeued after the worker's backoff. Keep
+    // polling through transient database failures instead of stranding this tab.
+    if (job.status === "failed" && isTemporaryFailure(job.error || "")) {
+      return NextResponse.json({ pending: true, stage: retryStage }, { status: 202, headers });
+    }
     if (job.status === "failed") throw new Error(job.error || "Ordering verification failed.");
     if (job.status !== "completed") return NextResponse.json({ pending: true, stage: job.status === "running" ? "Verifying ordering sources and calculating supplier totals" : "Waiting for ordering verification worker" }, { status: 202, headers });
     if (params.has("supplier")) {
@@ -32,6 +39,8 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({ ...job.result, snapshotId: job.id, sourceVersion: requested.source_version, generatedAt: job.completed_at }, { headers });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Ordering snapshot unavailable." }, { status: 503, headers });
+    const message = error instanceof Error ? error.message : "Ordering snapshot unavailable.";
+    if (isTemporaryFailure(message)) return NextResponse.json({ pending: true, stage: retryStage }, { status: 202, headers });
+    return NextResponse.json({ error: message }, { status: 503, headers });
   }
 }

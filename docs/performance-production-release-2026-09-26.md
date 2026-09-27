@@ -64,3 +64,11 @@ Web Auto-Deploy was temporarily disabled for the controlled rollout and restored
 The 300–500 ms feedback and first-usable p95 under 3 seconds targets remain unproven. There was no two-buyer end-to-end production mutation test or 100-interaction browser measurement campaign. Existing correctness regression coverage is documented above. Production rollout does not change these evidence limits.
 
 Rollback can restore the prior compatible web build and stop the worker while retaining the additive schema and completed snapshots. No guarded approval/PO transaction function was replaced.
+
+## Follow-up: Order Summary stopped on a recoverable timeout
+
+The user reported Order Summary unavailable shortly after release. Authenticated Safari reproduced a terminal “canceling statement due to statement timeout” message with a Retry button. The worker had already recovered and published source version 269, but the browser had stopped polling on the earlier HTTP 503. Retrying manually restored the page. The original smoke check missed this failure-to-recovery transition.
+
+The snapshot API now returns HTTP 202 with an explicit automatic-retry stage for transient database/network failures, including failures when requesting the job. The existing browser polling then resumes when the current generation is ready. Substantive source failures remain errors; source-version, business-date and formula checks remain required. The worker also retries SQL statement timeouts up to three times for GET reads and the explicitly read-only sales-window RPC. Mutations and publication RPCs are never blindly replayed. Sanitized failure logs include the endpoint path and SQLSTATE to identify residual database bottlenecks without exposing request parameters or business records.
+
+Regression tests cover failed-to-ready API recovery, requesting-job timeouts, substantive failure visibility, authentication, bounded read retries and no mutation retries. Deployment and final verification are recorded after rollout.
