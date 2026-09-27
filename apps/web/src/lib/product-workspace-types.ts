@@ -120,3 +120,31 @@ export type ProductWorkspaceResponse = {
   includeInactive: boolean;
   generatedAt: string;
 };
+
+export type ProductWorkspaceListRow = Omit<ProductWorkspaceRow, "priceLevels" | "gpExplanation" | "quickbooks" | "vinosmith" | "supplierCatalog"> & {
+  quickbooks: Pick<ProductWorkspaceRow["quickbooks"], "listId">;
+};
+export type ProductSnapshotMeta = {
+  snapshotId: string;
+  generatedAt: string;
+  sourceVersion: number;
+  formulaVersion: string;
+  businessDate: string;
+  isStale: boolean;
+};
+export type ProductWorkspacePage = ProductSnapshotMeta & {
+  rows: ProductWorkspaceListRow[];
+  offset: number;
+  pageSize: number;
+  hasMore: boolean;
+};
+export type ProductWorkspaceCounts = {
+  visible: number;
+  lifecycleMismatches: number;
+  vsStatusUnknown: number;
+  qbActiveVsUnknown: number;
+  needsReview: number;
+  gpRed: number;
+  gpYellow: number;
+  suppliers: string[];
+};

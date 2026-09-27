@@ -1,3 +1,4 @@
+import { CalculationPending } from "@/lib/read-model-jobs";
 import { NextRequest, NextResponse } from "next/server";
 import { fetchCompanyDashboardData, parseCompanyDashboardPeriod } from "@/lib/company-dashboard-data";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
@@ -28,21 +29,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Account is not enabled." }, { status: 403 });
   }
 
+  const startedAt = performance.now();
   try {
     const params = request.nextUrl.searchParams;
     const dateFrom = validDate(params.get("from")) || undefined;
     const dateTo = validDate(params.get("to")) || undefined;
-    const period = dateFrom && dateTo ? "custom" : parseCompanyDashboardPeriod(params.get("period"));
+    const period = params.has("period") ? parseCompanyDashboardPeriod(params.get("period")) : dateFrom && dateTo ? "custom" : "mtd";
     const data = await fetchCompanyDashboardData(createServiceRoleClient(), period, {
       dateFrom,
       dateTo,
       rep: cleanParam(params.get("rep")),
       businessLine: cleanParam(params.get("businessLine")),
+      includeComparison: params.get("includeComparison") !== "false",
       includeGrossProfit: params.get("includeProfit") !== "false",
       includeBreakdowns: params.get("includeBreakdowns") !== "false"
     });
-    return noStoreJson(data);
+    return noStoreJson(data, { headers: { "Server-Timing": `dashboard;dur=${(performance.now() - startedAt).toFixed(1)}` } });
   } catch (error) {
+    if (error instanceof CalculationPending) return noStoreJson({ pending: true, stage: error.stage }, { status: 202, headers: { "Retry-After": "2" } });
     return noStoreJson(
       { error: error instanceof Error ? error.message : "Could not load company dashboard." },
       { status: 500 }

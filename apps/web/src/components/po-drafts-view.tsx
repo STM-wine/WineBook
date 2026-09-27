@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { WineLoadingProgress } from "./wine-loading-progress";
 import type { PurchaseOrderDraftWithLines, PurchaseOrderLine, PurchaseOrderLineNote, SupplierLogistics } from "@/lib/types";
 import { auditActorName, formatAuditTimestamp, poDraftAuditTrail } from "@/lib/audit-trail";
 import { asNumber, formatCurrency, formatCurrencyCents, formatInteger } from "@/lib/order-data";
@@ -23,9 +23,13 @@ export function PoDraftsView({
   onAddLineNote,
   onCancelDrafts,
   onDeleteLine,
-  onStatusChange
+  onStatusChange,
+  onLoadDetail,
+  onRefresh
 }: {
   drafts: PurchaseOrderDraftWithLines[];
+  onLoadDetail: (id: string) => Promise<void>;
+  onRefresh: () => void;
   isPending: boolean;
   reportRunId: string;
   suppliers: SupplierLogistics[];
@@ -35,7 +39,15 @@ export function PoDraftsView({
   onDeleteLine: (lineId: string, draftId: string) => void;
   onStatusChange: (draftId: string, status: string) => void;
 }) {
-  const router = useRouter();
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
+  function loadDetail(id: string) {
+    setDetailErrors((current) => ({ ...current, [id]: "" }));
+    void onLoadDetail(id).catch((error) => setDetailErrors((current) => ({ ...current, [id]: error.message })));
+  }
+  useEffect(() => {
+    for (const draft of drafts) if (expandedIds.has(draft.id) && draft.detailLoaded === false && !detailErrors[draft.id]) loadDetail(draft.id);
+  }, [drafts, expandedIds]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
@@ -44,6 +56,7 @@ export function PoDraftsView({
   const [noteTarget, setNoteTarget] = useState<{ draftId: string; lineKey: string } | null>(null);
   const supplierMetadata = useMemo(() => supplierLogisticsLookup(suppliers), [suppliers]);
   const draftSummaries = useMemo(() => drafts.map((draft) => {
+    if (draft.summary) return { draft, ...draft.summary };
     const lines = draft.lines || [];
     const fallbackLaidIn = supplierLaidInForDraft(draft, supplierMetadata);
     const costs = lines.map((line) => poLineCosts(line, fallbackLaidIn));
@@ -72,6 +85,7 @@ export function PoDraftsView({
         draft.supplier_name,
         draft.status,
         draft.po_number,
+        draft.search_text,
         ...(draft.lines || []).flatMap((line) => [line.product_name, line.product_code, line.planning_sku])
       ]
         .filter(Boolean)
@@ -170,7 +184,7 @@ export function PoDraftsView({
       link.remove();
       URL.revokeObjectURL(url);
       setExportStatus(`Generated ${filename}. The exact draft revision was recorded.`);
-      router.refresh();
+      onRefresh();
     } catch (error) {
       setExportStatus(error instanceof Error ? error.message : "PO export failed.");
     } finally {
@@ -291,6 +305,7 @@ export function PoDraftsView({
           </select>
         </label>
       </div>
+      {exporting ? <WineLoadingProgress inline message="Generating supplier export" detail="Validating the immutable draft revision and recording the export audit." /> : null}
       {draftSummaries.length === 0 ? (
         <div className="empty-inline">No PO drafts exist for this report run yet.</div>
       ) : (
@@ -300,7 +315,10 @@ export function PoDraftsView({
             const activity = poDraftAuditTrail(draft, auditActorNames);
 
             return (
-            <details className="po-draft-card" key={draft.id}>
+            <details className="po-draft-card" key={draft.id} onToggle={(event) => {
+              const open = event.currentTarget.open;
+              setExpandedIds((current) => { const next = new Set(current); if (open) next.add(draft.id); else next.delete(draft.id); return next; });
+            }}>
               <summary>
                 <div className="po-draft-summary-main">
                   <input
@@ -356,13 +374,16 @@ export function PoDraftsView({
                 ))}
               </div>
               <SupplierDraftMetadata supplier={supplierMetadata.get((draft.supplier_name || "").trim().toLowerCase())} />
-              <PoDraftLinesTable
+              {expandedIds.has(draft.id) && draft.detailLoaded === false ? (
+                detailErrors[draft.id] ? <p role="alert">{detailErrors[draft.id]} <button type="button" onClick={() => loadDetail(draft.id)}>Retry</button></p>
+                  : <WineLoadingProgress inline message="Loading draft lines, notes, and history" />
+              ) : expandedIds.has(draft.id) ? <PoDraftLinesTable
                 draft={draft}
                 disabled={isPending}
                 fallbackLaidInPerBottle={supplierLaidInForDraft(draft, supplierMetadata)}
                 onDeleteLine={onDeleteLine}
                 onOpenNotes={(line) => setNoteTarget({ draftId: draft.id, lineKey: poLineCollaborationKey(line) })}
-              />
+              /> : null}
             </details>
             );
           })}

@@ -61,6 +61,8 @@ declare
     wine_id uuid;
     original_version bigint;
     updated_version bigint;
+    audit_before jsonb;
+    audit_count bigint;
 begin
     insert into auth.users (
         id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -119,6 +121,20 @@ begin
         raise exception 'Add Wine catalog audit history is incomplete';
     end if;
 
+    select jsonb_agg(to_jsonb(audit) order by audit.id), count(*)
+      into audit_before, audit_count
+      from public.supplier_catalog_price_level_audit audit
+     where supplier_catalog_wine_id = wine_id;
+    if audit_count < 2 then raise exception 'price-level history was not recorded before deletion'; end if;
+    begin
+        perform public.delete_pending_supplier_catalog_sku_atomic(
+            wine_id, original_version, delete_key, 'delete-hash'
+        );
+        raise exception 'stale deletion unexpectedly succeeded';
+    exception when others then
+        if sqlerrm not like 'This wine changed after you opened it.%' then raise; end if;
+    end;
+
     result := public.delete_pending_supplier_catalog_sku_atomic(
         wine_id, updated_version, delete_key, 'delete-hash'
     );
@@ -144,6 +160,33 @@ begin
     if (select count(*) from public.supplier_catalog_delete_requests where actor_id = buyer_id and idempotency_key = delete_key) <> 1 then
         raise exception 'Add Wine delete idempotency record is missing';
     end if;
+    if (select count(*) from public.supplier_catalog_price_level_audit where supplier_catalog_wine_id = wine_id) <> audit_count + 2 then
+        raise exception 'Deleting the wine lost price history or duplicated delete events';
+    end if;
+    if exists (
+        select 1 from jsonb_array_elements(audit_before) original
+        where not exists (
+            select 1 from public.supplier_catalog_price_level_audit retained
+            where retained.id = (original->>'id')::uuid and to_jsonb(retained) = original
+        )
+    ) then raise exception 'Deleting the wine changed or removed historical price audit records'; end if;
+    if (select count(*) from public.supplier_catalog_price_level_audit deleted
+        where supplier_catalog_wine_id = wine_id and operation = 'delete'
+          and changed_by = buyer_id and changed_at is not null
+          and before_record->>'supplier_catalog_wine_id' = wine_id::text
+          and after_record is null
+          and not exists (select 1 from jsonb_array_elements(audit_before) original
+                          where (original->>'id')::uuid = deleted.id)) <> 2 then
+        raise exception 'Price deletion audit must retain snapshots, actor, time and wine identity';
+    end if;
+    if has_table_privilege('authenticated', 'public.supplier_catalog_wines', 'DELETE') then
+        raise exception 'Buyers must use the guarded deletion function';
+    end if;
+    if not exists (
+        select 1 from pg_constraint
+        where contype = 'f' and conrelid = 'public.supplier_catalog_price_levels'::regclass
+          and confrelid = 'public.supplier_catalog_wines'::regclass
+    ) then raise exception 'Live price levels must retain their wine foreign key'; end if;
 end;
 $$;
 

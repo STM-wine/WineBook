@@ -1,3 +1,4 @@
+import { WineBookPerformanceObserver } from "@/components/performance-observer";
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body><WineBookPerformanceObserver />{children}</body>
     </html>
   );
 }

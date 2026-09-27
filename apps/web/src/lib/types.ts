@@ -404,6 +404,9 @@ export type PurchaseOrderLineNote = {
 };
 
 export type PurchaseOrderDraftWithLines = PurchaseOrderDraft & {
+  summary?: { lineCount: number; approvedQty: number; wineCost: number; laidInCost: number; estimatedCost: number };
+  search_text?: string;
+  detailLoaded?: boolean;
   lines: PurchaseOrderLine[];
   line_notes?: PurchaseOrderLineNote[];
   revisions?: PurchaseOrderDraftRevision[];

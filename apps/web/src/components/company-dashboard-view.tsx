@@ -1,5 +1,6 @@
 "use client";
 
+import { mergeDashboardSnapshot } from "@/lib/dashboard-snapshot-merge";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { WineLoadingProgress } from "@/components/wine-loading-progress";
@@ -128,15 +129,21 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const [accountInvoicePanel, setAccountInvoicePanel] = useState<AccountInvoicePanelState | null>(null);
   const [repSummaryExpanded, setRepSummaryExpanded] = useState(false);
   const [accountSummaryExpanded, setAccountSummaryExpanded] = useState(false);
+  const requestKinds = useRef(new Map<string, AbortController>());
+  const [profitStage, setProfitStage] = useState("Calculating margins and comparisons");
   const activeDashboardRequests = useRef<Set<AbortController>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
+  const [isComparisonLoading, setIsComparisonLoading] = useState(false);
   const [isProfitLoading, setIsProfitLoading] = useState(false);
   const [isDrilldownLoading, setIsDrilldownLoading] = useState(false);
   const [isBreakdownsLoading, setIsBreakdownsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const activeKey = cacheKeyFor(activePeriod, dateFrom, dateTo, selectedBusinessLine);
-  const data = dataByPeriod[activeKey] || initialData;
-  const displayPeriodLabel = selectedRangeLabel === RANGE_PLACEHOLDER || selectedRangeLabel === CUSTOM_RANGE_LABEL
+  const lastVisibleData = useRef(initialData);
+  const matchingData = dataByPeriod[activeKey];
+  if (matchingData) lastVisibleData.current = matchingData;
+  const data = matchingData || lastVisibleData.current;
+  const displayPeriodLabel = !matchingData ? data.periodLabel : selectedRangeLabel === RANGE_PLACEHOLDER || selectedRangeLabel === CUSTOM_RANGE_LABEL
     ? data.periodLabel
     : selectedRangeLabel;
   const scopedPeriodLabel = data.businessLine === "all" ? displayPeriodLabel : `${displayPeriodLabel} ${businessLineLabel(data.businessLine)}`;
@@ -144,12 +151,15 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
   const tableRangeLabel = formatDateRange(data.dateFrom, data.dateTo);
   const deliveryDays = mtdDeliveryDayComparison(data.generatedAt);
   const canAutoLoadGrossProfitForVisibleRange = canAutoLoadGrossProfit(data.dateFrom, data.dateTo);
-  const loadingStatus = dashboardLoadingStatus({ isDrilldownLoading, isLoading, isProfitLoading });
+  const loadingStatus = dashboardLoadingStatus({ isDrilldownLoading, isLoading, isProfitLoading: isProfitLoading || isComparisonLoading });
   const topReps = useMemo(() => sortSummaryRows(data.byRep, repSort).slice(0, 20), [data.byRep, repSort]);
   const accountRows = useMemo(() => sortSummaryRows(accountData.byAccount, accountSort), [accountData.byAccount, accountSort]);
 
   useEffect(() => {
     setTopbarControlTarget(document.getElementById("topbar-context-controls"));
+    // Initial server render is sales-only. Hydration must be explicitly started.
+    performance.mark("winebook:home-sales-usable");
+    if (initialData.summary.grossProfit === null) void hydrateProfit(initialData);
     return () => {
       activeDashboardRequests.current.forEach((controller) => controller.abort());
       activeDashboardRequests.current.clear();
@@ -157,8 +167,10 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     };
   }, []);
 
-  function startDashboardRequest() {
+  function startDashboardRequest(kind = "navigation") {
+    requestKinds.current.get(kind)?.abort();
     const controller = new AbortController();
+    requestKinds.current.set(kind, controller);
     activeDashboardRequests.current.add(controller);
     return controller;
   }
@@ -172,11 +184,13 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     activeDashboardRequests.current.clear();
     setIsLoading(false);
     setIsProfitLoading(false);
+    setIsComparisonLoading(false);
     setIsDrilldownLoading(false);
     setIsBreakdownsLoading(false);
   }
 
   async function selectDateRange(rangeLabel: DateRangeLabel) {
+    stopLoading();
     setSelectedRangeLabel(rangeLabel);
     if (rangeLabel === RANGE_PLACEHOLDER) return;
     if (rangeLabel === CUSTOM_RANGE_LABEL) {
@@ -196,7 +210,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setSelectedRep(null);
     setAccountInvoicePanel(null);
     setErrorMessage("");
-    const cachedData = dataByPeriod[nextKey];
+    const cachedData = freshDashboard(dataByPeriod[nextKey]);
     if (cachedData) {
       setDateFrom(cachedData.dateFrom);
       setDateTo(cachedData.dateTo);
@@ -222,21 +236,23 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         businessLine: nextBusinessLine,
         signal: controller.signal
       });
+      controller.signal.throwIfAborted();
       setDateFrom(dashboardData.dateFrom);
       setDateTo(dashboardData.dateTo);
       setAccountData(dashboardData);
-      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: mergeDashboardSnapshot(current[cacheKey(dashboardData)], dashboardData) }));
       if (!requiresProfit) void hydrateProfit(dashboardData);
     } catch (error) {
       if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load company dashboard.");
     } finally {
       finishDashboardRequest(controller);
-      setIsLoading(false);
+      if (!controller.signal.aborted) setIsLoading(false);
     }
   }
 
   async function applyCustomRange() {
+    stopLoading();
     setActivePeriod("custom");
     setSelectedRangeLabel(CUSTOM_RANGE_LABEL);
     const canLoadProfitForCustom = canAutoLoadGrossProfit(dateFrom, dateTo);
@@ -246,8 +262,8 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setAccountInvoicePanel(null);
     setErrorMessage("");
     const key = cacheKeyFor("custom", dateFrom, dateTo, nextBusinessLine);
-    if (dataByPeriod[key]) {
-      const cachedData = dataByPeriod[key];
+    if (freshDashboard(dataByPeriod[key])) {
+      const cachedData = freshDashboard(dataByPeriod[key])!;
       setAccountData(cachedData);
       if ((repSummaryExpanded || accountSummaryExpanded) && !cachedData.breakdownsLoaded) {
         void loadBreakdowns(cachedData);
@@ -269,15 +285,16 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         businessLine: nextBusinessLine,
         signal: controller.signal
       });
+      controller.signal.throwIfAborted();
       setAccountData(dashboardData);
-      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: mergeDashboardSnapshot(current[cacheKey(dashboardData)], dashboardData) }));
       if (!requiresProfit) void hydrateProfit(dashboardData);
     } catch (error) {
       if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load company dashboard.");
     } finally {
       finishDashboardRequest(controller);
-      setIsLoading(false);
+      if (!controller.signal.aborted) setIsLoading(false);
     }
   }
 
@@ -286,7 +303,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setAccountSummaryExpanded(true);
     setAccountInvoicePanel(null);
     setErrorMessage("");
-    const controller = startDashboardRequest();
+    const controller = startDashboardRequest("rep");
     setIsDrilldownLoading(true);
     try {
       const drilldownData = await loadCompanyDashboard({
@@ -297,23 +314,27 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         businessLine: selectedBusinessLine,
         signal: controller.signal
       });
+      controller.signal.throwIfAborted();
       setAccountData(drilldownData);
     } catch (error) {
       if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load rep accounts.");
     } finally {
       finishDashboardRequest(controller);
-      setIsDrilldownLoading(false);
+      if (!controller.signal.aborted) setIsDrilldownLoading(false);
     }
   }
 
   function clearRep() {
+    requestKinds.current.get("rep")?.abort();
+    setIsDrilldownLoading(false);
     setSelectedRep(null);
     setAccountData(data);
     setAccountInvoicePanel(null);
   }
 
   async function selectBusinessLine(nextBusinessLine: CompanyDashboardBusinessLine) {
+    stopLoading();
     if (nextBusinessLine === selectedBusinessLine) return;
     if (nextBusinessLine !== "all" && !canAutoLoadGrossProfit(dateFrom, dateTo)) {
       setErrorMessage("Stem/GRW filtering needs a year-or-less range for now.");
@@ -325,7 +346,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     setErrorMessage("");
 
     const key = cacheKeyFor(activePeriod, dateFrom, dateTo, nextBusinessLine);
-    const cachedData = dataByPeriod[key];
+    const cachedData = freshDashboard(dataByPeriod[key]);
     if (cachedData) {
       setAccountData(cachedData);
       if ((repSummaryExpanded || accountSummaryExpanded) && !cachedData.breakdownsLoaded) {
@@ -348,45 +369,80 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         businessLine: nextBusinessLine,
         signal: controller.signal
       });
+      controller.signal.throwIfAborted();
       setDateFrom(dashboardData.dateFrom);
       setDateTo(dashboardData.dateTo);
       setAccountData(dashboardData);
-      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: mergeDashboardSnapshot(current[cacheKey(dashboardData)], dashboardData) }));
     } catch (error) {
       if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load business line.");
     } finally {
       finishDashboardRequest(controller);
-      setIsLoading(false);
+      if (!controller.signal.aborted) setIsLoading(false);
     }
+  }
+
+  async function reloadSales() {
+    stopLoading();
+    const controller = startDashboardRequest();
+    setIsLoading(true); setErrorMessage("");
+    try {
+      const fresh = await loadCompanyDashboard({ period: activePeriod, dateFrom, dateTo,
+        businessLine: "all", includeProfit: false, includeBreakdowns: false, signal: controller.signal });
+      controller.signal.throwIfAborted();
+      setSelectedBusinessLine("all");
+      setDataByPeriod((current) => ({ ...current, [cacheKey(fresh)]: fresh }));
+      setAccountData(fresh); void hydrateProfit(fresh);
+    } catch (error) {
+      if (!controller.signal.aborted) setErrorMessage(error instanceof Error ? error.message : "Sales unavailable.");
+    } finally { finishDashboardRequest(controller); if (!controller.signal.aborted) setIsLoading(false); }
   }
 
   async function hydrateProfit(baseData: CompanyDashboardData) {
     if (baseData.selectedRep) return;
     if (!canAutoLoadGrossProfit(baseData.dateFrom, baseData.dateTo)) return;
-    const controller = startDashboardRequest();
+    const controller = startDashboardRequest("profit");
     setIsProfitLoading(true);
     try {
       const dashboardData = await loadCompanyDashboard({
-        dateFrom: baseData.period === "custom" ? baseData.dateFrom : undefined,
-        dateTo: baseData.period === "custom" ? baseData.dateTo : undefined,
-        period: baseData.period === "custom" ? undefined : baseData.period,
+        dateFrom: baseData.dateFrom,
+        dateTo: baseData.dateTo,
+        period: baseData.period,
         includeProfit: true,
+        includeComparison: false,
         includeBreakdowns: repSummaryExpanded || accountSummaryExpanded,
         businessLine: baseData.businessLine,
+        onStage: setProfitStage,
         signal: controller.signal
       });
-      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+      controller.signal.throwIfAborted();
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: mergeDashboardSnapshot(current[cacheKey(dashboardData)], dashboardData) }));
+      void hydrateComparison(dashboardData);
       setAccountData((current) =>
-        current.selectedRep || current.dateFrom !== baseData.dateFrom || current.dateTo !== baseData.dateTo ? current : dashboardData
+        current.selectedRep || current.businessLine !== baseData.businessLine || current.dateFrom !== baseData.dateFrom || current.dateTo !== baseData.dateTo ? current : dashboardData
       );
     } catch (error) {
       if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not calculate gross profit.");
     } finally {
       finishDashboardRequest(controller);
-      setIsProfitLoading(false);
+      if (!controller.signal.aborted) setIsProfitLoading(false);
     }
+  }
+
+  async function hydrateComparison(baseData: CompanyDashboardData) {
+    const controller = startDashboardRequest("comparison");
+    setIsComparisonLoading(true);
+    try {
+      const dashboardData = await loadCompanyDashboard({ dateFrom: baseData.dateFrom, dateTo: baseData.dateTo,
+        period: baseData.period, businessLine: baseData.businessLine, includeProfit: true, includeBreakdowns: false,
+        includeComparison: true, signal: controller.signal });
+      controller.signal.throwIfAborted();
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: mergeDashboardSnapshot(current[cacheKey(dashboardData)], dashboardData) }));
+    } catch (error) {
+      if (!controller.signal.aborted) setErrorMessage(error instanceof Error ? error.message : "Comparison failed.");
+    } finally { finishDashboardRequest(controller); if (!controller.signal.aborted) setIsComparisonLoading(false); }
   }
 
   async function selectAccount(row: QuickBooksSalesSummaryRow) {
@@ -419,27 +475,28 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
 
   async function loadBreakdowns(baseData: CompanyDashboardData) {
     if (baseData.breakdownsLoaded || isBreakdownsLoading) return;
-    const controller = startDashboardRequest();
+    const controller = startDashboardRequest("breakdowns");
     setIsBreakdownsLoading(true);
     setErrorMessage("");
     try {
       const dashboardData = await loadCompanyDashboard({
-        dateFrom: baseData.period === "custom" ? baseData.dateFrom : undefined,
-        dateTo: baseData.period === "custom" ? baseData.dateTo : undefined,
-        period: baseData.period === "custom" ? undefined : baseData.period,
+        dateFrom: baseData.dateFrom,
+        dateTo: baseData.dateTo,
+        period: baseData.period,
         includeProfit: true,
         includeBreakdowns: true,
         businessLine: baseData.businessLine,
         signal: controller.signal
       });
-      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: dashboardData }));
+      controller.signal.throwIfAborted();
+      setDataByPeriod((current) => ({ ...current, [cacheKey(dashboardData)]: mergeDashboardSnapshot(current[cacheKey(dashboardData)], dashboardData) }));
       if (!selectedRep) setAccountData(dashboardData);
     } catch (error) {
       if (isAbortError(error)) return;
       setErrorMessage(error instanceof Error ? error.message : "Could not load sales summaries.");
     } finally {
       finishDashboardRequest(controller);
-      setIsBreakdownsLoading(false);
+      if (!controller.signal.aborted) setIsBreakdownsLoading(false);
     }
   }
 
@@ -453,6 +510,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
     range: { from: string; to: string },
     mode: AccountInvoiceRangeMode
   ) {
+    const controller = startDashboardRequest("invoices");
     const loadingState: AccountInvoicePanelState = {
       accountKey: row.key,
       accountName: row.label,
@@ -471,8 +529,10 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         account: row.label,
         dateFrom: range.from,
         dateTo: range.to,
-        rep: selectedRep || undefined
+        rep: selectedRep || undefined,
+        signal: controller.signal
       });
+      controller.signal.throwIfAborted();
       setAccountInvoicePanel({
         ...loadingState,
         transactions: transactionData.transactions,
@@ -480,17 +540,18 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         isLoading: false
       });
     } catch (error) {
+      if (controller.signal.aborted) return;
       setAccountInvoicePanel({
         ...loadingState,
         isLoading: false,
         error: error instanceof Error ? error.message : "Could not load account invoices."
       });
-    }
+    } finally { finishDashboardRequest(controller); }
   }
 
   return (
     <section className="company-dashboard-view">
-      {loadingStatus ? <WineLoadingProgress message={loadingStatus.message} detail={loadingStatus.detail} onStop={stopLoading} /> : null}
+      {loadingStatus ? <WineLoadingProgress message={isProfitLoading && !isLoading ? profitStage : isComparisonLoading && !isLoading ? "Loading prior-year comparison" : loadingStatus.message} detail={loadingStatus.detail} onStop={stopLoading} /> : null}
       {topbarControlTarget
         ? createPortal(
             <DashboardDateControls
@@ -520,13 +581,20 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
           <h1>Company Dashboard</h1>
           <p className="muted">{formatDateRange(data.dateFrom, data.dateTo)}</p>
         </div>
-        <span className="company-dashboard-updated">Updated {formatDateTime(data.generatedAt)}</span>
+        <span className="company-dashboard-updated">Updated {formatDateTime(data.generatedAt)}{data.sourceVersion ? ` · source ${data.sourceVersion}` : ""}{data.marginCalculatedAt ? ` · ${data.marginPeriodState} margins calculated ${formatDateTime(data.marginCalculatedAt)}` : ""}</span>
       </div>
 
-      {data.unavailableReason ? <div className="status-card error">Sales data is not available yet.</div> : null}
-      {errorMessage ? <div className="status-card error">{errorMessage}</div> : null}
+      {data.unavailableReason ? <div className="status-card error">Sales data is not available yet. <button onClick={() => void reloadSales()} type="button">Retry sales</button></div> : null}
+      {errorMessage ? <div className="status-card error" role="alert">{errorMessage} <button onClick={() => void hydrateProfit(data)} type="button">Retry calculations</button></div> : null}
+      {!matchingData ? <p role="status">Showing previous results for {tableRangeLabel} while the requested range loads.</p> : null}
+      <div className="metric-grid" aria-label="Sales KPIs">
+        <div className="panel"><h2>Net sales</h2><strong>{data.unavailableReason ? "Unavailable" : currency.format(data.summary.netSales)}</strong></div>
+        <div className="panel"><h2>Gross sales</h2><strong>{data.unavailableReason ? "Unavailable" : currency.format(data.summary.grossSales)}</strong></div>
+        <div className="panel"><h2>Credits</h2><strong>{data.unavailableReason ? "Unavailable" : currency.format(data.summary.credits)}</strong></div>
+      </div>
+      {data.summary.grossProfit === null ? <p role="status">{isProfitLoading ? "Calculating margins and business-line totals…" : "Margins and business-line totals unavailable."}{!isProfitLoading ? <button onClick={() => void hydrateProfit(data)} type="button">Load margins</button> : null}</p> : null}
 
-      <BusinessLineKpis
+      {data.summary.grossProfit !== null ? <BusinessLineKpis
         businessLine="stem"
         comparison={data.comparison?.businessLineSummaries.find((row) => row.key === "stem") || null}
         current={data.businessLineSummaries.find((row) => row.key === "stem") || null}
@@ -535,9 +603,9 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         period={data.period}
         periodLabel={compactDashboardPeriodLabel(displayPeriodLabel)}
         canLoadProfit={canAutoLoadGrossProfitForVisibleRange}
-      />
+      /> : null}
 
-      <BusinessLineKpis
+      {data.summary.grossProfit !== null ? <BusinessLineKpis
         businessLine="grw"
         comparison={data.comparison?.businessLineSummaries.find((row) => row.key === "grw") || null}
         current={data.businessLineSummaries.find((row) => row.key === "grw") || null}
@@ -546,14 +614,14 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
         period={data.period}
         periodLabel={compactDashboardPeriodLabel(displayPeriodLabel)}
         canLoadProfit={canAutoLoadGrossProfitForVisibleRange}
-      />
+      /> : null}
 
-      <BusinessLineSplit
+      {data.summary.grossProfit !== null ? <BusinessLineSplit
         activeBusinessLine={selectedBusinessLine}
         isLoading={isProfitLoading || isLoading}
         rows={data.businessLineSummaries}
         onSelectBusinessLine={selectBusinessLine}
-      />
+      /> : null}
 
       <section className="company-dashboard-panel">
         <div className="panel-heading-row">
@@ -716,7 +784,7 @@ export function CompanyDashboardView({ initialData }: CompanyDashboardViewProps)
                       panel={accountInvoicePanel}
                       selectedRange={{ from: data.dateFrom, to: data.dateTo }}
                       selectedRep={selectedRep}
-                      onClose={() => setAccountInvoicePanel(null)}
+                      onClose={() => { requestKinds.current.get("invoices")?.abort(); setAccountInvoicePanel(null); }}
                       onLoadFullRange={() => void loadFullAccountRange()}
                     />
                   ) : null}
@@ -1188,15 +1256,19 @@ async function loadCompanyDashboard({
   dateFrom,
   dateTo,
   includeBreakdowns,
+  includeComparison,
   includeProfit,
   period,
   rep,
-  signal
+  signal,
+  onStage
 }: {
+  onStage?: (stage: string) => void;
   businessLine?: CompanyDashboardBusinessLine;
   dateFrom?: string;
   dateTo?: string;
   includeBreakdowns?: boolean;
+  includeComparison?: boolean;
   includeProfit?: boolean;
   period?: CompanyDashboardPeriod;
   rep?: string;
@@ -1206,19 +1278,32 @@ async function loadCompanyDashboard({
   if (dateFrom && dateTo) {
     params.set("from", dateFrom);
     params.set("to", dateTo);
-  } else if (period) {
+  }
+  if (period) {
     params.set("period", period);
   }
   if (includeProfit === false) params.set("includeProfit", "false");
+  if (includeComparison === false || (includeComparison === undefined && includeProfit === false)) params.set("includeComparison", "false");
   if (includeBreakdowns === false) params.set("includeBreakdowns", "false");
   if (businessLine && businessLine !== "all") params.set("businessLine", businessLine);
   if (rep) params.set("rep", rep);
-  const response = await fetch(`/api/company-dashboard?${params.toString()}`, { signal });
-  const result = (await response.json()) as CompanyDashboardData | { error?: string };
-  if (!response.ok || "error" in result) {
-    throw new Error("error" in result && result.error ? result.error : "Could not load company dashboard.");
+  for (;;) {
+    const response = await fetch(`/api/company-dashboard?${params.toString()}`, { signal, cache: "no-store" });
+    const result = await response.json();
+    if (response.status === 202) {
+      onStage?.(result.stage || "Waiting for shared calculation");
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => { clearTimeout(timer); reject(new DOMException("Stopped waiting", "AbortError")); };
+        const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, 2000);
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
+      });
+      continue;
+    }
+    if (!response.ok || "error" in result) throw new Error(result.error || "Could not load company dashboard.");
+    if (includeProfit !== false) performance.mark("winebook:home-calculation-complete");
+    return result as CompanyDashboardData;
   }
-  return result as CompanyDashboardData;
 }
 
 function isAbortError(error: unknown) {
@@ -1229,8 +1314,10 @@ async function loadAccountTransactions({
   account,
   dateFrom,
   dateTo,
-  rep
+  rep,
+  signal
 }: {
+  signal?: AbortSignal;
   account: string;
   dateFrom: string;
   dateTo: string;
@@ -1244,7 +1331,7 @@ async function loadAccountTransactions({
     includeTransactions: "true"
   });
   if (rep) params.set("rep", rep);
-  const response = await fetch(`/api/sales-dashboard?${params.toString()}`);
+  const response = await fetch(`/api/sales-dashboard?${params.toString()}`, { signal });
   const result = (await response.json()) as QuickBooksSalesDashboardData | { error?: string };
   if (!response.ok || "error" in result) {
     throw new Error("error" in result && result.error ? result.error : "Could not load account invoices.");
@@ -1262,7 +1349,7 @@ function cacheKeyFor(
   dateTo: string,
   businessLine: CompanyDashboardBusinessLine
 ) {
-  const rangeKey = period === "custom" ? customKey(dateFrom, dateTo) : period;
+  const rangeKey = `${period}:${dateFrom}:${dateTo}`;
   return `${businessLine}:${rangeKey}`;
 }
 
@@ -1698,4 +1785,8 @@ function revenueCenterOptionLabel(businessLine: CompanyDashboardBusinessLine) {
   if (businessLine === "grw") return "GRW Broker";
   if (businessLine === "stem") return "Stem Core";
   return "All Revenue";
+}
+
+function freshDashboard(data: CompanyDashboardData | undefined) {
+  return data && !data.unavailableReason && Date.now() - Date.parse(data.generatedAt) < 30_000 ? data : undefined;
 }

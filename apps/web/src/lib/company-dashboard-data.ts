@@ -1,8 +1,10 @@
 import "server-only";
 
+import { completedReadModel, CalculationPending, readSourceVersion } from "@/lib/read-model-jobs";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildGrossProfitCenter, type GrossProfitCenterLine } from "@/lib/supabase/gross-profit-center";
 import {
+  GROSS_PROFIT_FORMULA_VERSION,
   fetchStoredGrossProfitRollups,
   STABLE_GROSS_PROFIT_LAG_DAYS,
   type StoredGrossProfitBusinessLine
@@ -42,6 +44,9 @@ export type CompanyDashboardBusinessLineSummary = CompanyDashboardSummary & {
 
 export type CompanyDashboardData = {
   generatedAt: string;
+  sourceVersion?: number;
+  marginCalculatedAt?: string;
+  marginPeriodState?: "provisional" | "finalized";
   period: CompanyDashboardPeriod;
   periodLabel: string;
   businessLine: CompanyDashboardBusinessLine;
@@ -62,13 +67,22 @@ const DASHBOARD_TIME_ZONE = "America/Phoenix";
 const QUICKBOOKS_SALES_HISTORY_FROM = process.env.QUICKBOOKS_DESKTOP_SALES_DASHBOARD_HISTORY_FROM || "2025-01-01";
 const MAX_AUTO_GROSS_PROFIT_DAYS = 366;
 
-export async function fetchCompanyDashboardData(
+// A read is only labelled current when all of its constituent queries used one source generation.
+export async function fetchCompanyDashboardData(...args: Parameters<typeof fetchDashboardData>): Promise<CompanyDashboardData> {
+  const version = await readSourceVersion(args[0], "margins");
+  const data = await fetchDashboardData(...args);
+  if (await readSourceVersion(args[0], "margins") !== version) throw new CalculationPending("Sources changed; refreshing this range");
+  return { ...data, sourceVersion: version };
+}
+
+async function fetchDashboardData(
   supabase: SupabaseClient,
   period: CompanyDashboardPeriod = "mtd",
   filters: {
     dateFrom?: string;
     dateTo?: string;
     rep?: string;
+    includeComparison?: boolean;
     includeGrossProfit?: boolean;
     includeBreakdowns?: boolean;
     businessLine?: string;
@@ -81,7 +95,7 @@ export async function fetchCompanyDashboardData(
   const includeGrossProfit = filters.includeGrossProfit !== false;
   const includeBreakdowns = filters.includeBreakdowns !== false;
   const businessLine = parseCompanyDashboardBusinessLine(filters.businessLine);
-  const comparisonRange = comparableLastYearRange(range);
+  const comparisonRange = filters.includeComparison === false ? null : comparableLastYearRange(range);
   const includeComparisonGrossProfit = includeGrossProfit && canAutoLoadGrossProfitRange(range);
 
   const [current, comparison, salesThroughDate] = await Promise.all([
@@ -99,6 +113,8 @@ export async function fetchCompanyDashboardData(
 
   return {
     generatedAt: new Date().toISOString(),
+    marginCalculatedAt: current.calculatedAt,
+    marginPeriodState: current.periodState,
     period,
     periodLabel: periodLabel(period),
     businessLine,
@@ -175,6 +191,8 @@ export function unavailableCompanyDashboardData(
 }
 
 type PeriodDashboardData = {
+  calculatedAt?: string;
+  periodState?: "provisional" | "finalized";
   byRep: QuickBooksSalesSummaryRow[];
   byAccount: QuickBooksSalesSummaryRow[];
   businessLineSummaries: CompanyDashboardBusinessLineSummary[];
@@ -198,6 +216,8 @@ async function fetchPeriodDashboardData(
     const grossProfit = await fetchGrossProfitRollups(supabase, range, rep, businessLine, includeBreakdowns);
     if (!grossProfit.unavailableReason) {
       return {
+        calculatedAt: grossProfit.calculatedAt,
+        periodState: grossProfit.periodState,
         byRep: includeBreakdowns ? grossProfit.byRepRows : [],
         byAccount: includeBreakdowns ? grossProfit.byAccountRows : [],
         businessLineSummaries: grossProfit.businessLineSummaries,
@@ -339,6 +359,8 @@ type MutableGrossProfitRollup = GrossProfitRollup & {
 };
 
 type GrossProfitRollups = {
+  calculatedAt?: string;
+  periodState?: "provisional" | "finalized";
   summary: CompanyDashboardSummary;
   byRep: Map<string, GrossProfitRollup>;
   byAccount: Map<string, GrossProfitRollup>;
@@ -355,10 +377,17 @@ async function fetchGrossProfitRollups(
   businessLine: CompanyDashboardBusinessLine = "all",
   includeBreakdowns = true
 ): Promise<GrossProfitRollups> {
-  if (shouldUseStoredGrossProfit(range)) {
-    return fetchStoredOrHybridGrossProfitRollups(supabase, range, rep, businessLine, includeBreakdowns);
-  }
-  return fetchLiveGrossProfitRollups(supabase, range, rep, businessLine, includeBreakdowns);
+  const snapshot = await completedReadModel<MarginSnapshot>(supabase, "margins", `${range.from}:${range.to}`,
+    MARGIN_SNAPSHOT_FORMULA, range);
+  const scope = snapshot.scopes[businessLine];
+  const stored = rep ? scope.reps[rep] : scope.company;
+  const result = stored || { ...emptyGrossProfitRollups(), byRepRows: [], byAccountRows: [] };
+  return {
+    ...result, calculatedAt: snapshot.calculatedAt, periodState: snapshot.periodState,
+    byRep: new Map(), byAccount: new Map(),
+    byRepRows: includeBreakdowns ? result.byRepRows : [],
+    byAccountRows: includeBreakdowns ? result.byAccountRows : []
+  };
 }
 
 async function fetchLiveGrossProfitRollups(
@@ -900,4 +929,40 @@ function comparisonLabel(period: CompanyDashboardPeriod) {
 function cleanFilter(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+export const MARGIN_SNAPSHOT_FORMULA = `${GROSS_PROFIT_FORMULA_VERSION}:snapshot-v1`;
+type SerializableMarginRollups = Omit<GrossProfitRollups, "byRep" | "byAccount">;
+type MarginSnapshot = {
+  calculatedAt: string;
+  periodState: "provisional" | "finalized";
+  scopes: Record<CompanyDashboardBusinessLine, { company: SerializableMarginRollups; reps: Record<string, SerializableMarginRollups> }>;
+};
+
+// Worker only: one line-matching pass supplies every company, rep and account view.
+export async function buildMarginSnapshot(supabase: SupabaseClient, range: { from: string; to: string }): Promise<MarginSnapshot> {
+  const report = await buildGrossProfitCenterWithRetry(supabase, range);
+  const reps = Array.from(new Set(report.lines.map((line) => cleanLabel(line.salesRep, "Unassigned Rep"))));
+  function summarize(lines: GrossProfitCenterLine[], businessLine: CompanyDashboardBusinessLine): SerializableMarginRollups {
+    const filtered = filterGrossProfitLinesByBusinessLine(lines, businessLine);
+    return {
+      summary: summarizeGrossProfitLines(filtered),
+      byRepRows: rollupSalesRows(filtered, (line) => cleanLabel(line.salesRep, "Unassigned Rep")),
+      byAccountRows: rollupSalesRows(filtered, (line) => cleanLabel(line.customerFullName, "Unknown Account")),
+      businessLineSummaries: summarizeBusinessLineSplits(lines), unavailableReason: null
+    };
+  }
+  return {
+    calculatedAt: new Date().toISOString(),
+    periodState: range.to > stableGrossProfitCutoff() ? "provisional" : "finalized",
+    scopes: Object.fromEntries((["all", "stem", "grw"] as const).map((line) => [line, {
+      company: summarize(report.lines, line),
+      reps: Object.fromEntries(reps.map((rep) => [rep, summarize(filterGrossProfitLines(report.lines, rep), line)]))
+    }])) as MarginSnapshot["scopes"]
+  };
+}
+
+export function warmMarginRanges() {
+  const current = (["previous-day", "mtd", "ytd"] as const).map(rangeForPeriod);
+  return [...current, ...current.map(comparableLastYearRange).filter((range): range is { from: string; to: string } => range !== null)];
 }

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const orderingPagePath = path.resolve(process.cwd(), "src/app/page.tsx");
+const orderingPagePath = path.resolve(process.cwd(), "src/lib/ordering-page-data.ts");
 const poCreateRoutePath = path.resolve(process.cwd(), "src/app/api/po-drafts/create/route.ts");
 const sourceServerPath = path.resolve(process.cwd(), "src/lib/source-backed-ordering-server.ts");
 const sourceRunsPath = path.resolve(process.cwd(), "src/lib/source-backed-ordering-runs.ts");
@@ -33,6 +33,8 @@ describe("current QuickBooks sales cutoff contract", () => {
     expect(page).toContain("allowVerifiedFallbackDuringRefresh: true");
     expect(page).toContain("Order Summary is showing the last verified snapshot");
     expect(page).toContain("The latest QuickBooks refresh stopped without finishing");
+    expect(page).toContain("isQuickBooksSyncNonMaterialFailure(data)");
+    expect(page).toContain("quickBooksSyncCompletedRequestCount(data) === 0");
     expect(poCreateRoute).not.toContain("allowVerifiedFallbackDuringRefresh: true");
   });
 

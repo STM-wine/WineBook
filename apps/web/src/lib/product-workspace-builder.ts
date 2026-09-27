@@ -1,0 +1,1023 @@
+import "server-only";
+import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type {
+  ProductWorkspacePriceLevel,
+  ProductWorkspaceResponse,
+  ProductWorkspaceRow,
+  ProductWorkspaceSource,
+  ProductWorkspaceStatusKey
+} from "@/lib/product-workspace-types";
+import { recommendationsAreSuppressed, replenishmentPolicy } from "@/lib/replenishment-policy";
+
+type ProductWorkspaceClient = SupabaseClient<any, "public", any>;
+
+type QuickBooksItemRow = {
+  list_id: string;
+  item_type: string | null;
+  name: string | null;
+  full_name: string | null;
+  is_active: boolean | null;
+  sales_price: number | string | null;
+  purchase_cost: number | string | null;
+  average_cost: number | string | null;
+  custom_fields: Record<string, unknown> | null;
+  last_seen_at: string | null;
+};
+
+type VinosmithWineRow = {
+  wine_id: string;
+  code: string | null;
+  name: string | null;
+  vintage: string | null;
+  importer_name: string | null;
+  producer_name: string | null;
+  unit_set: number | string | null;
+  bottle_size: string | null;
+  bottle_size_label: string | null;
+  category: string | null;
+  active: boolean | null;
+  orderable: boolean | null;
+  last_seen_at: string | null;
+};
+
+type VinosmithPriceRow = {
+  price_id: string;
+  wine_id: string | null;
+  label: string | null;
+  price_cents: number | null;
+  bill_back_price_cents: number | null;
+  active: boolean | null;
+  disabled: boolean | null;
+  is_default: boolean | null;
+};
+
+type VinosmithSupplierHintRow = {
+  code: string | null;
+  importer_name: string | null;
+};
+
+type SupplierRow = {
+  id: string;
+  name: string;
+  trucking_cost_per_bottle: number | string | null;
+  active: boolean | null;
+};
+
+type SupplierCatalogWineRow = {
+  id: string;
+  supplier_id: string | null;
+  supplier_name: string;
+  display_name: string;
+  producer: string;
+  wine_name: string;
+  vintage: string;
+  pack_size: number | string;
+  bottle_size: string;
+  quickbooks_item_id: string | null;
+  quickbooks_item_name: string | null;
+  quickbooks_item_number: string | null;
+  quickbooks_sync_status: string;
+  conversion_status: string;
+  product_lifecycle_status: string;
+};
+
+type SupplierCatalogPriceLevelRow = {
+  id: string;
+  supplier_catalog_wine_id: string;
+  name: string;
+  bottle_price: number | string;
+  depletion_allowance: number | string;
+  calculated_gp_margin: number | string;
+  is_frontline: boolean;
+  is_best: boolean;
+  active: boolean;
+};
+
+type OrderingItemMarkerRow = {
+  item_code: string;
+  quickbooks_item_list_id: string | null;
+  is_btg: boolean | null;
+  is_core: boolean | null;
+  replenishment_policy: string | null;
+  policy_family_key: string | null;
+  policy_family_name: string | null;
+  family_default_policy: string | null;
+  recommendations_suppressed: boolean | null;
+  suppression_reason: string | null;
+  suppressed_until: string | null;
+  suppression_changed_at: string | null;
+  suppression_changed_by: string | null;
+  marker_note: string | null;
+  note_source: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+};
+
+
+export async function buildProductWorkspace(supabase: ProductWorkspaceClient, includeInactive = true): Promise<ProductWorkspaceResponse> {
+    const [quickBooksItems, suppliers, supplierCatalogWines, supplierCatalogPriceLevels, vinosmithSupplierHints, activeVinosmithWines, orderingItemMarkers] = await Promise.all([
+      fetchQuickBooksItems(supabase),
+      fetchSuppliers(supabase),
+      fetchSupplierCatalogWines(supabase),
+      fetchSupplierCatalogPriceLevels(supabase),
+      fetchVinosmithSupplierHints(supabase),
+      fetchActiveVinosmithWines(supabase),
+      fetchOrderingItemMarkers(supabase)
+    ]);
+
+    const matchedWineIds = new Set<string>();
+    // Vinosmith active/orderable flags are not complete enough to be the only
+    // matching source. Keep code/name matching for correctness, but execute all
+    // independent batches concurrently below.
+    const additionalVinosmithWines = await fetchVinosmithWines(supabase, quickBooksItems);
+    const vinosmithWines = mergeVinosmithWines([
+      ...additionalVinosmithWines,
+      ...activeVinosmithWines
+    ]);
+    const supplierByName = mapSuppliersByName(suppliers);
+    const supplierNameByCodePrefix = mapVinosmithSuppliersByCodePrefix(vinosmithSupplierHints);
+    const vinosmithLookup = buildVinosmithLookup(vinosmithWines);
+    const quickBooksLookup = buildQuickBooksLookup(quickBooksItems);
+    const catalogLookup = buildSupplierCatalogLookup(supplierCatalogWines);
+    const catalogPriceLevelsByWine = groupSupplierCatalogPriceLevels(supplierCatalogPriceLevels);
+    const orderingMarkersByCode = buildOrderingMarkerLookup(orderingItemMarkers);
+    const baseRows = quickBooksItems.filter((item) => includeInactive || item.is_active !== false);
+    const inactiveQuickBooksVsActiveRows = includeInactive
+      ? []
+      : quickBooksItems.filter((item) => {
+          if (item.is_active !== false) return false;
+          const itemCode = itemCodeFromQuickBooks(item);
+          const vinosmith = resolveVinosmithWine(item, itemCode, vinosmithLookup);
+          return isVinosmithActive(vinosmith);
+        });
+    const quickBooksRowsForWorkspace = dedupeQuickBooksItems([
+      ...baseRows,
+      ...inactiveQuickBooksVsActiveRows
+    ]);
+
+    const provisionalRows = quickBooksRowsForWorkspace.map((item) => {
+      const itemCode = itemCodeFromQuickBooks(item);
+      const vinosmith = resolveVinosmithWine(item, itemCode, vinosmithLookup);
+      if (vinosmith) matchedWineIds.add(vinosmith.wine_id);
+      const supplierCatalog = resolveSupplierCatalogWine(item, itemCode, catalogLookup);
+      const supplierResolution = resolveSupplierName(itemCode, vinosmith, supplierCatalog, supplierNameByCodePrefix);
+      const supplier = supplierResolution.name ? supplierByName.get(normalizeKey(supplierResolution.name)) || null : null;
+      const fob = numberOrNull(item.purchase_cost) ?? numberOrNull(item.average_cost);
+      const purchaseCost = numberOrNull(item.purchase_cost);
+      const fobSource = purchaseCost !== null ? "QuickBooks purchase_cost" : numberOrNull(item.average_cost) !== null ? "QuickBooks average_cost" : null;
+      const laidIn = supplier ? numberOrNull(supplier.trucking_cost_per_bottle) : null;
+      const laidInSource = supplier
+        ? `Supplier Logistics trucking_cost_per_bottle${supplierResolution.source ? ` (${supplierResolution.source})` : ""}`
+        : null;
+      const landedCost = fob !== null && laidIn !== null ? roundMoney(fob + laidIn) : null;
+      const supplierCatalogLevels = supplierCatalog ? catalogPriceLevelsByWine.get(supplierCatalog.id) || [] : [];
+      const orderingMarker = resolveOrderingMarker(itemCode, orderingMarkersByCode);
+
+      return {
+        item,
+        itemCode,
+        vinosmith,
+        supplierCatalog,
+        supplierName: supplierResolution.name,
+        supplierSource: supplierResolution.source,
+        fob,
+        fobSource,
+        laidIn,
+        laidInSource,
+        landedCost,
+        sourceBadges: sourceBadgesForRow(vinosmith, supplierCatalog, orderingMarker),
+        orderingMarker,
+        supplierCatalogLevels
+      };
+    });
+    const vinosmithOnlyRows = activeVinosmithWines.filter((wine) => !resolveQuickBooksItem(wine, quickBooksLookup));
+    vinosmithOnlyRows.forEach((wine) => matchedWineIds.add(wine.wine_id));
+
+    const vinosmithPrices = await fetchVinosmithPrices(supabase, Array.from(matchedWineIds));
+    const vinosmithPricesByWine = groupVinosmithPrices(vinosmithPrices);
+    const rows = provisionalRows.map<ProductWorkspaceRow>((row) => {
+      const priceLevels = [
+        ...priceLevelsFromVinosmith(vinosmithPricesByWine.get(row.vinosmith?.wine_id || "") || [], row.landedCost),
+        ...priceLevelsFromSupplierCatalog(row.supplierCatalogLevels)
+      ];
+      const frontline = pickPrice(priceLevels, "frontline");
+      const bestPrice = pickPrice(priceLevels, "best");
+      const lowestGpPercent = lowestGpForPriceLevels(priceLevels);
+      const sourceHealth = sourceHealthForRow(row.fob, row.laidIn, priceLevels);
+      const productName = row.vinosmith?.name || row.supplierCatalog?.display_name || row.item.full_name || row.item.name || "Unnamed item";
+      const status = statusForRow(row.item, row.vinosmith);
+
+      return {
+        id: row.item.list_id,
+        itemCode: row.itemCode || row.item.name || row.item.list_id,
+        productName,
+        brand: row.vinosmith?.producer_name || row.supplierCatalog?.producer || null,
+        vintage: row.vinosmith?.vintage || row.supplierCatalog?.vintage || null,
+        pack: packLabel(row.vinosmith, row.supplierCatalog),
+        supplierName: row.supplierName,
+        supplierSource: row.supplierSource,
+        revenueCenter: revenueCenterFromItem(row.item, row.itemCode),
+        active: row.item.is_active,
+        statusKey: status.key,
+        statusLabel: status.label,
+        statusDetail: status.detail,
+        fob: row.fob,
+        fobSource: row.fobSource,
+        laidIn: row.laidIn,
+        laidInSource: row.laidInSource,
+        landedCost: row.landedCost,
+        frontline,
+        bestPrice,
+        lowestGpPercent,
+        lastSold: null,
+        ytdSales: null,
+        sourceHealth,
+        sourceHealthLabel: sourceHealthLabel(sourceHealth),
+        sourceBadges: row.sourceBadges,
+        orderingMarker: productWorkspaceMarker(row.orderingMarker),
+        quickbooks: {
+          listId: row.item.list_id,
+          fullName: row.item.full_name || row.item.name || "",
+          purchaseCost: numberOrNull(row.item.purchase_cost),
+          averageCost: numberOrNull(row.item.average_cost),
+          salesPrice: numberOrNull(row.item.sales_price),
+          itemType: row.item.item_type,
+          lastSeenAt: row.item.last_seen_at
+        },
+        vinosmith: row.vinosmith
+          ? {
+              wineId: row.vinosmith.wine_id,
+              code: row.vinosmith.code,
+              name: row.vinosmith.name,
+              active: row.vinosmith.active,
+              orderable: row.vinosmith.orderable,
+              lastSeenAt: row.vinosmith.last_seen_at
+            }
+          : null,
+        supplierCatalog: row.supplierCatalog
+          ? {
+              id: row.supplierCatalog.id,
+              displayName: row.supplierCatalog.display_name,
+              conversionStatus: row.supplierCatalog.conversion_status,
+              lifecycleStatus: row.supplierCatalog.product_lifecycle_status,
+              quickbooksSyncStatus: row.supplierCatalog.quickbooks_sync_status
+            }
+          : null,
+        priceLevels,
+        gpExplanation: gpExplanation(row.fob, row.laidIn, priceLevels)
+      };
+    }).concat(vinosmithOnlyRows.map((wine) => (
+      buildVinosmithOnlyRow(
+        wine,
+        supplierByName,
+        supplierNameByCodePrefix,
+        vinosmithPricesByWine.get(wine.wine_id) || [],
+        resolveOrderingMarker(wine.code || "", orderingMarkersByCode)
+      )
+    )));
+
+    const [totalCount, activeCount, inactiveCount] = await Promise.all([
+      countRows(supabase, "quickbooks_items"),
+      countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", true)),
+      countRows(supabase, "quickbooks_items", (query) => query.eq("is_active", false))
+    ]);
+    const summary = {
+      total: totalCount,
+      active: activeCount,
+      inactive: inactiveCount,
+      visible: rows.length,
+      ready: rows.filter((row) => row.sourceHealth === "ready").length,
+      partial: rows.filter((row) => row.sourceHealth === "partial").length,
+      needsReview: rows.filter((row) => row.sourceHealth === "needs_review").length,
+      lifecycleMismatches: rows.filter((row) => isLifecycleMismatch(row.statusKey)).length,
+      qbActiveVsInactive: rows.filter((row) => row.statusKey === "qb_active_vs_inactive").length,
+      qbActiveVsMissing: rows.filter((row) => row.statusKey === "qb_active_vs_missing").length,
+      qbActiveVsUnknown: rows.filter((row) => row.statusKey === "qb_active_vs_unknown").length,
+      vsStatusUnknown: rows.filter((row) => row.statusKey === "qb_active_vs_unknown" || row.statusKey === "qb_inactive_vs_unknown").length,
+      qbInactiveVsActive: rows.filter((row) => row.statusKey === "qb_inactive_vs_active").length,
+      vsActiveQbMissing: rows.filter((row) => row.statusKey === "vs_active_qb_missing").length,
+      btgMarkers: 0,
+      coreMarkers: rows.filter((row) => row.orderingMarker.replenishmentPolicy === "Core").length,
+      policyCounts: rows.reduce<Record<string, number>>((counts, row) => {
+        const policy = row.orderingMarker.replenishmentPolicy;
+        counts[policy] = (counts[policy] || 0) + 1;
+        return counts;
+      }, {})
+    };
+
+    const response: ProductWorkspaceResponse = {
+      rows,
+      summary,
+      includeInactive,
+      generatedAt: new Date().toISOString()
+    };
+
+    return response;
+}
+
+async function fetchQuickBooksItems(supabase: ProductWorkspaceClient) {
+  return fetchAllExact<QuickBooksItemRow>("fetchQuickBooksItems", (from, to) => supabase
+    .from("quickbooks_items")
+      .select(`
+        list_id,
+        item_type,
+        name,
+        full_name,
+        is_active,
+        sales_price,
+        purchase_cost,
+        average_cost,
+        custom_fields,
+        last_seen_at
+      `, { count: "exact" })
+    .order("list_id", { ascending: true })
+    .range(from, to) as never);
+}
+
+async function fetchActiveVinosmithWines(supabase: ProductWorkspaceClient) {
+  return fetchAllExact<VinosmithWineRow>("fetchActiveVinosmithWines", (from, to) => supabase
+    .from("vinosmith_wines")
+      .select(`
+        wine_id,
+        code,
+        name,
+        vintage,
+        importer_name,
+        producer_name,
+        unit_set,
+        bottle_size,
+        bottle_size_label,
+        category,
+        active,
+        orderable
+      `, { count: "exact" })
+      .or("active.eq.true,orderable.eq.true")
+    .order("wine_id", { ascending: true })
+    .range(from, to) as never);
+}
+
+async function fetchVinosmithWines(supabase: ProductWorkspaceClient, quickBooksItems: QuickBooksItemRow[]) {
+  const byWineId = new Map<string, VinosmithWineRow>();
+  const itemCodes = uniqueTextValues(quickBooksItems.map((item) => itemCodeFromQuickBooks(item)));
+  const itemNames = uniqueTextValues(
+    quickBooksItems.flatMap((item) => [item.full_name, item.name])
+  );
+
+  await Promise.all([
+    fetchVinosmithWineBatch(supabase, "code", itemCodes, byWineId),
+    fetchVinosmithWineBatch(supabase, "name", itemNames, byWineId)
+  ]);
+
+  return Array.from(byWineId.values());
+}
+
+async function fetchVinosmithWineBatch(
+  supabase: ProductWorkspaceClient,
+  column: "code" | "name",
+  values: string[],
+  byWineId: Map<string, VinosmithWineRow>
+) {
+  const batches: string[][] = [];
+  for (let index = 0; index < values.length; index += 200) {
+    batches.push(values.slice(index, index + 200));
+  }
+  const pages = await Promise.all(batches.map(async (batch) => {
+    return fetchAllExact<VinosmithWineRow> ("fetchVinosmithWineBatch", (from, to) => supabase
+      .from("vinosmith_wines")
+      .select(`
+        wine_id,
+        code,
+        name,
+        vintage,
+        importer_name,
+        producer_name,
+        unit_set,
+        bottle_size,
+        bottle_size_label,
+        category,
+        active,
+        orderable
+      `, { count: "exact" })
+      .in(column, batch)
+      .order("wine_id", { ascending: true }).range(from, to) as never);
+
+  }));
+
+  pages.flat().forEach((row) => byWineId.set(row.wine_id, row));
+}
+
+async function fetchVinosmithSupplierHints(supabase: ProductWorkspaceClient) {
+  return fetchAllExact<VinosmithSupplierHintRow>("fetchVinosmithSupplierHints", (from, to) => supabase
+    .from("vinosmith_wines")
+      .select("code,importer_name", { count: "exact" })
+      .not("code", "is", null)
+      .not("importer_name", "is", null)
+    .order("wine_id", { ascending: true })
+    .range(from, to) as never);
+}
+
+async function fetchSuppliers(supabase: ProductWorkspaceClient) {
+  return fetchAllExact<SupplierRow>("fetchSuppliers", (from, to) => supabase
+    .from("suppliers")
+    .select("id,name,trucking_cost_per_bottle,active", { count: "exact" })
+    .order("id", { ascending: true })
+    .range(from, to) as never);
+}
+
+async function fetchSupplierCatalogWines(supabase: ProductWorkspaceClient) {
+  return fetchAllExact<SupplierCatalogWineRow>("fetchSupplierCatalogWines", (from, to) => supabase
+    .from("supplier_catalog_wines")
+    .select(`
+      id,
+      supplier_id,
+      supplier_name,
+      display_name,
+      producer,
+      wine_name,
+      vintage,
+      pack_size,
+      bottle_size,
+      quickbooks_item_id,
+      quickbooks_item_name,
+      quickbooks_item_number,
+      quickbooks_sync_status,
+      conversion_status,
+      product_lifecycle_status
+    `, { count: "exact" })
+    .in("quickbooks_sync_status", ["created", "linked"])
+    .order("id", { ascending: true })
+    .range(from, to) as never);
+}
+
+async function fetchSupplierCatalogPriceLevels(supabase: ProductWorkspaceClient) {
+  return fetchAllExact<SupplierCatalogPriceLevelRow>("fetchSupplierCatalogPriceLevels", (from, to) => supabase
+    .from("supplier_catalog_price_levels")
+    .select(`
+      id,
+      supplier_catalog_wine_id,
+      name,
+      bottle_price,
+      depletion_allowance,
+      calculated_gp_margin,
+      is_frontline,
+      is_best,
+      active
+    `, { count: "exact" })
+    .eq("active", true)
+    .order("id", { ascending: true })
+    .range(from, to) as never);
+}
+
+async function fetchOrderingItemMarkers(supabase: ProductWorkspaceClient) {
+  return fetchAllExact<OrderingItemMarkerRow>("fetchOrderingItemMarkers", (from, to) => supabase
+    .from("ordering_item_markers")
+      .select("item_code,quickbooks_item_list_id,is_btg,is_core,replenishment_policy,policy_family_key,policy_family_name,family_default_policy,recommendations_suppressed,suppression_reason,suppressed_until,suppression_changed_at,suppression_changed_by,marker_note,note_source,updated_at,updated_by", { count: "exact" })
+    .order("item_code", { ascending: true })
+    .range(from, to) as never);
+}
+
+async function fetchVinosmithPrices(supabase: ProductWorkspaceClient, wineIds: string[]) {
+  if (wineIds.length === 0) return [];
+  const batches: string[][] = [];
+  for (let index = 0; index < wineIds.length; index += 200) {
+    batches.push(wineIds.slice(index, index + 200));
+  }
+  const pages = await Promise.all(batches.map(async (batch) => {
+    return fetchAllExact<VinosmithPriceRow> ("fetchVinosmithPrices", (from, to) => supabase
+      .from("vinosmith_prices")
+      .select("price_id,wine_id,label,price_cents,bill_back_price_cents,active,disabled,is_default", { count: "exact" })
+      .in("wine_id", batch)
+      .eq("active", true)
+      .or("disabled.is.null,disabled.eq.false")
+      .order("price_id", { ascending: true }).range(from, to) as never);
+
+  }));
+
+  return pages.flat();
+}
+
+async function countRows(
+  supabase: ProductWorkspaceClient,
+  table: string,
+  applyFilter?: (query: any) => any
+) {
+  const baseQuery = supabase.from(table).select("*", { count: "exact", head: true });
+  const query = applyFilter ? applyFilter(baseQuery) : baseQuery;
+  const { count, error } = await query;
+
+  if (error) throw new Error(error.message);
+  return count || 0;
+}
+
+function buildOrderingMarkerLookup(rows: OrderingItemMarkerRow[]) {
+  return new Map(rows.map((row) => [normalizeKey(row.item_code), row]));
+}
+
+function resolveOrderingMarker(itemCode: string, lookup: Map<string, OrderingItemMarkerRow>) {
+  return lookup.get(normalizeKey(itemCode)) || null;
+}
+
+function buildVinosmithLookup(rows: VinosmithWineRow[]) {
+  const byCode = new Map<string, VinosmithWineRow>();
+  const byName = new Map<string, VinosmithWineRow>();
+
+  rows.forEach((row) => {
+    if (row.code) byCode.set(normalizeKey(row.code), row);
+    if (row.name) byName.set(normalizeKey(row.name), row);
+  });
+
+  return { byCode, byName };
+}
+
+function mergeVinosmithWines(rows: VinosmithWineRow[]) {
+  const byWineId = new Map<string, VinosmithWineRow>();
+  rows.forEach((row) => byWineId.set(row.wine_id, row));
+  return Array.from(byWineId.values());
+}
+
+function dedupeQuickBooksItems(rows: QuickBooksItemRow[]) {
+  const byListId = new Map<string, QuickBooksItemRow>();
+  rows.forEach((row) => byListId.set(row.list_id, row));
+  return Array.from(byListId.values());
+}
+
+function buildQuickBooksLookup(rows: QuickBooksItemRow[]) {
+  const byCode = new Map<string, QuickBooksItemRow[]>();
+  const byName = new Map<string, QuickBooksItemRow[]>();
+
+  rows.forEach((row) => {
+    addQuickBooksLookupValue(byCode, itemCodeFromQuickBooks(row), row);
+    addQuickBooksLookupValue(byName, row.full_name, row);
+    addQuickBooksLookupValue(byName, row.name, row);
+  });
+
+  return { byCode, byName };
+}
+
+function addQuickBooksLookupValue(lookup: Map<string, QuickBooksItemRow[]>, value: unknown, row: QuickBooksItemRow) {
+  const key = normalizeKey(value);
+  if (!key) return;
+  const existing = lookup.get(key) || [];
+  existing.push(row);
+  lookup.set(key, existing);
+}
+
+function buildSupplierCatalogLookup(rows: SupplierCatalogWineRow[]) {
+  const byListId = new Map<string, SupplierCatalogWineRow>();
+  const byItemNumber = new Map<string, SupplierCatalogWineRow>();
+  const byItemName = new Map<string, SupplierCatalogWineRow>();
+
+  rows.forEach((row) => {
+    if (row.quickbooks_item_id) byListId.set(row.quickbooks_item_id, row);
+    if (row.quickbooks_item_number) byItemNumber.set(normalizeKey(row.quickbooks_item_number), row);
+    if (row.quickbooks_item_name) byItemName.set(normalizeKey(row.quickbooks_item_name), row);
+  });
+
+  return { byListId, byItemNumber, byItemName };
+}
+
+function mapSuppliersByName(rows: SupplierRow[]) {
+  return new Map(rows.map((row) => [normalizeKey(row.name), row]));
+}
+
+function mapVinosmithSuppliersByCodePrefix(rows: VinosmithSupplierHintRow[]) {
+  const namesByPrefix = new Map<string, Set<string>>();
+
+  rows.forEach((row) => {
+    const prefix = itemCodePrefix(row.code);
+    if (!prefix || !row.importer_name) return;
+    const existing = namesByPrefix.get(prefix) || new Set<string>();
+    existing.add(row.importer_name.trim());
+    namesByPrefix.set(prefix, existing);
+  });
+
+  const uniqueSupplierByPrefix = new Map<string, string>();
+  namesByPrefix.forEach((names, prefix) => {
+    const normalizedNames = new Map(Array.from(names).map((name) => [normalizeKey(name), name]));
+    if (normalizedNames.size === 1) {
+      uniqueSupplierByPrefix.set(prefix, Array.from(normalizedNames.values())[0]);
+    }
+  });
+
+  return uniqueSupplierByPrefix;
+}
+
+function groupSupplierCatalogPriceLevels(rows: SupplierCatalogPriceLevelRow[]) {
+  const byWine = new Map<string, SupplierCatalogPriceLevelRow[]>();
+  rows.forEach((row) => {
+    const existing = byWine.get(row.supplier_catalog_wine_id) || [];
+    existing.push(row);
+    byWine.set(row.supplier_catalog_wine_id, existing);
+  });
+  return byWine;
+}
+
+function groupVinosmithPrices(rows: VinosmithPriceRow[]) {
+  const byWine = new Map<string, VinosmithPriceRow[]>();
+  rows.forEach((row) => {
+    if (!row.wine_id) return;
+    const existing = byWine.get(row.wine_id) || [];
+    existing.push(row);
+    byWine.set(row.wine_id, existing);
+  });
+  return byWine;
+}
+
+function resolveVinosmithWine(
+  item: QuickBooksItemRow,
+  itemCode: string,
+  lookup: ReturnType<typeof buildVinosmithLookup>
+) {
+  return lookup.byCode.get(normalizeKey(itemCode)) ||
+    lookup.byName.get(normalizeKey(item.full_name)) ||
+    lookup.byName.get(normalizeKey(item.name)) ||
+    null;
+}
+
+function resolveQuickBooksItem(wine: VinosmithWineRow, lookup: ReturnType<typeof buildQuickBooksLookup>) {
+  const candidates = [
+    ...(lookup.byCode.get(normalizeKey(wine.code)) || []),
+    ...(lookup.byName.get(normalizeKey(wine.name)) || [])
+  ];
+  if (candidates.length === 0) return null;
+  return candidates.find((item) => item.is_active !== false) || candidates[0] || null;
+}
+
+function resolveSupplierCatalogWine(
+  item: QuickBooksItemRow,
+  itemCode: string,
+  lookup: ReturnType<typeof buildSupplierCatalogLookup>
+) {
+  return lookup.byListId.get(item.list_id) ||
+    lookup.byItemNumber.get(normalizeKey(itemCode)) ||
+    lookup.byItemName.get(normalizeKey(item.full_name)) ||
+    lookup.byItemName.get(normalizeKey(item.name)) ||
+    null;
+}
+
+function resolveSupplierName(
+  itemCode: string,
+  vinosmith: VinosmithWineRow | null,
+  supplierCatalog: SupplierCatalogWineRow | null,
+  supplierNameByCodePrefix: Map<string, string>
+) {
+  if (isGrwItemCode(itemCode)) return { name: "GRW", source: "GRW item code" };
+  if (vinosmith?.importer_name) return { name: vinosmith.importer_name, source: "Vinosmith importer" };
+  if (supplierCatalog?.supplier_name) return { name: supplierCatalog.supplier_name, source: "Supplier Hub catalog" };
+
+  const prefixSupplierName = supplierNameByCodePrefix.get(itemCodePrefix(itemCode));
+  if (prefixSupplierName) return { name: prefixSupplierName, source: "Item prefix via Vinosmith" };
+
+  return { name: null, source: null };
+}
+
+function buildVinosmithOnlyRow(
+  wine: VinosmithWineRow,
+  supplierByName: Map<string, SupplierRow>,
+  supplierNameByCodePrefix: Map<string, string>,
+  vinosmithPrices: VinosmithPriceRow[],
+  orderingMarker: OrderingItemMarkerRow | null
+): ProductWorkspaceRow {
+  const supplierResolution = resolveSupplierName(wine.code || "", wine, null, supplierNameByCodePrefix);
+  const supplier = supplierResolution.name ? supplierByName.get(normalizeKey(supplierResolution.name)) || null : null;
+  const laidIn = supplier ? numberOrNull(supplier.trucking_cost_per_bottle) : null;
+  const laidInSource = supplier
+    ? `Supplier Logistics trucking_cost_per_bottle${supplierResolution.source ? ` (${supplierResolution.source})` : ""}`
+    : null;
+  const priceLevels = priceLevelsFromVinosmith(vinosmithPrices, null);
+  const frontline = pickPrice(priceLevels, "frontline");
+  const bestPrice = pickPrice(priceLevels, "best");
+  const lowestGpPercent = lowestGpForPriceLevels(priceLevels);
+  const sourceHealth = sourceHealthForRow(null, laidIn, priceLevels);
+
+  return {
+    id: `vinosmith:${wine.wine_id}`,
+    itemCode: wine.code || wine.wine_id,
+    productName: wine.name || "Unnamed Vinosmith wine",
+    brand: wine.producer_name,
+    vintage: wine.vintage,
+    pack: packLabel(wine, null),
+    supplierName: supplierResolution.name,
+    supplierSource: supplierResolution.source,
+    revenueCenter: revenueCenterFromItemCode(wine.code || ""),
+    active: null,
+    statusKey: "vs_active_qb_missing",
+    statusLabel: "VS active / no QB",
+    statusDetail: "Vinosmith is active or orderable, but no QuickBooks item matched this wine code or name.",
+    fob: null,
+    fobSource: null,
+    laidIn,
+    laidInSource,
+    landedCost: null,
+    frontline,
+    bestPrice,
+    lowestGpPercent,
+    lastSold: null,
+    ytdSales: null,
+    sourceHealth,
+    sourceHealthLabel: sourceHealthLabel(sourceHealth),
+    sourceBadges: orderingMarker ? ["vinosmith", "stem"] : ["vinosmith"],
+    orderingMarker: productWorkspaceMarker(orderingMarker),
+    quickbooks: {
+      listId: "",
+      fullName: "No QuickBooks match",
+      purchaseCost: null,
+      averageCost: null,
+      salesPrice: null,
+      itemType: null,
+      lastSeenAt: null
+    },
+    vinosmith: {
+      wineId: wine.wine_id,
+      code: wine.code,
+      name: wine.name,
+      active: wine.active,
+      orderable: wine.orderable,
+      lastSeenAt: wine.last_seen_at
+    },
+    supplierCatalog: null,
+    priceLevels,
+    gpExplanation: gpExplanation(null, laidIn, priceLevels)
+  };
+}
+
+function itemCodeFromQuickBooks(item: QuickBooksItemRow) {
+  return textFromCustomFields(item.custom_fields, [
+    "item_number",
+    "itemNumber",
+    "ItemNumber",
+    "sku",
+    "SKU",
+    "product_code",
+    "productCode",
+    "ProductCode"
+  ]) || item.name || item.full_name || item.list_id;
+}
+
+function sourceBadgesForRow(
+  vinosmith: VinosmithWineRow | null,
+  supplierCatalog: SupplierCatalogWineRow | null,
+  orderingMarker: OrderingItemMarkerRow | null
+) {
+  const badges: ProductWorkspaceSource[] = ["quickbooks"];
+  if (vinosmith) badges.push("vinosmith");
+  if (supplierCatalog) badges.push("supplier_hub");
+  if (orderingMarker) badges.push("stem");
+  return badges;
+}
+
+function productWorkspaceMarker(marker: OrderingItemMarkerRow | null): ProductWorkspaceRow["orderingMarker"] {
+  const policy = replenishmentPolicy(
+    marker?.replenishment_policy || (marker?.is_core === true || marker?.is_btg === true ? "Core" : null)
+  );
+  return {
+    isBtg: false,
+    isCore: policy === "Core",
+    replenishmentPolicy: policy,
+    policyFamilyKey: marker?.policy_family_key || null,
+    policyFamilyName: marker?.policy_family_name || null,
+    familyDefaultPolicy: replenishmentPolicy(marker?.family_default_policy || policy),
+    recommendationsSuppressed: recommendationsAreSuppressed(
+      marker?.recommendations_suppressed,
+      marker?.suppression_reason,
+      marker?.suppressed_until
+    ),
+    suppressionReason: marker?.suppression_reason || null,
+    suppressedUntil: marker?.suppressed_until || null,
+    suppressionChangedAt: marker?.suppression_changed_at || null,
+    suppressionChangedBy: marker?.suppression_changed_by || null,
+    markerNote: marker?.marker_note || null,
+    noteSource: marker?.note_source || null,
+    updatedAt: marker?.updated_at || null,
+    updatedBy: marker?.updated_by || null
+  };
+}
+
+function priceLevelsFromVinosmith(rows: VinosmithPriceRow[], landedCost: number | null): ProductWorkspacePriceLevel[] {
+  return rows
+    .filter((row) => row.price_cents !== null)
+    .map((row) => {
+      const bottlePrice = row.price_cents === null ? null : roundMoney(row.price_cents / 100);
+      const depletionAllowance = roundMoney((row.bill_back_price_cents || 0) / 100);
+      return {
+        id: row.price_id,
+        name: row.label || "Price level",
+        bottlePrice,
+        depletionAllowance,
+        calculatedGpPercent: calculateGpPercent(bottlePrice, landedCost, depletionAllowance),
+        isFrontline: Boolean(row.is_default) || normalizeKey(row.label).includes("front"),
+        isBest: normalizeKey(row.label).includes("best"),
+        source: "Vinosmith"
+      };
+    });
+}
+
+function priceLevelsFromSupplierCatalog(rows: SupplierCatalogPriceLevelRow[]): ProductWorkspacePriceLevel[] {
+  return rows.map((row) => {
+    const calculated = numberOrNull(row.calculated_gp_margin);
+    return {
+      id: row.id,
+      name: row.name,
+      bottlePrice: numberOrNull(row.bottle_price),
+      depletionAllowance: numberOrNull(row.depletion_allowance) || 0,
+      calculatedGpPercent: calculated === null ? null : roundPercent(calculated * 100),
+      isFrontline: row.is_frontline,
+      isBest: row.is_best,
+      source: "Supplier Hub"
+    };
+  });
+}
+
+function pickPrice(priceLevels: ProductWorkspacePriceLevel[], kind: "frontline" | "best") {
+  const match = priceLevels.find((level) => (kind === "frontline" ? level.isFrontline : level.isBest));
+  return match?.bottlePrice ?? null;
+}
+
+function lowestGpForPriceLevels(priceLevels: ProductWorkspacePriceLevel[]) {
+  const gpValues = priceLevels
+    .map((level) => level.calculatedGpPercent)
+    .filter((value): value is number => value !== null);
+  if (gpValues.length === 0) return null;
+  return roundPercent(Math.min(...gpValues));
+}
+
+function calculateGpPercent(bottlePrice: number | null, landedCost: number | null, depletionAllowance: number) {
+  if (bottlePrice === null || bottlePrice <= 0 || landedCost === null) return null;
+  const effectiveCost = Math.max(0, landedCost - depletionAllowance);
+  return roundPercent(((bottlePrice - effectiveCost) / bottlePrice) * 100);
+}
+
+function sourceHealthForRow(fob: number | null, laidIn: number | null, priceLevels: ProductWorkspacePriceLevel[]) {
+  if (fob !== null && laidIn !== null && priceLevels.length > 0) return "ready";
+  if (fob !== null || laidIn !== null || priceLevels.length > 0) return "partial";
+  return "needs_review";
+}
+
+function sourceHealthLabel(sourceHealth: ProductWorkspaceRow["sourceHealth"]) {
+  if (sourceHealth === "ready") return "Ready";
+  if (sourceHealth === "partial") return "Partial";
+  return "Needs review";
+}
+
+function statusForRow(item: QuickBooksItemRow, vinosmith: VinosmithWineRow | null) {
+  const qbActive = item.is_active !== false;
+  if (!vinosmith) {
+    if (qbActive && !isLikelyProductItemCode(itemCodeFromQuickBooks(item))) {
+      return {
+        key: "qb_active_non_product",
+        label: "QB active / non-product",
+        detail: "This QuickBooks row looks like an accounting, service, fee, or other non-wine item. No Vinosmith wine match is expected."
+      } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+    }
+    return {
+      key: qbActive ? "qb_active_vs_missing" : "inactive_match",
+      label: qbActive ? "QB active / no VS" : "QB inactive",
+      detail: "No matched Vinosmith wine status."
+    } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+  }
+
+  const vsActive = isVinosmithActive(vinosmith);
+  const vsInactive = isVinosmithInactive(vinosmith);
+  const vsUnknown = isVinosmithStatusUnknown(vinosmith);
+  if (qbActive && vsUnknown) {
+    return {
+      key: "qb_active_vs_unknown",
+      label: "QB active / VS unknown",
+      detail: "QuickBooks is active, but Vinosmith active/orderable status is blank in Stem. This is source visibility, not a confirmed inactive product."
+    } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+  }
+  if (!qbActive && vsUnknown) {
+    return {
+      key: "qb_inactive_vs_unknown",
+      label: "QB inactive / VS unknown",
+      detail: "QuickBooks is inactive, and Vinosmith active/orderable status is blank in Stem."
+    } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+  }
+  if (qbActive && vsInactive) {
+    return {
+      key: "qb_active_vs_inactive",
+      label: "QB active / VS inactive",
+      detail: "QuickBooks is active, but Vinosmith is marked inactive or not orderable."
+    } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+  }
+  if (!qbActive && vsActive) {
+    return {
+      key: "qb_inactive_vs_active",
+      label: "QB inactive / VS active",
+      detail: "QuickBooks is inactive, but Vinosmith is active or orderable."
+    } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+  }
+
+  return {
+    key: qbActive ? "active_match" : "inactive_match",
+    label: qbActive ? "Active" : "Inactive",
+    detail: qbActive ? "QuickBooks and Vinosmith are active/current." : "QuickBooks is inactive and Vinosmith is not active/orderable."
+  } satisfies { key: ProductWorkspaceStatusKey; label: string; detail: string };
+}
+
+function isVinosmithActive(vinosmith: VinosmithWineRow | null) {
+  return vinosmith?.active === true || vinosmith?.orderable === true;
+}
+
+function isVinosmithInactive(vinosmith: VinosmithWineRow | null) {
+  return vinosmith?.active === false || vinosmith?.orderable === false;
+}
+
+function isVinosmithStatusUnknown(vinosmith: VinosmithWineRow | null) {
+  return vinosmith?.active !== true &&
+    vinosmith?.active !== false &&
+    vinosmith?.orderable !== true &&
+    vinosmith?.orderable !== false;
+}
+
+function isLikelyProductItemCode(value: string) {
+  return /^[A-Z]{2,}\d{5,6}$/i.test(value.trim());
+}
+
+function isLifecycleMismatch(statusKey: ProductWorkspaceStatusKey) {
+  return statusKey === "qb_active_vs_inactive" ||
+    statusKey === "qb_active_vs_missing" ||
+    statusKey === "qb_inactive_vs_active" ||
+    statusKey === "vs_active_qb_missing";
+}
+
+function gpExplanation(fob: number | null, laidIn: number | null, priceLevels: ProductWorkspacePriceLevel[]) {
+  const level = priceLevels.find((row) => row.isFrontline) || priceLevels[0];
+  if (!level || level.bottlePrice === null || fob === null || laidIn === null) {
+    return "GP needs a sale price, QuickBooks FOB, and Supplier Logistics laid-in cost.";
+  }
+  return `GP = (${moneyLabel(level.bottlePrice)} sale price - (${moneyLabel(fob)} QB FOB + ${moneyLabel(laidIn)} supplier laid-in - ${moneyLabel(level.depletionAllowance)} depletion)) / ${moneyLabel(level.bottlePrice)} sale price.`;
+}
+
+function packLabel(vinosmith: VinosmithWineRow | null, supplierCatalog: SupplierCatalogWineRow | null) {
+  if (vinosmith) {
+    const unitSet = numberOrNull(vinosmith.unit_set);
+    const size = vinosmith.bottle_size_label || vinosmith.bottle_size || "750ml";
+    return unitSet ? `${unitSet}/${size}` : size;
+  }
+  if (supplierCatalog) return `${supplierCatalog.pack_size}/${supplierCatalog.bottle_size}`;
+  return null;
+}
+
+function revenueCenterFromItem(item: QuickBooksItemRow, itemCode: string) {
+  const fullName = normalizeKey(item.full_name);
+  if (isGrwItemCode(itemCode) || fullName.includes("grw")) return "GRW Broker";
+  return "Stem Core";
+}
+
+function revenueCenterFromItemCode(itemCode: string) {
+  return isGrwItemCode(itemCode) ? "GRW Broker" : "Stem Core";
+}
+
+function isGrwItemCode(value: string) {
+  return normalizeKey(value).startsWith("grw");
+}
+
+function itemCodePrefix(value: unknown) {
+  const text = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return text.match(/^[A-Z]+/)?.[0] || "";
+}
+
+function numberOrNull(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function roundPercent(value: number | null) {
+  return value === null ? null : Math.round(value * 10) / 10;
+}
+
+function normalizeKey(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function uniqueTextValues(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
+}
+
+function moneyLabel(value: number) {
+  return `$${value.toFixed(2)}`;
+}
+
+function textFromCustomFields(value: unknown, keys: string[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const fields = value as Record<string, unknown>;
+
+  for (const key of keys) {
+    const direct = fields[key];
+    if (typeof direct === "string" && direct.trim()) return direct.trim();
+    if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+      const nested = direct as Record<string, unknown>;
+      const text = nested.value ?? nested.Value ?? nested.text ?? nested.Text;
+      if (typeof text === "string" && text.trim()) return text.trim();
+    }
+  }
+
+  return "";
+}

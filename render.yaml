@@ -32,3 +32,23 @@ services:
         sync: false
       - key: ORDERING_SOURCE_MODE
         value: source
+  # Deploy only after read-model migrations and prewarming; independent of web request lifetimes.
+  - type: worker
+    name: winebook-read-models
+    runtime: node
+    rootDir: apps/web
+    plan: starter
+    buildCommand: npm ci --include=dev --ignore-scripts
+    startCommand: npm run read-models:watch
+    autoDeploy: false
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: VINOSMITH_API_TOKEN
+        sync: false
+      - key: ORDERING_SOURCE_MODE
+        value: source

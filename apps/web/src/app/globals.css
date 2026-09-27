@@ -7505,3 +7505,9 @@ th.numeric .company-sort-button {
     width: 100%;
   }
 }
+
+.wine-loading-progress.wine-loading-inline { position: relative; inset: auto; width: 100%; max-width: none; margin: 12px 0; }
+.section-skeleton { min-height: 120px; background: linear-gradient(90deg, #eee 25%, #f8f8f8 50%, #eee 75%); border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .wine-loader-bar span, .product-workspace-preview-spinner, .processing-spinner { animation: none !important; }
+}

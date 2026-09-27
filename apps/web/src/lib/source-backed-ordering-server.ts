@@ -31,7 +31,10 @@ import {
   assertCurrentOrderingDiagnostics,
   orderingBusinessDate
 } from "./ordering-freshness";
-import { isQuickBooksSyncActivelyRunning } from "./quickbooks-sync-state";
+import {
+  isQuickBooksSyncActivelyRunning,
+  isQuickBooksSyncNonMaterialFailure
+} from "./quickbooks-sync-state";
 
 export { ORDERING_TIMEZONE, orderingBusinessDate } from "./ordering-freshness";
 
@@ -128,7 +131,7 @@ export async function fetchCurrentOrderingOverlay(
   supabase: SourceClient,
   recommendations: Recommendation[],
   options: {
-    liveAvailability?: LatestVinosmithAvailability;
+    liveAvailability?: LatestVinosmithAvailability | null;
     now?: Date;
     allowVerifiedFallbackDuringRefresh?: boolean;
     verifiedReferenceDate?: string | null;
@@ -136,7 +139,7 @@ export async function fetchCurrentOrderingOverlay(
 ) {
   const referenceDate = orderingBusinessDate(options.now);
   const syncState = await fetchQuickBooksSyncState(supabase, options.now);
-  if (syncState.latest?.status !== "completed") {
+  if (syncState.latest?.status !== "completed" && !syncState.latestNonMaterialFailure) {
     if (
       options.allowVerifiedFallbackDuringRefresh
       && syncState.latestCompletedAt
@@ -157,10 +160,13 @@ export async function fetchCurrentOrderingOverlay(
     }
     throw new Error(incompleteQuickBooksSyncMessage(syncState.latest));
   }
-  const quickBooksAsOf = syncState.latest.completed_at;
+  const quickBooksAsOf = syncState.latest?.status === "completed"
+    ? syncState.latest.completed_at
+    : syncState.latestCompletedAt;
   if (!quickBooksAsOf) {
     throw new Error("The latest QuickBooks Web Connector refresh has no completed timestamp.");
   }
+  if (options.liveAvailability === null) throw new Error("The background inventory verification failed. Retry source refresh before using current recommendations.");
   const availability = options.liveAvailability || await fetchLiveVinosmithAvailability();
   const reportRunIds = Array.from(new Set(recommendations.map((row) => row.report_run_id).filter(Boolean)));
   const [configuration, onOrderSnapshot, activeItems, vendorMappings, suppliers, markers, commitments, salesRows] = await Promise.all([
@@ -279,13 +285,16 @@ export async function fetchCurrentOrderingOverlay(
 
 async function assertLatestQuickBooksSyncComplete(supabase: SourceClient) {
   const state = await fetchQuickBooksSyncState(supabase);
-  if (state.latest?.status !== "completed") {
+  if (state.latest?.status !== "completed" && !state.latestNonMaterialFailure) {
     throw new Error(incompleteQuickBooksSyncMessage(state.latest));
   }
-  if (!state.latest.completed_at) {
+  const completedAt = state.latest?.status === "completed"
+    ? state.latest.completed_at
+    : state.latestCompletedAt;
+  if (!completedAt) {
     throw new Error("The latest QuickBooks Web Connector refresh has no completed timestamp.");
   }
-  return state.latest.completed_at;
+  return completedAt;
 }
 
 type QuickBooksSyncRow = {
@@ -338,10 +347,12 @@ async function fetchQuickBooksSyncState(supabase: SourceClient, now = new Date()
     if (error) throw new Error(error.message);
     latest = data || latest;
   }
+  const latestNonMaterialFailure = isQuickBooksSyncNonMaterialFailure(latest);
   return {
     latest,
     latestCompletedAt: completedResult.data?.completed_at || null,
-    latestActivelyRunning
+    latestActivelyRunning,
+    latestNonMaterialFailure
   };
 }
 

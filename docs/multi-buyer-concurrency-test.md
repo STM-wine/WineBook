@@ -28,8 +28,14 @@ Use two different buyer accounts in separate browser profiles. Do not use two ta
 3. Induce generation failure and confirm a failed event exists but no artifact is released.
 4. Confirm approval rows and approval events remain unchanged after export.
 5. Mark a draft entered in QuickBooks. Confirm commitments are recorded and recreating drafts does not reproduce the committed quantities.
-6. Increase one entered approval and rebuild. Confirm only the positive delta is drafted.
-7. Decrease it and rebuild. Confirm the correction is a negative delta; committed history is unchanged.
+6. Edit an entered approval from 12 to 18 and rebuild. Confirm its lock version advances and a fresh order cycle drafts 18 bottles. The entered 12-bottle draft and its commitments remain unchanged.
+7. Decrease the new approval to 6 and rebuild. Confirm the active draft contains 6 bottles, not a negative correction against the entered cycle.
+8. Clear the approval and rebuild. Confirm its active draft is cancelled without creating a negative correction. Reapprove and confirm the full new quantity is drafted. Rebuilding the same entered lock version must never redraft its committed quantity.
+
+These expectations follow `20260923134500_approval_commitment_cycles.sql` and
+the exact-version behavior in `applyApprovalCommitments`. Earlier cross-cycle
+delta instructions were obsolete; editing an approval is a new order decision,
+not an adjustment to an already entered PO.
 
 ## Realtime safety
 

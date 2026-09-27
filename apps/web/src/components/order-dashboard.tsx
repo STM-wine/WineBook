@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { orderingBusinessDate } from "@/lib/ordering-freshness";
+import { mergeOrderingRead } from "@/lib/merge-ordering-read";
+import { sharedOrderingRead } from "@/lib/shared-ordering-read";
+import { registerApprovalEditor, flushAllApprovals } from "@/lib/approval-navigation";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
@@ -63,6 +67,8 @@ import {
   rowRecommendedQty,
   uniqueSorted
 } from "@/lib/order-data";
+import { applyCurrentOrderingPolicies } from "@/lib/source-backed-ordering";
+import { WineLoadingProgress } from "./wine-loading-progress";
 import { AppTopbar } from "./app-topbar";
 import { ActiveView, DEFAULT_VIEW, isActiveView } from "./dashboard-types";
 import { StatusMessages } from "./status-messages";
@@ -83,6 +89,8 @@ function ViewLoading() {
 }
 
 type Props = {
+  embedded?: boolean;
+  catalogSupplier?: string | null;
   reportRun: ReportRun;
   recommendations: Recommendation[];
   approvalEvents: ApprovalEvent[];
@@ -146,24 +154,38 @@ function formatSourceUpdatedAt(value: string | null) {
 export function OrderDashboard({
   reportRun,
   recommendations,
-  approvalEvents,
-  auditActorNames,
-  approvalCommitments,
+  approvalEvents: initialApprovalEvents,
+  auditActorNames: initialActorNames,
+  approvalCommitments: initialCommitments,
   poDrafts,
-  suppliers,
-  supplierCatalogWines,
+  suppliers: initialSuppliers,
+  supplierCatalogWines: initialCatalogWines,
   vinosmithExplorer,
-  wineRequests,
-  priceChangeEvents,
+  wineRequests: initialWineRequests,
+  priceChangeEvents: initialPriceChanges,
   quickBooksSupplierMatches,
   initialView,
   quickBooksLastSyncAt,
   vinosmithLastSyncAt,
   orderingDataWarning,
   salesReferenceDate,
-  canViewSettings
+  canViewSettings,
+  embedded = false,
+  catalogSupplier = null
 }: Props) {
   const router = useRouter();
+  const [suppliers, setSuppliers] = useState(initialSuppliers);
+  const [supplierCatalogWines, setCatalogWines] = useState(initialCatalogWines);
+  const [wineRequests, setWineRequests] = useState(initialWineRequests);
+  const [priceChangeEvents, setPriceChanges] = useState(initialPriceChanges);
+  useEffect(() => { setSuppliers(initialSuppliers); setCatalogWines(initialCatalogWines); setWineRequests(initialWineRequests); setPriceChanges(initialPriceChanges); }, [initialSuppliers, initialCatalogWines, initialWineRequests, initialPriceChanges]);
+  const [approvalEvents, setApprovalEvents] = useState(initialApprovalEvents);
+  const [auditActorNames, setAuditActorNames] = useState(initialActorNames);
+  const [approvalCommitments, setApprovalCommitments] = useState(initialCommitments);
+  const draftReadRef = useRef<Promise<void> | null>(null);
+  const draftDetailReads = useRef(new Map<string, Promise<void>>());
+  const [isRefreshingShared, setIsRefreshingShared] = useState(false);
+  useEffect(() => { setApprovalEvents(initialApprovalEvents); setAuditActorNames(initialActorNames); setApprovalCommitments(initialCommitments); }, [initialApprovalEvents, initialActorNames, initialCommitments]);
   const combinedRecommendations = useMemo(
     () =>
       applyApprovalCommitments(
@@ -174,9 +196,9 @@ export function OrderDashboard({
           ),
           suppliers
         ),
-        approvalCommitments
+        initialCommitments
       ),
-    [approvalCommitments, recommendations, reportRun.id, supplierCatalogWines, suppliers]
+    [initialCommitments, recommendations, reportRun.id, supplierCatalogWines, suppliers]
   );
   const [rows, setRows] = useState(combinedRecommendations);
   const [draftRows, setDraftRows] = useState(poDrafts);
@@ -198,6 +220,7 @@ export function OrderDashboard({
   >(null);
   const [showPoDraftProgress, setShowPoDraftProgress] = useState(false);
   const realtimeSupabase = useMemo(() => createBrowserClient(), []);
+  const approvalDirtyKeysRef = useRef(new Set<string>());
   const approvalQueueRef = useRef(new Map<string, ApprovalQueueItem>());
   const approvalInFlightKeysRef = useRef(new Set<string>());
   const approvalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -207,6 +230,50 @@ export function OrderDashboard({
   const draftRefreshQueuedRef = useRef(false);
   const draftRefreshBlockedUntilRef = useRef(0);
   const [isPending, startTransition] = useTransition();
+
+  const refreshSharedState = useCallback((): Promise<void> => {
+    if (draftReadRef.current) { draftRefreshQueuedRef.current = true; return draftReadRef.current; }
+    setIsRefreshingShared(true);
+    const request = (async () => {
+      do {
+        draftRefreshQueuedRef.current = false;
+        const result = await sharedOrderingRead(`/api/ordering/reads?run=${encodeURIComponent(reportRun.id)}`);
+        // An in-flight read may finish after a mutation starts. Discard it and queue a fresh read.
+        if (draftMutationDepthRef.current > 0) { draftRefreshQueuedRef.current = true; return; }
+        setDraftRows((current) => result.drafts.map((draft: PurchaseOrderDraftWithLines) => {
+          const old = current.find((row) => row.id === draft.id);
+          return old?.detailLoaded && old.revision_no === draft.revision_no
+            ? { ...old, ...draft, lines: old.lines, revisions: old.revisions, line_notes: old.line_notes, detailLoaded: true } : draft;
+        }));
+        setApprovalCommitments(result.commitments);
+        setAuditActorNames(result.actorNames);
+        setRows((current) => applyApprovalCommitments(current, result.commitments));
+      } while (draftRefreshQueuedRef.current && draftMutationDepthRef.current === 0);
+    })().catch((error) => setErrorMessage(error.message)).finally(() => { draftReadRef.current = null; setIsRefreshingShared(false); });
+    draftReadRef.current = request;
+    return request;
+  }, [reportRun.id]);
+
+  async function loadDraftDetail(id: string) {
+    const existing = draftDetailReads.current.get(id);
+    if (existing) return existing;
+    const request = (async () => {
+      const response = await fetch(`/api/ordering/reads?run=${encodeURIComponent(reportRun.id)}&draft=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Draft could not load.");
+      setDraftRows((current) => current.map((draft) => draft.id === id && Number(draft.revision_no) <= Number(result.revision_no)
+        ? { ...draft, ...result } : draft));
+    })().finally(() => draftDetailReads.current.delete(id));
+    draftDetailReads.current.set(id, request);
+    return request;
+  }
+
+  const editorFlushRef = useRef<() => Promise<void>>(async () => {});
+  editorFlushRef.current = async () => {
+    await flushApprovalQueue();
+    if (approvalDirtyKeysRef.current.size) throw new Error("Resolve the unsaved approval conflict before leaving or creating drafts.");
+  };
+  useEffect(() => registerApprovalEditor(() => editorFlushRef.current()), []);
 
   const scheduleDraftRefresh = useCallback((requestedDelayMs = REALTIME_REFRESH_DEBOUNCE_MS) => {
     draftRefreshQueuedRef.current = true;
@@ -227,9 +294,9 @@ export function OrderDashboard({
       realtimeRefreshTimerRef.current = null;
       if (draftMutationDepthRef.current > 0) return;
       draftRefreshQueuedRef.current = false;
-      router.refresh();
+      void refreshSharedState();
     }, delay);
-  }, [router]);
+  }, [refreshSharedState]);
 
   function beginDraftMutation() {
     draftMutationDepthRef.current += 1;
@@ -255,26 +322,7 @@ export function OrderDashboard({
   }
 
   useEffect(() => {
-    setRows((current) => combinedRecommendations.map((incoming) => {
-      const queueKey = incoming.supplier_catalog_wine_id
-        ? `catalog:${incoming.supplier_catalog_wine_id}`
-        : `recommendation:${incoming.id}`;
-      if (!approvalQueueRef.current.has(queueKey) && !approvalInFlightKeysRef.current.has(queueKey)) return incoming;
-      const local = current.find((row) => row.id === incoming.id || (
-        incoming.supplier_catalog_wine_id && row.supplier_catalog_wine_id === incoming.supplier_catalog_wine_id
-      ));
-      if (!local) return incoming;
-      const preserved = {
-        ...incoming,
-        recommendation_status: local.recommendation_status,
-        approved_qty: local.approved_qty,
-        order_path: local.order_path
-      };
-      return {
-        ...preserved,
-        ...approvalProcessingPatch(preserved, preserved.recommendation_status, preserved.approved_qty)
-      };
-    }));
+    setRows((current) => mergeOrderingRead(current, combinedRecommendations, approvalDirtyKeysRef.current));
   }, [combinedRecommendations]);
 
   useEffect(() => {
@@ -283,14 +331,14 @@ export function OrderDashboard({
 
   useEffect(() => {
     const channel = realtimeSupabase
-      .channel(`ordering-run:${reportRun.id}`)
+      .channel(`ordering-run:${reportRun.id}:${embedded ? recommendations[0]?.supplier_name || "supplier" : "workspace"}`)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "reorder_recommendations", filter: `report_run_id=eq.${reportRun.id}` },
         (payload) => {
           const incoming = payload.new as Partial<Recommendation> & { id: string };
           const key = `recommendation:${incoming.id}`;
-          if (approvalQueueRef.current.has(key) || approvalInFlightKeysRef.current.has(key)) return;
+          if (approvalDirtyKeysRef.current.has(key)) return;
           setRows((current) => current.map((row) => {
             if (row.id !== incoming.id) return row;
             const updated = { ...row, ...incoming };
@@ -318,7 +366,7 @@ export function OrderDashboard({
           };
           if (!incoming.supplier_catalog_wine_id) return;
           const key = `catalog:${incoming.supplier_catalog_wine_id}`;
-          if (approvalQueueRef.current.has(key) || approvalInFlightKeysRef.current.has(key)) return;
+          if (approvalDirtyKeysRef.current.has(key)) return;
           setRows((current) => current.map((row) => {
             if (row.supplier_catalog_wine_id !== incoming.supplier_catalog_wine_id) return row;
             const updated: Recommendation = {
@@ -342,19 +390,28 @@ export function OrderDashboard({
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "approval_events", filter: `report_run_id=eq.${reportRun.id}` },
-        () => scheduleDraftRefresh()
+        (payload) => {
+          const event = payload.new as ApprovalEvent;
+          setApprovalEvents((current) => current.some((row) => row.id === event.id) ? current : [event, ...current]);
+        }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "ordering_item_markers" },
-        () => scheduleDraftRefresh()
+        () => {
+          // Policy-family propagation requires the complete marker set, but no catalog or live inventory.
+          void sharedOrderingRead(`/api/ordering/reads?run=${encodeURIComponent(reportRun.id)}&scope=policies`)
+            .then((result) => setRows((current) => applyCurrentOrderingPolicies(current, result.markers, salesReferenceDate || reportRun.report_date || orderingBusinessDate())))
+            .catch((error) => setErrorMessage(error.message));
+        }
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "purchase_order_drafts", filter: `report_run_id=eq.${reportRun.id}` },
         () => scheduleDraftRefresh()
       )
-      .on("postgres_changes", { event: "*", schema: "public", table: "purchase_order_lines" }, () => scheduleDraftRefresh())
+      // Guarded line mutations advance the parent draft revision; its run-scoped event invalidates details.
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "approval_commitments", filter: `report_run_id=eq.${reportRun.id}` }, () => scheduleDraftRefresh())
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "purchase_order_line_notes", filter: `report_run_id=eq.${reportRun.id}` },
@@ -451,30 +508,19 @@ export function OrderDashboard({
     : undefined;
 
   function selectView(view: ActiveView) {
-    if (view === DEFAULT_VIEW) {
-      window.location.assign("/");
-      return;
-    }
-    setActiveView(view);
-    setSupplierHubAddWineSupplier(null);
-    const url = new URL(window.location.href);
-    url.searchParams.delete("addWineSupplier");
-    if (view === DEFAULT_VIEW) {
-      url.searchParams.delete("view");
-    } else {
-      url.searchParams.set("view", view);
-    }
-    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    startTransition(async () => {
+      try {
+        await flushAllApprovals();
+        if (approvalQueueRef.current.size || approvalInFlightKeysRef.current.size) return;
+        router.push(view === DEFAULT_VIEW ? "/" : `/?view=${view}`, { scroll: false });
+      } catch (error) { setErrorMessage(error instanceof Error ? error.message : "Approvals could not be saved."); }
+    });
   }
-
   function openSupplierAddWine(supplierName: string) {
-    setActiveView("supplier-hub");
-    setSupplierHubAddWineSupplier(supplierName);
-    const url = new URL(window.location.href);
-    url.searchParams.set("view", "supplier-hub");
-    url.searchParams.set("addWineSupplier", supplierName);
-    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    void flushAllApprovals().then(() => router.push(`/?view=supplier-hub&supplier=${encodeURIComponent(supplierName)}&addWineSupplier=${encodeURIComponent(supplierName)}`, { scroll: false }))
+      .catch((error) => setErrorMessage(error.message));
   }
+  useEffect(() => { setActiveView(initialView); }, [initialView]);
 
   function patchRow(id: string, patch: Partial<Recommendation>) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -603,6 +649,7 @@ export function OrderDashboard({
           if (submitted) {
             const [queueKey] = submitted;
             const newer = approvalQueueRef.current.get(queueKey);
+            if (!newer) approvalDirtyKeysRef.current.delete(queueKey);
             if (newer && newer.expectedLockVersion === submitted[1].expectedLockVersion) {
               approvalQueueRef.current.set(queueKey, {
                 ...newer,
@@ -634,6 +681,7 @@ export function OrderDashboard({
     const sourceType = row.supplier_catalog_wine_id ? "catalog_workbench" as const : "recommendation" as const;
     const queueKey = sourceType === "recommendation" ? `recommendation:${row.id}` : `catalog:${row.supplier_catalog_wine_id}`;
     const existing = approvalQueueRef.current.get(queueKey);
+    approvalDirtyKeysRef.current.add(queueKey);
     approvalQueueRef.current.set(queueKey, {
       rowId: row.id,
       sourceType,
@@ -652,7 +700,7 @@ export function OrderDashboard({
       clearTimeout(approvalTimerRef.current);
     }
     approvalTimerRef.current = setTimeout(() => {
-      void flushApprovalQueue();
+      void flushApprovalQueue().catch(() => {});
     }, 650);
   }
 
@@ -744,7 +792,7 @@ export function OrderDashboard({
     startTransition(async () => {
       let refreshAfterMutation = false;
       try {
-        await flushApprovalQueue();
+        await flushAllApprovals();
         const response = await fetch("/api/po-drafts/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -804,7 +852,7 @@ export function OrderDashboard({
 
     startTransition(async () => {
       try {
-        await flushApprovalQueue();
+        await flushAllApprovals();
         const result = await refreshOrderingData();
         if (!result.ok) {
           setErrorMessage(result.error);
@@ -926,6 +974,13 @@ export function OrderDashboard({
     }
   }
 
+  async function refreshSupplierHub() {
+    const response = await fetch(`/api/ordering/reads?run=${encodeURIComponent(reportRun.id)}&scope=hub&supplier=${encodeURIComponent(catalogSupplier || "")}`, { cache: "no-store" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Supplier data could not refresh.");
+    setSuppliers(result.suppliers); setCatalogWines(result.catalog); setWineRequests(result.requests); setPriceChanges(result.priceChanges);
+  }
+
   function saveSuppliers(updatedSuppliers: SupplierLogistics[]) {
     setPendingMessage(`Saving ${updatedSuppliers.length.toLocaleString()} supplier logistics change(s)...`);
     setErrorMessage("");
@@ -948,7 +1003,7 @@ export function OrderDashboard({
           }))
         });
         setPendingMessage(`Supplier logistics saved (${result.saved.toLocaleString()} change(s)).`);
-        router.refresh();
+        await refreshSupplierHub();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save supplier logistics.");
         setPendingMessage("");
@@ -980,7 +1035,7 @@ export function OrderDashboard({
           )
         );
         onSuccess?.();
-        router.refresh();
+        await refreshSupplierHub();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save supplier wine.");
         setPendingMessage("");
@@ -1000,7 +1055,7 @@ export function OrderDashboard({
         const result = await deletePendingSupplierCatalogWine(input);
         setRows((currentRows) => removeSupplierCatalogWineFromWorkbench(currentRows, input.id));
         setPendingMessage(`Deleted pending product: ${result.displayName}`);
-        router.refresh();
+        await refreshSupplierHub();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not delete pending product.");
         setPendingMessage("");
@@ -1018,7 +1073,7 @@ export function OrderDashboard({
       try {
         const result = await createSupplierWineRequest(input);
         setPendingMessage(`Request created: ${result.requestId}`);
-        router.refresh();
+        await refreshSupplierHub();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not save wine request.");
         setPendingMessage("");
@@ -1034,7 +1089,7 @@ export function OrderDashboard({
       try {
         await updateSupplierWineRequestApproval(input);
         setPendingMessage("Request approval updated");
-        router.refresh();
+        await refreshSupplierHub();
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Could not update request approval.");
         setPendingMessage("");
@@ -1044,7 +1099,7 @@ export function OrderDashboard({
 
   return (
     <main className="app-shell">
-      <AppTopbar
+      {embedded ? <button className="button" disabled={isPending} onClick={createDrafts}>Create PO drafts from all saved approvals</button> : <AppTopbar
         activeView={activeView}
         canViewSettings={canViewSettings}
         dataLabel={dataLabel}
@@ -1056,9 +1111,9 @@ export function OrderDashboard({
         onCreateDrafts={activeView === "order-review" ? createDrafts : undefined}
         onRefreshReports={activeView === "order-review" ? refreshReports : undefined}
         onSelectView={selectView}
-      />
+      />}
 
-      <StatusMessages errorMessage={errorMessage || orderingDataWarning || ""} pendingMessage={isPending ? pendingMessage || "Working..." : pendingMessage} />
+      <StatusMessages isPending={isPending} errorMessage={errorMessage || orderingDataWarning || ""} pendingMessage={isPending ? pendingMessage || "Working..." : pendingMessage} />
       {showPoDraftProgress ? (
         <div className="processing-modal" role="status" aria-live="assertive">
           <div className="processing-modal-panel">
@@ -1071,6 +1126,7 @@ export function OrderDashboard({
         </div>
       ) : null}
 
+      {isRefreshingShared ? <WineLoadingProgress inline message="Refreshing shared draft summaries" /> : null}
       {activeView === "product-workspace" ? (
         <ProductWorkspaceView canManageMarkers={canViewSettings} previewRows={displayRows} />
       ) : null}
@@ -1120,8 +1176,12 @@ export function OrderDashboard({
         />
       ) : null}
 
+      {activeView === "supplier-hub" ? <section className="panel"><label>Supplier catalog scope <select value={catalogSupplier || ""} onChange={(event) => router.push(`/?view=supplier-hub&supplier=${encodeURIComponent(event.target.value)}`, { scroll: false })}>
+        <option value="">Choose a supplier</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.name}>{supplier.name}</option>)}
+      </select></label><p>Catalog searches and counts apply to the selected supplier’s complete catalog.</p></section> : null}
       {activeView === "supplier-hub" ? (
         <SupplierHubView
+          catalogScope={catalogSupplier}
           addWineSupplierName={supplierHubAddWineSupplier}
           suppliers={suppliers}
           supplierCatalogWines={supplierCatalogWines}
@@ -1148,6 +1208,8 @@ export function OrderDashboard({
       {activeView === "po-drafts" ? (
         <PoDraftsView
           drafts={draftRows}
+          onLoadDetail={loadDraftDetail}
+          onRefresh={() => scheduleDraftRefresh(0)}
           isPending={isPending}
           reportRunId={reportRun.id}
           suppliers={suppliers}

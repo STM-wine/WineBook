@@ -93,6 +93,7 @@ function isSearchableSupplierWine(wine: SupplierCatalogWine) {
 }
 
 export function SupplierHubView({
+  catalogScope,
   addWineSupplierName,
   suppliers,
   supplierCatalogWines,
@@ -108,6 +109,7 @@ export function SupplierHubView({
   onSaveSuppliers,
   onUpdateWineRequestApproval
 }: {
+  catalogScope?: string | null;
   addWineSupplierName?: string | null;
   suppliers: SupplierLogistics[];
   supplierCatalogWines: SupplierCatalogWine[];
@@ -123,12 +125,16 @@ export function SupplierHubView({
   onSaveSuppliers: (suppliers: SupplierLogistics[]) => void;
   onUpdateWineRequestApproval: (input: UpdateWineRequestApprovalInput) => void;
 }) {
-  const [activeArea, setActiveArea] = useState<HubArea>(addWineSupplierName ? "add" : "search");
+  const [activeArea, setActiveArea] = useState<HubArea>(catalogScope === null ? "logistics" : addWineSupplierName ? "add" : "search");
   const [pendingEditWineId, setPendingEditWineId] = useState<string | null>(null);
   const searchableCatalogWines = useMemo(() => supplierCatalogWines.filter(isSearchableSupplierWine), [supplierCatalogWines]);
   const pendingWineCount = supplierCatalogWines.filter(isDraftOnlyCatalogWine).length;
   const pendingRequestCount = wineRequests.filter((request) => request.request_status === "pending_review").length;
   const draftPriceChanges = priceChangeEvents.filter((event) => event.status === "draft").length;
+
+  useEffect(() => {
+    setActiveArea(catalogScope === null ? "logistics" : addWineSupplierName ? "add" : "search");
+  }, [catalogScope, addWineSupplierName]);
 
   useEffect(() => {
     if (!addWineSupplierName) return;
@@ -145,7 +151,7 @@ export function SupplierHubView({
         </div>
       </div>
 
-      <div className="supplier-hub-summary">
+      {catalogScope !== null ? <div className="supplier-hub-summary">
         <div>
           <span>Supplier Wines</span>
           <strong>{formatInteger(searchableCatalogWines.length)}</strong>
@@ -162,10 +168,10 @@ export function SupplierHubView({
           <span>Draft Price Changes</span>
           <strong>{formatInteger(draftPriceChanges)}</strong>
         </div>
-      </div>
+      </div> : <p>Choose a supplier above to load its catalog. Logistics below covers all suppliers.</p>}
 
       <div className="supplier-hub-tabs" role="tablist" aria-label="Supplier Hub areas">
-        {HUB_AREAS.map((area) => (
+        {HUB_AREAS.filter((area) => catalogScope !== null || area.id === "logistics").map((area) => (
           <button
             key={area.id}
             className={activeArea === area.id ? "active" : undefined}

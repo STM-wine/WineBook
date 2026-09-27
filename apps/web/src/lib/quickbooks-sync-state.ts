@@ -6,6 +6,24 @@ export type QuickBooksSyncActivityRow = {
   diagnostics?: Record<string, unknown> | null;
 };
 
+export function quickBooksSyncCompletedRequestCount(run: QuickBooksSyncActivityRow) {
+  const value = run.diagnostics?.completed_request_count;
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.max(0, parsed);
+  }
+  return null;
+}
+
+export function isQuickBooksSyncNonMaterialFailure(run: QuickBooksSyncActivityRow | null) {
+  return Boolean(
+    run
+    && run.status === "failed"
+    && quickBooksSyncCompletedRequestCount(run) === 0
+  );
+}
+
 export function quickBooksSyncLastActivityAt(run: QuickBooksSyncActivityRow) {
   const diagnosticValue = run.diagnostics?.last_activity_at;
   return typeof diagnosticValue === "string" && diagnosticValue.trim()

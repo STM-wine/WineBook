@@ -1,22 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { dateTimeLabel } from "@/lib/date-labels";
 import { asNumber, formatCurrency, formatInteger, rowReplenishmentPolicy } from "@/lib/order-data";
 import type { Recommendation } from "@/lib/types";
-import type { ProductWorkspaceResponse, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
+import type { ProductWorkspaceListRow, ProductWorkspacePage, ProductWorkspaceCounts, ProductSnapshotMeta, ProductWorkspaceRow, ProductWorkspaceStatusKey } from "@/lib/product-workspace-types";
 import {
   REPLENISHMENT_POLICIES,
   policySupportsAutomaticRecommendations,
   replenishmentPolicyLabel,
   type ReplenishmentPolicy
 } from "@/lib/replenishment-policy";
+import { WineLoadingProgress } from "./wine-loading-progress";
 import { MetricCard } from "./metric-card";
-
-type LoadState =
-  | { status: "loading"; data: null; error: null }
-  | { status: "loaded"; data: ProductWorkspaceResponse; error: null }
-  | { status: "error"; data: null; error: string };
 
 type SortKey =
   | "itemCode"
@@ -47,16 +43,6 @@ type OrderingMarker = ProductWorkspaceRow["orderingMarker"];
 
 type StatusFilter = "All" | "gaps" | "vs_status_unknown" | ProductWorkspaceStatusKey;
 
-type ProductWorkspaceCacheEntry = {
-  data: ProductWorkspaceResponse;
-  cachedAt: string;
-};
-
-const productWorkspaceCache = new Map<string, ProductWorkspaceCacheEntry>();
-const productWorkspaceRequests = new Map<string, Promise<ProductWorkspaceCacheEntry>>();
-const INITIAL_RENDERED_ROWS = 200;
-const RENDERED_ROW_STEP = 200;
-
 const STATUS_FILTERS: Array<{ label: string; value: StatusFilter }> = [
   { label: "All", value: "All" },
   { label: "True status gaps", value: "gaps" },
@@ -70,335 +56,89 @@ const STATUS_FILTERS: Array<{ label: string; value: StatusFilter }> = [
   { label: "Inactive match", value: "inactive_match" }
 ];
 
-export function ProductWorkspaceView({
-  canManageMarkers,
-  previewRows = []
-}: {
-  canManageMarkers?: boolean;
-  previewRows?: Recommendation[];
-}) {
-  const [includeInactive, setIncludeInactive] = useState(false);
-  const [state, setState] = useState<LoadState>({ status: "loading", data: null, error: null });
-  const [cacheMeta, setCacheMeta] = useState<{ cachedAt: string; fromCache: boolean } | null>(null);
-  const [isReloading, setIsReloading] = useState(false);
-
-  const loadWorkspace = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    const cacheKey = productWorkspaceCacheKey(includeInactive);
-    const cached = productWorkspaceCache.get(cacheKey);
-    if (!force && cached) {
-      setState({ status: "loaded", data: cached.data, error: null });
-      setCacheMeta({ cachedAt: cached.cachedAt, fromCache: true });
-      return;
-    }
-
-    setIsReloading(force);
-    setCacheMeta((current) => force ? current : null);
-    setState((current) => force && current.status === "loaded" ? current : { status: "loading", data: null, error: null });
-
-    try {
-      const request = force ? fetchAndCacheProductWorkspace(includeInactive, force) : productWorkspaceRequests.get(cacheKey) || fetchAndCacheProductWorkspace(includeInactive, force);
-      if (!force && !productWorkspaceRequests.has(cacheKey)) {
-        productWorkspaceRequests.set(cacheKey, request);
-      }
-      const entry = await request;
-      setState({ status: "loaded", data: entry.data, error: null });
-      setCacheMeta({ cachedAt: entry.cachedAt, fromCache: false });
-    } catch (error) {
-      setState((current) => {
-        if (force && current.status === "loaded") return current;
-        return {
-          status: "error",
-          data: null,
-          error: error instanceof Error ? error.message : "Could not load Product Workspace."
-        };
-      });
-      if (!force) {
-        setCacheMeta(null);
-      }
-    } finally {
-      if (!force) {
-        productWorkspaceRequests.delete(cacheKey);
-      }
-      setIsReloading(false);
-    }
-  }, [includeInactive]);
-
-  useEffect(() => {
-    void loadWorkspace();
-  }, [loadWorkspace]);
-
-  if (state.status === "loading") {
-    if (previewRows.length > 0) {
-      return <ProductWorkspaceLoadingPreview rows={previewRows} />;
-    }
-    return (
-      <section className="panel product-workspace-header">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Products / Items</p>
-            <h1>Product Workspace</h1>
-            <p>Loading active products...</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  if (state.status === "error") {
-    return (
-      <section className="panel product-workspace-header">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Products / Items</p>
-            <h1>Product Workspace</h1>
-            <p>{state.error}</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  function handleMarkerUpdated(itemCode: string, marker: OrderingMarker) {
-    const normalizedItemCode = normalizeCode(itemCode);
-    const cacheKey = productWorkspaceCacheKey(includeInactive);
-    setState((current) => {
-      if (current.status !== "loaded") return current;
-      const rows = current.data.rows.map((row) => {
-        const sameItem = normalizeCode(row.itemCode) === normalizedItemCode;
-        if (!sameItem) return row;
-        return {
-          ...row,
-          orderingMarker: marker,
-          sourceBadges: sourceBadgesWithStem(row.sourceBadges)
-        };
-      });
-
-      const nextData = {
-        ...current.data,
-        rows,
-        summary: {
-          ...current.data.summary,
-          btgMarkers: 0,
-          coreMarkers: rows.filter((row) => row.orderingMarker.replenishmentPolicy === "Core").length,
-          policyCounts: rows.reduce<Record<string, number>>((counts, row) => {
-            const policy = row.orderingMarker.replenishmentPolicy;
-            counts[policy] = (counts[policy] || 0) + 1;
-            return counts;
-          }, {})
-        }
-      };
-      const cached = productWorkspaceCache.get(cacheKey);
-      if (cached) {
-        productWorkspaceCache.set(cacheKey, { ...cached, data: nextData });
-      }
-      return {
-        status: "loaded",
-        error: null,
-        data: nextData
-      };
-    });
-  }
-
-  return (
-    <ProductWorkspaceTable
-      canManageMarkers={canManageMarkers}
-      data={state.data}
-      includeInactive={includeInactive}
-      isReloading={isReloading}
-      cacheMeta={cacheMeta}
-      onMarkerUpdated={handleMarkerUpdated}
-      onReload={() => loadWorkspace({ force: true })}
-      onSetIncludeInactive={setIncludeInactive}
-    />
-  );
-}
-
-function ProductWorkspaceLoadingPreview({ rows }: { rows: Recommendation[] }) {
-  const [search, setSearch] = useState("");
-  const visibleRows = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return rows
-      .filter((row) => {
-        if (!query) return true;
-        return [row.product_code, row.planning_sku, row.product_name, row.supplier_name]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(query));
-      })
-      .sort((left, right) => String(left.product_name || left.planning_sku || "").localeCompare(String(right.product_name || right.planning_sku || "")))
-      .slice(0, INITIAL_RENDERED_ROWS);
-  }, [rows, search]);
-
-  return (
-    <section className="panel product-workspace-header product-workspace-preview">
-      <div className="section-heading product-workspace-titlebar">
-        <div>
-          <p className="eyebrow">Products / Items</p>
-          <h1>Product Workspace</h1>
-          <p>Items are ready. Loading source status, pricing, and GP details in the background...</p>
-        </div>
-        <div className="product-workspace-preview-spinner" aria-label="Loading full product details" role="status" />
-      </div>
-      <label className="product-workspace-preview-search">
-        Search items
-        <input
-          autoFocus
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Wine, supplier, item #"
-          value={search}
-        />
-      </label>
-      <div className="table-shell product-workspace-preview-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Item #</th>
-              <th>Wine</th>
-              <th>Supplier</th>
-              <th>Replenishment</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.map((row) => (
-              <tr key={row.id}>
-                <td className="mono-cell">{row.product_code || row.planning_sku || "-"}</td>
-                <td>{row.product_name || row.planning_sku || "Unnamed wine"}</td>
-                <td>{row.supplier_name || "Unmatched"}</td>
-                <td>{replenishmentPolicyLabel(rowReplenishmentPolicy(row))}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <small className="product-workspace-cache-note">
-        Showing {formatInteger(visibleRows.length)} items while full details load.
-      </small>
-    </section>
-  );
-}
-
-function productWorkspaceCacheKey(includeInactive: boolean) {
-  return includeInactive ? "include-inactive" : "active";
-}
-
-async function fetchAndCacheProductWorkspace(includeInactive: boolean, force: boolean): Promise<ProductWorkspaceCacheEntry> {
-  const cacheKey = productWorkspaceCacheKey(includeInactive);
-  const params = new URLSearchParams();
-  if (includeInactive) params.set("includeInactive", "true");
-  if (force) params.set("reload", Date.now().toString());
-  const response = await fetch(`/api/products/workspace${params.size ? `?${params}` : ""}`, { cache: "no-store" });
-  const body = await response.json().catch(() => null) as ProductWorkspaceResponse | { error?: string } | null;
-
-  if (!response.ok) {
-    throw new Error(body && "error" in body && body.error ? body.error : "Could not load Product Workspace.");
-  }
-  if (!body || !("rows" in body)) {
-    throw new Error("Product Workspace response was incomplete.");
-  }
-
-  const entry = { data: body, cachedAt: new Date().toISOString() };
-  productWorkspaceCache.set(cacheKey, entry);
-  return entry;
-}
-
-function ProductWorkspaceTable({
-  canManageMarkers,
-  data,
-  includeInactive,
-  isReloading,
-  cacheMeta,
-  onMarkerUpdated,
-  onReload,
-  onSetIncludeInactive
-}: {
-  canManageMarkers?: boolean;
-  data: ProductWorkspaceResponse;
-  includeInactive: boolean;
-  isReloading: boolean;
-  cacheMeta: { cachedAt: string; fromCache: boolean } | null;
-  onMarkerUpdated: (itemCode: string, marker: OrderingMarker) => void;
-  onReload: () => void;
-  onSetIncludeInactive: (value: boolean) => void;
-}) {
+export function ProductWorkspaceView({ canManageMarkers }: { canManageMarkers?: boolean; previewRows?: Recommendation[] }) {
+  const [data, setData] = useState<ProductWorkspacePage | null>(null);
+  const [counts, setCounts] = useState<ProductWorkspaceCounts | null>(null);
+  const [includeInactive, onSetIncludeInactive] = useState(false);
+  const [isReloading, setIsReloading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [reload, setReload] = useState(0);
+  const onReload = () => setReload((value) => value + 1);
   const [search, setSearch] = useState("");
   const [supplier, setSupplier] = useState("All");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [health, setHealth] = useState("All");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "productName", direction: "asc" });
-  const [selectedId, setSelectedId] = useState<string | null>(data.rows[0]?.id || null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [updatingMarkerCode, setUpdatingMarkerCode] = useState<string | null>(null);
   const [markerError, setMarkerError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [renderedRowLimit, setRenderedRowLimit] = useState(INITIAL_RENDERED_ROWS);
   useEffect(() => {
     const linkedItem = new URLSearchParams(window.location.search).get("item")?.trim();
-    if (!linkedItem) return;
-    setSearch(linkedItem);
-    const linkedRow = data.rows.find((row) => normalizeCode(row.itemCode) === normalizeCode(linkedItem));
-    if (linkedRow) setSelectedId(linkedRow.id);
-  }, [data.rows]);
-  const supplierOptions = useMemo(
-    () => ["All", ...Array.from(new Set(data.rows.map((row) => row.supplierName || "Unknown").sort((a, b) => a.localeCompare(b))))],
-    [data.rows]
-  );
-  const visibleRows = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return [...data.rows]
-      .filter((row) => {
-        if (supplier !== "All" && (row.supplierName || "Unknown") !== supplier) return false;
-        if (statusFilter === "gaps" && !isLifecycleMismatch(row.statusKey)) return false;
-        if (statusFilter === "vs_status_unknown" && !isVinosmithStatusUnknown(row.statusKey)) return false;
-        if (statusFilter !== "All" && statusFilter !== "gaps" && statusFilter !== "vs_status_unknown" && row.statusKey !== statusFilter) return false;
-        if (health !== "All" && row.sourceHealth !== health) return false;
-        if (!query) return true;
-        return [
-          row.itemCode,
-          row.productName,
-          row.brand,
-          row.vintage,
-          row.pack,
-          row.supplierName,
-          row.quickbooks.fullName
-        ]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(query));
-      })
-      .sort((a, b) => compareRows(a, b, sort.key, sort.direction));
-  }, [data.rows, health, search, sort, statusFilter, supplier]);
-  const renderedRows = visibleRows.slice(0, renderedRowLimit);
+    if (linkedItem) setSearch(linkedItem);
+  }, []);
+  const filterKey = JSON.stringify({ search, supplier, status: statusFilter, health, sort: sort.key, direction: sort.direction, includeInactive });
+  const params = new URLSearchParams(JSON.parse(filterKey));
+  params.set("offset", String(offset));
+  // Pagination remains pinned to one immutable generation until filters or Reload change.
+  const [pageSnapshot, setPageSnapshot] = useState<string | null>(null);
+  if (pageSnapshot) params.set("snapshot", pageSnapshot);
+  const requestKey = params.toString();
+  useEffect(() => { setOffset(0); setPageSnapshot(null); }, [filterKey, reload]);
   useEffect(() => {
-    setRenderedRowLimit(INITIAL_RENDERED_ROWS);
-  }, [health, search, sort, statusFilter, supplier]);
-  const statusGapCount = useMemo(
-    () => data.rows.filter((row) => isLifecycleMismatch(row.statusKey)).length,
-    [data.rows]
-  );
-  const needsReviewCount = useMemo(
-    () => data.rows.filter((row) => row.sourceHealth === "needs_review").length,
-    [data.rows]
-  );
-  const gpRiskCounts = useMemo(
-    () => data.rows.reduce(
-      (counts, row) => {
-        const tone = gpToneClass(row);
-        if (tone === "gp-cell-critical") counts.red += 1;
-        if (tone === "gp-cell-warning") counts.yellow += 1;
-        return counts;
-      },
-      { red: 0, yellow: 0 }
-    ),
-    [data.rows]
-  );
-  const selectedRow = visibleRows.find((row) => row.id === selectedId) || visibleRows[0] || null;
+    const controller = new AbortController();
+    setIsReloading(true);
+    setLoadError("");
+    const timer = setTimeout(async () => {
+      try {
+        const page = await fetchProducts<ProductWorkspacePage>(requestKey, controller.signal);
+        if (controller.signal.aborted) return;
+        setData(page);
+        performance.mark("winebook:products-usable");
+      } catch (error) {
+        if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Products could not load.");
+      } finally { if (!controller.signal.aborted) setIsReloading(false); }
+    }, search ? 200 : 0);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [requestKey, reload]);
+  useEffect(() => {
+    if (!data) return;
+    const controller = new AbortController();
+    setCounts(null);
+    const query = new URLSearchParams(requestKey);
+    query.set("snapshot", data.snapshotId);
+    query.set("mode", "counts");
+    fetchProducts<ProductSnapshotMeta & { data: ProductWorkspaceCounts }>(query.toString(), controller.signal)
+      .then((result) => { if (!controller.signal.aborted) setCounts(result.data); })
+      .catch((error) => { if (!controller.signal.aborted) setLoadError(`Counts unavailable: ${error.message}`); });
+    return () => controller.abort();
+  }, [data]);
+  const supplierOptions = ["All", ...(counts?.suppliers || (supplier !== "All" ? [supplier] : []))];
+  const visibleRows = data?.rows || [];
+  const renderedRows = visibleRows;
+  const statusGapCount = counts?.lifecycleMismatches;
+  const needsReviewCount = counts?.needsReview;
+  const gpRiskCounts = { red: counts?.gpRed, yellow: counts?.gpYellow };
+  const selectedRow = visibleRows.find((row) => row.id === selectedId) || null;
+  const countLabel = (value: number | undefined) => value === undefined ? "…" : formatInteger(value);
+  function onMarkerUpdated(itemCode: string, marker: OrderingMarker) {
+    setData((current) => current ? { ...current, isStale: true, rows: current.rows.map((row) =>
+      normalizeCode(row.itemCode) === normalizeCode(itemCode) ? { ...row, orderingMarker: marker, sourceBadges: sourceBadgesWithStem(row.sourceBadges) } : row
+    ) } : null);
+  }
 
   async function exportPricingModel() {
     setIsExporting(true);
     setExportError(null);
     try {
-      const { buildProductWorkspaceWorkbook } = await import("@/lib/product-workspace-export");
-      const workbook = buildProductWorkspaceWorkbook(visibleRows, data.generatedAt);
-      const buffer = await workbook.xlsx.writeBuffer();
-      const url = URL.createObjectURL(new Blob([new Uint8Array(buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      const query = new URLSearchParams(requestKey);
+      query.set("mode", "download");
+      query.set("snapshot", data!.snapshotId);
+      const response = await fetch(`/api/products/workspace?${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error((await response.json()).error || "Export failed.");
+      const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
       link.href = url;
       link.download = `stem-pricing-model-${new Date().toISOString().slice(0, 10)}.xlsx`;
@@ -426,7 +166,7 @@ function ProductWorkspaceTable({
     }));
   }
 
-  async function saveOrderingMarker(row: ProductWorkspaceRow, marker: OrderingMarker) {
+  async function saveOrderingMarker(row: ProductWorkspaceListRow, marker: OrderingMarker) {
     const previousMarker = row.orderingMarker;
     const note = "Manual Product Workspace marker update";
     setMarkerError(null);
@@ -469,11 +209,14 @@ function ProductWorkspaceTable({
 
   return (
     <>
+      {isExporting ? <WineLoadingProgress inline message="Building pricing workbook" detail="Exporting every product matching the current filters." /> : null}
+      {isReloading ? <WineLoadingProgress inline message={data ? "Refreshing products — previous results remain visible" : "Loading products"} detail="Search, sort, and counts cover all matching products." /> : null}
+      {loadError ? <p role="alert">{loadError} <button onClick={onReload} type="button">Retry</button></p> : null}
       <section className="metric-grid product-workspace-metrics">
-        <MetricCard label="True Status Gaps" value={formatInteger(statusGapCount)} detail="Confirmed QB and VS mismatch" tone={statusGapCount ? "red" : "green"} />
-        <MetricCard label="VS Status Unknown" value={formatInteger(data.summary.vsStatusUnknown)} detail={`${formatInteger(data.summary.qbActiveVsUnknown)} active QB rows`} tone={data.summary.vsStatusUnknown ? "gold" : "green"} />
-        <MetricCard label="Needs Review" value={formatInteger(needsReviewCount)} detail="Missing core source data" tone={needsReviewCount ? "red" : "green"} />
-        <MetricCard label="GP Risk" value={`${formatInteger(gpRiskCounts.red)} / ${formatInteger(gpRiskCounts.yellow)}`} detail="Red / yellow low-GP items" tone={gpRiskCounts.red ? "red" : gpRiskCounts.yellow ? "gold" : "green"} />
+        <MetricCard label="True Status Gaps" value={countLabel(statusGapCount)} detail="Confirmed QB and VS mismatch" tone={statusGapCount ? "red" : "green"} />
+        <MetricCard label="VS Status Unknown" value={countLabel(counts?.vsStatusUnknown)} detail={`${countLabel(counts?.qbActiveVsUnknown)} active QB rows`} tone={counts?.vsStatusUnknown ? "gold" : "green"} />
+        <MetricCard label="Needs Review" value={countLabel(needsReviewCount)} detail="Missing core source data" tone={needsReviewCount ? "red" : "green"} />
+        <MetricCard label="GP Risk" value={`${countLabel(gpRiskCounts.red)} / ${countLabel(gpRiskCounts.yellow)}`} detail="Red / yellow low-GP items" tone={gpRiskCounts.red ? "red" : gpRiskCounts.yellow ? "gold" : "green"} />
       </section>
 
       <section className="panel product-workspace-header">
@@ -483,13 +226,11 @@ function ProductWorkspaceTable({
             <h1>Product Workspace</h1>
             <p>QuickBooks and source proof table with Stem-owned replenishment policies.</p>
             <small className="product-workspace-cache-note">
-              {cacheMeta
-                ? `${cacheMeta.fromCache ? "Cached" : "Loaded"} ${dateTimeLabel(cacheMeta.cachedAt)}`
-                : `Loaded ${dateTimeLabel(data.generatedAt)}`}
+              {data ? `Snapshot ${dateTimeLabel(data.generatedAt)} · source ${data.sourceVersion}${data.isStale ? " · refresh queued; showing previous snapshot" : ""}` : "Loading product snapshot"}
             </small>
           </div>
           <div className="product-workspace-actions">
-            <button className="button button-outline button-small" disabled={isExporting || isReloading || visibleRows.length === 0} onClick={exportPricingModel} type="button" title="Export the currently filtered products with editable prices and GP formulas">
+            <button className="button button-outline button-small" disabled={isExporting || isReloading || visibleRows.length === 0} onClick={exportPricingModel} type="button" title="Export all matching products with editable prices and GP formulas">
               {isExporting ? "Exporting..." : "Export pricing model"}
             </button>
             <button className="button button-outline button-small" disabled={isReloading} onClick={onReload} type="button">
@@ -592,7 +333,7 @@ function ProductWorkspaceTable({
                     <td onClick={(event) => event.stopPropagation()}>
                       <PolicySelect
                         policy={row.orderingMarker.replenishmentPolicy}
-                        disabled={!canManageMarkers || updatingMarkerCode === row.itemCode}
+                        disabled={!canManageMarkers || isReloading || data?.isStale || updatingMarkerCode === row.itemCode}
                         onChange={(policy) => saveOrderingMarker(row, {
                           ...row.orderingMarker,
                           replenishmentPolicy: policy,
@@ -614,7 +355,7 @@ function ProductWorkspaceTable({
                     <td onClick={(event) => event.stopPropagation()}>
                       <RecommendationModeControl
                         marker={row.orderingMarker}
-                        disabled={!canManageMarkers || updatingMarkerCode === row.itemCode}
+                        disabled={!canManageMarkers || isReloading || data?.isStale || updatingMarkerCode === row.itemCode}
                         onChange={(suppressed) => {
                           if (suppressed) {
                             setMarkerError("Turn off automatic reorders from the wine's Edit Replenishment popup in Order Summary so the reason is recorded.");
@@ -643,19 +384,12 @@ function ProductWorkspaceTable({
               </tbody>
             </table>
             <div className="product-workspace-table-footer">
-              <span>Showing {formatInteger(renderedRows.length)} of {formatInteger(visibleRows.length)} items</span>
-              {renderedRows.length < visibleRows.length ? (
-                <button
-                  className="ghost-button"
-                  onClick={() => setRenderedRowLimit((current) => Math.min(current + RENDERED_ROW_STEP, visibleRows.length))}
-                  type="button"
-                >
-                  Load next {formatInteger(Math.min(RENDERED_ROW_STEP, visibleRows.length - renderedRows.length))}
-                </button>
-              ) : null}
+              <span>Showing {formatInteger(renderedRows.length)} of {countLabel(counts?.visible)} matching items (page starts at {offset + 1})</span>
+              <button className="ghost-button" disabled={isReloading || offset === 0} onClick={() => { setPageSnapshot(data!.snapshotId); setOffset(Math.max(0, offset - 75)); }} type="button">Previous</button>
+              <button className="ghost-button" disabled={isReloading || !data?.hasMore} onClick={() => { setPageSnapshot(data!.snapshotId); setOffset(offset + 75); }} type="button">Next 75</button>
             </div>
           </div>
-          <ProductWorkspaceDrawer row={selectedRow} />
+          <ProductWorkspaceDetail row={selectedRow} snapshotId={data?.snapshotId} />
         </div>
       </section>
     </>
@@ -825,42 +559,7 @@ function SortableHeader({
   );
 }
 
-function compareRows(a: ProductWorkspaceRow, b: ProductWorkspaceRow, key: SortKey, direction: "asc" | "desc") {
-  const multiplier = direction === "asc" ? 1 : -1;
-  const left = sortValue(a, key);
-  const right = sortValue(b, key);
-  if (typeof left === "number" && typeof right === "number") return (left - right) * multiplier;
-  return String(left).localeCompare(String(right)) * multiplier;
-}
-
-function sortValue(row: ProductWorkspaceRow, key: SortKey) {
-  if (key === "replenishmentPolicy") return row.orderingMarker.replenishmentPolicy;
-  if (key === "recommendationsSuppressed") return row.orderingMarker.recommendationsSuppressed ? 1 : 0;
-  const value = row[key];
-  if (key === "active") return row.statusLabel;
-  if (typeof value === "number") return value;
-  if (value === null || value === undefined) return "";
-  return value;
-}
-
-function recommendationModeLabel(marker: OrderingMarker) {
-  if (marker.replenishmentPolicy === "Allocated" || marker.replenishmentPolicy === "Special Order") return "Manual only";
-  if (marker.recommendationsSuppressed) {
-    const until = marker.suppressedUntil ? ` until ${marker.suppressedUntil}` : "";
-    return `Paused${until}${marker.suppressionReason ? `: ${marker.suppressionReason}` : ""}`;
-  }
-  return "Automatic";
-}
-
-function moneyOrDash(value: number | null) {
-  return value === null ? "-" : formatCurrency(asNumber(value));
-}
-
-function percentOrDash(value: number | null) {
-  return value === null ? "-" : `${value.toFixed(1)}%`;
-}
-
-function gpToneClass(row: ProductWorkspaceRow) {
+function gpToneClass(row: Pick<ProductWorkspaceRow, "lowestGpPercent" | "revenueCenter">) {
   const value = row.lowestGpPercent;
   if (value === null) return "";
   if (row.revenueCenter === "GRW Broker") return value < 8 ? "gp-cell-critical" : "";
@@ -904,4 +603,49 @@ function normalizeCode(value: string) {
 
 function sourceBadgesWithStem(sourceBadges: ProductWorkspaceRow["sourceBadges"]): ProductWorkspaceRow["sourceBadges"] {
   return sourceBadges.includes("stem") ? sourceBadges : [...sourceBadges, "stem"];
+}
+
+async function fetchProducts<T>(query: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`/api/products/workspace?${query}`, { cache: "no-store", signal });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || "Products unavailable.");
+  return body;
+}
+
+function ProductWorkspaceDetail({ row, snapshotId }: { row: ProductWorkspaceListRow | null; snapshotId?: string }) {
+  const [detail, setDetail] = useState<ProductWorkspaceRow | null>(null);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    setDetail(null); setError("");
+    if (!row || !snapshotId) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ mode: "detail", id: row.id, snapshot: snapshotId });
+    fetchProducts<ProductSnapshotMeta & { data: ProductWorkspaceRow }>(params.toString(), controller.signal)
+      .then((body) => { if (!controller.signal.aborted) setDetail(body.data); })
+      .catch((error) => { if (!controller.signal.aborted) setError(error.message); });
+    return () => controller.abort();
+  }, [row?.id, snapshotId, retry]);
+  if (row && !detail) return <aside className="product-workspace-drawer">
+    {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p>
+      : <WineLoadingProgress inline message={`Loading ${row.productName}`} detail="Pricing levels and source explanations" />}
+  </aside>;
+  return <ProductWorkspaceDrawer row={detail && row ? { ...detail, orderingMarker: row.orderingMarker } : null} />;
+}
+
+function recommendationModeLabel(marker: OrderingMarker) {
+  if (marker.replenishmentPolicy === "Allocated" || marker.replenishmentPolicy === "Special Order") return "Manual only";
+  if (marker.recommendationsSuppressed) {
+    const until = marker.suppressedUntil ? ` until ${marker.suppressedUntil}` : "";
+    return `Paused${until}${marker.suppressionReason ? `: ${marker.suppressionReason}` : ""}`;
+  }
+  return "Automatic";
+}
+
+function moneyOrDash(value: number | null) {
+  return value === null ? "-" : formatCurrency(asNumber(value));
+}
+
+function percentOrDash(value: number | null) {
+  return value === null ? "-" : `${value.toFixed(1)}%`;
 }

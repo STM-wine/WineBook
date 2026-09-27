@@ -1,3 +1,4 @@
+import { buildFreightRows, type FreightReadModel } from "@/lib/freight-read-model";
 import { useMemo, useState } from "react";
 import type { Recommendation, SupplierLogistics } from "@/lib/types";
 import {
@@ -12,121 +13,19 @@ import { MetricCard } from "./metric-card";
 
 type FreightMode = "suggested" | "approved";
 
-type FreightSupplierRollup = {
-  supplier: string;
-  freightForwarder: string;
-  orderFrequency: string;
-  skuCount: number;
-  quantity: number;
-  cases: number;
-  wineCost: number;
-  laidInCost: number;
-  estimatedCost: number;
-};
-
-type FreightLocationRollup = {
-  location: string;
-  supplierCount: number;
-  skuCount: number;
-  quantity: number;
-  cases: number;
-  wineCost: number;
-  laidInCost: number;
-  estimatedCost: number;
-  suppliers: FreightSupplierRollup[];
-};
-
-function lineQuantity(row: Recommendation, mode: FreightMode): number {
-  if (mode === "approved") {
-    return isApproved(row) ? Math.max(0, Math.round(asNumber(row.approved_qty))) : 0;
-  }
-
-  return Math.max(0, Math.round(asNumber(row.recommended_qty_rounded)));
-}
-
-function lineCosts(row: Recommendation, quantity: number) {
-  const fob = asNumber(row.fob);
-  const laidIn = asNumber(row.trucking_cost_per_bottle);
-  const wineCost = fob * quantity;
-  const laidInCost = laidIn * quantity;
-
-  return {
-    wineCost,
-    laidInCost,
-    estimatedCost: wineCost + laidInCost
-  };
-}
-
 export function FreightView({
   rows,
-  suppliers
+  suppliers,
+  readModel
 }: {
+  readModel?: FreightReadModel;
   rows: Recommendation[];
   suppliers: SupplierLogistics[];
 }) {
   const [mode, setMode] = useState<FreightMode>("suggested");
   const [locationFilter, setLocationFilter] = useState("All");
 
-  const supplierLookup = useMemo(() => {
-    const lookup = new Map<string, SupplierLogistics>();
-    suppliers.forEach((supplier) => lookup.set(supplier.name.trim().toLowerCase(), supplier));
-    return lookup;
-  }, [suppliers]);
-
-  const freightRows = useMemo(() => {
-    const locations = new Map<string, Map<string, FreightSupplierRollup>>();
-
-    rows.forEach((row) => {
-      const quantity = lineQuantity(row, mode);
-      if (quantity <= 0) return;
-
-      const location = row.pickup_location?.trim() || "Unassigned";
-      const supplier = row.supplier_name?.trim() || "Unknown Supplier";
-      const logistics = supplierLookup.get(supplier.toLowerCase());
-      const { wineCost, laidInCost, estimatedCost } = lineCosts(row, quantity);
-      const locationGroup = locations.get(location) || new Map<string, FreightSupplierRollup>();
-      const supplierGroup =
-        locationGroup.get(supplier) || {
-          supplier,
-          freightForwarder: logistics?.freight_forwarder || "",
-          orderFrequency: logistics?.order_frequency || "",
-          skuCount: 0,
-          quantity: 0,
-          cases: 0,
-          wineCost: 0,
-          laidInCost: 0,
-          estimatedCost: 0
-        };
-
-      supplierGroup.skuCount += 1;
-      supplierGroup.quantity += quantity;
-      supplierGroup.cases += quantity / 12;
-      supplierGroup.wineCost += wineCost;
-      supplierGroup.laidInCost += laidInCost;
-      supplierGroup.estimatedCost += estimatedCost;
-      locationGroup.set(supplier, supplierGroup);
-      locations.set(location, locationGroup);
-    });
-
-    return Array.from(locations.entries())
-      .map(([location, suppliersMap]) => {
-        const supplierRows = Array.from(suppliersMap.values()).sort(
-          (a, b) => b.estimatedCost - a.estimatedCost || a.supplier.localeCompare(b.supplier)
-        );
-        return {
-          location,
-          supplierCount: supplierRows.length,
-          skuCount: supplierRows.reduce((sum, supplier) => sum + supplier.skuCount, 0),
-          quantity: supplierRows.reduce((sum, supplier) => sum + supplier.quantity, 0),
-          cases: supplierRows.reduce((sum, supplier) => sum + supplier.cases, 0),
-          wineCost: supplierRows.reduce((sum, supplier) => sum + supplier.wineCost, 0),
-          laidInCost: supplierRows.reduce((sum, supplier) => sum + supplier.laidInCost, 0),
-          estimatedCost: supplierRows.reduce((sum, supplier) => sum + supplier.estimatedCost, 0),
-          suppliers: supplierRows
-        } satisfies FreightLocationRollup;
-      })
-      .sort((a, b) => b.estimatedCost - a.estimatedCost || a.location.localeCompare(b.location));
-  }, [mode, rows, supplierLookup]);
+  const freightRows = useMemo(() => readModel?.[mode] || buildFreightRows(rows, suppliers, mode), [mode, readModel, rows, suppliers]);
 
   const locationOptions = useMemo(
     () => ["All", ...freightRows.map((row) => row.location).sort((a, b) => a.localeCompare(b))],
@@ -147,7 +46,7 @@ export function FreightView({
   const totalQuantity = visibleRows.reduce((sum, row) => sum + row.quantity, 0);
   const totalEstimatedCost = visibleRows.reduce((sum, row) => sum + row.estimatedCost, 0);
   const totalLaidInCost = visibleRows.reduce((sum, row) => sum + row.laidInCost, 0);
-  const diPlans = useMemo(() => buildDiContainerPlans(rows), [rows]);
+  const diPlans = useMemo(() => readModel?.diPlans || buildDiContainerPlans(rows), [readModel, rows]);
 
   return (
     <section className="panel freight-panel" id="freight">

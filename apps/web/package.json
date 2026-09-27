@@ -14,7 +14,10 @@
     "typecheck": "tsc --noEmit",
     "gross-profit-center:proof": "node scripts/run-gross-profit-center-proof.mjs",
     "gross-profit-center:test": "node scripts/test-gross-profit-center.mjs",
-    "gross-profit:rollups": "node scripts/refresh-gross-profit-rollups.mjs"
+    "gross-profit:rollups": "node scripts/refresh-gross-profit-rollups.mjs",
+    "read-models:refresh": "node scripts/refresh-read-models.mjs",
+    "read-models:watch": "node scripts/refresh-read-models.mjs --watch",
+    "performance:probe": "node scripts/probe-performance.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",
@@ -32,6 +35,7 @@
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
+    "jsdom": "^26.1.0",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"
   },
