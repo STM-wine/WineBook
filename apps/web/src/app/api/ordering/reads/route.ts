@@ -1,3 +1,4 @@
+import { fetchSupplierHubData } from "@/lib/supplier-hub-reads";
 import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { fetchDraftDetail, fetchDraftSummaries } from "@/lib/ordering-draft-reads";
@@ -16,16 +17,11 @@ export async function GET(request: Request) {
   const db = createServiceRoleClient();
   try {
     if (params.get("scope") === "hub") {
-      const supplier = params.get("supplier");
-      const [suppliers, catalog, requests, priceChanges] = await Promise.all([
+      const [suppliers, hub] = await Promise.all([
         fetchAllExact("supplier logistics", (from, to) => db.from("suppliers").select("*", { count: "exact" }).order("id").range(from, to) as never),
-        supplier ? fetchAllExact("supplier catalog", (from, to) => db.from("supplier_catalog_wines")
-          .select("*,price_levels:supplier_catalog_price_levels(*),free_goods:supplier_catalog_free_goods(*),workbench_items:supplier_catalog_workbench_items(*)", { count: "exact" })
-          .eq("supplier_name", supplier).order("id").range(from, to) as never) : Promise.resolve([]),
-        fetchAllExact("wine requests", (from, to) => db.from("wine_requests").select("*", { count: "exact" }).eq("supplier_name", supplier || "").order("id").range(from, to) as never),
-        fetchAllExact("price changes", (from, to) => db.from("price_change_events").select("*", { count: "exact" }).eq("supplier", supplier || "").order("id").range(from, to) as never)
+        fetchSupplierHubData(db)
       ]);
-      return NextResponse.json({ suppliers, catalog, requests, priceChanges }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ suppliers, ...hub }, { headers: { "Cache-Control": "no-store" } });
     }
     if (params.get("scope") === "policies") {
       const markers = await fetchAllExact("ordering policies", (from, to) => db.from("ordering_item_markers").select("*", { count: "exact" }).order("item_code").range(from, to) as never);

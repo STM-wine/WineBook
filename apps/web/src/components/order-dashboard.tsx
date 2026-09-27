@@ -91,7 +91,6 @@ function ViewLoading() {
 type Props = {
   embedded?: boolean;
   summaryFilters?: import("@/lib/ordering-summary-search").OrderingSummaryFilters;
-  catalogSupplier?: string | null;
   reportRun: ReportRun;
   recommendations: Recommendation[];
   approvalEvents: ApprovalEvent[];
@@ -172,8 +171,7 @@ export function OrderDashboard({
   salesReferenceDate,
   canViewSettings,
   embedded = false,
-  summaryFilters,
-  catalogSupplier = null
+  summaryFilters
 }: Props) {
   const router = useRouter();
   const [suppliers, setSuppliers] = useState(initialSuppliers);
@@ -519,7 +517,7 @@ export function OrderDashboard({
     });
   }
   function openSupplierAddWine(supplierName: string) {
-    void flushAllApprovals().then(() => router.push(`/?view=supplier-hub&supplier=${encodeURIComponent(supplierName)}&addWineSupplier=${encodeURIComponent(supplierName)}`, { scroll: false }))
+    void flushAllApprovals().then(() => router.push(`/?view=supplier-hub&addWineSupplier=${encodeURIComponent(supplierName)}`, { scroll: false }))
       .catch((error) => setErrorMessage(error.message));
   }
   useEffect(() => { setActiveView(initialView); }, [initialView]);
@@ -977,7 +975,7 @@ export function OrderDashboard({
   }
 
   async function refreshSupplierHub() {
-    const response = await fetch(`/api/ordering/reads?run=${encodeURIComponent(reportRun.id)}&scope=hub&supplier=${encodeURIComponent(catalogSupplier || "")}`, { cache: "no-store" });
+    const response = await fetch(`/api/ordering/reads?run=${encodeURIComponent(reportRun.id)}&scope=hub`, { cache: "no-store" });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Supplier data could not refresh.");
     setSuppliers(result.suppliers); setCatalogWines(result.catalog); setWineRequests(result.requests); setPriceChanges(result.priceChanges);
@@ -1180,12 +1178,8 @@ export function OrderDashboard({
         />
       ) : null}
 
-      {activeView === "supplier-hub" ? <section className="panel"><label>Supplier catalog scope <select value={catalogSupplier || ""} onChange={(event) => router.push(`/?view=supplier-hub&supplier=${encodeURIComponent(event.target.value)}`, { scroll: false })}>
-        <option value="">Choose a supplier</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.name}>{supplier.name}</option>)}
-      </select></label><p>Catalog searches and counts apply to the selected supplier’s complete catalog.</p></section> : null}
       {activeView === "supplier-hub" ? (
         <SupplierHubView
-          catalogScope={catalogSupplier}
           addWineSupplierName={supplierHubAddWineSupplier}
           suppliers={suppliers}
           supplierCatalogWines={supplierCatalogWines}

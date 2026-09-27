@@ -50,12 +50,12 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   }
 
   return <Suspense fallback={<main className="app-shell"><AppTopbar activeView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} /><SectionLoading title={initialView === "po-drafts" ? "PO Drafts" : initialView === "supplier-hub" ? "Supplier Hub" : "Ordering"} message="Loading this workspace" /></main>}>
-    <OrderingScreen catalogSupplier={singleParam(params.supplier)} initialView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} />
+    <OrderingScreen initialView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} />
   </Suspense>;
 }
 
-async function OrderingScreen({ initialView, canViewSettings, catalogSupplier }: { initialView: ActiveView; canViewSettings: boolean; catalogSupplier: string | null }) {
-  const data = await loadOrderingPageData(initialView, createServiceRoleClient(), catalogSupplier);
+async function OrderingScreen({ initialView, canViewSettings }: { initialView: ActiveView; canViewSettings: boolean }) {
+  const data = await loadOrderingPageData(initialView, createServiceRoleClient());
   const latestRun = data.latestRun;
 
   if (!latestRun) {
@@ -77,7 +77,6 @@ async function OrderingScreen({ initialView, canViewSettings, catalogSupplier }:
 
   return (
     <OrderDashboard
-      catalogSupplier={catalogSupplier}
       reportRun={latestRun}
       recommendations={data.recommendations}
       approvalEvents={data.approvalEvents}

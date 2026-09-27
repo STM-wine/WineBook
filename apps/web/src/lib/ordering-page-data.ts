@@ -1,4 +1,5 @@
 import "server-only";
+import { fetchSupplierHubData } from "./supplier-hub-reads";
 import type { ActiveView } from "@/components/dashboard-types";
 import { fetchDraftSummaries } from "./ordering-draft-reads";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
@@ -59,7 +60,7 @@ export type OrderingPageData = {
   salesReferenceDate: string | null;
 };
 
-export async function loadOrderingPageData(view: ActiveView, serviceRoleSupabase: SupabaseClient, catalogSupplier: string | null = null): Promise<OrderingPageData> {
+export async function loadOrderingPageData(view: ActiveView, serviceRoleSupabase: SupabaseClient): Promise<OrderingPageData> {
   const needsRows = view === "order-review" || view === "freight" || view === "supplier-board";
   const needsHub = view === "supplier-hub";
   const needsDrafts = view === "po-drafts";
@@ -77,7 +78,8 @@ export async function loadOrderingPageData(view: ActiveView, serviceRoleSupabase
     .limit(10)
     .returns<ReportRun[]>();
 
-  const supplierCatalogPromise = !(needsRows || (needsHub && catalogSupplier)) ? Promise.resolve([] as SupplierCatalogWine[]) : fetchAllExact<SupplierCatalogWine>("supplier catalog wines", (from, to) => {
+  const hubDataPromise = needsHub ? fetchSupplierHubData(serviceRoleSupabase) : Promise.resolve({ catalog: [] as SupplierCatalogWine[], requests: [] as WineRequest[], priceChanges: [] as PriceChangeEvent[] });
+  const supplierCatalogPromise = needsHub ? hubDataPromise.then((data) => data.catalog) : !needsRows ? Promise.resolve([] as SupplierCatalogWine[]) : fetchAllExact<SupplierCatalogWine>("supplier catalog wines", (from, to) => {
     const query = serviceRoleSupabase
     .from("supplier_catalog_wines")
     .select(`
@@ -87,22 +89,11 @@ export async function loadOrderingPageData(view: ActiveView, serviceRoleSupabase
       workbench_items:supplier_catalog_workbench_items (*)
     `, { count: "exact" })
     .order("id", { ascending: true });
-    return (needsHub && catalogSupplier ? query.eq("supplier_name", catalogSupplier) : query).range(from, to) as never;
+    return query.range(from, to) as never;
   });
 
-  const wineRequestsPromise = !(needsHub && catalogSupplier) ? Promise.resolve({ data: [] as WineRequest[] }) : fetchAllExact<WineRequest> ("wineRequestsPromise", (from, to) => serviceRoleSupabase
-    .from("wine_requests")
-    .select("*", { count: "exact" })
-    .eq("supplier_name", catalogSupplier!)
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: true }).range(from, to) as never).then((data) => ({ data }));
-
-  const priceChangeEventsPromise = !(needsHub && catalogSupplier) ? Promise.resolve({ data: [] as PriceChangeEvent[] }) : fetchAllExact<PriceChangeEvent> ("priceChangeEventsPromise", (from, to) => serviceRoleSupabase
-    .from("price_change_events")
-    .select("*", { count: "exact" })
-    .eq("supplier", catalogSupplier!)
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: true }).range(from, to) as never).then((data) => ({ data }));
+  const wineRequestsPromise = hubDataPromise.then((data) => ({ data: data.requests }));
+  const priceChangeEventsPromise = hubDataPromise.then((data) => ({ data: data.priceChanges }));
 
   const quickBooksLastSyncPromise = (async () => {
     try {
