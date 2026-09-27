@@ -2,7 +2,7 @@
 begin;
 do $$
 declare j public.read_model_jobs; claimed public.read_model_jobs; second public.read_model_jobs;
-  page jsonb; counts jsonb; detail jsonb; rows jsonb; ok boolean;
+  page jsonb; counts jsonb; detail jsonb; rows jsonb; ok boolean; rejected boolean;
 begin
   j := public.request_read_model('products','performance-test','test-v1','{}');
   claimed := public.claim_read_model();
@@ -49,6 +49,34 @@ begin
   second := public.claim_read_model();
   if second.lease_token=claimed.lease_token then raise exception 'Reclaim reused lease'; end if;
   if not public.publish_read_model(j.id,second.lease_token,'{"complete":true}') then raise exception 'Reclaimed job did not publish'; end if;
+  -- Uploading a catalog in batches must never make a partial generation readable.
+  j := public.request_read_model('products','batched-test','test-v1','{}'); claimed := public.claim_read_model();
+  if public.stage_product_read_model(j.id,gen_random_uuid(),'[{"id":"wrong"}]',true) then raise exception 'Wrong lease staged rows'; end if;
+  if not public.stage_product_read_model(j.id,claimed.lease_token,'[{"id":"first"}]',true) then raise exception 'Batch rejected'; end if;
+  rejected := false;
+  begin perform public.read_product_workspace(j.id,'{}'); exception when others then rejected := true; end;
+  if not rejected then raise exception 'Unpublished rows became readable'; end if;
+  rejected := false;
+  begin perform public.finish_product_read_model(j.id,claimed.lease_token,2); exception when others then rejected := true; end;
+  if not rejected then raise exception 'Partial upload published'; end if;
+  perform public.stage_product_read_model(j.id,claimed.lease_token,'[{"id":"second"}]');
+  perform public.stage_product_read_model(j.id,claimed.lease_token,'[{"id":"second"}]');
+  if not public.finish_product_read_model(j.id,claimed.lease_token,2) then raise exception 'Complete batches did not publish'; end if;
+  if public.stage_product_read_model(j.id,claimed.lease_token,'[]',true) then raise exception 'Completed snapshot overwritten'; end if;
+  counts := public.read_product_workspace(j.id,'{}',0,75,'productName','asc','counts');
+  if (counts#>>'{data,visible}')::int <> 2 then raise exception 'Batch retry duplicated rows'; end if;
+  j := public.request_read_model('products','batch-reclaim-test','test-v1','{}'); claimed := public.claim_read_model();
+  perform public.stage_product_read_model(j.id,claimed.lease_token,'[{"id":"old"}]',true);
+  update public.read_model_jobs set lease_until=now()-interval '1 second' where id=j.id;
+  if public.stage_product_read_model(j.id,claimed.lease_token,'[]',true) then raise exception 'Expired upload accepted'; end if;
+  second := public.claim_read_model();
+  perform public.stage_product_read_model(j.id,second.lease_token,'[{"id":"new"}]',true);
+  if public.finish_product_read_model(j.id,claimed.lease_token,1) then raise exception 'Former lease published'; end if;
+  update public.read_model_versions set version=version+1 where kind='products';
+  if public.finish_product_read_model(j.id,second.lease_token,1) then raise exception 'Obsolete staged rows published'; end if;
+  if (select count(*) from public.product_workspace_records where snapshot_id=j.id) <> 1 then raise exception 'Reclaim retained abandoned rows'; end if;
+  if has_function_privilege('authenticated','public.stage_product_read_model(uuid,uuid,jsonb,boolean)','EXECUTE') then raise exception 'Browser can stage cache'; end if;
+  if has_function_privilege('anon','public.finish_product_read_model(uuid,uuid,integer)','EXECUTE') then raise exception 'Anonymous can finish cache'; end if;
   if has_table_privilege('authenticated','public.product_workspace_records','SELECT') then raise exception 'Browser can read private cache'; end if;
   if has_function_privilege('authenticated','public.publish_read_model(uuid,uuid,jsonb,jsonb)','EXECUTE') then raise exception 'Browser can publish cache'; end if;
   if has_function_privilege('anon','public.read_product_workspace(uuid,jsonb,integer,integer,text,text,text,text)','EXECUTE') then raise exception 'Anonymous cache read allowed'; end if;

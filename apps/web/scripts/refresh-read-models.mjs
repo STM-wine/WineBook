@@ -47,9 +47,28 @@ async function drain() {
         continue;
       }
       const product = job.kind === 'products' ? await buildProductWorkspace(supabase) : null;
-      const result = product ? { rowCount: product.rows.length } : await buildMarginSnapshot(supabase, job.request);
+      if (product) {
+        // Bound PostgREST parsing/memory overhead; incomplete uploads stay private.
+        const ids = new Set(product.rows.map((row) => row.id));
+        if (ids.size !== product.rows.length) throw new Error('Duplicate product snapshot IDs');
+        for (let offset = 0; offset < Math.max(1, product.rows.length); offset += 200) {
+          const { data: staged, error } = await supabase.rpc('stage_product_read_model', {
+            p_id: job.id, p_token: job.lease_token, p_rows: product.rows.slice(offset, offset + 200), p_reset: offset === 0
+          });
+          if (error) throw new Error(error.message);
+          if (!staged) throw new Error('Product upload lease expired or superseded');
+        }
+        const { data: published, error } = await supabase.rpc('finish_product_read_model', {
+          p_id: job.id, p_token: job.lease_token, p_count: product.rows.length
+        });
+        if (error) throw new Error(error.message);
+        console.log(JSON.stringify({ kind: job.kind, key: job.cache_key, published, rows: product.rows.length,
+          durationMs: Math.round(performance.now() - start) }));
+        continue;
+      }
+      const result = await buildMarginSnapshot(supabase, job.request);
       const { data: published, error: publishError } = await supabase.rpc('publish_read_model', {
-        p_id: job.id, p_token: job.lease_token, p_result: result, p_rows: product?.rows || null
+        p_id: job.id, p_token: job.lease_token, p_result: result, p_rows: null
       });
       if (publishError) throw new Error(publishError.message);
       console.log(JSON.stringify({ kind: job.kind, key: job.cache_key, published, durationMs: Math.round(performance.now() - start) }));
