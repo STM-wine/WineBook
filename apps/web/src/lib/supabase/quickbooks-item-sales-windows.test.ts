@@ -19,6 +19,33 @@ function salesRow(index: number): QuickBooksItemSalesWindowRow {
 }
 
 describe("fetchQuickBooksItemSalesWindows", () => {
+  it("shares completed-upload reads, coalesces concurrent requests, and invalidates on the next upload or cutoff", async () => {
+    const rows = [salesRow(1)];
+    const supabase = { rpc: vi.fn(() => ({ returns: async () => ({ data: rows, error: null }) })) };
+    const results = await Promise.all(Array.from({ length: 3 }, () =>
+      fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-26", "cache-upload-one")));
+    expect(results).toEqual([rows, rows, rows]);
+    await fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-26", "cache-upload-one");
+    expect(supabase.rpc).toHaveBeenCalledTimes(1);
+    await fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-26", "cache-upload-two");
+    await fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-27", "cache-upload-two");
+    expect(supabase.rpc).toHaveBeenCalledTimes(3);
+  });
+
+  it("expires cached sales and does not cache failed reads", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    try {
+      const returns = vi.fn().mockResolvedValue({ data: [salesRow(1)], error: null });
+      const supabase = { rpc: vi.fn(() => ({ returns })) };
+      await fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-26", "expiry-upload");
+      now.mockReturnValue(1_300_001);
+      returns.mockResolvedValueOnce({ data: null, error: { message: "read failed" } });
+      await expect(fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-26", "expiry-upload")).rejects.toThrow("read failed");
+      await fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-26", "expiry-upload");
+      expect(supabase.rpc).toHaveBeenCalledTimes(3);
+    } finally { now.mockRestore(); }
+  });
+
   it("retries a canceled read once with the same cutoff and returns every row", async () => {
     const allRows = Array.from({ length: 2456 }, (_, index) => salesRow(index));
     const returns = vi.fn()

@@ -195,7 +195,8 @@ export async function fetchCurrentOrderingOverlay(
           .range(from, to)
           .returns<Array<{ source_id: string }>>() as never)
       : Promise.resolve([]),
-    fetchQuickBooksItemSalesWindows(supabase, referenceDate)
+    fetchQuickBooksItemSalesWindows(supabase, referenceDate,
+      syncState.latest?.status === "completed" ? syncState.latest.id : syncState.latestCompletedId)
   ]);
   if (onOrderSnapshot === null) {
     throw new Error("The latest completed QuickBooks refresh has no inventory snapshot.");
@@ -320,13 +321,13 @@ async function fetchQuickBooksSyncState(supabase: SourceClient, now = new Date()
       .maybeSingle<QuickBooksSyncRow>(),
     supabase
       .from("source_sync_runs")
-      .select("completed_at")
+      .select("id,completed_at")
       .eq("source_system", "quickbooks_desktop")
       .eq("worker_name", "quickbooks_web_connector")
       .eq("status", "completed")
       .order("completed_at", { ascending: false })
       .limit(1)
-      .maybeSingle<{ completed_at: string | null }>()
+      .maybeSingle<{ id: string; completed_at: string | null }>()
   ]);
   if (latestResult.error) throw new Error(latestResult.error.message);
   if (completedResult.error) throw new Error(completedResult.error.message);
@@ -352,6 +353,7 @@ async function fetchQuickBooksSyncState(supabase: SourceClient, now = new Date()
   const latestNonMaterialFailure = isQuickBooksSyncNonMaterialFailure(latest);
   return {
     latest,
+    latestCompletedId: completedResult.data?.id || null,
     latestCompletedAt: completedResult.data?.completed_at || null,
     latestActivelyRunning,
     latestNonMaterialFailure

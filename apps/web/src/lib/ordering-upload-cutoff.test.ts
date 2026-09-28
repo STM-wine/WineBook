@@ -16,7 +16,7 @@ function database(lastUpload = completedAt, status = "completed", pages = 0) {
       eq() { return query; }, in() { return query; }, order() { return query; }, limit() { return query; }, range() { return query; },
       returns: async () => ({ data: [], count: 0, error: null }),
       maybeSingle: async () => ({ error: null, data: table === "source_sync_runs"
-        ? columns === "completed_at" ? { completed_at: lastUpload } : {
+        ? columns === "id,completed_at" ? { id: "last-completed", completed_at: lastUpload } : {
           id: "sync", status, started_at: lastUpload, completed_at: lastUpload,
           diagnostics: { completed_request_count: pages }
         } : null })
@@ -29,16 +29,17 @@ beforeEach(() => vi.clearAllMocks());
 describe("ordering without a new QuickBooks upload", () => {
   it.each(["2026-09-27T07:01:00Z", "2026-09-28T18:00:00Z", "2026-10-05T18:00:00Z"])("keeps the last uploaded sales cutoff at %s", async (now) => {
     const result = await fetchCurrentOrderingOverlay(database(), [], { now: new Date(now), liveAvailability: availability });
-    expect(fetchQuickBooksItemSalesWindows).toHaveBeenCalledWith(expect.anything(), "2026-09-26");
+    expect(fetchQuickBooksItemSalesWindows).toHaveBeenCalledWith(expect.anything(), "2026-09-26", "sync");
     expect(result.diagnostics).toMatchObject({ reference_date: "2026-09-26", quickbooks_as_of: completedAt });
   });
   it("advances the cutoff only when another upload completes", async () => {
     const result = await fetchCurrentOrderingOverlay(database("2026-09-28T23:00:00Z"), [], { now: new Date("2026-09-29T18:00:00Z"), liveAvailability: availability });
-    expect(fetchQuickBooksItemSalesWindows).toHaveBeenCalledWith(expect.anything(), "2026-09-28");
+    expect(fetchQuickBooksItemSalesWindows).toHaveBeenCalledWith(expect.anything(), "2026-09-28", "sync");
     expect(result.diagnostics.reference_date).toBe("2026-09-28");
   });
   it("ignores an empty failed connector attempt when completed data exists", async () => {
     await expect(fetchCurrentOrderingOverlay(database(completedAt, "failed", 0), [], { liveAvailability: availability })).resolves.toMatchObject({ diagnostics: { quickbooks_as_of: completedAt } });
+    expect(fetchQuickBooksItemSalesWindows).toHaveBeenCalledWith(expect.anything(), "2026-09-26", "last-completed");
   });
   it("still prevents PO calculations from using an incomplete import", async () => {
     await expect(fetchCurrentOrderingOverlay(database(completedAt, "failed", 1), [], { liveAvailability: availability })).rejects.toThrow(/not complete/);
