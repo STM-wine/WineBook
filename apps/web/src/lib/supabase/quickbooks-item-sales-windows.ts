@@ -15,9 +15,17 @@ export type QuickBooksItemSalesWindowRow = {
 };
 
 export async function fetchQuickBooksItemSalesWindows(supabase: SupabaseClient, referenceDate: string) {
-  const { data, error } = await supabase
+  const read = () => supabase
     .rpc("quickbooks_item_sales_windows_payload", { p_reference_date: referenceDate })
     .returns<QuickBooksItemSalesWindowRow[]>();
+  let result = await read();
+  // This RPC only reads sales. Retry a canceled statement once; never retry PO
+  // writes or rebuild their idempotency payload after an ambiguous write error.
+  if (result.error?.code === "57014") {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    result = await read();
+  }
+  const { data, error } = result;
 
   if (error) throw new Error(error.message);
   if (!Array.isArray(data)) {

@@ -12,7 +12,7 @@ import { fetchLiveVinosmithAvailability } from "@/lib/supabase/vinosmith-availab
 import { fetchCurrentOrderingOverlay } from "@/lib/source-backed-ordering-server";
 import { isSourceBackedRun, type OrderingRun } from "@/lib/source-backed-ordering-runs";
 import { buildOrderingDraftSourceSnapshot, buildOrderingLineSourceSnapshot } from "@/lib/po-source-snapshot";
-import type { ApprovalConflict, PurchaseOrderDraftWithLines, PurchaseOrderLineNote, Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
+import type { ApprovalConflict, Recommendation, SupplierCatalogWine, SupplierLogistics } from "@/lib/types";
 
 const WRITE_ROLES = new Set(["buyer", "admin"]);
 
@@ -64,55 +64,6 @@ function approvalSource(row: Recommendation) {
     return { sourceType: "catalog_workbench" as const, sourceId: row.supplier_catalog_workbench_item_id };
   }
   return { sourceType: "recommendation" as const, sourceId: row.id };
-}
-
-async function loadDrafts(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  reportRunId: string
-) {
-  const draftsPromise = supabase
-    .from("purchase_order_drafts")
-    .select(`
-      id, report_run_id, ordering_source, source_snapshot, supplier_name, order_path,
-      status, po_number, notes, revision_no, content_hash, last_exported_at,
-      last_exported_by, created_by, reviewed_by, created_at, updated_at,
-      revisions:purchase_order_draft_revisions (
-        id, purchase_order_draft_id, revision_no, created_by, created_at
-      ),
-      lines:purchase_order_lines (
-        id, purchase_order_draft_id, recommendation_id, supplier_catalog_wine_id,
-        producer_name, product_name, product_code, planning_sku, recommended_qty,
-        approved_qty, fob, line_cost, trucking_cost_per_bottle, wine_cost,
-        laid_in_cost, landed_cost, is_new_item, new_item_warning, source_snapshot,
-        source_type, source_id, source_lock_version
-      )
-    `)
-    .eq("report_run_id", reportRunId)
-    .order("created_at", { ascending: false })
-    .returns<PurchaseOrderDraftWithLines[]>();
-  const notesPromise = fetchAllExact<PurchaseOrderLineNote>("PO line collaboration notes", (from, to) => supabase
-    .from("purchase_order_line_notes")
-    .select("id,report_run_id,purchase_order_draft_id,line_key,product_code_snapshot,product_name_snapshot,body,created_by,created_at", { count: "exact" })
-    .eq("report_run_id", reportRunId)
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .range(from, to)
-    .returns<PurchaseOrderLineNote[]>() as never);
-  const [draftResult, notes] = await Promise.all([draftsPromise, notesPromise]);
-  if (draftResult.error) return draftResult;
-  const notesByDraft = new Map<string, PurchaseOrderLineNote[]>();
-  for (const note of notes) {
-    const group = notesByDraft.get(note.purchase_order_draft_id);
-    if (group) group.push(note);
-    else notesByDraft.set(note.purchase_order_draft_id, [note]);
-  }
-  return {
-    ...draftResult,
-    data: (draftResult.data || []).map((draft) => ({
-      ...draft,
-      line_notes: notesByDraft.get(draft.id) || []
-    }))
-  };
 }
 
 export async function POST(request: Request) {
@@ -312,15 +263,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Approvals changed while drafts were being prepared.", conflicts: result.conflicts || [] }, { status: 409 });
   }
 
-  const { data: drafts, error: draftsError } = await loadDrafts(supabase, reportRunId);
-  if (draftsError) return NextResponse.json({ error: draftsError.message }, { status: 500 });
-
+  // The transaction is committed. Return its result without querying display
+  // data: the PO workspace loads summaries and individual details separately.
   revalidateTag(CACHE_TAGS.dashboard);
   return NextResponse.json({
     created: result.created || [],
     updated: result.updated || [],
     skipped: result.skipped || [],
-    errors: [],
-    drafts: drafts || []
+    errors: []
   });
 }

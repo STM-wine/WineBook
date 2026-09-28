@@ -19,6 +19,26 @@ function salesRow(index: number): QuickBooksItemSalesWindowRow {
 }
 
 describe("fetchQuickBooksItemSalesWindows", () => {
+  it("retries a canceled read once with the same cutoff and returns every row", async () => {
+    const allRows = Array.from({ length: 2456 }, (_, index) => salesRow(index));
+    const returns = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } })
+      .mockResolvedValueOnce({ data: allRows, error: null });
+    const supabase = { rpc: vi.fn(() => ({ returns })) };
+    expect(await fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-26")).toEqual(allRows);
+    expect(supabase.rpc.mock.calls).toEqual(Array(2).fill([
+      "quickbooks_item_sales_windows_payload", { p_reference_date: "2026-09-26" }
+    ]));
+  });
+
+  it("bounds retries and never substitutes empty sales after repeated timeouts", async () => {
+    const supabase = { rpc: vi.fn(() => ({ returns: async () => ({
+      data: null, error: { code: "57014", message: "statement timeout" }
+    }) })) };
+    await expect(fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-26")).rejects.toThrow("statement timeout");
+    expect(supabase.rpc).toHaveBeenCalledTimes(2);
+  });
+
   it("fetches every sales row in one scalar payload instead of recomputing the RPC for each 1,000-row page", async () => {
     const allRows = Array.from({ length: 2456 }, (_, index) => salesRow(index));
     const supabase = {
@@ -45,6 +65,7 @@ describe("fetchQuickBooksItemSalesWindows", () => {
     };
 
     await expect(fetchQuickBooksItemSalesWindows(supabase as never, "2026-09-15")).rejects.toThrow("payload failed");
+    expect(supabase.rpc).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed when the database does not provide an array payload", async () => {

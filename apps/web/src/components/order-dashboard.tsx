@@ -805,7 +805,6 @@ export function OrderDashboard({
           updated?: string[];
           skipped?: string[];
           errors?: string[];
-          drafts?: PurchaseOrderDraftWithLines[];
           conflicts?: ApprovalConflict[];
           error?: string;
         };
@@ -835,7 +834,8 @@ export function OrderDashboard({
         } else {
           setPendingMessage("No approved quantities are ready for PO drafts.");
         }
-        setDraftRows(result.drafts || []);
+        // Draft details load independently after the committed mutation. A
+        // display-read failure must never be reported as a failed PO save.
         selectView("po-drafts");
         refreshAfterMutation = true;
       } catch (error) {
