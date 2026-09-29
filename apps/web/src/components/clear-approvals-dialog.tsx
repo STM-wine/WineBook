@@ -43,7 +43,7 @@ export function ClearApprovalsDialog({ scope, onClose, onCleared }: {
         }
       }}>
       <h2 id="clear-approvals-title">{scope.supplier ? `Clear approved orders for ${scope.supplier}?` : "Clear approved orders for all suppliers?"}</h2>
-      {preview ? <p>{preview.rows.length ? `${formatInteger(preview.rows.length)} saved approvals · ${formatInteger(preview.bottles)} bottles · ${formatInteger(preview.supplierCount)} suppliers` : "There are no saved approvals to clear."}</p> : !error ? <p role="status">Checking saved approvals…</p> : null}
+      {preview ? <p>{preview.rows.length ? `${formatInteger(preview.rows.length)} saved ${preview.rows.length === 1 ? "approval" : "approvals"} · ${formatInteger(preview.bottles)} bottles · ${formatInteger(preview.supplierCount)} ${preview.supplierCount === 1 ? "supplier" : "suppliers"}` : "There are no saved approvals to clear."}</p> : !error ? <p role="status">Checking saved approvals…</p> : null}
       <p>{scope.supplier ? "This includes all wines in this supplier’s workbench, even if hidden by filters." : "This includes all suppliers in the current ordering run, even if hidden by filters or not opened."}</p>
       <p>Existing PO drafts and order history stay unchanged. Use Create PO Drafts afterward if you also want to update the open drafts.</p>
       {error ? <p role="alert">{error}</p> : null}

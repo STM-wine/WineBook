@@ -8,4 +8,4 @@ Success refreshes the overview and open supplier workbenches, including when the
 
 Validation: 317 tests across 54 files, TypeScript check, production build, and diff whitespace check passed. Read-only production preview returned 92 saved approvals / 10,842 bottles across 17 suppliers; Los Milics returned 3 approvals / 588 bottles. These are saved quantities, including previously processed approvals, not the net outstanding metric displayed in the summary. No production approvals were cleared during validation.
 
-Code: facae66. Deployment uses the production web service's existing On Commit setting; the documentation commit triggers deployment without a skip marker. Live verification pending deployment completion.
+Code: facae66 plus confirmation-count copy polish. Deployment uses the production web service's existing On Commit setting; the final application change has no skip marker. Live verification pending deployment completion.

@@ -144,7 +144,7 @@ describe("approval clearing controls", () => {
     expect(host.querySelector('details')?.open).toBe(false);
     expect(requests).toHaveLength(1);
     expect(approvalActions.previewClearOrderApprovals).toHaveBeenCalledWith({ reportRunId: "run", supplier: "Example supplier" });
-    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("1 saved approvals · 6 bottles");
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("1 saved approval · 6 bottles · 1 supplier");
     await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Cancel')!.click());
     expect(host.querySelector('[role="dialog"]')).toBeNull();
     expect(approvalActions.clearOrderApprovals).not.toHaveBeenCalled();
