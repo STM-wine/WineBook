@@ -1,5 +1,6 @@
 "use server";
 
+import { previewOrderApprovalClear, clearSavedOrderApprovals, type ApprovalClearScope, type ApprovalClearPreview } from "@/lib/clear-order-approvals";
 import { createHash, randomUUID } from "node:crypto";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { addWineSaveFailure } from "@/lib/add-wine-save-result";
@@ -172,6 +173,18 @@ export async function refreshVinosmithReports(): Promise<RefreshVinosmithReports
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not queue legacy report refresh." };
   }
+}
+
+export async function previewClearOrderApprovals(scope: ApprovalClearScope) {
+  const { supabase } = await requireWriteAccess();
+  return previewOrderApprovalClear(supabase, scope);
+}
+
+export async function clearOrderApprovals(preview: ApprovalClearPreview) {
+  const { supabase } = await requireWriteAccess();
+  const result = await clearSavedOrderApprovals(supabase, preview);
+  revalidateDashboardData();
+  return result;
 }
 
 export async function updateRecommendationApproval(input: {

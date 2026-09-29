@@ -54,7 +54,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       fetchLastCompletedQuickBooksUpload(db).catch(() => null),
       fetchLatestVinosmithPullAt(db)
     ]);
-    return <OrderingSnapshotHome canManageMarkers={canManageMarkers} view={initialView} initialQuickBooksLastSyncAt={quickBooksLastSyncAt} initialVinosmithLastSyncAt={vinosmithLastSyncAt} canViewSettings={hasPermission(permissions, "view_settings")} />;
+    return <OrderingSnapshotHome canClearApprovals={context.profile.role === "buyer" || context.profile.role === "admin"} canManageMarkers={canManageMarkers} view={initialView} initialQuickBooksLastSyncAt={quickBooksLastSyncAt} initialVinosmithLastSyncAt={vinosmithLastSyncAt} canViewSettings={hasPermission(permissions, "view_settings")} />;
   }
 
   return <Suspense fallback={<main className="app-shell"><AppTopbar activeView={initialView} canViewSettings={hasPermission(permissions, "view_settings")} /><SectionLoading title={initialView === "po-drafts" ? "PO Drafts" : initialView === "supplier-hub" ? "Supplier Hub" : "Ordering"} message="Loading this workspace" /></main>}>

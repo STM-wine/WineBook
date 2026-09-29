@@ -7579,3 +7579,5 @@ th.numeric .company-sort-button {
   justify-content: space-between;
   margin-bottom: 16px;
 }
+
+.clear-approval-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }

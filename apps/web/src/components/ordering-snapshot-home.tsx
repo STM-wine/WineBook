@@ -1,4 +1,6 @@
 "use client";
+import { ClearApprovalsDialog } from "./clear-approvals-dialog";
+import type { ApprovalClearScope } from "@/lib/clear-order-approvals";
 import { flushAllApprovals } from "@/lib/approval-navigation";
 import { quickBooksUploadLabel, vinosmithUpdateLabel } from "@/lib/ordering-freshness";
 import { useRouter } from "next/navigation";
@@ -16,7 +18,7 @@ import { OrderDashboard } from "./order-dashboard";
 import { FreightView } from "./freight-view";
 import { unavailableVinosmithExplorerData } from "@/lib/vinosmith-explorer-empty";
 
-export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, initialQuickBooksLastSyncAt, initialVinosmithLastSyncAt }: { view: "order-review" | "freight"; canViewSettings: boolean; canManageMarkers: boolean; initialQuickBooksLastSyncAt?: string | null; initialVinosmithLastSyncAt?: string | null }) {
+export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, initialQuickBooksLastSyncAt, initialVinosmithLastSyncAt, canClearApprovals = false }: { canClearApprovals?: boolean; view: "order-review" | "freight"; canViewSettings: boolean; canManageMarkers: boolean; initialQuickBooksLastSyncAt?: string | null; initialVinosmithLastSyncAt?: string | null }) {
   const router = useRouter();
   const [data, setData] = useState<OrderingSnapshotSummary | null>(null);
   const [error, setError] = useState("");
@@ -25,6 +27,9 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
   const [filters, setFilters] = useState<OrderingSummaryFilters>(defaultOrderingFilters);
   const [queryFilters, setQueryFilters] = useState(filters);
   const [creatingDrafts, setCreatingDrafts] = useState(false);
+  const [clearScope, setClearScope] = useState<ApprovalClearScope | null>(null);
+  const [approvalRefresh, setApprovalRefresh] = useState(0);
+  const [notice, setNotice] = useState("");
   const overviewRequestPending = useRef(false);
   const automaticRefresh = useRef(false);
   useEffect(() => {
@@ -106,6 +111,7 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
     {!data ? <h1>{view === "freight" ? "Freight" : "Order Summary"}</h1> : null}
     {stage && data ? <p role="status">Updating totals. Showing the last verified summary below.{data.isStale ? " Supplier editing will be available when current data is ready." : ""}</p> : null}
     {stage ? <WineLoadingProgress inline message={stage} detail="Navigation remains available. Source checks run in the shared worker." /> : null}
+    {notice ? <p role="status">{notice}</p> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
     {data ? <>
       <div className="ordering-snapshot-status"><button className="ghost-button" onClick={() => setRetry((n) => n + 1)}>Refresh summaries</button></div>
@@ -116,7 +122,9 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
           <div className="section-heading"><div>
             <h1>Order Summary</h1>
             <p>Review supplier totals below, then expand a supplier to work with its wines and approvals.</p>
-          </div><button className="button" disabled={creatingDrafts || Boolean(data.isStale)} onClick={() => void createDrafts()}>{creatingDrafts ? "Creating PO drafts..." : "Create PO Drafts"}</button></div>
+          </div><div className="clear-approval-actions">
+            {canClearApprovals ? <button className="ghost-button clear-approvals-button" disabled={creatingDrafts || Boolean(data.isStale) || Boolean(clearScope)} onClick={() => { setNotice(""); setClearScope({ reportRunId: data.reportRun.id }); }} type="button">Clear all approved orders</button> : null}
+            <button className="button" disabled={creatingDrafts || Boolean(data.isStale) || Boolean(clearScope)} onClick={() => void createDrafts()}>{creatingDrafts ? "Creating PO drafts..." : "Create PO Drafts"}</button></div></div>
           <div className="filter-bar">
             <label>Supplier<select value={filters.supplier} onChange={(event) => setFilters({ ...filters, supplier: event.target.value })}>
               <option>All</option>{data.filterOptions?.suppliers.map((supplier) => <option key={supplier}>{supplier}</option>)}
@@ -131,14 +139,18 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
           {!data.groups.length ? <p className="empty-inline">No wines match these filters.</p> : null}
         </section>
         <section className="supplier-stack" aria-label="Supplier workbenches">
-          {data.groups.map((group) => <SupplierExpansion canManageMarkers={canManageMarkers} filters={data.filters || defaultOrderingFilters} unavailable={Boolean(data.isStale)} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
+          {data.groups.map((group) => <SupplierExpansion approvalRefresh={approvalRefresh} onClear={canClearApprovals ? () => { setNotice(""); setClearScope({ reportRunId: data.reportRun.id, supplier: group.supplier }); } : undefined} clearDisabled={creatingDrafts || Boolean(clearScope)} canManageMarkers={canManageMarkers} filters={data.filters || defaultOrderingFilters} unavailable={Boolean(data.isStale)} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
         </section>
       </>}
     </> : null}
+    {clearScope ? <ClearApprovalsDialog scope={clearScope} onClose={() => setClearScope(null)} onCleared={(count) => {
+      setClearScope(null); setNotice(`Cleared ${formatInteger(count)} saved approvals.`);
+      setApprovalRefresh(n => n + 1); setRetry(n => n + 1);
+    }} /> : null}
   </main>;
 }
 
-function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageMarkers }: { group: Omit<SupplierGroup, "rows">; filters: OrderingSummaryFilters; snapshotId: string; unavailable: boolean; canManageMarkers: boolean }) {
+function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageMarkers, approvalRefresh, onClear, clearDisabled }: { approvalRefresh: number; onClear?: () => void; clearDisabled: boolean; group: Omit<SupplierGroup, "rows">; filters: OrderingSummaryFilters; snapshotId: string; unavailable: boolean; canManageMarkers: boolean }) {
   const { supplier } = group;
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<(OrderingPageData & { generatedAt?: string }) | null>(null);
@@ -153,7 +165,7 @@ function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageM
       .then(async (result) => { await flushAllApprovals(); if (!controller.signal.aborted) { setData(result); setStage(""); } })
       .catch((error) => { if (!controller.signal.aborted) { setError(error.message); setStage(""); } });
     return () => controller.abort();
-  }, [open, supplier, retry, snapshotId, unavailable]);
+  }, [open, supplier, retry, snapshotId, unavailable, approvalRefresh]);
   return <details className="supplier-section ordering-supplier-section" open={open && !unavailable} onToggle={(event) => setOpen(event.currentTarget.open)}>
     <summary aria-disabled={unavailable} onClick={(event) => { if (unavailable) event.preventDefault(); }}>
       <div className="ordering-supplier-totals">
@@ -163,7 +175,7 @@ function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageM
         <span className={group.approvedBottles !== 0 ? "supplier-approved-value" : "supplier-approved-value is-empty"}>{formatCurrency(group.approvedValue)} approved</span>
         {group.freeGoodProgramCount > 0 ? <span className="free-goods-chip">{formatInteger(group.freeGoodProgramCount)} free-goods</span> : null}
       </div>
-      <div className="supplier-summary-actions"><span>{formatInteger(group.skuCount)} SKUs</span>{unavailable ? <span>Updating</span> : <span className="ordering-supplier-chevron" aria-hidden="true">⌄</span>}</div>
+      <div className="supplier-summary-actions">{onClear ? <button className="ghost-button clear-approvals-button" aria-label={`Clear approved orders for ${supplier}`} disabled={unavailable || clearDisabled} type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); onClear(); }}>Clear approved orders</button> : null}<span>{formatInteger(group.skuCount)} SKUs</span>{unavailable ? <span>Updating</span> : <span className="ordering-supplier-chevron" aria-hidden="true">⌄</span>}</div>
     </summary>
     {stage ? <WineLoadingProgress inline message={stage} /> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}

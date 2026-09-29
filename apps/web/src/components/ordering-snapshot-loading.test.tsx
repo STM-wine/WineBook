@@ -3,6 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { OrderingSnapshotHome } from "./ordering-snapshot-home";
+const approvalActions = vi.hoisted(() => ({ previewClearOrderApprovals: vi.fn(), clearOrderApprovals: vi.fn() }));
+vi.mock("@/app/actions", () => approvalActions);
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("./app-topbar", () => ({ AppTopbar: ({ qbDataLabel, dataLabel }: { qbDataLabel?: string; dataLabel?: string }) => <nav>Navigation {dataLabel} {qbDataLabel}</nav> }));
 vi.mock("./order-dashboard", () => ({ OrderDashboard: ({ summaryFilters, canManageMarkers }: { canManageMarkers: boolean; summaryFilters?: { search: string; brandManager: string } }) => <div data-testid="supplier-editor" data-can-manage={canManageMarkers} data-search={summaryFilters?.search} data-tdm={summaryFilters?.brandManager}>Supplier editor</div> }));
@@ -20,6 +22,7 @@ async function respond(index: number, status: number, body: unknown) {
   await act(async () => requests[index].resolve({ status, ok: status < 400, json: async () => body }));
 }
 beforeEach(async () => {
+  vi.clearAllMocks();
   vi.useFakeTimers(); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); requests = [];
   vi.stubGlobal("fetch", vi.fn((url: string, init: {signal: AbortSignal}) => new Promise((resolve) => requests.push({url, signal:init.signal,resolve}))));
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -120,5 +123,46 @@ describe("ordering summary during background preparation", () => {
     expect(requests[0].signal.aborted).toBe(true);
     await act(async () => vi.advanceTimersByTimeAsync(4000));
     expect(requests).toHaveLength(1);
+  });
+});
+
+describe("approval clearing controls", () => {
+  async function mountBuyer() {
+    await act(async () => root.render(<OrderingSnapshotHome canClearApprovals={true} canManageMarkers={false} view="order-review" canViewSettings={false} />));
+    await respond(0, 200, { ...summary, isStale: false });
+    approvalActions.previewClearOrderApprovals.mockImplementation(async scope => ({ scope, rows: [{ sourceType: "recommendation", id: "r1", lockVersion: 2 }], bottles: 6, supplierCount: 1 }));
+    approvalActions.clearOrderApprovals.mockResolvedValue({ cleared: 1 });
+  }
+  it("does not show clearing controls to a read-only user", async () => {
+    await respond(0, 200, { ...summary, isStale: false });
+    expect(host.textContent).not.toContain("Clear approved");
+    expect(host.textContent).not.toContain("Clear all approved");
+  });
+  it("opens a supplier-scoped confirmation without expanding or loading its workbench; cancel makes no changes", async () => {
+    await mountBuyer();
+    await act(async () => (host.querySelector('[aria-label="Clear approved orders for Example supplier"]') as HTMLButtonElement).click());
+    expect(host.querySelector('details')?.open).toBe(false);
+    expect(requests).toHaveLength(1);
+    expect(approvalActions.previewClearOrderApprovals).toHaveBeenCalledWith({ reportRunId: "run", supplier: "Example supplier" });
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("1 saved approvals · 6 bottles");
+    await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Cancel')!.click());
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(approvalActions.clearOrderApprovals).not.toHaveBeenCalled();
+  });
+  it("global clear ignores filters and refreshes an open supplier even when its snapshot ID stays the same", async () => {
+    await mountBuyer();
+    const tdm = [...host.querySelectorAll('select')].find(s => s.parentElement?.textContent?.startsWith('TDM'))!;
+    await act(async () => { tdm.value = 'ROJO'; tdm.dispatchEvent(new Event('change', { bubbles: true })); await vi.advanceTimersByTimeAsync(250); });
+    await respond(1, 200, { ...summary, isStale: false });
+    await act(async () => { const d = host.querySelector('details')!; d.open = true; d.dispatchEvent(new Event('toggle')); });
+    await respond(2, 200, { latestRun: { id: 'run' }, generatedAt: summary.generatedAt });
+    await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Clear all approved orders')!.click());
+    expect(approvalActions.previewClearOrderApprovals).toHaveBeenCalledWith({ reportRunId: "run" });
+    await act(async () => (host.querySelector('[role="dialog"] .clear-approvals-button') as HTMLButtonElement).click());
+    expect(approvalActions.clearOrderApprovals).toHaveBeenCalledTimes(1);
+    expect(requests.slice(3).some(r => r.url.includes('supplier=Example%20supplier'))).toBe(true);
+    expect(requests.slice(3).some(r => r.url.includes('supplierFilter=All'))).toBe(true);
+    expect(host.textContent).toContain('Cleared 1 saved approvals.');
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 });
