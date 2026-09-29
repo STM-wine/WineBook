@@ -236,7 +236,7 @@ function rowForRollup(day, businessLine, scopeType, scopeKey, scopeLabel, rollup
     credit_memo_count: rollup.creditMemoTxnIds.size,
     sample_cost: roundMoney(rollup.sampleCost),
     gross_profit: roundMoney(rollup.grossProfit),
-    gross_profit_percent: marginPct(rollup.grossProfit, rollup.netSales),
+    gross_profit_percent: marginPct(rollup.grossProfit, rollup.grossProfitNetSales),
     confidence_buckets: summarizeBy(lines, (line) => line.confidenceBucket),
     cost_sources: summarizeBy(lines, (line) => line.qbCostSource),
     price_match_methods: summarizeBy(lines, (line) => line.vinosmithPriceMatchMethod),
@@ -252,6 +252,7 @@ function rollupLines(lines) {
     invoiceSales: 0,
     creditMemos: 0,
     netSales: 0,
+    grossProfitNetSales: 0,
     invoiceTxnIds: new Set(),
     creditMemoTxnIds: new Set(),
     sampleCost: 0,
@@ -276,6 +277,8 @@ function addLineToRollup(rollup, line) {
     if (line.transactionId) rollup.creditMemoTxnIds.add(line.transactionId);
   }
   rollup.netSales += amount;
+  if (line.confidenceBucket === "non_wine_adjustment") return;
+  rollup.grossProfitNetSales += amount;
   rollup.grossProfit += money(line.grossProfit);
 }
 

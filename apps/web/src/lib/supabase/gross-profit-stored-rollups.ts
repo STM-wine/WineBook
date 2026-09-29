@@ -12,6 +12,7 @@ export type StoredGrossProfitSummary = {
   grossSales: number;
   credits: number;
   netSales: number;
+  grossProfitNetSales?: number;
   invoiceCount: number;
   creditMemoCount: number;
   averageInvoice: number;
@@ -52,6 +53,7 @@ type StoredRollupRow = {
   sample_cost: number | string | null;
   gross_profit: number | string | null;
   gross_profit_percent: number | string | null;
+  confidence_buckets?: Record<string, { grossSales?: number }>;
 };
 
 type MutableStoredRollup = {
@@ -60,6 +62,7 @@ type MutableStoredRollup = {
   invoiceSales: number;
   creditMemos: number;
   netSales: number;
+  grossProfitNetSales?: number;
   invoiceCount: number;
   creditMemoCount: number;
   sampleCost: number;
@@ -231,7 +234,8 @@ function emptyRollup(key: string, label: string): MutableStoredRollup {
     invoiceCount: 0,
     creditMemoCount: 0,
     sampleCost: 0,
-    grossProfit: 0
+    grossProfit: 0,
+    grossProfitNetSales: 0
   };
 }
 
@@ -239,6 +243,7 @@ function addStoredRow(rollup: MutableStoredRollup, row: StoredRollupRow) {
   rollup.invoiceSales += number(row.invoice_sales);
   rollup.creditMemos += number(row.credit_memos);
   rollup.netSales += number(row.net_sales);
+  rollup.grossProfitNetSales = (rollup.grossProfitNetSales ?? 0) + number(row.net_sales) - number(row.confidence_buckets?.non_wine_adjustment?.grossSales);
   rollup.invoiceCount += integer(row.invoice_count);
   rollup.creditMemoCount += integer(row.credit_memo_count);
   rollup.sampleCost += number(row.sample_cost);
@@ -256,7 +261,8 @@ function salesRowFromRollup(rollup: MutableStoredRollup): QuickBooksSalesSummary
     creditMemoCount: rollup.creditMemoCount,
     creditMemoRate: rollup.invoiceSales > 0 ? rollup.creditMemos / rollup.invoiceSales : 0,
     grossProfit: rollup.grossProfit,
-    grossProfitPercent: marginPct(rollup.grossProfit, rollup.netSales),
+    grossProfitNetSales: rollup.grossProfitNetSales ?? rollup.netSales,
+    grossProfitPercent: marginPct(rollup.grossProfit, rollup.grossProfitNetSales ?? rollup.netSales),
     sampleCost: rollup.sampleCost
   };
 }
@@ -271,7 +277,8 @@ function summaryFromRollup(rollup: MutableStoredRollup): StoredGrossProfitSummar
     averageInvoice: rollup.invoiceCount > 0 ? rollup.invoiceSales / rollup.invoiceCount : 0,
     sampleCost: rollup.sampleCost,
     grossProfit: rollup.grossProfit,
-    grossProfitPercent: marginPct(rollup.grossProfit, rollup.netSales),
+    grossProfitNetSales: rollup.grossProfitNetSales ?? rollup.netSales,
+    grossProfitPercent: marginPct(rollup.grossProfit, rollup.grossProfitNetSales ?? rollup.netSales),
     grossProfitUnavailableReason: null
   };
 }
@@ -358,5 +365,6 @@ const STORED_SELECT = `
   credit_memo_count,
   sample_cost,
   gross_profit,
-  gross_profit_percent
+  gross_profit_percent,
+  confidence_buckets
 `;

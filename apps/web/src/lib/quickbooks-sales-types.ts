@@ -4,6 +4,7 @@ export type QuickBooksSalesSummaryRow = {
   invoiceSales: number;
   creditMemos: number;
   netSales: number;
+  grossProfitNetSales?: number;
   invoiceCount: number;
   creditMemoCount: number;
   creditMemoRate: number;

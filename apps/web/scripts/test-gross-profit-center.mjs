@@ -64,6 +64,29 @@ test("Gross Profit Center signs credits and applies confidence buckets", async (
   assert.equal(credit.grossProfit, -4);
 });
 
+test("paid QuickBooks wines stay sales when Vinosmith has a zero custom price", async () => {
+  const tables = fixtureTables();
+  const wine = tables.vinosmith_order_lines.find(line => line.wine_code === "SKU-EXACT");
+  wine.price_cents = 0; wine.total_cents = 0; wine.price_id = null; wine.discount = 100;
+  const proof = await buildGrossProfitWorkflowProof(fakeSupabase(tables), "2026-01-01", "2026-01-31", { includeLines: true, lineLimit: 30 });
+  const sale = proof.lines.find(line => line.itemFullName === "SKU-EXACT" && line.transactionType === "invoice");
+  assert.notEqual(sale.confidenceBucket, "sample_zero_dollar_or_100_discount");
+  assert.equal(sale.qbGrossSales, 120);
+  assert.equal(sale.grossProfit, 60);
+});
+
+test("non-wine exclusions are explicit and do not hide a wine with missing cost", async () => {
+  const tables = fixtureTables();
+  for (const [i, name] of ["Warehouse Storage Rent", "Customer Deposit", "CREDIT MEMO", "WINE-NO-COST"].entries()) {
+    tables.quickbooks_invoice_lines.push(qbLine("invoice-1", 20 + i, name, 1, 100, 100));
+  }
+  const proof = await buildGrossProfitWorkflowProof(fakeSupabase(tables), "2026-01-01", "2026-01-31", { includeLines: true, lineLimit: 30 });
+  for (const name of ["Warehouse Storage Rent", "Customer Deposit", "CREDIT MEMO"]) {
+    assert.equal(proof.lines.find(line => line.itemFullName === name).confidenceBucket, "non_wine_adjustment");
+  }
+  assert.notEqual(proof.lines.find(line => line.itemFullName === "WINE-NO-COST").confidenceBucket, "non_wine_adjustment");
+});
+
 function fixtureTables() {
   return {
     quickbooks_invoices: [

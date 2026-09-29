@@ -47,4 +47,28 @@ describe("margin snapshot historical parity", () => {
     expect(fetchStoredGrossProfitRollups).not.toHaveBeenCalled();
     expect(buildGrossProfitCenter).toHaveBeenCalledExactlyOnceWith(db, "2026-09-01", "2026-09-26");
   });
+  it("keeps non-wine revenue in sales while excluding it from the GP denominator", async () => {
+    vi.mocked(buildGrossProfitCenter).mockResolvedValue({ lines: [
+      { transactionType: "invoice", transactionId: "wine", qbGrossSales: 100, grossProfit: 30, confidenceBucket: "missing_vinosmith_line", itemFullName: "WINE" },
+      { transactionType: "invoice", transactionId: "rent", qbGrossSales: 50, grossProfit: null, confidenceBucket: "non_wine_adjustment", itemFullName: "Warehouse Storage Rent" },
+      { transactionType: "credit_memo", transactionId: "deposit", qbGrossSales: -10, grossProfit: null, confidenceBucket: "non_wine_adjustment", itemFullName: "Customer Deposit" }
+    ] } as never);
+    const result = await buildMarginSnapshot(db, { from: "2026-09-01", to: "2026-09-26" });
+    const value = result.scopes.stem.company.summary;
+    expect(value.netSales).toBe(140);
+    expect(value.grossProfitNetSales).toBe(100);
+    expect(value.grossProfit).toBe(30);
+    expect(value.grossProfitPercent).toBe(.3);
+    expect(result.scopes.stem.company.byRepRows[0].grossProfitPercent).toBe(.3);
+  });
+  it("merges wine revenue denominators instead of averaging GP percentages", async () => {
+    vi.mocked(fetchStoredGrossProfitRollups).mockResolvedValue({ summary: { ...summary, netSales: 200, grossProfit: 20, grossProfitNetSales: 100 }, byRepRows: [], byAccountRows: [], businessLineSummaries: [], unavailableReason: null });
+    vi.mocked(buildGrossProfitCenter).mockResolvedValue({ lines: [
+      { transactionType: "invoice", transactionId: "wine", qbGrossSales: 300, grossProfit: 120, confidenceBucket: "missing_vinosmith_line", itemFullName: "WINE" }
+    ] } as never);
+    const result = await buildMarginSnapshot(db, { from: "2026-01-01", to: "2026-09-26" });
+    expect(result.scopes.all.company.summary.grossProfitNetSales).toBe(400);
+    expect(result.scopes.all.company.summary.grossProfitPercent).toBe(.35);
+  });
+
 });

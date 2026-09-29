@@ -101,6 +101,7 @@ export type GrossProfitConfidenceBucket =
   | "qb_price_qb_cost_vinosmith_unique_label_current_price_billback"
   | "qb_price_qb_cost_vinosmith_price_no_billback"
   | "qb_price_qb_cost_manual_no_billback"
+  | "non_wine_adjustment"
   | "sample_zero_dollar_or_100_discount"
   | "missing_vinosmith_line"
   | "credit_workflow_missing_vinosmith_line"
@@ -355,14 +356,17 @@ function buildGrossProfitCenterLine({
   const vinosmithWine = matchedLine?.wine_id ? wineById.get(matchedLine.wine_id) || null : null;
   const cost = itemCost(item, vinosmithWine);
   const grossCostBeforeBillback = quantity !== null && cost.costPerBottle !== null ? quantity * cost.costPerBottle : null;
-  const sample = isQuickBooksSampleLine(line) || (matchedLine ? isVinosmithSampleLine(matchedLine) : false);
+  // QuickBooks is revenue truth: a zero-priced Vinosmith match must never
+  // turn a paid QuickBooks line into a free sample.
+  const vinosmithSample = Boolean(matchedLine && isVinosmithSampleLine(matchedLine));
+  const sample = isQuickBooksSampleLine(line) || (qbGrossSales === null && vinosmithSample);
   const manualPrice = Boolean(matchedLine?.manual_price);
-  const priceMatch = matchedLine && !sample && !manualPrice ? matchVinosmithPrice(matchedLine, priceById, priceLookup) : { status: "missing" as const };
+  const priceMatch = matchedLine && !sample && !vinosmithSample && !manualPrice ? matchVinosmithPrice(matchedLine, priceById, priceLookup) : { status: "missing" as const };
   const billbackPerBottle = billbackPerBottleDollars({ matchedLine, sample, manualPrice, priceMatch });
   const billbackAmount = quantity !== null && billbackPerBottle !== null ? quantity * billbackPerBottle : null;
   const effectiveCost = grossCostBeforeBillback === null ? null : grossCostBeforeBillback - (billbackAmount || 0);
   const grossProfit = qbGrossSales === null || effectiveCost === null ? null : qbGrossSales - effectiveCost;
-  const bucket = confidenceBucket({
+  const bucket: GrossProfitConfidenceBucket = isNonWineAdjustment(line.item_full_name) ? "non_wine_adjustment" : confidenceBucket({
     transactionType,
     match,
     sample,
@@ -1007,6 +1011,12 @@ function itemKeys(value: string | null | undefined) {
   if (!full) return [];
   const terminal = normalizeKey(full.split(":").at(-1));
   return unique([full, terminal]);
+}
+
+// Explicit business policy; a wine with missing cost is NOT a non-wine adjustment.
+function isNonWineAdjustment(itemName: string | null) {
+  const name = (itemName || "").split(":").at(-1)?.trim().toLowerCase();
+  return ["warehouse storage rent", "customer deposit", "credit memo"].includes(name || "");
 }
 
 function isQuickBooksSampleLine(line: QuickBooksLineRow) {

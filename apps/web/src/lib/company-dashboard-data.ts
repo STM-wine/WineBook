@@ -19,6 +19,7 @@ export type CompanyDashboardSummary = {
   grossSales: number;
   credits: number;
   netSales: number;
+  grossProfitNetSales?: number;
   invoiceCount: number;
   creditMemoCount: number;
   averageInvoice: number;
@@ -358,6 +359,7 @@ type GrossProfitRollup = {
   invoiceSales: number;
   creditMemos: number;
   netSales: number;
+  grossProfitNetSales?: number;
   invoiceCount: number;
   creditMemoCount: number;
   sampleCost: number;
@@ -529,6 +531,7 @@ function mergeSalesSummaryRows(left: QuickBooksSalesSummaryRow[], right: QuickBo
 function mergeSalesSummaryRow(left: QuickBooksSalesSummaryRow, right: QuickBooksSalesSummaryRow): QuickBooksSalesSummaryRow {
   const grossProfit = money(left.grossProfit) + money(right.grossProfit);
   const netSales = left.netSales + right.netSales;
+  const grossProfitNetSales = (left.grossProfitNetSales ?? left.netSales) + (right.grossProfitNetSales ?? right.netSales);
   const invoiceSales = left.invoiceSales + right.invoiceSales;
   const creditMemos = left.creditMemos + right.creditMemos;
   return {
@@ -540,7 +543,8 @@ function mergeSalesSummaryRow(left: QuickBooksSalesSummaryRow, right: QuickBooks
     creditMemoCount: left.creditMemoCount + right.creditMemoCount,
     creditMemoRate: invoiceSales > 0 ? creditMemos / invoiceSales : 0,
     grossProfit,
-    grossProfitPercent: marginPct(grossProfit, netSales),
+    grossProfitNetSales,
+    grossProfitPercent: marginPct(grossProfit, grossProfitNetSales),
     sampleCost: money(left.sampleCost) + money(right.sampleCost)
   };
 }
@@ -572,6 +576,7 @@ function mergeSummaries(left: CompanyDashboardSummary, right: CompanyDashboardSu
   const grossSales = left.grossSales + right.grossSales;
   const credits = left.credits + right.credits;
   const netSales = left.netSales + right.netSales;
+  const grossProfitNetSales = (left.grossProfitNetSales ?? left.netSales) + (right.grossProfitNetSales ?? right.netSales);
   const invoiceCount = left.invoiceCount + right.invoiceCount;
   return {
     grossSales,
@@ -582,7 +587,8 @@ function mergeSummaries(left: CompanyDashboardSummary, right: CompanyDashboardSu
     averageInvoice: invoiceCount > 0 ? grossSales / invoiceCount : 0,
     sampleCost: left.sampleCost + right.sampleCost,
     grossProfit,
-    grossProfitPercent: marginPct(grossProfit, netSales),
+    grossProfitNetSales,
+    grossProfitPercent: marginPct(grossProfit, grossProfitNetSales),
     grossProfitUnavailableReason: left.grossProfitUnavailableReason || right.grossProfitUnavailableReason
   };
 }
@@ -640,7 +646,8 @@ function summarizeGrossProfitLines(lines: GrossProfitCenterLine[]) {
     averageInvoice: rollup.invoiceCount > 0 ? rollup.invoiceSales / rollup.invoiceCount : 0,
     sampleCost: rollup.sampleCost,
     grossProfit,
-    grossProfitPercent: marginPct(grossProfit, rollup.netSales),
+    grossProfitNetSales: rollup.grossProfitNetSales ?? rollup.netSales,
+    grossProfitPercent: marginPct(grossProfit, rollup.grossProfitNetSales ?? rollup.netSales),
     grossProfitUnavailableReason: null
   };
 }
@@ -687,7 +694,8 @@ function businessLineSummary(
     averageInvoice: rollup.invoiceCount > 0 ? rollup.invoiceSales / rollup.invoiceCount : 0,
     sampleCost: rollup.sampleCost,
     grossProfit,
-    grossProfitPercent: marginPct(grossProfit, rollup.netSales),
+    grossProfitNetSales: rollup.grossProfitNetSales ?? rollup.netSales,
+    grossProfitPercent: marginPct(grossProfit, rollup.grossProfitNetSales ?? rollup.netSales),
     grossProfitUnavailableReason: null,
     salesShare: totalNetSales === 0 ? 0 : rollup.netSales / totalNetSales
   };
@@ -709,6 +717,7 @@ function emptyLineRollup(): MutableGrossProfitRollup {
     sampleCost: 0,
     grossProfit: 0,
     grossProfitPercent: null,
+    grossProfitNetSales: 0,
     invoiceTxnIds: new Set(),
     creditMemoTxnIds: new Set()
   };
@@ -731,8 +740,10 @@ function addLineToRollup(rollup: MutableGrossProfitRollup, line: GrossProfitCent
   rollup.netSales += amount;
   rollup.invoiceCount = rollup.invoiceTxnIds.size;
   rollup.creditMemoCount = rollup.creditMemoTxnIds.size;
+  if (line.confidenceBucket === "non_wine_adjustment") return;
+  rollup.grossProfitNetSales = (rollup.grossProfitNetSales ?? 0) + amount;
   rollup.grossProfit = money(rollup.grossProfit) + money(line.grossProfit);
-  rollup.grossProfitPercent = marginPct(rollup.grossProfit, rollup.netSales);
+  rollup.grossProfitPercent = marginPct(rollup.grossProfit, rollup.grossProfitNetSales);
 }
 
 function salesRowFromRollup(key: string, label: string, rollup: GrossProfitRollup): QuickBooksSalesSummaryRow {
@@ -746,6 +757,7 @@ function salesRowFromRollup(key: string, label: string, rollup: GrossProfitRollu
     creditMemoCount: rollup.creditMemoCount,
     creditMemoRate: rollup.invoiceSales > 0 ? rollup.creditMemos / rollup.invoiceSales : 0,
     grossProfit: rollup.grossProfit,
+    grossProfitNetSales: rollup.grossProfitNetSales ?? rollup.netSales,
     grossProfitPercent: rollup.grossProfitPercent,
     sampleCost: rollup.sampleCost
   };
@@ -944,7 +956,7 @@ function cleanFilter(value: string | undefined) {
   return trimmed || undefined;
 }
 
-export const MARGIN_SNAPSHOT_FORMULA = `${GROSS_PROFIT_FORMULA_VERSION}:snapshot-v2-stable-rollups`;
+export const MARGIN_SNAPSHOT_FORMULA = `${GROSS_PROFIT_FORMULA_VERSION}:snapshot-v3-wine-gp`;
 type SerializableMarginRollups = Omit<GrossProfitRollups, "byRep" | "byAccount">;
 type MarginSnapshot = {
   calculatedAt: string;

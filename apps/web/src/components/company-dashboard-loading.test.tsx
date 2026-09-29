@@ -46,6 +46,17 @@ describe("sales-first home", () => {
     expect(host.textContent).not.toContain("Net sales $100.00");
     expect([...host.querySelectorAll('h2')].some((heading) => ["Net sales", "Gross sales", "Credits"].includes(heading.textContent || ""))).toBe(false);
   });
+  it("uses wine sales for the GP card and sample accrual, retaining total revenue", async () => {
+    const value = dashboard(30);
+    value.summary.netSales = 140;
+    value.summary.grossProfitNetSales = 100;
+    value.businessLineSummaries[0] = { ...value.businessLineSummaries[0], netSales: 140, grossProfitNetSales: 100 };
+    await respond(0, value);
+    const stem = host.querySelector('[aria-label="Stem performance"]')!;
+    expect(stem.textContent).toContain("31.1%");
+    expect(stem.textContent).toContain("$31.10 GP incl. $1.10 sample accrual");
+    expect(stem.textContent).toContain("Net $140.00");
+  });
   it.each(["rep", "account"] as const)("loads only the requested %s table", async (kind) => {
     await respond(0,dashboard(30)); await respond(1,dashboard(30));
     await act(async()=> (panel(kind).querySelector('button') as HTMLButtonElement).click());

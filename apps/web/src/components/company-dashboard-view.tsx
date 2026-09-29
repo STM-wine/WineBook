@@ -1007,7 +1007,7 @@ function BusinessLineKpis({
                 : summary.grossProfitUnavailableReason || (includesSampleAccrual ? "Includes 1.1% sample accrual" : "No sample accrual")
           }
           helpText={includesSampleAccrual
-            ? "Stem Core GP uses QuickBooks sales and cost, Supplier Logistics laid-in cost, matched Vinosmith billbacks, and the estimated 1.1% sample bill-back accrual."
+            ? "Stem Core GP uses QuickBooks sales and cost, Supplier Logistics laid-in cost, matched Vinosmith billbacks, and the estimated 1.1% sample bill-back accrual. Non-wine income, deposits, and generic credit adjustments are excluded from GP."
             : "GRW GP uses QuickBooks sales and cost plus matched cost adjustments. It does not include sample cost or a sample bill-back accrual."}
         />
         {businessLine === "stem" ? (
@@ -1640,13 +1640,14 @@ function companyKpiGrossProfitWithSampleAccrual(
       sampleBillbackAccrual: 0
     };
   }
+  const wineNetSales = summary.grossProfitNetSales ?? summary.netSales;
   const sampleBillbackAccrual = businessLine === "grw"
     ? 0
-    : roundDollars(Math.max(0, summary.netSales) * COMPANY_SAMPLE_BILLBACK_ACCRUAL_RATE);
+    : roundDollars(Math.max(0, wineNetSales) * COMPANY_SAMPLE_BILLBACK_ACCRUAL_RATE);
   const grossProfit = roundDollars(summary.grossProfit + sampleBillbackAccrual);
   return {
     grossProfit,
-    grossProfitPercent: summary.netSales === 0 ? null : grossProfit / summary.netSales,
+    grossProfitPercent: wineNetSales === 0 ? null : grossProfit / wineNetSales,
     sampleBillbackAccrual
   };
 }
