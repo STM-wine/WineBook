@@ -37,3 +37,7 @@ GRW remains MTD 17.4510% → 17.5%, YTD 11.0382% → 11.0%.
 ## Validation and release
 
 302 tests in 52 files passed, plus all three focused GP engine tests, typecheck and production build. Regression coverage includes paid wines matched to zero-price Vinosmith lines, real samples, explicit non-wine exclusions, unknown-cost wines, separate revenue/GP denominators, historical GP preservation, weighted period merging, and headline sample accrual. Production repair/deployment verification will be recorded below.
+
+Production update completed at 20:02:32 UTC. Before-images: `tmp/wine-gp-exclusions-2026-09-29T20-00-11.567Z/changes.json`. A separate read-back of all 1,058 rows verified every column except the intended classification metadata and GP ratio remained identical, including every dollar field and historical calculation timestamp.
+
+Commit `d55a82689387a33ef08225045ba6e71f66481df3` was pushed to main and manually deployed to both production services. Render confirmed Deploy succeeded for worker `dep-dau1i1ou01pc73ata22g` and web `dep-dau1i6psrm7s73aeo7ag`. Current source-generation 9210 MTD job `1c25782b-0ca1-4e19-a27b-63e34778861a` completed at 20:02:54 UTC; YTD job `6511d890-515e-412e-b9e8-27683c46c1ff` completed at 20:03:51 UTC. Both deployed results matched independently calculated revenue, wine-GP denominators, GP dollars and percentages to the cent/expected precision. Authenticated homepage refresh displayed the corrected MTD 29.5%, $218,269.47 GP including $8,130.96 sample accrual, and $739,303.70 Stem net sales.
