@@ -207,6 +207,43 @@ class GrwParserTests(unittest.TestCase):
         code_only = extract_description_fragment_from_line("0750-1996-F0L0C0")
         self.assertEqual(code_only, "")
 
+    def test_nv_and_split_grw_codes_do_not_leak_into_wine_names(self):
+        blocks = [
+            (
+                "1 Sale CHM:JAC:VOBB- Jacques Selosse V.O. Blanc de Blancs "
+                "$624.75 3 750 $ 1,874.25\n"
+                "0750-NVNV-F0L0C0 Extra Brut 750mL",
+                "Jacques Selosse V.O. Blanc de Blancs Extra Brut",
+                "NV",
+                "Jacques Selosse V.O. Blanc de Blancs Extra Brut NV 1/750ml",
+            ),
+            (
+                "2 Sale CHM:JAC:INIB-0750- Jacques Selosse Initiale Blanc de Blancs "
+                "$624.75 3 750 $ 1,874.25\n"
+                "NVNV-F0L0C0 NV 750mL",
+                "Jacques Selosse Initiale Blanc de Blancs",
+                "NV",
+                "Jacques Selosse Initiale Blanc de Blancs NV 1/750ml",
+            ),
+            (
+                "3 Sale BUR:BON:FOLA:075 Bernard Bonin Puligny Montrachet Les "
+                "$729.75 4 750 $ 2,919.00\n"
+                "0-2019-F0L0C0 Folatieres 2019 750mL",
+                "Bernard Bonin Puligny Montrachet Les Folatieres",
+                2019,
+                "Bernard Bonin Puligny Montrachet Les Folatieres 2019 1/750ml",
+            ),
+        ]
+
+        for block, expected_name, expected_vintage, expected_description in blocks:
+            with self.subTest(expected_name=expected_name):
+                item = parse_item_block(block)
+                self.assertIsNotNone(item)
+                self.assertEqual(item["clean_description"], expected_name)
+                self.assertEqual(item["vintage"], expected_vintage)
+                self.assertEqual(item["description"], expected_description)
+                self.assertNotRegex(item["description"], r"F0L0C0|NVNV|(?:^|\s)0(?:\s|$)")
+
     def test_code_only_continuation_line_does_not_pollute_description(self):
         block = (
             "9 Sale BDX:CAN:GAFF- Canon La Gaffeliere OWC $300.00 1 PK12 $3,600.00\n"

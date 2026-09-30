@@ -30,6 +30,10 @@ ITEM_START_RE = re.compile(
 
 CURRENCY_RE = re.compile(r'\$\s*([\d,]+\.\d{2})')
 GRW_TRAILER_PATTERN = r'F[0O]L[0O]C[0O]?'
+GRW_VINTAGE_TOKEN_PATTERN = r'(?:19\d{2}|20\d{2}|NV(?:NV)?)'
+GRW_WRAPPED_CODE_PATTERN = (
+    rf'(?:[A-Z0-9]+-)?{GRW_VINTAGE_TOKEN_PATTERN}-{GRW_TRAILER_PATTERN}'
+)
 
 
 def parse_currency_value(value: str | None) -> float | None:
@@ -176,7 +180,7 @@ def extract_pack_size(description: str) -> int:
     return 1
 
 
-def extract_vintage(description: str) -> int:
+def extract_vintage(description: str) -> int | str:
     """Extract vintage year from description."""
     # Look for 4-digit year (1900-2030)
     years = re.findall(r'\b(19\d{2}|20\d{2})\b', description)
@@ -184,6 +188,8 @@ def extract_vintage(description: str) -> int:
         year = int(years[0])
         if 1900 <= year <= 2030:
             return year
+    if re.search(r'(?<![A-Z0-9])NV(?:NV)?(?![A-Z0-9])', description, re.IGNORECASE):
+        return 'NV'
     return 0
 
 
@@ -243,8 +249,12 @@ def clean_description(description: str, sku_prefix: str) -> str:
     cleaned = re.sub(r'GRW\s*Wine\s*Collection,?\s*Inc\.?', '', cleaned, flags=re.IGNORECASE)
 
     # Remove GRW code fragments that can leak into wrapped descriptions.
-    cleaned = re.sub(rf'\b[A-Z0-9]{{2,}}-\d{{4}}-{GRW_TRAILER_PATTERN}\b', ' ', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(rf'\b(?:0?375|0?750|1500|3000)-\d{{4}}-{GRW_TRAILER_PATTERN}\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        rf'(?<![A-Z0-9]){GRW_WRAPPED_CODE_PATTERN}\b',
+        ' ',
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     cleaned = re.sub(rf'(?<![A-Z0-9])[-–—]*{GRW_TRAILER_PATTERN}\b', ' ', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'\s*--+\s*', ' ', cleaned)
     cleaned = re.sub(r'\s*[-–—]+\s*(?=\d{4}\b)', ' ', cleaned)
@@ -266,6 +276,7 @@ def clean_description(description: str, sku_prefix: str) -> str:
     
     # Remove vintage years from the name portion (extracted separately)
     cleaned = re.sub(r'\b(19\d{2}|20\d{2})\b', '', cleaned)
+    cleaned = re.sub(r'\bNV\b', '', cleaned, flags=re.IGNORECASE)
     
     # Normalize whitespace
     cleaned = clean_text(cleaned)
@@ -275,7 +286,7 @@ def clean_description(description: str, sku_prefix: str) -> str:
 
 def format_item_description(
     wine_name: str,
-    vintage: int,
+    vintage: int | str,
     pack_size: int,
     sku_prefix: str,
     bottle_size: str = '750mL'
@@ -334,8 +345,13 @@ def format_item_description(
     # Format pack/size: PK/750ml
     pack_size_formatted = f"{pack_size}/{size_formatted}"
     
-    # Build final description
-    description = f"{wine_name} {vintage} {pack_size_formatted}"
+    # Build final description without leaking the numeric sentinel used when a
+    # vintage is genuinely unavailable.
+    description_parts = [wine_name]
+    if vintage not in (None, '', 0):
+        description_parts.append(str(vintage))
+    description_parts.append(pack_size_formatted)
+    description = " ".join(description_parts)
     
     # Clean up any double spaces
     description = clean_text(description)
@@ -403,14 +419,19 @@ def extract_description_fragment_from_line(line: str) -> str:
     # If a GRW code prefix appears at the start of the wrapped line, strip only that
     # prefix and keep any descriptive text that follows.
     candidate = re.sub(
-        rf'^\s*(?:[A-Z0-9]{{2,}}|0?375|0?750|1500|3000)-\d{{4}}-{GRW_TRAILER_PATTERN}\b\s*',
+        rf'^\s*{GRW_WRAPPED_CODE_PATTERN}\b\s*',
         '',
         candidate,
         flags=re.IGNORECASE,
     )
 
     # Remove remaining PDF row metadata/code fragments that are not part of the wine name.
-    candidate = re.sub(rf'\b(?:[A-Z0-9]{{2,}}|0?375|0?750|1500|3000)-\d{{4}}-{GRW_TRAILER_PATTERN}\b', ' ', candidate, flags=re.IGNORECASE)
+    candidate = re.sub(
+        rf'(?<![A-Z0-9]){GRW_WRAPPED_CODE_PATTERN}\b',
+        ' ',
+        candidate,
+        flags=re.IGNORECASE,
+    )
     candidate = re.sub(rf'(?<![A-Z0-9])[-–—]*{GRW_TRAILER_PATTERN}\b', ' ', candidate, flags=re.IGNORECASE)
     candidate = re.sub(r'\$[\d,]+\.\d{2}', ' ', candidate)
     candidate = re.sub(r'\b\d+\s+(?=(?:750|375|1500|3000|1\.5L|PK\d|\d+-Pack)\b)', ' ', candidate, flags=re.IGNORECASE)
