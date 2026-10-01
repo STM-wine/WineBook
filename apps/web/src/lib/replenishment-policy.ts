@@ -31,7 +31,7 @@ export function recommendationIsAutomatic(policy: ReplenishmentPolicy, suppresse
 }
 
 export function policySupportsAutomaticRecommendations(policy: ReplenishmentPolicy) {
-  return policy !== "Allocated" && policy !== "Special Order";
+  return policy === "Core" || policy === "Limited Core";
 }
 
 export function recommendationsAreSuppressed(

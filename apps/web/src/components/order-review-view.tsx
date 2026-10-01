@@ -731,8 +731,9 @@ function ReplenishmentEditDialog({
           ) : null}
 
           <p className="replenishment-family-note">
-            The automatic-reorder switch applies only to this item number. End of Vintage and End of Allocation stay off until manually restored;
-            Supplier OOS resumes on the selected date. A new vintage with a new item number starts eligible for recommendations.
+            {policySupportsAutomaticRecommendations(policy)
+              ? "The automatic-reorder switch applies only to this item number. End of Vintage and End of Allocation stay off until manually restored; Supplier OOS resumes on the selected date. A new vintage with a new item number starts eligible for recommendations."
+              : "Manual ordering only. This policy never generates reorder recommendations, regardless of target weeks. You can still enter and approve an order quantity."}
           </p>
           {row.suppression_changed_at ? (
             <div className="replenishment-audit-note">

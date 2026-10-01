@@ -634,7 +634,7 @@ function ProductWorkspaceDetail({ row, snapshotId }: { row: ProductWorkspaceList
 }
 
 function recommendationModeLabel(marker: OrderingMarker) {
-  if (marker.replenishmentPolicy === "Allocated" || marker.replenishmentPolicy === "Special Order") return "Manual only";
+  if (!policySupportsAutomaticRecommendations(marker.replenishmentPolicy)) return "Manual only";
   if (marker.recommendationsSuppressed) {
     const until = marker.suppressedUntil ? ` until ${marker.suppressedUntil}` : "";
     return `Paused${until}${marker.suppressionReason ? `: ${marker.suppressionReason}` : ""}`;

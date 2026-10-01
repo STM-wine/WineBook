@@ -86,3 +86,10 @@ describe("pricing model export", () => {
     expect(sheet.getCell("AC3").result).toContain("Multiple On 1-Case matches");
   });
 });
+
+it.each(["Limited", "Allocated", "Special Order"] as const)("exports %s as manual only regardless of an old automatic flag", policy => {
+  const row = product(); row.orderingMarker.replenishmentPolicy = policy;
+  row.orderingMarker.recommendationsSuppressed = false;
+  const sheet = buildProductWorkspaceWorkbook([row], "now").getWorksheet("Pricing model")!;
+  expect(sheet.getCell("G2").value).toBe("Manual only");
+});

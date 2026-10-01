@@ -290,8 +290,8 @@ describe("source-backed ordering rows", () => {
     }
   });
 
-  it("never automatically recommends Allocated or Special Order wines", () => {
-    for (const policy of ["Allocated", "Special Order"] as const) {
+  it("never automatically recommends Limited, Allocated or Special Order wines", () => {
+    for (const policy of ["Limited", "Allocated", "Special Order"] as const) {
       const result = build({
         markers: [{ item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: false, replenishment_policy: policy }],
         salesByCode: new Map([["AB12345", sales({ last30: 100 })]])
@@ -301,7 +301,7 @@ describe("source-backed ordering rows", () => {
   });
 
   it("allows every automatic policy to be paused without disabling manual ordering", () => {
-    for (const policy of ["Core", "Limited Core", "Limited"] as const) {
+    for (const policy of ["Core", "Limited Core"] as const) {
       const result = build({
         markers: [{
           item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false, is_core: policy === "Core",

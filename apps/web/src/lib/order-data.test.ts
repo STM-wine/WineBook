@@ -452,6 +452,7 @@ describe("live Order Review inventory and target weeks", () => {
 
   it("uses five target weeks by default, keeps supplier overrides, and lets a global override win", () => {
     const row = recommendation({
+      replenishment_policy: "Core",
       supplier_name: "Stateside",
       weekly_velocity: 10,
       true_available: 20,
@@ -471,10 +472,11 @@ describe("live Order Review inventory and target weeks", () => {
 
   it("sets every automatic supplier recommendation from the same global target", () => {
     const rows = [
-      recommendation({ id: "stateside", supplier_name: "Stateside", weekly_velocity: 10, true_available: 0, pack_size: 12 }),
-      recommendation({ id: "valkyrie", supplier_name: "Valkyrie", weekly_velocity: 4, true_available: 0, pack_size: 6 }),
+      recommendation({ replenishment_policy: "Core", id: "stateside", supplier_name: "Stateside", weekly_velocity: 10, true_available: 0, pack_size: 12 }),
+      recommendation({ replenishment_policy: "Limited Core", id: "valkyrie", supplier_name: "Valkyrie", weekly_velocity: 4, true_available: 0, pack_size: 6 }),
       recommendation({
         id: "direct-import",
+        replenishment_policy: "Core",
         supplier_name: "Direct Import",
         order_path: "di",
         weekly_velocity: 10,
@@ -537,6 +539,7 @@ describe("live Order Review inventory and target weeks", () => {
 
   it("preserves the saved one-case quantity for a new workbench wine without sales velocity", () => {
     const newWine = recommendation({
+      replenishment_policy: "Core",
       supplier_catalog_wine_id: "catalog-1",
       supplier_catalog_workbench_item_id: "workbench-1",
       is_new_item: true,
@@ -553,5 +556,30 @@ describe("live Order Review inventory and target weeks", () => {
       search: "",
       suggestedOnly: true
     })).toHaveLength(1);
+  });
+});
+
+describe("replenishment policy takes priority over coverage", () => {
+  it.each(["Limited", "Allocated", "Special Order"] as const)("never recommends %s, even with stale suggestions or a global override", policy => {
+    for (const order_path of ["stateside", "di"] as const) {
+      for (const globalWeeks of [undefined, 52]) {
+        const row = recommendation({ replenishment_policy: policy, order_path, weekly_velocity: 100,
+          true_available: -12, recommended_qty_rounded: 600, order_cost: 6000, landed_cost: 6600,
+          approved_qty: 24, recommendation_status: "approved", lock_version: 7 });
+        const [updated] = applySupplierTargetWeeks([row], { Stateside: 52 }, 5, globalWeeks);
+        expect(updated).toMatchObject({ recommended_qty_rounded: 0, order_cost: 0, landed_cost: 0,
+          approved_qty: 24, recommendation_status: "approved", lock_version: 7 });
+      }
+    }
+  });
+  it.each(["Core", "Limited Core"] as const)("recalculates %s shortages using coverage", policy => {
+    const row = recommendation({ replenishment_policy: policy, weekly_velocity: 10, true_available: 0, pack_size: 12 });
+    expect(applySupplierTargetWeeks([row], {})[0].recommended_qty_rounded).toBe(60);
+    expect(applySupplierTargetWeeks([row], { Stateside: 8 })[0].recommended_qty_rounded).toBe(84);
+  });
+  it("keeps unassigned and new manual-only catalog wines at zero", () => {
+    const row = recommendation({ supplier_catalog_workbench_item_id: "manual-row", weekly_velocity: 0,
+      recommended_qty_rounded: 12, approved_qty: 24, recommendation_status: "approved" });
+    expect(applySupplierTargetWeeks([row], {})[0]).toMatchObject({ recommended_qty_rounded: 0, approved_qty: 24 });
   });
 });

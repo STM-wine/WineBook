@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { recommendationsAreSuppressed, replenishmentPolicyLabel } from "./replenishment-policy";
+import { recommendationsAreSuppressed, replenishmentPolicyLabel, recommendationIsAutomatic, policySupportsAutomaticRecommendations } from "./replenishment-policy";
 import { normalizeSystemTags, systemTagLabel } from "./supplier-catalog";
 
 describe("replenishment policy labels", () => {
@@ -22,5 +22,16 @@ describe("replenishment policy labels", () => {
   it("accepts Select input while preserving the legacy stored tag", () => {
     expect(systemTagLabel("Limited Core")).toBe("Select");
     expect(normalizeSystemTags(["Select", "Limited Core", "Core"])).toEqual(["Limited Core", "Core"]);
+  });
+});
+
+describe("automatic reorder policy eligibility", () => {
+  it.each(["Limited", "Allocated", "Special Order"] as const)("keeps %s manual even when its old pause flag is false", policy => {
+    expect(policySupportsAutomaticRecommendations(policy)).toBe(false);
+    expect(recommendationIsAutomatic(policy, false)).toBe(false);
+  });
+  it.each(["Core", "Limited Core"] as const)("allows %s only while automatic reorders are enabled", policy => {
+    expect(recommendationIsAutomatic(policy, false)).toBe(true);
+    expect(recommendationIsAutomatic(policy, true)).toBe(false);
   });
 });

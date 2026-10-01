@@ -124,10 +124,9 @@ export function applySupplierTargetWeeks(
     const targetWeeks = globalTargetWeeks ?? supplierTargetWeeks[supplier] ?? defaultTargetWeeks;
     const policy = rowReplenishmentPolicy(row);
     const automatic = recommendationIsAutomatic(policy, row.recommendations_suppressed === true);
-    if (row.recommendations_suppressed === true) {
+    if (!automatic) {
       return suppressRecommendation(row);
     }
-    if (!automatic) return row;
     if (targetWeeks < 0 || (row.order_path === "di" && globalTargetWeeks === undefined)) return row;
     if (row.supplier_catalog_workbench_item_id && asNumber(row.weekly_velocity) <= 0) return row;
 

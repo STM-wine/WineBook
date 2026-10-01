@@ -4,7 +4,8 @@ import {
   MANUAL_RECOMMENDATION_PAUSE_REASON,
   recommendationsAreSuppressed,
   reorderSuppressionReason,
-  replenishmentPolicy
+  replenishmentPolicy,
+  policySupportsAutomaticRecommendations
 } from "@/lib/replenishment-policy";
 import { canManageOrderingMarkers, type OrderingMarkerPermissionRow } from "@/lib/ordering-marker-access";
 
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
   }
 
   const policy = replenishmentPolicy(body?.replenishmentPolicy);
-  const recommendationsSuppressed = body?.recommendationsSuppressed === true && policy !== "Allocated" && policy !== "Special Order";
+  const recommendationsSuppressed = body?.recommendationsSuppressed === true && policySupportsAutomaticRecommendations(policy);
   const suppressionReason = recommendationsSuppressed
     ? reorderSuppressionReason(body?.suppressionReason)
     : null;
@@ -144,8 +145,7 @@ export async function POST(request: Request) {
   // existing suppression reason until the widened constraint is applied.
   if (
     upsertError?.message.includes("ordering_item_markers_suppression_policy_check") &&
-    recommendationsSuppressed &&
-    policy !== "Limited"
+    recommendationsSuppressed
   ) {
     const fallback = await supabase.from("ordering_item_markers").upsert({
       ...markerValues,

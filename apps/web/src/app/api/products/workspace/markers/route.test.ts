@@ -51,3 +51,11 @@ describe("intrinsic buyer replenishment access", () => {
     expect(state.saved).toBeNull();
   });
 });
+
+it.each(["Limited", "Allocated", "Special Order"] as const)("saves %s as manual-only without requiring a pause reason", async policy => {
+  const response=await POST(new Request("https://example.test/api/products/workspace/markers", {
+    method:"POST",body:JSON.stringify({itemCode:"wine-1",replenishmentPolicy:policy,recommendationsSuppressed:true})
+  }));
+  expect(response.status).toBe(200);
+  expect(state.saved).toMatchObject({replenishment_policy:policy,recommendations_suppressed:false,suppression_reason:null});
+});

@@ -80,3 +80,14 @@ describe("DI vintage eligibility", () => {
     expect(applyDiContainerRecommendations([suppressed])[0].recommended_qty_rounded).toBe(0);
   });
 });
+
+describe("DI respects replenishment policy", () => {
+  it.each(["Limited", "Allocated", "Special Order"] as const)("excludes %s from automatic container allocations and preserves buyer approval", policy => {
+    const row = recommendation({ replenishment_policy: policy, recommended_qty_rounded: 120,
+      approved_qty: 24, recommendation_status: "approved", order_cost: 1200, landed_cost: 1320 });
+    expect(isDiOpportunity(row)).toBe(false);
+    expect(buildDiContainerPlans([row])).toEqual([]);
+    expect(applyDiContainerRecommendations([row])[0]).toMatchObject({ recommended_qty_rounded: 0,
+      approved_qty: 24, recommendation_status: "approved", order_cost: 0, landed_cost: 0 });
+  });
+});

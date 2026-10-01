@@ -29,6 +29,12 @@ it('renders a supplier editor directly without a duplicate overview, filters or 
   expect((dialog.querySelector('select') as HTMLSelectElement).disabled).toBe(false);
   expect((dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(false);
   expect(dialog.textContent).not.toContain('You do not have permission');
+  for (const policy of ['Limited', 'Allocated', 'Special Order', 'Limited Core', 'Core']) {
+    await act(async()=>{const select=dialog.querySelector('select')!;select.value=policy;select.dispatchEvent(new Event('change',{bubbles:true}));});
+    const automatic=policy==='Core'||policy==='Limited Core';
+    expect(Boolean(dialog.querySelector('input[type="checkbox"]'))).toBe(automatic);
+    expect(dialog.textContent?.includes('Manual ordering only')).toBe(!automatic);
+  }
   await act(async()=>root.render(<OrderReviewView {...props} canManageMarkers={false}/>));
   expect((dialog.querySelector('select') as HTMLSelectElement).disabled).toBe(true);
   expect((dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(true);

@@ -7,7 +7,7 @@ import { applyApprovalCommitments, applySupplierTdmAssignments, enrichRecommenda
 import { applyDiContainerRecommendations } from "./di-planning";
 import { buildFreightReadModel } from "./freight-read-model";
 export function orderingReadKey(now = Date.now()) { return `active:${Math.floor(now / 300_000)}`; }
-export const ORDERING_READ_FORMULA = "ordering-read-v3-upload-cutoff";
+export const ORDERING_READ_FORMULA = "ordering-read-v4-core-select-only";
 export async function buildOrderingSnapshot(db: SupabaseClient) {
   const data = await loadOrderingPageData("order-review", db);
   if (!data.latestRun) throw new Error("No completed ordering run is available.");

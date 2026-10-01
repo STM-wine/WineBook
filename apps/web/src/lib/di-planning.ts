@@ -1,10 +1,12 @@
 import {
   asNumber,
+  rowReplenishmentPolicy,
   formatInteger,
   isOlderVintageSuppressed,
   suppressRecommendation,
   suppressOlderVintageRecommendation
 } from "./order-data";
+import { recommendationIsAutomatic } from "./replenishment-policy";
 import type { Recommendation } from "./types";
 
 export type OrderPath = "stateside" | "di";
@@ -97,7 +99,7 @@ export function weeksSupply(row: Recommendation) {
 }
 
 export function isDiOpportunity(row: Recommendation) {
-  if (isOlderVintageSuppressed(row) || row.recommendations_suppressed === true) return false;
+  if (isOlderVintageSuppressed(row) || !recommendationIsAutomatic(rowReplenishmentPolicy(row), row.recommendations_suppressed === true)) return false;
   const eligibility = diEligibility(row);
   return eligibility.eligible && weeksSupply(row) < eligibility.triggerWeeks;
 }
@@ -139,7 +141,7 @@ export function buildDiContainerPlans(rows: Recommendation[]): DiContainerPlan[]
     .map((row) => ({ row, eligibility: diEligibility(row) }))
     .filter(({ row, eligibility }) =>
       !isOlderVintageSuppressed(row) &&
-      row.recommendations_suppressed !== true &&
+      recommendationIsAutomatic(rowReplenishmentPolicy(row), row.recommendations_suppressed === true) &&
       eligibility.eligible &&
       orderPath(row) === "di"
     );
@@ -204,7 +206,7 @@ export function buildDiAllocationMap(rows: Recommendation[]) {
 
 export function applyDiContainerRecommendations(rows: Recommendation[]): Recommendation[] {
   const eligibleRows = rows.map((row) =>
-    row.recommendations_suppressed === true
+    !recommendationIsAutomatic(rowReplenishmentPolicy(row), row.recommendations_suppressed === true)
       ? suppressRecommendation(row)
       : suppressOlderVintageRecommendation(row)
   );
