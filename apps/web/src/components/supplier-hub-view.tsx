@@ -2117,7 +2117,6 @@ function SupplierLogisticsPanel({
           <thead>
             <tr>
               <th>Supplier</th>
-              <th>QB Vendor</th>
               <th>QB Match</th>
               <th>Importer/Winery</th>
               <th>Importer ID</th>
@@ -2148,7 +2147,7 @@ function SupplierLogisticsPanel({
                 onDiscardDraft={discardDraftRow}
               />
             ))}
-            {filteredRows.length === 0 ? <EmptyRow colSpan={17} label="No suppliers match the current filters." /> : null}
+            {filteredRows.length === 0 ? <EmptyRow colSpan={16} label="No suppliers match the current filters." /> : null}
           </tbody>
         </table>
       </div>
@@ -2193,9 +2192,6 @@ function SupplierLogisticsRow({
     <tr className={rowClassName || undefined}>
       <td>
         <input aria-label="Supplier name" value={row.name} onChange={(event) => patch({ name: event.target.value })} />
-      </td>
-      <td>
-        <input aria-label="QB vendor" value={row.qb_vendor_name || ""} onChange={(event) => patch({ qb_vendor_name: event.target.value || null })} />
       </td>
       <td>
         <QuickBooksVendorMatchCell matches={isNew ? [] : quickBooksMatches} />
