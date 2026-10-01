@@ -32,7 +32,7 @@ describe("PO source snapshots", () => {
     const snapshot = buildOrderingDraftSourceSnapshot({
       supplier: "Supplier", reportRunId: "run-1", path: "stateside", orderingSource: "database",
       vinosmithAvailableAsOf: "2026-09-14T12:00:00Z", runDiagnostics: { quickbooks_as_of: "2026-09-14T10:00:00Z" },
-      metadata: { id: "s-1", importer_id: null, name: "Supplier", eta_days: 7, pick_up_location: "NJ", freight_forwarder: "FF", order_frequency: "weekly", tdm: "TDM", trucking_cost_per_bottle: 1, notes: null, active: true },
+      metadata: { id: "s-1", importer_id: null, name: "Supplier", qb_vendor_name: null, importer_winery_name: null, sample_allowance_type: null, sample_allowance_rate: null, current_da_in_place: null, eta_days: 7, pick_up_location: "NJ", freight_forwarder: "FF", order_frequency: "weekly", tdm: "TDM", trucking_cost_per_bottle: 1, notes: null, active: true },
       lines: [{ recommended_qty: 12, approved_qty: 18, wine_cost: 180, laid_in_cost: 18, landed_cost: 198 }]
     });
     expect(snapshot).toMatchObject({ ordering_source: "database", quickbooks_as_of: "2026-09-14T10:00:00Z", supplier_logistics: { eta_days: 7, tdm: "TDM" }, totals: { approved_qty: 18 } });

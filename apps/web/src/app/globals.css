@@ -3888,7 +3888,7 @@ th:nth-child(12) .table-sort-button {
 }
 
 .logistics-table {
-  min-width: 1780px;
+  min-width: 2380px;
 }
 
 .logistics-table th {
@@ -3912,7 +3912,8 @@ th:nth-child(12) .table-sort-button {
   z-index: 4;
 }
 
-.logistics-table input {
+.logistics-table input,
+.logistics-table select {
   background: #fffdfa;
   border: 1px solid var(--line);
   border-radius: 8px;

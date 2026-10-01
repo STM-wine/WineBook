@@ -357,6 +357,11 @@ export async function deletePurchaseOrderLine(input: { id: string; draftId: stri
 export async function saveSupplierLogistics(input: {
   id?: string;
   name: string;
+  qbVendorName?: string;
+  importerWineryName?: string;
+  sampleAllowanceType?: "billback" | "invoice_discount" | "none" | null;
+  sampleAllowanceRate?: number | null;
+  currentDaInPlace?: boolean | null;
   importerId?: string;
   etaDays?: number;
   pickUpLocation?: string;
@@ -399,6 +404,11 @@ export async function saveSupplierLogistics(input: {
 
 function supplierLogisticsPayload(input: {
   name: string;
+  qbVendorName?: string;
+  importerWineryName?: string;
+  sampleAllowanceType?: "billback" | "invoice_discount" | "none" | null;
+  sampleAllowanceRate?: number | null;
+  currentDaInPlace?: boolean | null;
   importerId?: string;
   etaDays?: number;
   pickUpLocation?: string;
@@ -413,6 +423,11 @@ function supplierLogisticsPayload(input: {
 
   return {
     name,
+    ...(input.qbVendorName !== undefined ? { qb_vendor_name: input.qbVendorName.trim() || null } : {}),
+    ...(input.importerWineryName !== undefined ? { importer_winery_name: input.importerWineryName.trim() || null } : {}),
+    ...(input.sampleAllowanceType !== undefined ? { sample_allowance_type: input.sampleAllowanceType || null } : {}),
+    ...(input.sampleAllowanceRate !== undefined ? { sample_allowance_rate: input.sampleAllowanceRate == null ? null : Math.max(0, Math.min(1, Number(input.sampleAllowanceRate) || 0)) } : {}),
+    ...(input.currentDaInPlace !== undefined ? { current_da_in_place: input.currentDaInPlace } : {}),
     importer_id: input.importerId?.trim() || null,
     eta_days: Math.max(0, Math.round(Number(input.etaDays) || 0)),
     pick_up_location: input.pickUpLocation?.trim() || null,
@@ -430,6 +445,11 @@ export async function saveSupplierLogisticsBatch(input: {
   suppliers: Array<{
     id?: string;
     name: string;
+    qbVendorName?: string;
+    importerWineryName?: string;
+    sampleAllowanceType?: "billback" | "invoice_discount" | "none" | null;
+    sampleAllowanceRate?: number | null;
+    currentDaInPlace?: boolean | null;
     importerId?: string;
     etaDays?: number;
     pickUpLocation?: string;

@@ -993,6 +993,11 @@ export function OrderDashboard({
           suppliers: updatedSuppliers.map((row) => ({
             id: row.id,
             name: row.name,
+            qbVendorName: row.qb_vendor_name ?? "",
+            importerWineryName: row.importer_winery_name ?? "",
+            sampleAllowanceType: row.sample_allowance_type,
+            sampleAllowanceRate: row.sample_allowance_rate == null ? null : asNumber(row.sample_allowance_rate),
+            currentDaInPlace: row.current_da_in_place,
             importerId: row.importer_id || undefined,
             etaDays: asNumber(row.eta_days),
             pickUpLocation: row.pick_up_location || undefined,

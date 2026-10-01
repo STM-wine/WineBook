@@ -1972,6 +1972,8 @@ function SupplierLogisticsPanel({
 
       return [
         supplier.name,
+        supplier.qb_vendor_name,
+        supplier.importer_winery_name,
         supplier.importer_id,
         supplier.tdm,
         supplier.pick_up_location,
@@ -2009,6 +2011,11 @@ function SupplierLogisticsPanel({
         id: `new-${Date.now()}`,
         importer_id: null,
         name: "",
+        qb_vendor_name: null,
+        importer_winery_name: null,
+        sample_allowance_type: null,
+        sample_allowance_rate: null,
+        current_da_in_place: null,
         eta_days: 0,
         pick_up_location: "",
         freight_forwarder: "",
@@ -2047,7 +2054,7 @@ function SupplierLogisticsPanel({
       <div className="section-heading compact-heading">
         <div>
           <h2>Supplier Logistics</h2>
-          <p>Maintain supplier defaults used by purchasing and laid-in calculations.</p>
+          <p>Billback applies to sample cost; invoice discount applies to the invoice. Admin approval allows samples for any supplier.</p>
         </div>
         <div className="supplier-form-header-actions">
           <button className="ghost-button" onClick={addDraftRow} disabled={isPending} type="button">
@@ -2087,7 +2094,7 @@ function SupplierLogisticsPanel({
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Supplier, QB vendor, TDM, pickup, notes"
+            placeholder="Supplier, QB vendor, importer/winery, TDM, pickup, notes"
           />
         </label>
         <label>
@@ -2111,7 +2118,12 @@ function SupplierLogisticsPanel({
             <tr>
               <th>Supplier</th>
               <th>QB Vendor</th>
+              <th>QB Match</th>
+              <th>Importer/Winery</th>
               <th>Importer ID</th>
+              <th>Sample Policy</th>
+              <th>Sample Rate</th>
+              <th>Current DA</th>
               <th>TDM</th>
               <th>Pickup</th>
               <th>Freight Forwarder</th>
@@ -2136,7 +2148,7 @@ function SupplierLogisticsPanel({
                 onDiscardDraft={discardDraftRow}
               />
             ))}
-            {filteredRows.length === 0 ? <EmptyRow colSpan={12} label="No suppliers match the current filters." /> : null}
+            {filteredRows.length === 0 ? <EmptyRow colSpan={17} label="No suppliers match the current filters." /> : null}
           </tbody>
         </table>
       </div>
@@ -2183,10 +2195,34 @@ function SupplierLogisticsRow({
         <input aria-label="Supplier name" value={row.name} onChange={(event) => patch({ name: event.target.value })} />
       </td>
       <td>
+        <input aria-label="QB vendor" value={row.qb_vendor_name || ""} onChange={(event) => patch({ qb_vendor_name: event.target.value || null })} />
+      </td>
+      <td>
         <QuickBooksVendorMatchCell matches={isNew ? [] : quickBooksMatches} />
       </td>
       <td>
+        <input aria-label="Importer or winery name" value={row.importer_winery_name || ""} onChange={(event) => patch({ importer_winery_name: event.target.value || null })} />
+      </td>
+      <td>
         <input aria-label="Importer ID" value={row.importer_id || ""} onChange={(event) => patch({ importer_id: event.target.value })} />
+      </td>
+      <td>
+        <select aria-label="Sample policy" value={row.sample_allowance_type || ""} onChange={(event) => patch({ sample_allowance_type: (event.target.value || null) as SupplierLogistics["sample_allowance_type"], ...(event.target.value === "none" ? { sample_allowance_rate: null } : {}) })}>
+          <option value="">Not set</option>
+          <option value="billback">Billback</option>
+          <option value="invoice_discount">Invoice discount</option>
+          <option value="none">No default rate</option>
+        </select>
+      </td>
+      <td>
+        <input aria-label="Sample rate percent" type="number" min={0} max={100} step={1} value={row.sample_allowance_rate == null ? "" : Math.round(asNumber(row.sample_allowance_rate) * 10000) / 100} onChange={(event) => patch({ sample_allowance_rate: event.target.value === "" ? null : Number(event.target.value) / 100 })} />
+      </td>
+      <td>
+        <select aria-label="Current DA in place" value={row.current_da_in_place == null ? "" : row.current_da_in_place ? "yes" : "no"} onChange={(event) => patch({ current_da_in_place: event.target.value === "" ? null : event.target.value === "yes" })}>
+          <option value="">Not listed</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
       </td>
       <td>
         <input aria-label="TDM" value={row.tdm || ""} onChange={(event) => patch({ tdm: event.target.value })} />

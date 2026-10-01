@@ -116,6 +116,11 @@ export type SupplierLogistics = {
   id: string;
   importer_id: string | null;
   name: string;
+  qb_vendor_name: string | null;
+  importer_winery_name: string | null;
+  sample_allowance_type: "billback" | "invoice_discount" | "none" | null;
+  sample_allowance_rate: number | string | null;
+  current_da_in_place: boolean | null;
   eta_days: number | string | null;
   pick_up_location: string | null;
   freight_forwarder: string | null;
