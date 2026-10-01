@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   balancePriceLevel,
+  bestPriceFromFrontline,
   buildSupplierCatalogWine,
   calculateBestPrice,
   calculateGpMargin,
@@ -42,24 +43,24 @@ describe("production Supplier Hub pricing", () => {
     expect(() => normalizeFobCosts({ packSize: Number.NaN, fobCase: 240 })).toThrow(/Pack size/);
   });
 
-  it("calculates Best independently at a minimum 30% GP", () => {
-    expect(calculateBestPrice(10.3)).toBe(14.75);
-    expect(calculateBestPrice(22)).toBe(32);
+  it("derives Best from rounded Frontline", () => {
+    expect(calculateBestPrice(10.3)).toBe(14.25);
+    expect(calculateBestPrice(22)).toBe(31);
   });
 
   it("matches the canonical $22 landed-cost example", () => {
     const result = calculatePricing({ packSize: 12, fobBottle: 20, laidInPerBottle: 2, pricingBasis: "bottle" });
     expect(result.frontlineBottlePrice).toBe(33);
-    expect(result.bestPrice).toBe(32);
+    expect(result.bestPrice).toBe(31);
     expect(result.grossProfitMargin).toBe(0.3333);
-    expect(calculateGpMargin({ bottlePrice: result.bestPrice, landedBottleCost: 22 })).toBe(0.3125);
+    expect(calculateGpMargin({ bottlePrice: result.bestPrice, landedBottleCost: 22 })).toBe(0.2903);
   });
 
-  it("keeps both automatic prices at or above their target GP", () => {
+  it("uses the fixed spread even when Best is below 30% GP", () => {
     const result = calculatePricing({ packSize: 12, fobBottle: 13, laidInPerBottle: 0, pricingBasis: "bottle" });
     expect(result.frontlineBottlePrice).toBe(19.25);
-    expect(result.bestPrice).toBe(18.75);
-    expect(calculateGpMargin({ bottlePrice: result.bestPrice, landedBottleCost: 13 })).toBeGreaterThanOrEqual(0.3);
+    expect(result.bestPrice).toBe(18.25);
+    expect(calculateGpMargin({ bottlePrice: result.bestPrice, landedBottleCost: 13 })).toBeCloseTo(0.2877);
     expect(result.diagnostics.best_target_conflict).toBe(false);
   });
 
@@ -72,7 +73,7 @@ describe("production Supplier Hub pricing", () => {
       pricingBasis: "bottle"
     });
     expect(result.frontlineBottlePrice).toBe(19.25);
-    expect(result.bestPrice).toBe(18.75);
+    expect(result.bestPrice).toBe(18.25);
     expect(calculateGpMargin({ bottlePrice: 18.75, landedBottleCost: 13, depletionAllowance: 1 })).toBe(0.36);
     expect(result.diagnostics.best_target_conflict).toBe(false);
   });
@@ -95,12 +96,12 @@ describe("production Supplier Hub pricing", () => {
       bestPrice: 48,
       pricingBasis: "bottle"
     });
-    expect(frontlineOnly.bestPrice).toBe(48);
+    expect(frontlineOnly.bestPrice).toBeNull();
     expect(frontlineOnly.diagnostics.best_target_conflict).toBe(false);
   });
 
-  it("supports explicit Frontline-only pricing without a $50 suppression rule", () => {
-    expect(calculatePricing({ packSize: 12, fobBottle: 40, laidInPerBottle: 0 }).bestPrice).toBe(58);
+  it("supports explicit and automatic Frontline-only pricing", () => {
+    expect(calculatePricing({ packSize: 12, fobBottle: 40, laidInPerBottle: 0 }).bestPrice).toBeNull();
     expect(calculatePricing({ packSize: 12, fobBottle: 40, laidInPerBottle: 0, frontlineOnly: true }).bestPrice).toBeNull();
   });
 
@@ -108,13 +109,13 @@ describe("production Supplier Hub pricing", () => {
     const pricing = calculatePricing({ packSize: 12, fobBottle: 11, laidInPerBottle: 1 });
     const levels = completeRequiredPriceLevels([{
       name: "Frontline",
-      bottlePrice: 18,
+      bottlePrice: 17.75,
       isFrontline: true,
       active: true
     }], pricing);
 
     expect(levels.filter((level) => level.active !== false).map((level) => level.name)).toEqual(["Frontline", "Best"]);
-    expect(levels.find((level) => level.isBest)?.bottlePrice).toBe(17.25);
+    expect(levels.find((level) => level.isBest)?.bottlePrice).toBe(16.75);
   });
 
   it("keeps the saved header and price-level rows consistent when the source has only Frontline", () => {
@@ -133,29 +134,29 @@ describe("production Supplier Hub pricing", () => {
     });
 
     const best = result.price_levels.find((level) => level.is_best && level.active);
-    expect(best?.bottle_price).toBe(17.25);
+    expect(best?.bottle_price).toBe(16.75);
     expect(result.best_price).toBe(best?.bottle_price);
   });
 
   it("matches the requested under-$20 acceptance example", () => {
     const result = calculatePricing({ packSize: 12, fobBottle: 10, laidInPerBottle: 0.3 });
-    expect(result.bestPrice).toBe(14.75);
+    expect(result.bestPrice).toBe(14.25);
     expect(result.frontlineBottlePrice).toBe(15.25);
-    expect(result.bestGrossProfitMargin).toBe(0.3017);
+    expect(result.bestGrossProfitMargin).toBe(0.2772);
     expect(result.grossProfitMargin).toBe(0.3246);
   });
 
   it("populates the Illahe Pinot Noir suggestions once supplier freight is available", () => {
     const result = calculatePricing({ packSize: 12, fobBottle: 13.75, laidInPerBottle: 1 });
     expect(result.suggestionsReady).toBe(true);
-    expect(result.frontlineBottlePrice).toBe(23);
-    expect(result.bestPrice).toBe(22);
+    expect(result.frontlineBottlePrice).toBe(22);
+    expect(result.bestPrice).toBe(21);
   });
 
   it("rounds raw prices immediately below, equal to, and above $20 upward", () => {
     expect(calculatePricing({ packSize: 12, fobBottle: 13.99, laidInPerBottle: 0 }).bestPrice).toBe(20);
     expect(calculatePricing({ packSize: 12, fobBottle: 14, laidInPerBottle: 0 }).bestPrice).toBe(20);
-    expect(calculatePricing({ packSize: 12, fobBottle: 14.01, laidInPerBottle: 0 }).bestPrice).toBe(21);
+    expect(calculatePricing({ packSize: 12, fobBottle: 14.01, laidInPerBottle: 0 }).bestPrice).toBe(20);
     expect(calculatePricing({ packSize: 12, fobBottle: 13.59, laidInPerBottle: 0 }).frontlineBottlePrice).toBe(20);
     expect(calculatePricing({ packSize: 12, fobBottle: 13.6, laidInPerBottle: 0 }).frontlineBottlePrice).toBe(20);
     expect(calculatePricing({ packSize: 12, fobBottle: 13.61, laidInPerBottle: 0 }).frontlineBottlePrice).toBe(21);
@@ -306,5 +307,45 @@ describe("production Supplier Hub pricing", () => {
     });
     expect(input.priceLevels?.[0]).toMatchObject({ id: "price-1", name: "Frontline", bottlePrice: 32 });
     expect(input.freeGoods?.[0]).toMatchObject({ id: "free-1", buyQuantity: 5, freeQuantity: 1, unit: "case" });
+  });
+});
+
+
+describe("fixed Frontline/Best bands", () => {
+  it.each([[15.25, 14.25], [29, 28], [29.99, 28.99], [30, 28], [49, 47], [49.99, 47.99], [50, null], [60, null]] as const)("Frontline %s produces Best %s", (frontline, best) => {
+    expect(bestPriceFromFrontline(frontline)).toBe(best);
+    expect(calculatePricing({ packSize: 12, fobBottle: 10, laidInPerBottle: 0,
+      frontlineBottlePrice: frontline }).bestPrice).toBe(best);
+  });
+  it("uses rounded Frontline at the $30/$50 boundaries", () => {
+    expect(calculatePricing({ packSize: 12, fobBottle: 19.73, laidInPerBottle: 0 })).toMatchObject({ frontlineBottlePrice: 30, bestPrice: 28 });
+    expect(calculatePricing({ packSize: 12, fobBottle: 33.33, laidInPerBottle: 0 })).toMatchObject({ frontlineBottlePrice: 50, bestPrice: null });
+  });
+  it.each([true, false])("deactivates a saved Best level at $50 (manual override: %s)", (isManualOverride) => {
+    const result = buildSupplierCatalogWine({ supplierName: "Supplier", producer: "Producer", wineName: "Wine",
+      vintage: "2026", bottleSize: "750ml",
+      packSize: 12, fobBottle: 20, laidInPerBottle: 0, availabilityStatus: "available", conversionStatus: "net_new_product",
+      priceLevels: [ { name: "Frontline", isFrontline: true, bottlePrice: 50, isManualOverride: true },
+        { name: "Best", isBest: true, bottlePrice: 48, isManualOverride } ] });
+    expect(result).toMatchObject({ frontline_bottle_price: 50, best_price: null, frontline_only: true });
+    expect(result.price_levels.find(level => level.is_best)?.active).toBe(false);
+  });
+  it("recalculates automatic Best from manual Frontline when building the saved payload", () => {
+    const result = buildSupplierCatalogWine({ supplierName: "Supplier", producer: "Producer", wineName: "Wine",
+      vintage: "2026", bottleSize: "750ml",
+      packSize: 12, fobBottle: 10, laidInPerBottle: 0, availabilityStatus: "available", conversionStatus: "net_new_product",
+      priceLevels: [ { name: "Frontline", isFrontline: true, bottlePrice: 30, isManualOverride: true },
+        { name: "Best", isBest: true, bottlePrice: 14.75, isManualOverride: false } ] });
+    expect(result).toMatchObject({ frontline_bottle_price: 30, best_price: 28 });
+    expect(result.price_levels.find(level => level.is_best)?.bottle_price).toBe(28);
+  });
+  it("retains low-margin review warnings without the obsolete 30% target warning", () => {
+    const result = calculatePricing({ packSize: 12, fobBottle: 10, laidInPerBottle: 0.3 });
+    expect(result.warnings).toContain("Best gross profit margin is below 28%.");
+    expect(result.warnings.some(warning => warning.includes("30%"))).toBe(false);
+  });
+  it("does not apply the standard cutoff to the broker model", () => {
+    expect(calculatePricing({ packSize: 12, fobBottle: 30, laidInPerBottle: 0, frontlineBottlePrice: 60,
+      bestPrice: 55, grwBrokerModel: true })).toMatchObject({ frontlineBottlePrice: 60, bestPrice: 55 });
   });
 });

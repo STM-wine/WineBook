@@ -1,6 +1,6 @@
 # Add Wine pricing and identity
 
-This document records the Add Wine behavior found before the September 24, 2026 correction and the behavior implemented by that correction. It is deliberately limited to Add Wine. Inventory, sales, target weeks, vintage selection, replenishment policy, recommendation quantities, and PO calculations are unchanged.
+This document records the current Add Wine behavior, including the October 1, 2026 Frontline/Best price bands. It is deliberately limited to Add Wine. Inventory, sales, target weeks, vintage selection, replenishment policy, recommendation quantities, and PO calculations are unchanged.
 
 ## Authoritative identity by stage
 
@@ -16,45 +16,35 @@ Supplier assignment uses the canonical supplier record when one exists. QuickBoo
 
 Search queries active Supplier Catalog, product, Vinosmith, and QuickBooks records first. “Search inactive items too” repeats the same query with inactive records included. Filtering happens in the database before exact pagination, and the result list retains distinct records even when they normalize to the same planning SKU, so an inactive item remains selectable beside an active item without slowing every initial search. “Start From” copies the identity and current source context; only an active QuickBooks result can be linked automatically.
 
-## Previous pricing behavior
+## Current Add Wine pricing rules as of October 1, 2026
 
-The TypeScript Add Wine path used one shared builder for the browser preview and initial saved values, but pricing metadata and price-change history were written after the catalog transaction. The Python/Streamlit path had a separate implementation of the same general rules.
+Supplier, FOB and pack size enable automatic pricing once the supplier's laid-in freight per bottle is known. A missing freight amount is not a confirmed zero; an explicitly entered zero is valid.
 
-Before this change:
+1. Pack must be a positive integer. FOB must be positive. Buyer selects bottle or case as the authoritative FOB basis.
+2. Bottle FOB = case FOB / pack; case FOB = bottle FOB * pack. Derive only the non-source field and store currency to cents.
+3. Landed bottle cost = bottle FOB + laid-in freight per bottle.
+4. Raw Frontline = landed bottle cost / 0.68 (32% GP, not a 32% markup).
+5. Round raw Frontline upward: below $20 to the next $0.25; $20 or higher to the next whole dollar.
+6. Derive Best from the resulting Frontline bottle price:
+   - Below $30: Frontline minus $1.
+   - $30 to less than $50: Frontline minus $2.
+   - $50 and above: Frontline-only; Best is absent and any existing Best level is inactive on save.
+7. Do not round Best again or independently solve it for 30% GP. The former 30% Best target and collision-adjustment formula are superseded.
+8. Buyer may explicitly choose Frontline-only below $50. A Frontline of $50 or more enforces it automatically for standard pricing.
+9. Automatic prices update with costs. Manual values below the cutoff remain buyer overrides until reset; an automatic Best follows the effective Frontline, including a manual Frontline. At $50+, even an existing manual Best is inactive. Frontline must exceed an active Best.
+10. Base suggestions exclude DA. Actual GP = (price - landed cost) / price. Price-level DA can separately reduce effective cost for displayed GP; it does not change the base suggestion.
+11. The fixed spread can yield less than 30%, or even 28%, GP. There is no separate 30% Best warning. Prices below 28% still require Approve price, a reason and an authorized owner/approver before saving.
+12. Standard pricing rules do not impose this ladder on GRW Broker pricing. No existing catalog records are bulk repriced by this release; rules apply in the Add Wine preview and save workflow.
 
-- Bottle FOB from case FOB was `case FOB / pack`, and case FOB from bottle FOB was `bottle FOB * pack`. Values were stored to cents. The selected pricing basis prevented the two fields from continually recalculating each other, but some UI conversion paths fell back to a 12-pack when pack was invalid.
-- Landed bottle cost was `FOB bottle + laid-in per bottle`.
-- Frontline targeted 32% GP: `landed / 0.68`. Below $20 it rounded upward to $0.25; at or above $20 it rounded upward to a whole dollar.
-- Best was not independently targeted. It was Frontline minus $1 below $20, Frontline minus $2 from $20 through $49.99, and it was suppressed when Frontline reached $50.
-- A Best DA could affect the displayed Best GP/conflict check, although DA did not determine the base Frontline recommendation.
-- Existing/manual values could be raised or replaced as costs changed; the system suggestion and final user value were not reliably distinct.
-- Incomplete cost input was normalized through zero, so a calculation object existed even when the buyer had not provided every required input.
-- The on-screen preview and the initial server payload used the same TypeScript builder. The save then performed separate metadata and price-change writes, which could leave those records out of sync if a later write failed.
+All prices are per bottle. If Frontline is $1 or less, no positive Best is generated; do not create a zero or negative selling price.
 
-For the requested examples, the previous rules produced:
+| Landed bottle cost | Frontline | Best | Best GP |
+| ---: | ---: | ---: | ---: |
+| $10.30 | $15.25 | $14.25 | 27.72% (approval required) |
+| $22.00 | $33.00 | $31.00 | 29.03% |
+| $33.33 | $50.00 | None | Frontline-only |
 
-| Landed cost | Previous Best | Previous Frontline | Correct Best | Correct Frontline |
-| ---: | ---: | ---: | ---: | ---: |
-| $10.30 | $14.25 | $15.25 | $14.75 | $15.25 |
-| $22.00 | $31.00 | $33.00 | $32.00 | $33.00 |
-
-## Corrected shared pricing rules
-
-The TypeScript and Python implementations now use these rules:
-
-1. A positive whole-number pack is required. The user chooses bottle or case as the source basis.
-2. `FOB bottle = FOB case / pack` and `FOB case = FOB bottle * pack`. Only the non-source field is derived.
-3. `landed bottle cost = FOB bottle + laid-in per bottle`.
-4. Suggestions remain unavailable until a positive FOB on the selected basis, a valid pack, and an explicitly supplied laid-in value are present. An explicit laid-in value of $0 is valid.
-5. Raw Best is `landed / 0.70`. Raw Frontline is `landed / 0.68`.
-6. A raw price below $20 rounds upward to the next $0.25. A raw price at or above $20 rounds upward to the next whole dollar. Neither calculation rounds below its target GP.
-7. Best and Frontline are calculated independently. If their rounded values collide, Frontline is raised to Best + $0.25 when both are below $20, or Best + $1 when either is $20 or more.
-8. Best is calculated at every price unless the buyer explicitly selects Frontline-only.
-9. No depletion allowance is included in automatic Best or Frontline suggestions. Price-level DA remains visible and its effective GP is shown for reference.
-10. Suggested and final price are stored separately. Frontline and Best follow suggestions until manually edited. A manual value is preserved exactly; an invalid manual ladder is shown and cannot be saved. “Reset to suggested” clears the override.
-11. Displayed GP is `(selling price - landed bottle cost) / selling price`. Source price levels also show price, DA, effective GP, and source update date.
-
-At $10.30 landed, Best is $14.75 (30.17% GP) and Frontline is $15.25 (32.46% GP). At $22 landed, Best is $32 (31.25% GP) and Frontline is $33 (33.33% GP).
+Band examples: $29 Frontline -> $28 Best; $30 -> $28; $49 -> $47; $50 -> no Best. The band is based on Frontline, not on FOB or landed cost. Browser preview and server save use the same helper and persist consistent header prices and price-level activity.
 
 ## Save, concurrency, and history
 

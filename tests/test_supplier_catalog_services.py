@@ -2,7 +2,7 @@ import unittest
 
 from services.normalization_service import normalize_wine_identity
 from services.price_change_service import detect_price_change
-from services.pricing_engine import balance_price_level, calculate_best_price, calculate_pricing
+from services.pricing_engine import balance_price_level, best_price_from_frontline, calculate_best_price, calculate_pricing
 from services.request_workflow_service import approve_request, create_request, is_approver
 from services.supplier_catalog_service import default_laid_in_for_supplier
 
@@ -15,27 +15,38 @@ class SupplierCatalogServiceTests(unittest.TestCase):
         self.assertEqual(result.fob_case, 240)
         self.assertEqual(result.landed_bottle_cost, 22)
         self.assertEqual(result.frontline_bottle_price, 33)
-        self.assertEqual(result.best_price, 32)
+        self.assertEqual(result.best_price, 31)
         self.assertAlmostEqual(result.gross_profit_margin, 0.3333)
-        self.assertAlmostEqual(result.best_gross_profit_margin, 0.3125)
+        self.assertAlmostEqual(result.best_gross_profit_margin, 0.2903)
         self.assertEqual(result.warnings, [])
 
-    def test_best_price_is_independent_and_rounds_up(self):
-        self.assertEqual(calculate_best_price(10.30), 14.75)
-        self.assertEqual(calculate_best_price(22), 32)
-        self.assertEqual(calculate_best_price(40), 58)
+    def test_best_price_uses_rounded_frontline(self):
+        self.assertEqual(calculate_best_price(10.30), 14.25)
+        self.assertEqual(calculate_best_price(22), 31)
+        self.assertIsNone(calculate_best_price(40))
+
+    def test_frontline_band_boundaries(self):
+        for frontline, best in [(15.25, 14.25), (29.99, 28.99), (30, 28), (49.99, 47.99), (50, None), (60, None)]:
+            with self.subTest(frontline=frontline):
+                self.assertEqual(best_price_from_frontline(frontline), best)
+                result = calculate_pricing(pack_size=12, fob_bottle=10, laid_in_per_bottle=0, frontline_bottle_price=frontline)
+                self.assertEqual(result.best_price, best)
+
+    def test_cutoff_removes_manual_best_but_not_broker_pricing(self):
+        self.assertIsNone(calculate_pricing(pack_size=12, fob_bottle=30, laid_in_per_bottle=0, frontline_bottle_price=50, best_price=48).best_price)
+        self.assertEqual(calculate_pricing(pack_size=12, fob_bottle=30, laid_in_per_bottle=0, frontline_bottle_price=50, best_price=48, grw_broker_model=True).best_price, 48)
 
     def test_pack_size_must_be_a_positive_whole_number(self):
         for invalid in (None, 0, -1, 2.5, "bad"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 calculate_pricing(pack_size=invalid, fob_case=240)
 
-    def test_best_30_percent_target_conflict_uses_best_da(self):
+    def test_best_spread_does_not_depend_on_da(self):
         without_da = calculate_pricing(pack_size=12, fob_bottle=13, laid_in_per_bottle=0)
         with_da = calculate_pricing(pack_size=12, fob_bottle=13, laid_in_per_bottle=0, best_depletion_allowance=1)
-        self.assertEqual((without_da.frontline_bottle_price, without_da.best_price), (19.25, 18.75))
+        self.assertEqual((without_da.frontline_bottle_price, without_da.best_price), (19.25, 18.25))
         self.assertFalse(without_da.diagnostics["best_target_conflict"])
-        self.assertEqual((with_da.frontline_bottle_price, with_da.best_price), (19.25, 18.75))
+        self.assertEqual((with_da.frontline_bottle_price, with_da.best_price), (19.25, 18.25))
         self.assertFalse(with_da.diagnostics["best_target_conflict"])
 
     def test_da_warning_and_explicit_solve_validation(self):
@@ -69,8 +80,8 @@ class SupplierCatalogServiceTests(unittest.TestCase):
 
     def test_acceptance_under_twenty_and_frontline_only(self):
         result = calculate_pricing(pack_size=12, fob_bottle=10.30, laid_in_per_bottle=0)
-        self.assertEqual((result.best_price, result.frontline_bottle_price), (14.75, 15.25))
-        self.assertAlmostEqual(result.best_gross_profit_margin, 0.3017)
+        self.assertEqual((result.best_price, result.frontline_bottle_price), (14.25, 15.25))
+        self.assertAlmostEqual(result.best_gross_profit_margin, 0.2772)
         self.assertAlmostEqual(result.gross_profit_margin, 0.3246)
         self.assertIsNone(calculate_pricing(pack_size=12, fob_bottle=40, laid_in_per_bottle=0, frontline_only=True).best_price)
 
@@ -78,7 +89,7 @@ class SupplierCatalogServiceTests(unittest.TestCase):
         below = calculate_pricing(pack_size=1, fob_bottle=13.99, laid_in_per_bottle=0)
         equal = calculate_pricing(pack_size=1, fob_bottle=14, laid_in_per_bottle=0)
         above = calculate_pricing(pack_size=1, fob_bottle=14.01, laid_in_per_bottle=0)
-        self.assertEqual((below.best_price, equal.best_price, above.best_price), (20, 20, 21))
+        self.assertEqual((below.best_price, equal.best_price, above.best_price), (20, 20, 20))
         self.assertFalse(calculate_pricing(pack_size=12, fob_bottle=10.30).suggestions_ready)
 
     def test_price_level_balancing_preserves_gp_then_da_before_frontline(self):

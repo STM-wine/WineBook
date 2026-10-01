@@ -20,6 +20,7 @@ import {
   buildSupplierCatalogWine,
   calculateGpMargin,
   calculatePricing,
+  bestPriceFromFrontline,
   defaultLaidInForSupplier,
   detachInheritedQuickBooksIdentity,
   findDuplicateActivePriceLevels,
@@ -277,7 +278,7 @@ function AddWinePanel({
   const supplierOptions = useMemo(() => uniqueSorted(suppliers.map((supplier) => supplier.name)), [suppliers]);
   const parsedPackSize = Number(packSize);
   const hasValidPack = Number.isInteger(parsedPackSize) && parsedPackSize > 0;
-  const computedPricing = calculatePricing({
+  const basePricing = calculatePricing({
     packSize: hasValidPack ? parsedPackSize : 1,
     fobBottle: hasValidPack ? parseOptionalNumber(fobBottle) : null,
     fobCase: hasValidPack ? parseOptionalNumber(fobCase) : null,
@@ -286,6 +287,16 @@ function AddWinePanel({
     grwBrokerModel: pricingModel === "grw_broker",
     frontlineOnly
   });
+  const frontlineDraft = priceLevels.find(level => level.active && level.isFrontline);
+  const effectiveFrontline = frontlineDraft
+    ? priceLevelDraftToInput(frontlineDraft, 0, basePricing).bottlePrice : basePricing.frontlineBottlePrice;
+  const automaticFrontlineOnly = pricingModel !== "grw_broker" && effectiveFrontline >= 50;
+  const effectiveFrontlineOnly = frontlineOnly || automaticFrontlineOnly;
+  const computedPricing = {
+    ...basePricing,
+    bestPrice: effectiveFrontlineOnly ? null : pricingModel === "grw_broker"
+      ? basePricing.bestPrice : basePricing.suggestionsReady ? bestPriceFromFrontline(effectiveFrontline) : null
+  };
   const copiedFromWine = templateWine;
   const showWineNameMatches = searchItem.trim().length >= 3 && !templateWine;
   const currentIdentity = normalizeWineIdentity({
@@ -313,7 +324,7 @@ function AddWinePanel({
   const draftPriceLevels = priceLevelsForDraft
     .map((level, index) => {
       const input = priceLevelDraftToInput(level, index, computedPricing);
-      return frontlineOnly && input.isBest ? { ...input, active: false } : input;
+      return effectiveFrontlineOnly && input.isBest ? { ...input, active: false } : input;
     })
     .filter((level) => money(level.bottlePrice) > 0 || level.isFrontline);
 
@@ -633,7 +644,7 @@ function AddWinePanel({
     return !Number.isFinite(target) || target < 0 || target >= 100;
   });
   const activeFrontline = draftPriceLevels.find((level) => level.active && level.isFrontline && level.bottlePrice > 0);
-  const activeBest = frontlineOnly
+  const activeBest = effectiveFrontlineOnly
     ? null
     : draftPriceLevels.find((level) => level.active && level.isBest && level.bottlePrice > 0);
   const invalidPricingLadder = Boolean(activeFrontline && activeBest && activeFrontline.bottlePrice <= activeBest.bottlePrice);
@@ -876,8 +887,8 @@ function AddWinePanel({
           <input min={0} step={0.01} type="number" value={laidInPerBottle} onChange={(event) => setLaidInPerBottle(event.target.value)} />
         </label>
         <label className="check-control">
-          <input type="checkbox" checked={frontlineOnly} onChange={(event) => setFrontlineOnly(event.target.checked)} />
-          Frontline-only pricing
+          <input type="checkbox" checked={effectiveFrontlineOnly} disabled={automaticFrontlineOnly} onChange={(event) => setFrontlineOnly(event.target.checked)} />
+          {automaticFrontlineOnly ? "Frontline-only pricing ($50 and above)" : "Frontline-only pricing"}
         </label>
         <label>
           QB Item #
@@ -977,7 +988,7 @@ function AddWinePanel({
               </tr>
             </thead>
             <tbody>
-              {priceLevels.filter((level) => level.active && !(frontlineOnly && level.isBest)).map((level, index) => {
+              {priceLevels.filter((level) => level.active && !(effectiveFrontlineOnly && level.isBest)).map((level, index) => {
                 const effective = priceLevelDraftToInput(level, index, computedPricing);
                 const bottlePriceEntered = level.bottlePrice.trim().length > 0;
                 const isBaseLevel = level.isFrontline || level.isBest;

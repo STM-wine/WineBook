@@ -8,7 +8,6 @@ from math import ceil, isfinite
 
 GP_WARNING_THRESHOLD = 0.28
 FRONTLINE_TARGET_MARGIN = 0.32
-BEST_TARGET_MARGIN = 0.30
 VALID_SOLVE_FOR = {"price", "da", "gp"}
 
 
@@ -81,11 +80,16 @@ def _round_suggested_price_up(raw_price: float) -> float:
     return _money(ceil(raw_price * 4) / 4 if raw_price < 20 else ceil(raw_price))
 
 
+def best_price_from_frontline(frontline_bottle_price: float) -> float | None:
+    frontline = _money(frontline_bottle_price)
+    if frontline <= 1 or frontline >= 50:
+        return None
+    return _money(frontline - (1 if frontline < 30 else 2))
+
+
 def calculate_best_price(landed_bottle_cost: float) -> float | None:
     landed = _money(landed_bottle_cost)
-    if landed <= 0:
-        return None
-    return _round_suggested_price_up(landed / (1 - BEST_TARGET_MARGIN))
+    return best_price_from_frontline(_round_suggested_price_up(landed / (1 - FRONTLINE_TARGET_MARGIN))) if landed > 0 else None
 
 
 def calculate_gp_margin(
@@ -219,15 +223,13 @@ def calculate_pricing(
     landed = _money(bottle_fob + laid_in)
     suggestions_ready = bottle_fob > 0 and laid_in_supplied
     suggested_frontline = _round_suggested_price_up(landed / (1 - FRONTLINE_TARGET_MARGIN)) if suggestions_ready else 0.0
-    suggested_best = calculate_best_price(landed) if suggestions_ready else None
-    if suggested_best is not None and suggested_frontline <= suggested_best:
-        ladder_step = 0.25 if suggested_frontline < 20 and suggested_best < 20 else 1.0
-        suggested_frontline = _money(suggested_best + ladder_step)
-
     existing_frontline = _money(frontline_bottle_price) if frontline_bottle_price is not None else None
     existing_best = _money(best_price) if best_price is not None else None
     frontline = existing_frontline if existing_frontline is not None else suggested_frontline
-    resolved_best = None if frontline_only else (existing_best if existing_best is not None else suggested_best)
+    automatic_frontline_only = not grw_broker_model and frontline >= 50
+    resolved_best = None if frontline_only or automatic_frontline_only else (
+        existing_best if existing_best is not None else best_price_from_frontline(frontline) if suggestions_ready else None
+    )
     if grw_broker_model:
         frontline = existing_frontline or 0.0
         resolved_best = existing_best
@@ -235,7 +237,6 @@ def calculate_pricing(
         bottle_price=resolved_best,
         landed_bottle_cost=landed,
     ) if resolved_best else None
-    best_target_conflict = not grw_broker_model and best_margin is not None and best_margin < BEST_TARGET_MARGIN
     margin = round((frontline - landed) / frontline, 4) if frontline else 0.0
 
     warnings = []
@@ -243,8 +244,8 @@ def calculate_pricing(
         warnings.append("Gross profit margin is below 28%.")
     if _money(best_depletion_allowance) > landed:
         warnings.append("Best depletion allowance exceeds landed cost.")
-    if best_target_conflict:
-        warnings.append("Best ladder price is below the 30% target GP.")
+    if not grw_broker_model and best_margin is not None and best_margin < GP_WARNING_THRESHOLD:
+        warnings.append("Best gross profit margin is below 28%.")
 
     return PricingResult(
         pack_size=pack,
@@ -261,15 +262,15 @@ def calculate_pricing(
         diagnostics={
             "basis": resolved_basis,
             "frontline_target_margin": FRONTLINE_TARGET_MARGIN,
-            "best_target_margin": BEST_TARGET_MARGIN,
+            "best_target_margin": None,
             "gp_warning_threshold": GP_WARNING_THRESHOLD,
             "frontline_formula": "round upward landed_bottle_cost / 0.68",
-            "best_price_rule": "round upward landed_bottle_cost / 0.70 independently",
+            "best_price_rule": "Frontline minus $1 below $30; minus $2 from $30 to under $50; $50+ Frontline only",
             "rounding_rule": "under $20 to next $0.25; $20 or more to next whole dollar",
             "suggestions_ready": suggestions_ready,
-            "frontline_only": frontline_only,
+            "frontline_only": frontline_only or automatic_frontline_only,
             "best_gp_margin": best_margin,
-            "best_target_conflict": best_target_conflict,
+            "best_target_conflict": False,
             "informational_only": grw_broker_model,
             "warnings": warnings,
         },
