@@ -2118,7 +2118,6 @@ function SupplierLogisticsPanel({
             <tr>
               <th>Supplier</th>
               <th>QB Match</th>
-              <th>Importer/Winery</th>
               <th>Importer ID</th>
               <th>Sample Policy</th>
               <th>Sample Rate</th>
@@ -2147,7 +2146,7 @@ function SupplierLogisticsPanel({
                 onDiscardDraft={discardDraftRow}
               />
             ))}
-            {filteredRows.length === 0 ? <EmptyRow colSpan={16} label="No suppliers match the current filters." /> : null}
+            {filteredRows.length === 0 ? <EmptyRow colSpan={15} label="No suppliers match the current filters." /> : null}
           </tbody>
         </table>
       </div>
@@ -2195,9 +2194,6 @@ function SupplierLogisticsRow({
       </td>
       <td>
         <QuickBooksVendorMatchCell matches={isNew ? [] : quickBooksMatches} />
-      </td>
-      <td>
-        <input aria-label="Importer or winery name" value={row.importer_winery_name || ""} onChange={(event) => patch({ importer_winery_name: event.target.value || null })} />
       </td>
       <td>
         <input aria-label="Importer ID" value={row.importer_id || ""} onChange={(event) => patch({ importer_id: event.target.value })} />
