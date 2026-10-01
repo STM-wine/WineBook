@@ -1,3 +1,4 @@
+import { DEFAULT_TARGET_WEEKS } from "@/lib/coverage-recommendation";
 import Link from "next/link";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import { fetchSettingsOverview } from "@/lib/settings-data";
@@ -62,16 +63,12 @@ export default async function SettingsOverviewPage() {
           </div>
           <dl className="settings-definition-list">
             <div>
-              <dt>Standard</dt>
-              <dd>{data.publishedVersion.values.standard_target_days} days</dd>
+              <dt>Default coverage</dt>
+              <dd>{DEFAULT_TARGET_WEEKS} weeks; adjustable in Order Summary</dd>
             </div>
             <div>
-              <dt>Core</dt>
-              <dd>{data.publishedVersion.values.core_target_days} days</dd>
-            </div>
-            <div>
-              <dt>BTG</dt>
-              <dd>{data.publishedVersion.values.btg_target_days} days</dd>
+              <dt>Automatic suggestions</dt>
+              <dd>Core and Select; same quantity calculation</dd>
             </div>
             <div>
               <dt>Default recommendation status</dt>

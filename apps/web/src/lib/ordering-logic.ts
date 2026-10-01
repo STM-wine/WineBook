@@ -5,6 +5,8 @@ export type MonthlyMultiplier = {
 
 export type OrderingLogicSettings = {
   schema_version: 1;
+  // Historical report settings retained for stored versions and legacy imports.
+  // Active ordering uses coverage weeks, independent of these policy targets.
   standard_target_days: number;
   core_target_days: number;
   btg_target_days: number;
@@ -104,89 +106,14 @@ export type OrderingLogicField = {
 
 export const ORDERING_LOGIC_FIELD_GROUPS: Array<{ title: string; fields: OrderingLogicField[] }> = [
   {
-    title: "Coverage Targets",
-    fields: [
-      {
-        key: "standard_target_days",
-        label: "Standard Target Coverage",
-        unit: "days",
-        explanation: "Used for items that are neither Core nor BTG.",
-        impact: "Sets the demand coverage target before inventory and open orders are subtracted."
-      },
-      {
-        key: "core_target_days",
-        label: "Core Target Coverage",
-        unit: "days",
-        explanation: "Used for wines flagged as Core.",
-        impact: "Core items can carry a longer target and may round positive sub-case needs to one pack."
-      },
-      {
-        key: "btg_target_days",
-        label: "BTG Target Coverage",
-        unit: "days",
-        explanation: "Used for wines flagged as BTG.",
-        impact: "BTG items carry the longest target and may round positive sub-case needs to one pack."
-      }
-    ]
-  },
-  {
-    title: "Purchasing Environment",
-    fields: [
-      {
-        key: "monthly_mode_enabled",
-        label: "Monthly Mode",
-        unit: "",
-        explanation: "Applies the published calendar-month purchasing multiplier.",
-        impact: "Changes risk tolerance without changing base demand."
-      },
-      {
-        key: "minimum_multiplier",
-        label: "Minimum Multiplier",
-        unit: "x",
-        explanation: "Lowest allowed monthly multiplier.",
-        impact: "Validation guard for admin proposals."
-      },
-      {
-        key: "maximum_multiplier",
-        label: "Maximum Multiplier",
-        unit: "x",
-        explanation: "Highest allowed monthly multiplier.",
-        impact: "Validation guard for admin proposals."
-      }
-    ]
-  },
-  {
-    title: "Minimums And Rounding",
-    fields: [
-      {
-        key: "default_pack_size",
-        label: "Default Pack Size",
-        unit: "bottles",
-        explanation: "Used only when source data is missing a pack size.",
-        impact: "Determines case rounding when source pack data is absent."
-      },
-      {
-        key: "standard_minimum_packs",
-        label: "Standard Minimum",
-        unit: "packs",
-        explanation: "Positive standard recommendations below this minimum are suppressed.",
-        impact: "Prevents defensive-month inventory creep on non-Core, non-BTG wines."
-      },
-      {
-        key: "core_round_sub_case_to_one_pack",
-        label: "Core Sub-Case Round Up",
-        unit: "",
-        explanation: "Allows positive Core needs below one pack to round to one pack.",
-        impact: "Keeps important Core replenishment from disappearing."
-      },
-      {
-        key: "btg_round_sub_case_to_one_pack",
-        label: "BTG Sub-Case Round Up",
-        unit: "",
-        explanation: "Allows positive BTG needs below one pack to round to one pack.",
-        impact: "Keeps glass-pour replenishment from disappearing."
-      }
-    ]
+    title: "Case Rounding",
+    fields: [{
+      key: "default_pack_size",
+      label: "Default Pack Size",
+      unit: "bottles",
+      explanation: "Used when source data has no pack size.",
+      impact: "Positive coverage shortfalls round up to a full pack for both Core and Select."
+    }]
   },
   {
     title: "Risk Classifications",

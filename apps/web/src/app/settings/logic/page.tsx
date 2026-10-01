@@ -1,3 +1,4 @@
+import { DEFAULT_TARGET_WEEKS } from "@/lib/coverage-recommendation";
 import { AccountPending, getAppContext, hasPermission } from "@/lib/auth";
 import {
   ORDERING_LOGIC_FIELD_GROUPS,
@@ -121,6 +122,11 @@ export default async function LogicSettingsPage() {
           <span className="status-pill">published</span>
         </div>
 
+        <div className="settings-group">
+          <h3>Weeks of Coverage</h3>
+          <p>Default: {DEFAULT_TARGET_WEEKS} weeks. Set a supplier target in its workbench, or use the global override in Order Summary.</p>
+          <p>Core and Select enable automatic suggestions; both use the same coverage calculation and round up to full packs. Limited, Allocated, and Special Order require manual ordering.</p>
+        </div>
         {ORDERING_LOGIC_FIELD_GROUPS.map((group) => (
           <div className="settings-group" key={group.title}>
             <h3>{group.title}</h3>
@@ -187,7 +193,7 @@ export default async function LogicSettingsPage() {
             <div className="settings-form-grid">
               <label>
                 Proposal summary
-                <input name="proposal_summary" required placeholder="Increase Core coverage for summer" />
+                <input name="proposal_summary" required placeholder="Update the default pack size" />
               </label>
               <label>
                 Business reason
@@ -207,28 +213,6 @@ export default async function LogicSettingsPage() {
                 </div>
               </div>
             ))}
-            <div className="settings-group">
-              <h3>Monthly Multipliers</h3>
-              <div className="settings-month-grid">
-                {Array.from({ length: 12 }, (_, index) => {
-                  const month = String(index + 1);
-                  const value = data.publishedVersion.values.monthly_multipliers[month];
-                  return (
-                    <div key={month}>
-                      <span>{month}</span>
-                      <input aria-label={`Month ${month} mode`} name={`month_${month}_mode`} defaultValue={value.mode} />
-                      <input
-                        aria-label={`Month ${month} multiplier`}
-                        name={`month_${month}_multiplier`}
-                        type="number"
-                        step="0.01"
-                        defaultValue={value.multiplier}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
             <button className="button" type="submit">
               Save Draft Proposal
             </button>

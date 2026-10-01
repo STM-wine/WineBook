@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { APP_PERMISSIONS, requireAppContext, requirePermission, type AppContext, type AppPermission } from "@/lib/auth";
 import {
-  DEFAULT_ORDERING_LOGIC_SETTINGS,
   normalizeOrderingLogicSettings,
   validateOrderingLogicSettings,
   type OrderingLogicSettings
@@ -21,7 +20,9 @@ function getString(formData: FormData, key: string) {
 }
 
 function getNumber(formData: FormData, key: string, fallback: number) {
-  const value = Number(formData.get(key));
+  const raw = formData.get(key);
+  if (raw === null || String(raw).trim() === "") return fallback;
+  const value = Number(raw);
   return Number.isFinite(value) ? value : fallback;
 }
 
@@ -43,34 +44,11 @@ const VINOSMITH_PLUMBING_STATUSES = [
   "resolved"
 ] as const;
 
-function settingsFromForm(formData: FormData): OrderingLogicSettings {
-  const current = DEFAULT_ORDERING_LOGIC_SETTINGS;
-  const monthly_multipliers = Object.fromEntries(
-    Array.from({ length: 12 }, (_, index) => {
-      const month = String(index + 1);
-      return [
-        month,
-        {
-          mode: getString(formData, `month_${month}_mode`) || current.monthly_multipliers[month].mode,
-          multiplier: getNumber(formData, `month_${month}_multiplier`, current.monthly_multipliers[month].multiplier)
-        }
-      ];
-    })
-  );
-
+function settingsFromForm(formData: FormData, current: OrderingLogicSettings): OrderingLogicSettings {
+  // Preserve historical fields, but accept edits only to active ordering settings.
   const settings = normalizeOrderingLogicSettings({
-    schema_version: 1,
-    standard_target_days: getNumber(formData, "standard_target_days", current.standard_target_days),
-    core_target_days: getNumber(formData, "core_target_days", current.core_target_days),
-    btg_target_days: getNumber(formData, "btg_target_days", current.btg_target_days),
-    monthly_mode_enabled: formData.get("monthly_mode_enabled") === "on",
-    monthly_multipliers,
-    minimum_multiplier: getNumber(formData, "minimum_multiplier", current.minimum_multiplier),
-    maximum_multiplier: getNumber(formData, "maximum_multiplier", current.maximum_multiplier),
+    ...current,
     default_pack_size: getNumber(formData, "default_pack_size", current.default_pack_size),
-    standard_minimum_packs: getNumber(formData, "standard_minimum_packs", current.standard_minimum_packs),
-    core_round_sub_case_to_one_pack: formData.get("core_round_sub_case_to_one_pack") === "on",
-    btg_round_sub_case_to_one_pack: formData.get("btg_round_sub_case_to_one_pack") === "on",
     rounding_method: "ceil_pack",
     urgent_weeks_threshold: getNumber(formData, "urgent_weeks_threshold", current.urgent_weeks_threshold),
     high_risk_coverage_threshold: getNumber(formData, "high_risk_coverage_threshold", current.high_risk_coverage_threshold),
@@ -122,7 +100,12 @@ export async function createLogicDraft(formData: FormData) {
   const context = await requireSettingsContext();
   requirePermission(context, "draft_logic_changes");
   const supabase = serviceSettingsClient();
-  const values = settingsFromForm(formData);
+  const { data: published, error: publishedError } = await supabase
+    .from("configuration_versions").select("values")
+    .eq("domain", "ordering_logic").eq("status", "published")
+    .maybeSingle<{ values: Partial<OrderingLogicSettings> }>();
+  if (publishedError) throw new Error(publishedError.message);
+  const values = settingsFromForm(formData, normalizeOrderingLogicSettings(published?.values));
   const summary = getString(formData, "proposal_summary");
   const reason = getString(formData, "change_reason");
 

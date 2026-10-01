@@ -1,3 +1,4 @@
+import { calculateCoverageRecommendation, DEFAULT_TARGET_WEEKS } from "./coverage-recommendation";
 import type {
   ApprovalCommitment,
   DashboardMetrics,
@@ -16,7 +17,7 @@ import {
 } from "./replenishment-policy";
 
 export type SupplierGroupSortMode = "default" | "value" | "az" | "za";
-export const DEFAULT_SUPPLIER_TARGET_WEEKS = 5;
+export const DEFAULT_SUPPLIER_TARGET_WEEKS = DEFAULT_TARGET_WEEKS;
 
 export function asNumber(value: number | string | null | undefined): number {
   if (value === null || value === undefined || value === "") return 0;
@@ -74,20 +75,6 @@ export function rowApprovedEstimate(row: Recommendation): number {
   return qty * (fob + trucking);
 }
 
-function roundUpToPack(qty: number, packSize: number): number {
-  const pack = Math.max(1, Math.round(packSize || 1));
-  return Math.ceil(Math.max(0, qty) / pack) * pack;
-}
-
-function recommendationForTargetWeeks(row: Recommendation, targetWeeks: number): number {
-  const velocity = asNumber(row.weekly_velocity);
-  if (velocity <= 0) return 0;
-
-  const currentSupply = asNumber(row.true_available) + asNumber(row.on_order);
-  const rawQty = targetWeeks * velocity - currentSupply;
-  return roundUpToPack(rawQty, asNumber(row.pack_size) || 1);
-}
-
 export function isOlderVintageSuppressed(
   row: Pick<Recommendation, "diagnostics">
 ): boolean {
@@ -130,7 +117,18 @@ export function applySupplierTargetWeeks(
     if (targetWeeks < 0 || (row.order_path === "di" && globalTargetWeeks === undefined)) return row;
     if (row.supplier_catalog_workbench_item_id && asNumber(row.weekly_velocity) <= 0) return row;
 
-    const qty = recommendationForTargetWeeks(row, targetWeeks);
+    const risk = row.diagnostics?.coverage_risk_settings as {
+      urgentWeeks?: number; highRiskCoverage?: number; mediumRiskCoverage?: number;
+    } | undefined;
+    const calculation = calculateCoverageRecommendation({
+      weeklyVelocity: asNumber(row.weekly_velocity),
+      trueAvailable: asNumber(row.true_available),
+      onOrder: asNumber(row.on_order),
+      packSize: asNumber(row.pack_size) || 1,
+      targetWeeks,
+      ...risk
+    });
+    const qty = calculation.recommended_qty_rounded;
     const fob = asNumber(row.fob);
     const trucking = asNumber(row.trucking_cost_per_bottle);
     const orderCost = qty * fob;
@@ -138,7 +136,7 @@ export function applySupplierTargetWeeks(
 
     return {
       ...row,
-      recommended_qty_rounded: qty,
+      ...calculation,
       order_cost: orderCost,
       landed_cost: landedCost
     };

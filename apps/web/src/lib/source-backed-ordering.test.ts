@@ -395,7 +395,7 @@ describe("source-backed ordering rows", () => {
 
 describe("recommendation math and buyer state", () => {
   it("subtracts only Available and QB On Order, then rounds to pack", () => {
-    expect(calculateSourceRecommendation({ weeklyVelocity: 10, trueAvailable: 5, onOrder: 4, isBtg: false, isCore: true, packSize: 6, settings, referenceDate: "2026-09-14" })).toMatchObject({ target_qty: 10 * (30 / 7), recommended_qty_rounded: 36 });
+    expect(calculateSourceRecommendation({ weeklyVelocity: 10, trueAvailable: 5, onOrder: 4, isBtg: false, isCore: true, packSize: 6, settings, referenceDate: "2026-09-14" })).toMatchObject({ target_qty: 50, recommended_qty_rounded: 42 });
   });
 
   it("carries approved quantity and DI path by exact code but excludes entered items", () => {
@@ -537,5 +537,27 @@ describe("recommendation math and buyer state", () => {
     expect(recommendationAllowsSourceAssignmentRefresh({ ...row, recommendation_status: "edited", approved_qty: 18 }, false)).toBe(true);
     expect(recommendationAllowsSourceAssignmentRefresh(row, true)).toBe(false);
     expect(recommendationAllowsSourceAssignmentRefresh({ ...row, recommendation_status: "edited", approved_qty: 18 }, true)).toBe(false);
+  });
+});
+
+describe("one coverage formula across source, workbench, and preview", () => {
+  it("treats Core and Select identically even under extreme legacy target and seasonal settings", () => {
+    const legacySettings = { ...settings, core_target_days: 120, standard_target_days: 1,
+      monthly_mode_enabled: true, standard_minimum_packs: 100,
+      core_round_sub_case_to_one_pack: false,
+      monthly_multipliers: { ...settings.monthly_multipliers, "9": { mode: "Defensive", multiplier: 0.5 } } };
+    for (const policy of ["Core", "Limited Core"] as const) {
+      const row = build({ settings: legacySettings,
+        markers: [{ item_code: "AB12345", quickbooks_item_list_id: "qb-1", is_btg: false,
+          is_core: policy === "Core", replenishment_policy: policy, note_source: "manual" }],
+        salesByCode: new Map([["AB12345", sales({ last30: 43.45 })]]),
+        vinosmithAvailableByCode: new Map([["AB12345", 46]]),
+        quickBooksItems: [qb({ quantity_on_order: 3 })]
+      }).rows[0];
+      // Ten/week * five weeks minus 49 supplied = one bottle, rounded to six.
+      expect(row.target_qty).toBeCloseTo(50);
+      expect(row).toMatchObject({ target_days: 35,
+        recommended_qty_rounded: 6, purchasing_environment_multiplier: 1 });
+    }
   });
 });

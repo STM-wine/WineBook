@@ -1,3 +1,4 @@
+import { calculateCoverageRecommendation } from "./coverage-recommendation";
 import type { OrderingLogicSettings } from "./ordering-logic";
 import type { Recommendation } from "./types";
 import {
@@ -9,7 +10,7 @@ import {
 } from "./replenishment-policy";
 
 export const ORDERING_SOURCE = "quickbooks_vinosmith_stem";
-export const ORDERING_BUILDER_VERSION = 7;
+export const ORDERING_BUILDER_VERSION = 8;
 
 export type SourceQuickBooksItem = {
   list_id: string;
@@ -384,8 +385,6 @@ export function buildSourceBackedOrderingRows(input: {
       recommendation_status: "rejected" as const,
       order_path: "stateside" as const,
       order_cost: round(calculation.recommended_qty_rounded * fob, 2),
-      reorder_status: reorderStatus(weeklyVelocity, trueAvailable, calculation.target_days, input.settings.urgent_weeks_threshold),
-      risk_level: riskLevel(weeklyVelocity, trueAvailable + onOrder, calculation.target_qty, input.settings),
       order_timing_risk: null,
       true_available: trueAvailable,
       on_order: onOrder,
@@ -396,6 +395,11 @@ export function buildSourceBackedOrderingRows(input: {
       landed_cost: round(calculation.recommended_qty_rounded * (fob + trucking), 2),
       diagnostics: {
         ordering_source: ORDERING_SOURCE,
+        coverage_risk_settings: {
+          urgentWeeks: input.settings.urgent_weeks_threshold,
+          highRiskCoverage: input.settings.high_risk_coverage_threshold,
+          mediumRiskCoverage: input.settings.medium_risk_coverage_threshold
+        },
         quickbooks_item_list_id: item.list_id,
         exact_item_code: productCode,
         quickbooks_item_as_of: item.last_seen_at || input.quickBooksAsOf,
@@ -613,34 +617,25 @@ export function calculateSourceRecommendation(input: {
   weeklyVelocity: number;
   trueAvailable: number;
   onOrder: number;
-  isBtg: boolean;
-  isCore: boolean;
+  isBtg?: boolean;
+  isCore?: boolean;
+  targetWeeks?: number;
   automaticRecommendation?: boolean;
   packSize: number;
   settings: OrderingLogicSettings;
   referenceDate: string;
 }) {
-  const targetDays = input.isBtg ? input.settings.btg_target_days : input.isCore ? input.settings.core_target_days : input.settings.standard_target_days;
-  const month = Number(input.referenceDate.slice(5, 7)) || 1;
-  const monthSettings = input.settings.monthly_multipliers[String(month)];
-  const multiplier = input.settings.monthly_mode_enabled ? monthSettings?.multiplier || 1 : 1;
-  const targetQty = Math.max(0, input.weeklyVelocity) * (targetDays / 7);
-  const baseRaw = Math.max(0, targetQty - (input.trueAvailable + Math.max(0, input.onOrder)));
-  const raw = input.automaticRecommendation === false ? 0 : baseRaw * multiplier;
-  const packSize = Math.max(1, Math.round(input.packSize));
-  const preserveOnePack = (input.isBtg && input.settings.btg_round_sub_case_to_one_pack) || (input.isCore && input.settings.core_round_sub_case_to_one_pack);
-  const rounded = raw <= 0 || (!preserveOnePack && raw < input.settings.standard_minimum_packs * packSize)
-    ? 0
-    : Math.ceil(raw / packSize) * packSize;
   return {
-    target_days: targetDays,
-    target_qty: targetQty,
-    base_recommended_qty_raw: baseRaw,
-    purchasing_environment_multiplier: multiplier,
-    purchasing_environment_mode: input.settings.monthly_mode_enabled ? monthSettings?.mode || null : null,
-    purchasing_environment_month: month,
-    recommended_qty_raw: raw,
-    recommended_qty_rounded: rounded
+    ...calculateCoverageRecommendation({
+      ...input,
+      urgentWeeks: input.settings.urgent_weeks_threshold,
+      highRiskCoverage: input.settings.high_risk_coverage_threshold,
+      mediumRiskCoverage: input.settings.medium_risk_coverage_threshold
+    }),
+    // Retain persisted compatibility fields without applying legacy multipliers.
+    purchasing_environment_multiplier: 1,
+    purchasing_environment_mode: "Coverage weeks",
+    purchasing_environment_month: Number(input.referenceDate.slice(5, 7)) || 1
   };
 }
 
@@ -704,21 +699,14 @@ export function refreshSourceBackedRecommendation(
     on_order: facts.onOrder,
     order_cost: round(calculation.recommended_qty_rounded * fob, 2),
     landed_cost: round(calculation.recommended_qty_rounded * (fob + trucking), 2),
-    reorder_status: reorderStatus(
-      weeklyVelocity,
-      facts.trueAvailable,
-      calculation.target_days,
-      settings.urgent_weeks_threshold
-    ),
-    risk_level: riskLevel(
-      weeklyVelocity,
-      facts.trueAvailable + facts.onOrder,
-      calculation.target_qty,
-      settings
-    ),
     recommendations_suppressed: suppressed,
     diagnostics: {
       ...(row.diagnostics || {}),
+      coverage_risk_settings: {
+        urgentWeeks: settings.urgent_weeks_threshold,
+        highRiskCoverage: settings.high_risk_coverage_threshold,
+        mediumRiskCoverage: settings.medium_risk_coverage_threshold
+      },
       quickbooks_item_as_of: facts.quickBooksItemAsOf,
       vinosmith_available_as_of: facts.vinosmithAvailableAsOf,
       automatic_recommendation: recommendationIsAutomatic(policy, suppressed) && !olderVintageSuppressed,
@@ -806,22 +794,6 @@ function firstByNormalizedCode<Row>(rows: Row[], codeFor: (row: Row) => unknown)
     if (code && !map.has(code)) map.set(code, row);
   }
   return map;
-}
-
-function reorderStatus(velocity: number, available: number, targetDays: number, urgentWeeks: number): SourceBackedRecommendationRow["reorder_status"] {
-  if (velocity <= 0) return "NO SALES";
-  const weeks = available / velocity;
-  if (weeks < urgentWeeks) return "URGENT";
-  return weeks < targetDays / 7 ? "LOW" : "OK";
-}
-
-function riskLevel(velocity: number, supply: number, targetQty: number, settings: OrderingLogicSettings): SourceBackedRecommendationRow["risk_level"] {
-  if (velocity <= 0) return "No Sales";
-  if (targetQty <= 0) return "Unknown";
-  const ratio = supply / targetQty;
-  if (ratio < settings.high_risk_coverage_threshold) return "High";
-  if (ratio < settings.medium_risk_coverage_threshold) return "Medium";
-  return "Low";
 }
 
 function velocityTrendLabel(pct: number | null, current: number, prior: number) {

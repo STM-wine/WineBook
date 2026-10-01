@@ -1,4 +1,4 @@
-import { asNumber } from "@/lib/order-data";
+import { asNumber, applySupplierTargetWeeks } from "@/lib/order-data";
 import type { OrderingLogicSettings } from "@/lib/ordering-logic";
 import type { Recommendation } from "@/lib/types";
 
@@ -62,23 +62,19 @@ export function previewOrderingLogicImpact(rows: Recommendation[], settings: Ord
 }
 
 function recommendedQtyForSettings(row: Recommendation, settings: OrderingLogicSettings) {
-  const weeklyVelocity = asNumber(row.weekly_velocity);
-  const trueAvailable = asNumber(row.true_available);
-  const onOrder = asNumber(row.on_order);
-  const packSize = Math.max(1, Math.round(asNumber(row.pack_size) || settings.default_pack_size));
-  const targetDays = row.is_btg
-    ? settings.btg_target_days
-    : row.is_core
-      ? settings.core_target_days
-      : settings.standard_target_days;
-  const month = new Date().getMonth() + 1;
-  const monthlyMultiplier = settings.monthly_mode_enabled ? settings.monthly_multipliers[String(month)]?.multiplier || 1 : 1;
-  const targetQty = weeklyVelocity * (targetDays / 7);
-  const raw = Math.max(0, targetQty - (trueAvailable + onOrder)) * monthlyMultiplier;
-  if (raw <= 0) return 0;
-  const preserveSubCase =
-    (row.is_btg && settings.btg_round_sub_case_to_one_pack) || (row.is_core && settings.core_round_sub_case_to_one_pack);
-  const minimumQty = preserveSubCase ? 0 : settings.standard_minimum_packs * packSize;
-  if (raw < minimumQty) return 0;
-  return Math.ceil(raw / packSize) * packSize;
+  // DI/container planning is a separate workflow, not a coverage proposal.
+  if (row.order_path === "di") return asNumber(row.recommended_qty_rounded);
+  const [next] = applySupplierTargetWeeks([{
+    ...row,
+    pack_size: asNumber(row.pack_size) || settings.default_pack_size,
+    diagnostics: {
+      ...row.diagnostics,
+      coverage_risk_settings: {
+        urgentWeeks: settings.urgent_weeks_threshold,
+        highRiskCoverage: settings.high_risk_coverage_threshold,
+        mediumRiskCoverage: settings.medium_risk_coverage_threshold
+      }
+    }
+  }], {});
+  return asNumber(next.recommended_qty_rounded);
 }
