@@ -3,6 +3,7 @@ import { loadEnvironment, loadServerModule } from './read-model-runtime.mjs';
 import { limitConcurrentFetch } from './limited-fetch.mjs';
 import { retryDatabaseReads } from './retry-database-reads.mjs';
 import { publishOrderingSnapshot } from './publish-ordering-snapshot.mjs';
+import { attemptReadModelPrune } from './read-model-pruning.mjs';
 await loadEnvironment();
 const supabase = createClient(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: limitConcurrentFetch(retryDatabaseReads(fetch), 2) } });
@@ -83,9 +84,10 @@ async function drain() {
 }
 do {
   if (Date.now() - lastPrunedAt > 3_600_000) {
-    const { error } = await supabase.rpc('prune_read_models');
-    if (error) throw new Error(error.message);
     lastPrunedAt = Date.now();
+    // Retention is maintenance work. A timeout must not prevent the worker
+    // from building the snapshots needed by Home and Order Summary.
+    await attemptReadModelPrune(supabase);
   }
   await warm();
   await drain();
