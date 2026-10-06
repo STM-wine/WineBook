@@ -60,11 +60,15 @@ export async function getAppContext(): Promise<AppContext | { pendingEmail: stri
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("app_profiles")
     .select("id,email,full_name,position,role")
     .eq("id", user.id)
     .maybeSingle<AppProfile>();
+
+  if (profileError) {
+    throw new Error(`Account profile lookup failed: ${profileError.code || "database_unavailable"}`);
+  }
 
   if (!profile) {
     return { pendingEmail: user.email || null };

@@ -10,7 +10,8 @@ export async function GET(request: Request) {
   const { data: { user } } = await auth.auth.getUser();
   if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
   const { data: profile, error: profileError } = await auth.from("app_profiles").select("id").eq("id", user.id).maybeSingle();
-  if (profileError || !profile) return NextResponse.json({ error: "Account is not enabled." }, { status: 403 });
+  if (profileError) return NextResponse.json({ error: "Account profile lookup is temporarily unavailable." }, { status: 503 });
+  if (!profile) return NextResponse.json({ error: "Account is not enabled." }, { status: 403 });
   const db = createServiceRoleClient();
   const params = new URL(request.url).searchParams;
   const filters = { supplier: params.get("supplierFilter") || "All", brandManager: params.get("tdm") || "All", search: params.get("search") || "", suggestedOnly: params.get("suggestedOnly") === "true" };

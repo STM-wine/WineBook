@@ -10,7 +10,8 @@ export async function GET(request: Request) {
   const { data: { user } } = await auth.auth.getUser();
   if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
   const { data: profile, error: authError } = await auth.from("app_profiles").select("id").eq("id", user.id).maybeSingle();
-  if (authError || !profile) return NextResponse.json({ error: "Account is not enabled." }, { status: 403 });
+  if (authError) return NextResponse.json({ error: "Account profile lookup is temporarily unavailable." }, { status: 503 });
+  if (!profile) return NextResponse.json({ error: "Account is not enabled." }, { status: 403 });
   const params = new URL(request.url).searchParams;
   const run = params.get("run");
   if (!run) return NextResponse.json({ error: "Report run required." }, { status: 400 });
