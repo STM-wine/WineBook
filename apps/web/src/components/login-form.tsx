@@ -47,6 +47,25 @@ export function LoginForm() {
     setMessage("Check your email for a fresh sign-in link.");
   }
 
+  async function sendPasswordReset() {
+    if (!email) {
+      setMessage("Enter your email address first.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?flow=recovery`
+    });
+    setLoading(false);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    setMessage("If an account exists for this email, a password reset link is on its way.");
+  }
+
   return (
     <div className="auth-card">
       <form onSubmit={signInWithPassword} className="login-form">
@@ -69,6 +88,9 @@ export function LoginForm() {
         <div className="divider">or</div>
         <button className="button button-secondary" disabled={loading} onClick={sendSignInLink} type="button">
           Email me a sign-in link
+        </button>
+        <button className="button button-outline" disabled={loading} onClick={sendPasswordReset} type="button">
+          Forgot password?
         </button>
       </form>
       {message ? <p className="form-message">{message}</p> : null}

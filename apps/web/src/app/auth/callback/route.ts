@@ -7,10 +7,13 @@ export async function GET(request: Request) {
   const code = requestUrl.searchParams.get("code");
   const tokenHash = requestUrl.searchParams.get("token_hash");
   const type = requestUrl.searchParams.get("type") as EmailOtpType | null;
+  const isRecovery = requestUrl.searchParams.get("flow") === "recovery";
   const supabase = await createClient();
   let error: { message: string } | null = null;
 
-  if (code) {
+  if (isRecovery && type && type !== "recovery") {
+    error = { message: "This is not a password recovery link." };
+  } else if (code) {
     ({ error } = await supabase.auth.exchangeCodeForSession(code));
   } else if (tokenHash && type) {
     ({ error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type }));
@@ -23,6 +26,18 @@ export async function GET(request: Request) {
     const loginUrl = new URL("/login", publicOrigin);
     loginUrl.searchParams.set("error", error.message);
     return NextResponse.redirect(loginUrl);
+  }
+
+  if (isRecovery) {
+    const response = NextResponse.redirect(new URL("/auth/reset-password", publicOrigin));
+    response.cookies.set("stem_password_recovery", "1", {
+      httpOnly: true,
+      maxAge: 600,
+      path: "/auth/reset-password",
+      sameSite: "lax",
+      secure: new URL(publicOrigin).protocol === "https:"
+    });
+    return response;
   }
 
   return NextResponse.redirect(new URL("/", publicOrigin));
