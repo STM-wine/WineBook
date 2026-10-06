@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  MAX_QUICKBOOKS_ITEM_PAGE_SIZE,
   buildQuickBooksSalesDashboardDiscoveryRequests,
   createQuickBooksDesktopReadOnlyClient,
   type QuickBooksDateRange,
@@ -575,8 +576,9 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
   if (job.resourceName === "quickbooks_customers") return client.buildCustomerQuery({ maxReturned, activeStatus: "All", iterator });
   if (job.resourceName === "quickbooks_vendors") return client.buildVendorQuery({ maxReturned, activeStatus: "All", iterator });
   if (job.resourceName === "quickbooks_items") {
-    if (useInventoryOnlyItemQuery(job)) return client.buildItemInventoryQuery({ maxReturned, activeStatus: "All", iterator });
-    return client.buildItemQuery({ maxReturned, activeStatus: "All", iterator });
+    const itemMaxReturned = Math.min(maxReturned, MAX_QUICKBOOKS_ITEM_PAGE_SIZE);
+    if (useInventoryOnlyItemQuery(job)) return client.buildItemInventoryQuery({ maxReturned: itemMaxReturned, activeStatus: "All", iterator });
+    return client.buildItemQuery({ maxReturned: itemMaxReturned, activeStatus: "All", iterator });
   }
   if (job.resourceName === "quickbooks_invoices") {
     return client.buildInvoiceQuery({

@@ -1,6 +1,8 @@
 import "server-only";
 
 export const DEFAULT_QUICKBOOKS_DESKTOP_QBXML_VERSION = "16.0";
+// A QBWC receiveResponseXML call must persist an entire item page before it can reply.
+export const MAX_QUICKBOOKS_ITEM_PAGE_SIZE = 200;
 
 export const QUICKBOOKS_READ_ONLY_REQUEST_TYPES = [
   "CustomerQueryRq",
@@ -233,7 +235,7 @@ export function buildQuickBooksOperationalRefreshRequests(
     }),
     client.buildItemQuery({
       requestId: "operational-items",
-      maxReturned: options.listMaxReturned,
+      maxReturned: Math.min(options.listMaxReturned, MAX_QUICKBOOKS_ITEM_PAGE_SIZE),
       iterator: { mode: "Start" },
       activeStatus: "All"
     })

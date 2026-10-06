@@ -97,6 +97,8 @@ describe("QuickBooks pagination completeness", () => {
     expect(capped.every((request) => request.pagination?.iteratorMode === "Start")).toBe(true);
 
     const itemRequest = requests.find((request) => request.requestId === "operational-items");
+    expect(itemRequest?.pagination?.maxReturned).toBe(200);
+    expect(itemRequest?.qbxml).toContain("<MaxReturned>200</MaxReturned>");
     expect(itemRequest?.qbxml).toContain("<ActiveStatus>All</ActiveStatus>");
     expect(itemRequest?.qbxml).not.toContain("FromModifiedDate");
     expect(itemRequest?.qbxml).not.toContain("ToModifiedDate");
