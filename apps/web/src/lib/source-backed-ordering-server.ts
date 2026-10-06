@@ -20,6 +20,7 @@ import {
   type SourceVinosmithWine
 } from "./source-backed-ordering";
 import type { Recommendation } from "./types";
+import { applyVinosmithAvailability } from "./order-data";
 import { fetchQuickBooksItemSalesWindows } from "./supabase/quickbooks-item-sales-windows";
 import { fetchLiveVinosmithAvailability, type LatestVinosmithAvailability } from "./supabase/vinosmith-availability";
 import { fetchAllExact } from "./supabase/fetch-all-exact";
@@ -144,9 +145,13 @@ export async function fetchCurrentOrderingOverlay(
       options.allowVerifiedFallbackDuringRefresh
       && syncState.latestCompletedAt
     ) {
+      if (options.liveAvailability === null) {
+        throw new Error("Current Vinosmith Available could not be verified during the QuickBooks refresh.");
+      }
+      const availability = options.liveAvailability || await fetchLiveVinosmithAvailability();
       const quickBooksFreshnessHours = ageHours(syncState.latestCompletedAt);
       return {
-        rows: applyCurrentVintageSafeguards(recommendations),
+        rows: applyCurrentVintageSafeguards(applyVinosmithAvailability(recommendations, availability.byProductCode)),
         diagnostics: {
           reference_date: options.verifiedReferenceDate || "",
           quickbooks_as_of: syncState.latestCompletedAt,
@@ -154,6 +159,7 @@ export async function fetchCurrentOrderingOverlay(
           quickbooks_fresh: quickBooksFreshnessHours !== null && quickBooksFreshnessHours <= 72,
           quickbooks_refresh_in_progress: syncState.latestActivelyRunning,
           quickbooks_refresh_incomplete_status: syncState.latest?.status || "missing",
+          vinosmith_available_as_of: availability.snapshotAt,
           using_saved_recommendations: true
         }
       };

@@ -46,11 +46,23 @@ describe("ordering without a new QuickBooks upload", () => {
     expect(fetchQuickBooksItemSalesWindows).not.toHaveBeenCalled();
   });
   it("keeps the saved rows available during an incomplete import", async () => {
-    const result = await fetchCurrentOrderingOverlay(database(completedAt, "failed", 1), [], {
-      liveAvailability: availability, allowVerifiedFallbackDuringRefresh: true, verifiedReferenceDate: "2026-09-26"
+    const result = await fetchCurrentOrderingOverlay(database(completedAt, "failed", 1), [{
+      product_code: "MAT000066", true_available: 33, weekly_velocity: 3, on_order: 0, diagnostics: {}
+    } as never], {
+      liveAvailability: { byProductCode: new Map([["MAT000066", 0]]), snapshotAt: "2026-10-06T18:30:00Z" },
+      allowVerifiedFallbackDuringRefresh: true, verifiedReferenceDate: "2026-09-26"
     });
-    expect(result.diagnostics).toMatchObject({ using_saved_recommendations: true, reference_date: "2026-09-26" });
+    expect(result.rows[0]).toMatchObject({ true_available: 0, weeks_on_hand: 0 });
+    expect(result.diagnostics).toMatchObject({
+      using_saved_recommendations: true, reference_date: "2026-09-26",
+      vinosmith_available_as_of: "2026-10-06T18:30:00Z"
+    });
     expect(fetchQuickBooksItemSalesWindows).not.toHaveBeenCalled();
+  });
+  it("does not show saved availability when the live Vinosmith read fails", async () => {
+    await expect(fetchCurrentOrderingOverlay(database(completedAt, "failed", 1), [], {
+      liveAvailability: null, allowVerifiedFallbackDuringRefresh: true
+    })).rejects.toThrow("Current Vinosmith Available could not be verified");
   });
   it("uses Arizona dates for uploads near midnight and refuses missing upload metadata", () => {
     expect(orderingSalesReferenceDate("2026-09-27T06:59:00Z")).toBe("2026-09-26");
