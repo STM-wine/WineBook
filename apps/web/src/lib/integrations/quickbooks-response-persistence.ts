@@ -29,6 +29,8 @@ type SalesRepLookup = {
 const salesRepLookupByInitial = new Map<string, SalesRepLookup>();
 const salesRepLookupByListId = new Map<string, SalesRepLookup>();
 let salesRepLookupHydrated = false;
+const ITEM_WRITE_BATCH_SIZE = 200;
+const ITEM_WRITE_MAX_ATTEMPTS = 3;
 
 type ParsedLine = {
   txn_line_id: string | null;
@@ -576,8 +578,24 @@ async function changedTransactions<T extends { txnId: string; editSequence: stri
 
 async function upsertRows(supabase: SupabaseClient, table: string, rows: Record<string, unknown>[], onConflict: string) {
   if (rows.length === 0) return;
-  const { error } = await supabase.from(table).upsert(rows, { onConflict });
-  if (error) throw new Error(error.message);
+  const isItemWrite = table === "quickbooks_items" || table === "quickbooks_inventory_snapshots";
+  const batchSize = isItemWrite ? ITEM_WRITE_BATCH_SIZE : rows.length;
+  for (let start = 0; start < rows.length; start += batchSize) {
+    const batch = rows.slice(start, start + batchSize);
+    const maxAttempts = isItemWrite ? ITEM_WRITE_MAX_ATTEMPTS : 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const { error } = await supabase.from(table).upsert(batch, { onConflict });
+      if (!error) break;
+      if (attempt === maxAttempts || !isStatementTimeout(error)) {
+        throw new Error(`QuickBooks ${table} upsert failed for rows ${start + 1}-${start + batch.length}: ${error.message}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
+  }
+}
+
+function isStatementTimeout(error: { code?: string; message: string }) {
+  return error.code === "57014" || /statement timeout/i.test(error.message);
 }
 
 async function hydrateSalesRepLookup(supabase: SupabaseClient) {
