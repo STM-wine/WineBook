@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 
 export function AccountMenu() {
   const [isOpen, setIsOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
@@ -37,35 +36,8 @@ export function AccountMenu() {
       setMessage("New passwords do not match.");
       return;
     }
-    if (currentPassword === newPassword) {
-      setMessage("Choose a new password that is different from the current password.");
-      return;
-    }
-
     setLoading(true);
     const supabase = createClient();
-    const {
-      data: { user },
-      error: userError
-    } = await supabase.auth.getUser();
-
-    if (userError || !user?.email) {
-      setLoading(false);
-      setMessage(userError?.message || "Could not find the signed-in user.");
-      return;
-    }
-
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: user.email,
-      password: currentPassword
-    });
-
-    if (signInError) {
-      setLoading(false);
-      setMessage("Current password is incorrect.");
-      return;
-    }
-
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     setLoading(false);
 
@@ -74,7 +46,6 @@ export function AccountMenu() {
       return;
     }
 
-    setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
     setMessageTone("success");
@@ -90,16 +61,6 @@ export function AccountMenu() {
         <div className="account-menu-panel">
           <h2>Change password</h2>
           <form className="account-password-form" onSubmit={changePassword}>
-            <label>
-              Current password
-              <input
-                autoComplete="current-password"
-                required
-                type="password"
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-              />
-            </label>
             <label>
               New password
               <input

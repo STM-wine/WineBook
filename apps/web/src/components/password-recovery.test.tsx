@@ -35,7 +35,7 @@ describe("password recovery controls", () => {
   it("requests a recovery email with the app callback, without signing in", async () => {
     await act(async () => root.render(<LoginForm />));
     await act(async () => enter(host.querySelector('input[type="email"]')!, "bethany@stemwinecompany.com"));
-    await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent === "Forgot password?")!.click());
+    await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent === "Reset password")!.click());
     expect(auth.resetPasswordForEmail).toHaveBeenCalledWith("bethany@stemwinecompany.com", {
       redirectTo: "http://localhost:3000/auth/callback?flow=recovery"
     });

@@ -82,15 +82,15 @@ export function LoginForm() {
             required
           />
         </label>
+        <button className="login-reset-button" disabled={loading} onClick={sendPasswordReset} type="button">
+          Reset password
+        </button>
         <button className="button" disabled={loading}>
           {loading ? "Signing in..." : "Sign in"}
         </button>
         <div className="divider">or</div>
         <button className="button button-secondary" disabled={loading} onClick={sendSignInLink} type="button">
           Email me a sign-in link
-        </button>
-        <button className="button button-outline" disabled={loading} onClick={sendPasswordReset} type="button">
-          Forgot password?
         </button>
       </form>
       {message ? <p className="form-message">{message}</p> : null}
