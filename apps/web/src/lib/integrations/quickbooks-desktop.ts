@@ -3,6 +3,11 @@ import "server-only";
 export const DEFAULT_QUICKBOOKS_DESKTOP_QBXML_VERSION = "16.0";
 // A QBWC receiveResponseXML call must persist an entire item page before it can reply.
 export const MAX_QUICKBOOKS_ITEM_PAGE_SIZE = 200;
+// Customer responses contain large nested records; keep each synchronous QBWC write small.
+export const MAX_QUICKBOOKS_CUSTOMER_PAGE_SIZE = 100;
+export const MAX_QUICKBOOKS_VENDOR_PAGE_SIZE = 200;
+// Transaction responses also include their lines and can grow much larger than their row count.
+export const MAX_QUICKBOOKS_TRANSACTION_PAGE_SIZE = 100;
 
 export const QUICKBOOKS_READ_ONLY_REQUEST_TYPES = [
   "CustomerQueryRq",
@@ -188,7 +193,7 @@ export type QuickBooksDesktopReadOnlyClient = ReturnType<typeof createQuickBooks
 export function buildQuickBooksSalesDashboardDiscoveryRequests(
   options: QuickBooksSalesDashboardDiscoveryOptions = {}
 ): QuickBooksDesktopQbxmlRequest[] {
-  const maxReturned = options.maxReturned || 1000;
+  const maxReturned = Math.min(options.maxReturned || 1000, MAX_QUICKBOOKS_TRANSACTION_PAGE_SIZE);
   const txnDateRange = options.txnDateRange;
   const client = createQuickBooksDesktopReadOnlyClient();
 
@@ -221,14 +226,14 @@ export function buildQuickBooksOperationalRefreshRequests(
     client.buildSalesRepQuery(),
     client.buildCustomerQuery({
       requestId: "operational-customers",
-      maxReturned: options.listMaxReturned,
+      maxReturned: Math.min(options.listMaxReturned, MAX_QUICKBOOKS_CUSTOMER_PAGE_SIZE),
       iterator: { mode: "Start" },
       activeStatus: "All",
       modifiedDateRange: options.modifiedDateRange
     }),
     client.buildVendorQuery({
       requestId: "operational-vendors",
-      maxReturned: options.listMaxReturned,
+      maxReturned: Math.min(options.listMaxReturned, MAX_QUICKBOOKS_VENDOR_PAGE_SIZE),
       iterator: { mode: "Start" },
       activeStatus: "All",
       modifiedDateRange: options.modifiedDateRange
@@ -243,10 +248,11 @@ export function buildQuickBooksOperationalRefreshRequests(
 
   for (const window of options.txnDateWindows) {
     const suffix = `${window.from || "open"}:${window.to || "open"}`;
+    const transactionMaxReturned = Math.min(options.maxReturned, MAX_QUICKBOOKS_TRANSACTION_PAGE_SIZE);
     requests.push(
       client.buildInvoiceQuery({
         requestId: `operational-invoices:${suffix}`,
-        maxReturned: options.maxReturned,
+        maxReturned: transactionMaxReturned,
         iterator: { mode: "Start" },
         txnDateRange: window,
         includeLineItems: true,
@@ -254,7 +260,7 @@ export function buildQuickBooksOperationalRefreshRequests(
       }),
       client.buildCreditMemoQuery({
         requestId: `operational-credit-memos:${suffix}`,
-        maxReturned: options.maxReturned,
+        maxReturned: transactionMaxReturned,
         iterator: { mode: "Start" },
         txnDateRange: window,
         includeLineItems: true,
@@ -262,7 +268,7 @@ export function buildQuickBooksOperationalRefreshRequests(
       }),
       client.buildPurchaseOrderQuery({
         requestId: `operational-purchase-orders:${suffix}`,
-        maxReturned: options.maxReturned,
+        maxReturned: transactionMaxReturned,
         iterator: { mode: "Start" },
         txnDateRange: window,
         includeLineItems: true,

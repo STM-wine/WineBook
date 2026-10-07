@@ -30,7 +30,9 @@ const salesRepLookupByInitial = new Map<string, SalesRepLookup>();
 const salesRepLookupByListId = new Map<string, SalesRepLookup>();
 let salesRepLookupHydrated = false;
 const ITEM_WRITE_BATCH_SIZE = 200;
-const ITEM_WRITE_MAX_ATTEMPTS = 3;
+const WRITE_MAX_ATTEMPTS = 3;
+const CUSTOMER_WRITE_BATCH_SIZE = 100;
+const DEFAULT_WRITE_BATCH_SIZE = 200;
 
 type ParsedLine = {
   txn_line_id: string | null;
@@ -579,10 +581,11 @@ async function changedTransactions<T extends { txnId: string; editSequence: stri
 async function upsertRows(supabase: SupabaseClient, table: string, rows: Record<string, unknown>[], onConflict: string) {
   if (rows.length === 0) return;
   const isItemWrite = table === "quickbooks_items" || table === "quickbooks_inventory_snapshots";
-  const batchSize = isItemWrite ? ITEM_WRITE_BATCH_SIZE : rows.length;
+  const isCustomerWrite = table === "quickbooks_customers";
+  const batchSize = isCustomerWrite ? CUSTOMER_WRITE_BATCH_SIZE : isItemWrite ? ITEM_WRITE_BATCH_SIZE : DEFAULT_WRITE_BATCH_SIZE;
   for (let start = 0; start < rows.length; start += batchSize) {
     const batch = rows.slice(start, start + batchSize);
-    const maxAttempts = isItemWrite ? ITEM_WRITE_MAX_ATTEMPTS : 1;
+    const maxAttempts = WRITE_MAX_ATTEMPTS;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const { error } = await supabase.from(table).upsert(batch, { onConflict });
       if (!error) break;

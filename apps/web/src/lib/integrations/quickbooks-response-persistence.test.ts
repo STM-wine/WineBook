@@ -13,6 +13,18 @@ function itemResponse(count: number) {
   ).join("")}</ItemQueryRs></QBXMLMsgsRs>`;
 }
 
+function customerResponse(count: number) {
+  return `<QBXMLMsgsRs><CustomerQueryRs>${Array.from({ length: count }, (_, index) =>
+    `<CustomerRet><ListID>customer-${index}</ListID><FullName>Customer ${index}</FullName></CustomerRet>`
+  ).join("")}</CustomerQueryRs></QBXMLMsgsRs>`;
+}
+
+function vendorResponse(count: number) {
+  return `<QBXMLMsgsRs><VendorQueryRs>${Array.from({ length: count }, (_, index) =>
+    `<VendorRet><ListID>vendor-${index}</ListID><Name>Vendor ${index}</Name><FullName>Vendor ${index}</FullName></VendorRet>`
+  ).join("")}</VendorQueryRs></QBXMLMsgsRs>`;
+}
+
 function input(count: number) {
   return {
     request: { requestType: "ItemQueryRq", qbxmlVersion: "16.0", qbxml: "<ItemQueryRq/>" } as never,
@@ -67,5 +79,53 @@ describe("QuickBooks item response persistence", () => {
     await expect(persistQuickBooksResponse(input(201)))
       .rejects.toThrow("quickbooks_items upsert failed for rows 1-200: statement timeout");
     expect(upsert).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("QuickBooks customer response persistence", () => {
+  it("batches an oversized response and retries only the timed-out batch", async () => {
+    const calls: string[][] = [];
+    createServiceRoleClient.mockReturnValue({
+      from: (table: string) => ({
+        insert: () => ({ select: () => ({ single: async () => ({ data: { id: "raw-1" }, error: null }) }) }),
+        select: () => ({ returns: async () => ({ data: [], error: null }) }),
+        upsert: async (rows: Array<{ list_id: string }>) => {
+          if (table !== "quickbooks_customers") return { error: null };
+          calls.push(rows.map((row) => row.list_id));
+          return { error: calls.length === 2 ? { code: "57014", message: "statement timeout" } : null };
+        }
+      })
+    });
+
+    await persistQuickBooksResponse({
+      ...input(0),
+      request: { requestType: "CustomerQueryRq", qbxmlVersion: "16.0", qbxml: "<CustomerQueryRq/>" } as never,
+      response: customerResponse(240)
+    });
+
+    expect(calls.map((rows) => rows.length)).toEqual([100, 100, 100, 40]);
+    expect(calls[1]).toEqual(calls[2]);
+    expect([...calls[0], ...calls[2], ...calls[3]])
+      .toEqual(Array.from({ length: 240 }, (_, index) => `customer-${index}`));
+  });
+});
+
+describe("other QuickBooks table writes", () => {
+  it("caps vendor upserts even if a response exceeds its requested page size", async () => {
+    const sizes: number[] = [];
+    createServiceRoleClient.mockReturnValue({
+      from: () => ({
+        insert: () => ({ select: () => ({ single: async () => ({ data: { id: "raw-1" }, error: null }) }) }),
+        upsert: async (rows: unknown[]) => { sizes.push(rows.length); return { error: null }; }
+      })
+    });
+
+    await persistQuickBooksResponse({
+      ...input(0),
+      request: { requestType: "VendorQueryRq", qbxmlVersion: "16.0", qbxml: "<VendorQueryRq/>" } as never,
+      response: vendorResponse(450)
+    });
+
+    expect(sizes).toEqual([200, 200, 50]);
   });
 });

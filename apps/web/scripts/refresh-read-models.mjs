@@ -11,7 +11,10 @@ const { buildProductWorkspace } = await loadServerModule('src/lib/product-worksp
 const { buildMarginSnapshot, MARGIN_SNAPSHOT_FORMULA, warmMarginRanges } = await loadServerModule('src/lib/company-dashboard-data.ts');
 const { PRODUCT_FORMULA_VERSION } = await loadServerModule('src/lib/product-workspace-reader.ts');
 const { buildOrderingSnapshot, ORDERING_READ_FORMULA, orderingReadKey } = await loadServerModule('src/lib/ordering-snapshot.ts');
-let lastPrunedAt = 0;
+// A worker restart must not immediately launch the expensive retention query,
+// especially while Postgres is recovering from an outage.
+let lastPrunedAt = Date.now();
+let consecutiveCycleFailures = 0;
 const loop = process.argv.includes('--watch');
 async function request(kind, key, formula, request) {
   const { error } = await supabase.rpc('request_read_model', { p_kind: kind, p_key: key, p_formula: formula, p_request: request }).select("id");
@@ -83,13 +86,26 @@ async function drain() {
   }
 }
 do {
-  if (Date.now() - lastPrunedAt > 3_600_000) {
-    lastPrunedAt = Date.now();
-    // Retention is maintenance work. A timeout must not prevent the worker
-    // from building the snapshots needed by Home and Order Summary.
-    await attemptReadModelPrune(supabase);
+  try {
+    await warm();
+    await drain();
+    consecutiveCycleFailures = 0;
+    if (Date.now() - lastPrunedAt > 3_600_000) {
+      lastPrunedAt = Date.now();
+      // Run retention only after a healthy snapshot cycle.
+      await attemptReadModelPrune(supabase);
+    }
+  } catch (error) {
+    if (!loop) throw error;
+    consecutiveCycleFailures += 1;
+    console.error(JSON.stringify({
+      event: 'read_model_cycle_failed',
+      message: error instanceof Error ? error.message : 'unknown error',
+      consecutiveFailures: consecutiveCycleFailures
+    }));
   }
-  await warm();
-  await drain();
-  if (loop) await new Promise((resolve) => setTimeout(resolve, 5000));
+  if (loop) {
+    const delay = Math.min(60_000, 5_000 * 2 ** Math.min(consecutiveCycleFailures, 4));
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
 } while (loop);

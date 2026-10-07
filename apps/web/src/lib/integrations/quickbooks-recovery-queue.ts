@@ -2,7 +2,10 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  MAX_QUICKBOOKS_CUSTOMER_PAGE_SIZE,
   MAX_QUICKBOOKS_ITEM_PAGE_SIZE,
+  MAX_QUICKBOOKS_TRANSACTION_PAGE_SIZE,
+  MAX_QUICKBOOKS_VENDOR_PAGE_SIZE,
   buildQuickBooksSalesDashboardDiscoveryRequests,
   createQuickBooksDesktopReadOnlyClient,
   type QuickBooksDateRange,
@@ -569,12 +572,13 @@ function groupPendingWeeklyRowsIntoTwoWeekSpans(rows: SourceSyncCheckpointRow[])
 function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlRequest {
   const client = createQuickBooksDesktopReadOnlyClient();
   const maxReturned = getMaxReturned();
+  const transactionMaxReturned = Math.min(maxReturned, MAX_QUICKBOOKS_TRANSACTION_PAGE_SIZE);
   const iterator = iteratorFor(job.cursorData);
   const txnDateRange = dateRangeFor(job);
 
   if (job.resourceName === "quickbooks_sales_reps") return client.buildSalesRepQuery();
-  if (job.resourceName === "quickbooks_customers") return client.buildCustomerQuery({ maxReturned, activeStatus: "All", iterator });
-  if (job.resourceName === "quickbooks_vendors") return client.buildVendorQuery({ maxReturned, activeStatus: "All", iterator });
+  if (job.resourceName === "quickbooks_customers") return client.buildCustomerQuery({ maxReturned: Math.min(maxReturned, MAX_QUICKBOOKS_CUSTOMER_PAGE_SIZE), activeStatus: "All", iterator });
+  if (job.resourceName === "quickbooks_vendors") return client.buildVendorQuery({ maxReturned: Math.min(maxReturned, MAX_QUICKBOOKS_VENDOR_PAGE_SIZE), activeStatus: "All", iterator });
   if (job.resourceName === "quickbooks_items") {
     const itemMaxReturned = Math.min(maxReturned, MAX_QUICKBOOKS_ITEM_PAGE_SIZE);
     if (useInventoryOnlyItemQuery(job)) return client.buildItemInventoryQuery({ maxReturned: itemMaxReturned, activeStatus: "All", iterator });
@@ -583,7 +587,7 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
   if (job.resourceName === "quickbooks_invoices") {
     return client.buildInvoiceQuery({
       requestId: job.checkpointKey,
-      maxReturned,
+      maxReturned: transactionMaxReturned,
       iterator,
       ...(iterator?.mode === "Continue" ? {} : { txnDateRange }),
       includeLineItems: true,
@@ -593,7 +597,7 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
   if (job.resourceName === "quickbooks_credit_memos") {
     return client.buildCreditMemoQuery({
       requestId: job.checkpointKey,
-      maxReturned,
+      maxReturned: transactionMaxReturned,
       iterator,
       ...(iterator?.mode === "Continue" ? {} : { txnDateRange }),
       includeLineItems: true,
@@ -603,7 +607,7 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
   if (job.resourceName === "quickbooks_receive_payments") {
     return client.buildReceivePaymentQuery({
       requestId: job.checkpointKey,
-      maxReturned,
+      maxReturned: transactionMaxReturned,
       iterator,
       ...(iterator?.mode === "Continue" ? {} : { txnDateRange })
     });
@@ -611,7 +615,7 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
   if (job.resourceName === "quickbooks_purchase_orders") {
     return client.buildPurchaseOrderQuery({
       requestId: job.checkpointKey,
-      maxReturned,
+      maxReturned: transactionMaxReturned,
       iterator,
       ...(iterator?.mode === "Continue" ? {} : { txnDateRange }),
       includeLineItems: true,
@@ -620,7 +624,7 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
   }
   return client.buildTxnDeletedQuery({
     requestId: job.checkpointKey,
-    maxReturned,
+    maxReturned: transactionMaxReturned,
     iterator,
     ...(iterator?.mode === "Continue" ? {} : { deletedDateRange: txnDateRange }),
     txnDeletedTypes: ["Invoice", "CreditMemo", "ReceivePayment", "PurchaseOrder", "Bill", "VendorCredit"]

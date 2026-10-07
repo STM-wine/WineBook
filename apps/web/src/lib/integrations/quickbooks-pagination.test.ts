@@ -102,5 +102,14 @@ describe("QuickBooks pagination completeness", () => {
     expect(itemRequest?.qbxml).toContain("<ActiveStatus>All</ActiveStatus>");
     expect(itemRequest?.qbxml).not.toContain("FromModifiedDate");
     expect(itemRequest?.qbxml).not.toContain("ToModifiedDate");
+    const customerRequest = requests.find((request) => request.requestId === "operational-customers");
+    expect(customerRequest?.pagination?.maxReturned).toBe(100);
+    expect(customerRequest?.qbxml).toContain("<MaxReturned>100</MaxReturned>");
+    const vendorRequest = requests.find((request) => request.requestId === "operational-vendors");
+    expect(vendorRequest?.pagination?.maxReturned).toBe(200);
+    for (const request of requests.filter((entry) => /^(Invoice|CreditMemo|PurchaseOrder)QueryRq$/.test(entry.requestType))) {
+      expect(request.pagination?.maxReturned).toBe(100);
+      expect(request.qbxml).toContain("<MaxReturned>100</MaxReturned>");
+    }
   });
 });
