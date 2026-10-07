@@ -30,6 +30,10 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("ordering summary during background preparation", () => {
+  it("loads without showing a progress bar", () => {
+    expect(host.textContent).toContain("Loading Order Summary");
+    expect(host.querySelector('.wine-loader-bar')).toBeNull();
+  });
   it("shows the completed upload in the toolbar while loading, after errors, and after a new snapshot", async () => {
     expect(host.querySelector('nav')?.textContent).toContain("QB Updated Sep 26, 2026, 4:28 PM");
     expect(host.querySelector('nav')?.textContent).toContain("Vinosmith Updated Sep 26, 2026, 7:37 PM");
@@ -54,6 +58,7 @@ describe("ordering summary during background preparation", () => {
     expect(requests[1].signal.aborted).toBe(false);
     await respond(1,202,{pending:true,stage:"Verifying sources"});
     expect(host.textContent).toContain("QuickBooks refresh is still in progress.");
+    expect(host.querySelector('.wine-loader-bar')).toBeNull();
     await act(async()=>vi.advanceTimersByTimeAsync(2000));
     await respond(2,200,{...summary,isStale:false,snapshotId:"updated",warning:null});
     expect(host.textContent).not.toContain("QuickBooks refresh is still in progress.");

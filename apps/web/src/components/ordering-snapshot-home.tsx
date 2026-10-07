@@ -13,7 +13,6 @@ import { defaultOrderingFilters, type OrderingSummaryFilters } from "@/lib/order
 import { OrderSummaryMetrics, SummaryTable } from "./order-summary-overview";
 import type { SupplierGroup } from "@/lib/types";
 import { AppTopbar } from "./app-topbar";
-import { WineLoadingProgress } from "./wine-loading-progress";
 import { OrderDashboard } from "./order-dashboard";
 import { FreightView } from "./freight-view";
 import { unavailableVinosmithExplorerData } from "@/lib/vinosmith-explorer-empty";
@@ -109,8 +108,8 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
       void flushAllApprovals().then(() => router.push(next === "company-dashboard" ? "/" : `/?view=${next}`, { scroll: false })).catch((error) => setError(error.message));
     }} />
     {!data ? <h1>{view === "freight" ? "Freight" : "Order Summary"}</h1> : null}
-    {stage && data ? <p role="status">Updating totals. Showing the last verified summary below.{data.isStale ? " Supplier editing will be available when current data is ready." : ""}</p> : null}
-    {stage ? <WineLoadingProgress inline message={stage} detail="Navigation remains available. Source checks run in the shared worker." /> : null}
+    {stage && !data ? <p role="status">Loading Order Summary…</p> : null}
+    {stage && data?.isStale ? <p role="status">Showing the last verified summary. Supplier editing will be available when current data is ready.</p> : null}
     {notice ? <p role="status">{notice}</p> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
     {data ? <>
@@ -177,7 +176,7 @@ function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageM
       </div>
       <div className="supplier-summary-actions">{onClear ? <button className="ghost-button clear-approvals-button" aria-label={`Clear approved orders for ${supplier}`} disabled={unavailable || clearDisabled} type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); onClear(); }}>Clear approved orders</button> : null}<span>{formatInteger(group.skuCount)} SKUs</span>{unavailable ? <span>Updating</span> : <span className="ordering-supplier-chevron" aria-hidden="true">⌄</span>}</div>
     </summary>
-    {stage ? <WineLoadingProgress inline message={stage} /> : null}
+    {stage && !data ? <p role="status">Loading supplier rows…</p> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
     {data?.latestRun ? <OrderDashboard canManageMarkers={canManageMarkers} embedded summaryFilters={filters} reportRun={data.latestRun} recommendations={data.recommendations}
       approvalEvents={data.approvalEvents} approvalCommitments={data.approvalCommitments} auditActorNames={data.auditActorNames}
