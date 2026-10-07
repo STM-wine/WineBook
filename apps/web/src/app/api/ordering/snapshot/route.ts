@@ -17,7 +17,22 @@ export async function GET(request: Request) {
   const filters = { supplier: params.get("supplierFilter") || "All", brandManager: params.get("tdm") || "All", search: params.get("search") || "", suggestedOnly: params.get("suggestedOnly") === "true" };
   const headers = { "Cache-Control": "no-store" };
   try {
-    // Only the current dependency generation is eligible. No stale ordering action inputs are served.
+    // An open supplier stays usable while the next overview is rebuilt. The
+    // client pins the saved snapshot it displayed; writes still use the live
+    // approval version checks and PO creation rereads current source data.
+    const snapshotId = params.get("snapshot");
+    if (snapshotId && params.has("supplier")) {
+      const { data: saved, error: savedError } = await db.from("read_model_jobs")
+        .select("id,completed_at,source_version")
+        .eq("id", snapshotId).eq("kind", "ordering").eq("status", "completed")
+        .eq("formula_version", ORDERING_READ_FORMULA).maybeSingle();
+      if (savedError) throw new Error(savedError.message);
+      if (!saved) return NextResponse.json({ error: "Saved supplier summary is no longer available. Refresh summaries and retry." }, { status: 404, headers });
+      const { data, error: supplierError } = await db.from("ordering_workspace_suppliers").select("data")
+        .eq("snapshot_id", saved.id).eq("supplier", params.get("supplier")).single();
+      if (supplierError) throw new Error(supplierError.message);
+      return NextResponse.json({ ...data.data, snapshotId: saved.id, sourceVersion: saved.source_version, generatedAt: saved.completed_at }, { headers });
+    }
     const { data: requestedRows, error } = await db.rpc("request_read_model", { p_kind: "ordering", p_key: orderingReadKey(), p_formula: ORDERING_READ_FORMULA, p_request: {} });
     if (error) throw new Error(error.message);
     const requested = Array.isArray(requestedRows) ? requestedRows[0] : requestedRows;
@@ -28,14 +43,12 @@ export async function GET(request: Request) {
     if (completedError) throw new Error(completedError.message);
     const job = completed ? { ...completed, status: "completed" } : requested;
     async function pending(stage: string) {
-      // A previous overview is safe to display as explicitly read-only. Never
-      // return old supplier action inputs, or relabel the old source version.
+      // Keep the last saved overview usable while the next generation builds.
       let previousSummary;
       if (!params.has("supplier")) {
         const { data: previous } = await db.from("read_model_jobs").select("id,result,completed_at,source_version")
           .eq("kind", "ordering").eq("status", "completed")
-          .eq("business_date", requested.business_date).eq("formula_version", ORDERING_READ_FORMULA)
-          .gte("completed_at", new Date(Date.now() - 3_600_000).toISOString())
+          .eq("formula_version", ORDERING_READ_FORMULA)
           .order("completed_at", { ascending: false }).limit(1).maybeSingle();
         if (previous) previousSummary = { ...orderingSummaryResponse(previous.result, filters), snapshotId: previous.id,
           sourceVersion: previous.source_version, generatedAt: previous.completed_at, isStale: true };

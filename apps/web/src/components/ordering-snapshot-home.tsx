@@ -43,7 +43,7 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
     const query = new URLSearchParams({ supplierFilter: queryFilters.supplier, tdm: queryFilters.brandManager,
       search: queryFilters.search, suggestedOnly: String(queryFilters.suggestedOnly) });
     waitForOrdering<OrderingSnapshotSummary>(query.toString(), controller.signal, setStage, (previous) => {
-      if (!controller.signal.aborted) setData((current) => !current || current.isStale ? previous : current);
+      if (!controller.signal.aborted) setData((current) => !current || current.isStale || current.snapshotId === previous.snapshotId ? previous : current);
     })
       .then(async (result) => { await flushAllApprovals(); if (!controller.signal.aborted) { setData(result); setStage(""); performance.mark("winebook:ordering-usable"); } })
       .catch((error) => { if (!controller.signal.aborted) { setError(error.message); setStage(""); } })
@@ -84,7 +84,7 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
     return () => { clearTimeout(timer); void db.removeChannel(channel); };
   }, [data?.reportRun.id]);
   async function createDrafts() {
-    if (!data || data.isStale || creatingDrafts) return;
+    if (!data || creatingDrafts) return;
     setCreatingDrafts(true); setError("");
     try {
       await flushAllApprovals();
@@ -109,7 +109,7 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
     }} />
     {!data ? <h1>{view === "freight" ? "Freight" : "Order Summary"}</h1> : null}
     {stage && !data ? <p role="status">Loading Order Summary…</p> : null}
-    {stage && data?.isStale ? <p role="status">Showing the last verified summary. Supplier editing will be available when current data is ready.</p> : null}
+    {stage && data?.isStale ? <p role="status">Showing the last saved summary while totals refresh.</p> : null}
     {notice ? <p role="status">{notice}</p> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
     {data ? <>
@@ -122,8 +122,8 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
             <h1>Order Summary</h1>
             <p>Review supplier totals below, then expand a supplier to work with its wines and approvals.</p>
           </div><div className="clear-approval-actions">
-            {canClearApprovals ? <button className="ghost-button clear-approvals-button" disabled={creatingDrafts || Boolean(data.isStale) || Boolean(clearScope)} onClick={() => { setNotice(""); setClearScope({ reportRunId: data.reportRun.id }); }} type="button">Clear all approved orders</button> : null}
-            <button className="button" disabled={creatingDrafts || Boolean(data.isStale) || Boolean(clearScope)} onClick={() => void createDrafts()}>{creatingDrafts ? "Creating PO drafts..." : "Create PO Drafts"}</button></div></div>
+            {canClearApprovals ? <button className="ghost-button clear-approvals-button" disabled={creatingDrafts || Boolean(clearScope)} onClick={() => { setNotice(""); setClearScope({ reportRunId: data.reportRun.id }); }} type="button">Clear all approved orders</button> : null}
+            <button className="button" disabled={creatingDrafts || Boolean(clearScope)} onClick={() => void createDrafts()}>{creatingDrafts ? "Creating PO drafts..." : "Create PO Drafts"}</button></div></div>
           <div className="filter-bar">
             <label>Supplier<select value={filters.supplier} onChange={(event) => setFilters({ ...filters, supplier: event.target.value })}>
               <option>All</option>{data.filterOptions?.suppliers.map((supplier) => <option key={supplier}>{supplier}</option>)}
@@ -138,7 +138,7 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
           {!data.groups.length ? <p className="empty-inline">No wines match these filters.</p> : null}
         </section>
         <section className="supplier-stack" aria-label="Supplier workbenches">
-          {data.groups.map((group) => <SupplierExpansion approvalRefresh={approvalRefresh} onClear={canClearApprovals ? () => { setNotice(""); setClearScope({ reportRunId: data.reportRun.id, supplier: group.supplier }); } : undefined} clearDisabled={creatingDrafts || Boolean(clearScope)} canManageMarkers={canManageMarkers} filters={data.filters || defaultOrderingFilters} unavailable={Boolean(data.isStale)} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
+          {data.groups.map((group) => <SupplierExpansion approvalRefresh={approvalRefresh} onClear={canClearApprovals ? () => { setNotice(""); setClearScope({ reportRunId: data.reportRun.id, supplier: group.supplier }); } : undefined} clearDisabled={creatingDrafts || Boolean(clearScope)} canManageMarkers={canManageMarkers} filters={data.filters || defaultOrderingFilters} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
         </section>
       </>}
     </> : null}
@@ -149,7 +149,7 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
   </main>;
 }
 
-function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageMarkers, approvalRefresh, onClear, clearDisabled }: { approvalRefresh: number; onClear?: () => void; clearDisabled: boolean; group: Omit<SupplierGroup, "rows">; filters: OrderingSummaryFilters; snapshotId: string; unavailable: boolean; canManageMarkers: boolean }) {
+function SupplierExpansion({ group, filters, snapshotId, canManageMarkers, approvalRefresh, onClear, clearDisabled }: { approvalRefresh: number; onClear?: () => void; clearDisabled: boolean; group: Omit<SupplierGroup, "rows">; filters: OrderingSummaryFilters; snapshotId: string; canManageMarkers: boolean }) {
   const { supplier } = group;
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<(OrderingPageData & { generatedAt?: string }) | null>(null);
@@ -157,16 +157,16 @@ function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageM
   const [stage, setStage] = useState("");
   const [retry, setRetry] = useState(0);
   useEffect(() => {
-    if (!open || unavailable) return;
+    if (!open) return;
     const controller = new AbortController();
     setError(""); setStage("Loading supplier rows");
-    waitForOrdering<OrderingPageData & { generatedAt?: string }>(`supplier=${encodeURIComponent(supplier)}`, controller.signal, setStage)
+    waitForOrdering<OrderingPageData & { generatedAt?: string }>(`supplier=${encodeURIComponent(supplier)}&snapshot=${encodeURIComponent(snapshotId)}`, controller.signal, setStage)
       .then(async (result) => { await flushAllApprovals(); if (!controller.signal.aborted) { setData(result); setStage(""); } })
       .catch((error) => { if (!controller.signal.aborted) { setError(error.message); setStage(""); } });
     return () => controller.abort();
-  }, [open, supplier, retry, snapshotId, unavailable, approvalRefresh]);
-  return <details className="supplier-section ordering-supplier-section" open={open && !unavailable} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary aria-disabled={unavailable} onClick={(event) => { if (unavailable) event.preventDefault(); }}>
+  }, [open, supplier, retry, snapshotId, approvalRefresh]);
+  return <details className="supplier-section ordering-supplier-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>
       <div className="ordering-supplier-totals">
         <span className="supplier-chip">{supplier}</span>
         <strong>{formatInteger(group.recommendedBottles)} bottles</strong>
@@ -174,7 +174,7 @@ function SupplierExpansion({ group, filters, snapshotId, unavailable, canManageM
         <span className={group.approvedBottles !== 0 ? "supplier-approved-value" : "supplier-approved-value is-empty"}>{formatCurrency(group.approvedValue)} approved</span>
         {group.freeGoodProgramCount > 0 ? <span className="free-goods-chip">{formatInteger(group.freeGoodProgramCount)} free-goods</span> : null}
       </div>
-      <div className="supplier-summary-actions">{onClear ? <button className="ghost-button clear-approvals-button" aria-label={`Clear approved orders for ${supplier}`} disabled={unavailable || clearDisabled} type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); onClear(); }}>Clear approved orders</button> : null}<span>{formatInteger(group.skuCount)} SKUs</span>{unavailable ? <span>Updating</span> : <span className="ordering-supplier-chevron" aria-hidden="true">⌄</span>}</div>
+      <div className="supplier-summary-actions">{onClear ? <button className="ghost-button clear-approvals-button" aria-label={`Clear approved orders for ${supplier}`} disabled={clearDisabled} type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); onClear(); }}>Clear approved orders</button> : null}<span>{formatInteger(group.skuCount)} SKUs</span><span className="ordering-supplier-chevron" aria-hidden="true">⌄</span></div>
     </summary>
     {stage && !data ? <p role="status">Loading supplier rows…</p> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}

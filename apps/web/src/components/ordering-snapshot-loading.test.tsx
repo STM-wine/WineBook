@@ -81,24 +81,27 @@ describe("ordering summary during background preparation", () => {
     expect(requests).toHaveLength(3);
     visibility.mockRestore();
   });
-  it("renders the previous overview without enabling stale supplier editing, then enables current data", async () => {
+  it("keeps supplier rows and PO draft creation available during a background rebuild", async () => {
     await respond(0,202,{pending:true,stage:"Verifying sources",previousSummary:summary});
     expect(host.textContent).toContain("Example supplier");
-    expect(host.textContent).toContain("last verified summary");
+    expect(host.textContent).toContain("last saved summary");
     const disclosure = host.querySelector('details > summary') as HTMLElement;
-    expect(disclosure.getAttribute('aria-disabled')).toBe('true');
-    await act(async () => disclosure.click());
-    expect(requests).toHaveLength(1);
-    expect(host.textContent).not.toContain("Supplier editor");
+    expect(disclosure.getAttribute('aria-disabled')).toBeNull();
+    expect([...host.querySelectorAll('button')].find(b => b.textContent === 'Create PO Drafts')?.disabled).toBe(false);
+    await act(async () => { const details = host.querySelector('details')!; details.open = true; details.dispatchEvent(new Event('toggle')); });
+    expect(requests[1].url).toContain('supplier=Example%20supplier&snapshot=previous');
+    await respond(1,200,{latestRun:{id:'run'},recommendations:[],generatedAt:summary.generatedAt});
+    expect(host.textContent).toContain("Supplier editor");
     await act(async () => vi.advanceTimersByTimeAsync(2000));
-    await respond(1,200,{...summary,snapshotId:"current",isStale:false});
-    expect(host.querySelector('details > summary')?.getAttribute('aria-disabled')).toBe('false');
-    expect(host.textContent).not.toContain("Supplier editing will be available");
-    await act(async () => {
-      const details = host.querySelector('details')!;
-      details.open = true; details.dispatchEvent(new Event('toggle'));
-    });
-    expect(requests[2].url).toContain('supplier=Example%20supplier');
+    await respond(2,200,{...summary,snapshotId:"current",isStale:false});
+    expect(requests[3].url).toContain('supplier=Example%20supplier&snapshot=current');
+  });
+  it("creates PO drafts from live source data while the summary worker is still running", async () => {
+    await respond(0,202,{pending:true,stage:"Verifying sources",previousSummary:summary});
+    await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === 'Create PO Drafts')!.click());
+    expect(requests[1].url).toBe('/api/po-drafts/create');
+    await respond(1,200,{created:['draft'],updated:[],skipped:[],errors:[]});
+    expect(host.textContent).not.toContain('Could not create PO drafts');
   });
   it("searches unopened suppliers globally and passes the selected TDM and wine query to an opened editor", async () => {
     await respond(0,200,{...summary,isStale:false});
