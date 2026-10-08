@@ -48,3 +48,6 @@ jobs:
             --delivery-end-date "$DELIVERY_END_DATE" \
             --sync-type daily_refresh \
             --require-supabase
+
+      - name: Add new suppliers from matching QuickBooks and Vinosmith setup
+        run: python scripts/reconcile_new_suppliers.py --apply

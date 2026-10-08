@@ -74,6 +74,12 @@ Production environment variables:
 - `GITHUB_WORKFLOW_REF=main`
 - `VINOSMITH_SOURCE_MIRROR_WORKFLOW_ID=vinosmith-source-mirror-refresh.yml`
 
+The Vinosmith source mirror workflow also runs `scripts/reconcile_new_suppliers.py --apply`.
+It adds a supplier when one active QuickBooks vendor has an exact name match to one
+active Vinosmith producer or importer. Existing supplier logistics are preserved;
+similar names and conflicting vendor mappings are held for manual review in the
+workflow log. New suppliers appear in Settings > Supplier Settings after the refresh.
+
 Required Supabase Auth redirect URLs:
 
 - `https://stmhq.com/auth/callback`
