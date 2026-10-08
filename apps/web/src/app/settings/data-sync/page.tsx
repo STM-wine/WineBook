@@ -151,9 +151,10 @@ async function loadVinosmithSyncData() {
   const checkpoints = checkpointsResult.data || [];
   const latestCompleted = runs.find((run) => run.status === "completed") || null;
   const latestRun = runs[0] || null;
-  const [quickBooksItemCheckpoint, latestVinosmithCheckpoint] = await Promise.all([
+  const [quickBooksItemCheckpoint, latestVinosmithCheckpoint, latestVinosmithInventoryCheckpoint] = await Promise.all([
     fetchLatestSourceCheckpoint("quickbooks_desktop", "quickbooks_items"),
-    fetchLatestSourceCheckpoint("vinosmith", "wines")
+    fetchLatestSourceCheckpoint("vinosmith", "wines"),
+    fetchLatestSourceCheckpoint("vinosmith", "inventory")
   ]);
   const [workflowState, orderingReadiness] = await Promise.all([
     fetchVinosmithPlumbingWorkflows(supabase, productHealth),
@@ -166,6 +167,7 @@ async function loadVinosmithSyncData() {
     latestRun,
     latestCompleted,
     latestVinosmithCheckpoint,
+    latestVinosmithInventoryCheckpoint,
     quickBooksItemCheckpoint,
     productHealth,
     orderingReadiness,
@@ -464,7 +466,7 @@ export default async function DataSyncSettingsPage({ searchParams }: { searchPar
             <div className="settings-panel-header">
               <div>
                 <h2>Vinosmith</h2>
-                <p className="muted">Refresh queues the daily ingest workflow. Vinosmith Plumbing stays read-only and does not change ordering logic.</p>
+                <p className="muted">Refresh queues the Vinosmith wine, price, and inventory mirror workflow. Vinosmith Plumbing stays read-only and does not change ordering logic.</p>
               </div>
               <VinosmithResyncButton configured={refreshConfigured} />
             </div>
@@ -490,6 +492,11 @@ export default async function DataSyncSettingsPage({ searchParams }: { searchPar
                 <strong>Vinosmith wine fixes</strong>
                 <span>Rows like MW000542 clear only after the Vinosmith wines mirror updates.</span>
                 <b>Current proof: {dateTimeLabel(data.latestVinosmithCheckpoint?.last_synced_at)}</b>
+              </article>
+              <article>
+                <strong>Vinosmith quantities</strong>
+                <span>The source inventory mirror updates when the Vinosmith refresh workflow completes.</span>
+                <b>Current proof: {dateTimeLabel(data.latestVinosmithInventoryCheckpoint?.last_synced_at)}</b>
               </article>
             </div>
           </section>

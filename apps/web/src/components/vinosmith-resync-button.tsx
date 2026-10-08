@@ -13,7 +13,7 @@ export function VinosmithResyncButton({ configured }: { configured: boolean }) {
   const [state, setState] = useState<SyncState>({
     status: configured ? "idle" : "error",
     message: configured
-      ? "Queues a fresh Vinosmith ingest workflow."
+      ? "Queues a fresh Vinosmith wine, price, and quantity refresh."
       : "Set GITHUB_WORKFLOW_DISPATCH_TOKEN in .env.local for local dev and in Render for production."
   });
 
@@ -28,7 +28,7 @@ export function VinosmithResyncButton({ configured }: { configured: boolean }) {
       }
       setState({
         status: "success",
-        message: `Refresh queued for ${result.reportDate}.`,
+        message: `Vinosmith source refresh queued for ${result.reportDate}.`,
         workflowUrl: result.workflowUrl
       });
     });

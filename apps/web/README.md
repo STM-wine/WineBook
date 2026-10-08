@@ -22,7 +22,7 @@ Required environment variables:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_SITE_URL`
-- `GITHUB_WORKFLOW_DISPATCH_TOKEN` with Actions write access for the ingest workflow dispatch
+- `GITHUB_WORKFLOW_DISPATCH_TOKEN` with Actions write access for the Vinosmith source mirror workflow dispatch
 - `SUPABASE_SERVICE_ROLE_KEY` for trusted server-side settings and user administration
 
 Never expose `SUPABASE_SERVICE_ROLE_KEY` through a `NEXT_PUBLIC_` variable or browser code. It is
@@ -72,7 +72,7 @@ Production environment variables:
 - `GITHUB_WORKFLOW_DISPATCH_TOKEN=<GitHub fine-grained token with Actions write access>`
 - `GITHUB_WORKFLOW_REPO=STM-wine/WineBook`
 - `GITHUB_WORKFLOW_REF=main`
-- `VINOSMITH_INGEST_WORKFLOW_ID=daily-vinosmith-ingest.yml`
+- `VINOSMITH_SOURCE_MIRROR_WORKFLOW_ID=vinosmith-source-mirror-refresh.yml`
 
 Required Supabase Auth redirect URLs:
 

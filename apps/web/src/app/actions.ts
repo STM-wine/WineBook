@@ -60,8 +60,8 @@ const VALID_VENDOR_CLASSIFICATIONS = new Set<QuickBooksVendorClassification>([
 ]);
 const DEFAULT_GITHUB_WORKFLOW_REPO = "STM-wine/WineBook";
 const DEFAULT_GITHUB_WORKFLOW_REF = "main";
-const DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID = "daily-vinosmith-ingest.yml";
-const REPORT_TIMEZONE = "America/Denver";
+const DEFAULT_VINOSMITH_SOURCE_MIRROR_WORKFLOW_ID = "vinosmith-source-mirror-refresh.yml";
+const REPORT_TIMEZONE = "America/Phoenix";
 
 function revalidateDashboardData() {
   revalidateTag(CACHE_TAGS.dashboard);
@@ -160,18 +160,20 @@ export async function refreshVinosmithReports(): Promise<RefreshVinosmithReports
     const token = process.env.GITHUB_WORKFLOW_DISPATCH_TOKEN;
     const repo = process.env.GITHUB_WORKFLOW_REPO || DEFAULT_GITHUB_WORKFLOW_REPO;
     const ref = process.env.GITHUB_WORKFLOW_REF || DEFAULT_GITHUB_WORKFLOW_REF;
-    const workflowId = process.env.VINOSMITH_INGEST_WORKFLOW_ID || DEFAULT_VINOSMITH_INGEST_WORKFLOW_ID;
+    const workflowId = process.env.VINOSMITH_SOURCE_MIRROR_WORKFLOW_ID || DEFAULT_VINOSMITH_SOURCE_MIRROR_WORKFLOW_ID;
     const reportDate = reportDateForTimezone();
-    if (!token) return { ok: false, error: "Legacy report refresh is not configured." };
+    if (!token) return { ok: false, error: "Vinosmith refresh is not configured. Set GITHUB_WORKFLOW_DISPATCH_TOKEN on Render." };
     const response = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${workflowId}/dispatches`, {
       method: "POST",
       headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-GitHub-Api-Version": "2022-11-28" },
-      body: JSON.stringify({ ref, inputs: { report_date: reportDate, force: "true" } })
+      body: JSON.stringify({ ref })
     });
-    if (!response.ok) return { ok: false, error: `GitHub could not queue the legacy report refresh (${response.status}).` };
+    if (response.status === 401) return { ok: false, error: "GitHub rejected the Vinosmith refresh credential (401). The Render GITHUB_WORKFLOW_DISPATCH_TOKEN needs to be replaced." };
+    if (response.status === 403) return { ok: false, error: "GitHub denied the Vinosmith refresh (403). Check that the dispatch token has Actions write access to this repository." };
+    if (!response.ok) return { ok: false, error: `GitHub could not queue the Vinosmith source refresh (${response.status}).` };
     return { ok: true, reportDate, workflowUrl: `https://github.com/${repo}/actions/workflows/${workflowId}` };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Could not queue legacy report refresh." };
+    return { ok: false, error: error instanceof Error ? error.message : "Could not queue Vinosmith source refresh." };
   }
 }
 
