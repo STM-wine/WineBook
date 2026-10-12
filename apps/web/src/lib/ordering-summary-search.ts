@@ -1,23 +1,34 @@
-import type { DashboardMetrics, Recommendation, SupplierGroup } from './types';
+import type { DashboardMetrics, Recommendation, SupplierGroup, SupplierLogistics } from './types';
 import { activeFreeGoodsForRow, asNumber, fuzzyTextMatches, rowApprovedEstimate, rowOutstandingApprovedQty, rowSuggestedValue, uniqueSorted } from './order-data';
 
 export type OrderingSummaryFilters = { supplier: string; brandManager: string; search: string; suggestedOnly: boolean };
 export const defaultOrderingFilters: OrderingSummaryFilters = { supplier: 'All', brandManager: 'All', search: '', suggestedOnly: false };
 export type OrderingSearchRow = {
   supplier: string; hasSupplier: boolean; tdm: string; text: string[]; urgent: number; low: number;
-  recommended: number; approved: number; suggestedValue: number; approvedValue: number; freeGoods: number;
+  recommended: number; approved: number; suggestedValue: number; approvedValue: number; freeGoods: number; skuCount?: number;
 };
-export function buildOrderingSearchIndex(rows: Recommendation[]): OrderingSearchRow[] {
-  return rows.map((row) => {
+export function buildOrderingSearchIndex(rows: Recommendation[], suppliers: SupplierLogistics[] = []): OrderingSearchRow[] {
+  const itemRows = rows.map((row) => {
     const approved = rowOutstandingApprovedQty(row);
     return { supplier: row.supplier_name?.trim() || 'Unknown Supplier', hasSupplier: Boolean(row.supplier_name?.trim()), tdm: row.brand_manager?.trim() || '',
       text: [row.product_name || '', row.planning_sku || '', row.product_code || '', row.supplier_name || '', row.brand_manager || ''],
       urgent: Number(row.risk_level === 'High' || row.reorder_status === 'URGENT'),
       low: Number(row.risk_level === 'Medium' || row.reorder_status === 'LOW'),
       recommended: asNumber(row.recommended_qty_rounded), approved,
-      suggestedValue: rowSuggestedValue(row), approvedValue: approved !== 0 ? rowApprovedEstimate(row) : 0,
+      suggestedValue: rowSuggestedValue(row), approvedValue: approved !== 0 ? rowApprovedEstimate(row) : 0, skuCount: 1,
       freeGoods: activeFreeGoodsForRow(row).length };
   });
+  const populated = new Set(itemRows.map((row) => row.supplier.toLocaleLowerCase()));
+  const emptySuppliers = suppliers.flatMap((supplier) => {
+    const name = supplier.name?.trim();
+    const key = name?.toLocaleLowerCase();
+    if (supplier.active === false || !name || !key || populated.has(key)) return [];
+    populated.add(key);
+    return [{ supplier: name, hasSupplier: true, tdm: supplier.tdm?.trim() || '', text: [name, supplier.tdm || ''],
+      urgent: 0, low: 0, recommended: 0, approved: 0, suggestedValue: 0, approvedValue: 0, freeGoods: 0,
+      skuCount: 0 } satisfies OrderingSearchRow];
+  });
+  return [...itemRows, ...emptySuppliers];
 }
 export function filterOrderingSummary(index: OrderingSearchRow[], filters: OrderingSummaryFilters) {
   const groups = new Map<string, Omit<SupplierGroup, 'rows'>>();
@@ -29,7 +40,7 @@ export function filterOrderingSummary(index: OrderingSearchRow[], filters: Order
     if (filters.suggestedOnly && row.recommended <= 0) continue;
     if (!fuzzyTextMatches(filters.search, row.text)) continue;
     const group = groups.get(row.supplier) || { supplier: row.supplier, skuCount: 0, urgentCount: 0, freeGoodProgramCount: 0, recommendedBottles: 0, approvedBottles: 0, suggestedValue: 0, approvedValue: 0 };
-    group.skuCount++; group.urgentCount += row.urgent; group.freeGoodProgramCount += row.freeGoods;
+    group.skuCount += row.skuCount ?? 1; group.urgentCount += row.urgent; group.freeGoodProgramCount += row.freeGoods;
     group.recommendedBottles += row.recommended; group.approvedBottles += row.approved;
     group.suggestedValue += row.suggestedValue; group.approvedValue += row.approvedValue;
     groups.set(row.supplier, group);

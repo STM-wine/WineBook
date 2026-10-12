@@ -3,7 +3,7 @@ import { buildOrderingSearchIndex } from "./ordering-summary-search";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadOrderingPageData, type OrderingPageData } from "./ordering-page-data";
 import { applyApprovalCommitments, applySupplierTdmAssignments, enrichRecommendationsWithSupplierCatalogPrograms,
-  mergeSupplierCatalogRows, applySupplierTargetWeeks, buildMetrics, buildSupplierGroups } from "./order-data";
+  mergeSupplierCatalogRows, applySupplierTargetWeeks, buildMetrics, buildSupplierGroups, includeEmptySupplierGroups } from "./order-data";
 import { applyDiContainerRecommendations } from "./di-planning";
 import { buildFreightReadModel } from "./freight-read-model";
 export function orderingReadKey(now = Date.now()) { return `active:${Math.floor(now / 300_000)}`; }
@@ -16,7 +16,8 @@ export async function buildOrderingSnapshot(db: SupabaseClient) {
     mergeSupplierCatalogRows(data.recommendations, data.supplierCatalogWines, data.latestRun.id), data.supplierCatalogWines
   ), data.suppliers), data.approvalCommitments);
   const display = applySupplierTargetWeeks(applyDiContainerRecommendations(base), {});
-  const groups = buildSupplierGroups(display);
+  const activeSuppliers = data.suppliers.filter((supplier) => supplier.active !== false);
+  const groups = includeEmptySupplierGroups(buildSupplierGroups(display), activeSuppliers.map((supplier) => supplier.name));
   const suppliers = groups.map((group) => {
     const recommendations = data.recommendations.filter((row) => (row.supplier_name?.trim() || "Unknown Supplier") === group.supplier);
     const catalog = data.supplierCatalogWines.filter((wine) => wine.supplier_name?.trim() === group.supplier);
@@ -26,7 +27,7 @@ export async function buildOrderingSnapshot(db: SupabaseClient) {
       approvalCommitments: data.approvalCommitments.filter((event) => ids.has(event.source_id)) } satisfies OrderingPageData };
   });
   return {
-    result: { searchIndex: buildOrderingSearchIndex(display), groups: groups.map(({ rows, ...summary }) => summary), metrics: buildMetrics(display),
+    result: { searchIndex: buildOrderingSearchIndex(display, activeSuppliers), groups: groups.map(({ rows, ...summary }) => summary), metrics: buildMetrics(display),
       freight: buildFreightReadModel(display, data.suppliers), reportRun: data.latestRun,
       warning: data.orderingDataWarning, salesReferenceDate: data.salesReferenceDate,
       quickBooksLastSyncAt: data.quickBooksLastSyncAt, vinosmithLastSyncAt: data.vinosmithLastSyncAt,

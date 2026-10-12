@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Recommendation } from './types';
-import { buildMetrics, buildSupplierGroups, filterRecommendations } from './order-data';
+import type { Recommendation, SupplierLogistics } from './types';
+import { buildMetrics, buildSupplierGroups, filterRecommendations, includeEmptySupplierGroups } from './order-data';
 import { buildOrderingSearchIndex, defaultOrderingFilters, filterOrderingSummary, orderingSummaryResponse } from './ordering-summary-search';
 const rows = [
   { product_name: 'Domaine Vacheron Sancerre Blanc', product_code: 'VC25001', planning_sku: 'vc-white', supplier_name: 'Supplier A', brand_manager: 'ROJO', recommended_qty_rounded: 12, approved_qty: 6, recommendation_status: 'approved', fob: 10, order_cost: 120, risk_level: 'High' },
@@ -26,5 +26,28 @@ describe('global ordering summary search', () => {
     expect(result.groups[0].skuCount).toBe(1);
     expect(result).not.toHaveProperty('searchIndex');
     expect(result.groups[0]).not.toHaveProperty('rows');
+  });
+  it('reads saved summaries generated before zero-SKU suppliers were supported', () => {
+    const legacy = buildOrderingSearchIndex(rows).map(({ skuCount: _skuCount, ...row }) => row);
+    expect(filterOrderingSummary(legacy, defaultOrderingFilters).groups).toEqual(
+      buildSupplierGroups(rows).map(({ rows: _rows, ...group }) => group)
+    );
+  });
+  it('shows a new active supplier with no wines as a zero-SKU workbench', () => {
+    const suppliers = [
+      { name: 'Talley Vineyards', tdm: 'Bethany', active: true },
+      { name: 'Supplier A', tdm: 'ROJO', active: true },
+      { name: 'Inactive Supplier', tdm: null, active: false }
+    ] as SupplierLogistics[];
+    const index = buildOrderingSearchIndex(rows, suppliers);
+    const summary = filterOrderingSummary(index, { ...defaultOrderingFilters, supplier: 'Talley Vineyards' });
+    expect(summary.groups).toEqual([{ supplier: 'Talley Vineyards', skuCount: 0, urgentCount: 0,
+      freeGoodProgramCount: 0, recommendedBottles: 0, approvedBottles: 0, suggestedValue: 0, approvedValue: 0 }]);
+    expect(summary.filterOptions.suppliers).toContain('Talley Vineyards');
+    expect(summary.filterOptions.suppliers).not.toContain('Inactive Supplier');
+    expect(filterOrderingSummary(index, { ...defaultOrderingFilters, brandManager: 'Bethany' }).groups).toEqual(summary.groups);
+    expect(filterOrderingSummary(index, { ...defaultOrderingFilters, suggestedOnly: true }).groups).not.toContainEqual(summary.groups[0]);
+    expect(includeEmptySupplierGroups(buildSupplierGroups(rows), suppliers.filter((row) => row.active).map((row) => row.name))
+      .find((group) => group.supplier === 'Talley Vineyards')?.rows).toEqual([]);
   });
 });

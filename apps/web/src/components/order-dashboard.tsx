@@ -59,6 +59,7 @@ import {
   buildSupplierGroups,
   enrichRecommendationsWithSupplierCatalogPrograms,
   filterRecommendations,
+  includeEmptySupplierGroups,
   mergeSupplierCatalogRows,
   removeSupplierCatalogWineFromWorkbench,
   upsertSupplierCatalogWineInWorkbench,
@@ -90,6 +91,7 @@ function ViewLoading() {
 
 type Props = {
   embedded?: boolean;
+  workbenchSupplierName?: string;
   summaryFilters?: import("@/lib/ordering-summary-search").OrderingSummaryFilters;
   reportRun: ReportRun;
   recommendations: Recommendation[];
@@ -173,6 +175,7 @@ export function OrderDashboard({
   canViewSettings,
   canManageMarkers,
   embedded = false,
+  workbenchSupplierName,
   summaryFilters
 }: Props) {
   const router = useRouter();
@@ -491,8 +494,9 @@ export function OrderDashboard({
   );
   const metrics = useMemo(() => buildMetrics(visibleRecommendations), [visibleRecommendations]);
   const supplierGroups = useMemo(
-    () => sortSupplierGroups(buildSupplierGroups(visibleRecommendations), supplierSort),
-    [supplierSort, visibleRecommendations]
+    () => sortSupplierGroups(includeEmptySupplierGroups(buildSupplierGroups(visibleRecommendations),
+      embedded && workbenchSupplierName ? [workbenchSupplierName] : []), supplierSort),
+    [embedded, supplierSort, visibleRecommendations, workbenchSupplierName]
   );
   const allSupplierGroups = useMemo(() => buildSupplierGroups(displayRows), [displayRows]);
   const dataUpdatedAt = formatSourceUpdatedAt(vinosmithLastSyncAt || reportRun.completed_at);
@@ -1158,6 +1162,9 @@ export function OrderDashboard({
           suggestedOnly={suggestedOnly}
           supplier={supplier}
           supplierGroups={supplierGroups}
+          workbenchSupplierTdm={embedded && workbenchSupplierName
+            ? suppliers.find((row) => row.name === workbenchSupplierName)?.tdm || ""
+            : ""}
           supplierSort={supplierSort}
           supplierOptions={supplierOptions}
           supplierCatalogWines={supplierCatalogWines}

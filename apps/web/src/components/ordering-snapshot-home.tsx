@@ -178,7 +178,7 @@ function SupplierExpansion({ group, filters, snapshotId, canManageMarkers, appro
     </summary>
     {stage && !data ? <p role="status">Loading supplier rows…</p> : null}
     {error ? <p role="alert">{error} <button onClick={() => setRetry((n) => n + 1)}>Retry</button></p> : null}
-    {data?.latestRun ? <OrderDashboard canManageMarkers={canManageMarkers} embedded summaryFilters={filters} reportRun={data.latestRun} recommendations={data.recommendations}
+    {data?.latestRun ? <OrderDashboard canManageMarkers={canManageMarkers} embedded workbenchSupplierName={supplier} summaryFilters={filters} reportRun={data.latestRun} recommendations={data.recommendations}
       approvalEvents={data.approvalEvents} approvalCommitments={data.approvalCommitments} auditActorNames={data.auditActorNames}
       poDrafts={[]} suppliers={data.suppliers} supplierCatalogWines={data.supplierCatalogWines}
       wineRequests={[]} priceChangeEvents={[]} quickBooksSupplierMatches={[]} initialView="order-review"

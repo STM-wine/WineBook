@@ -696,6 +696,19 @@ export function buildSupplierGroups(rows: Recommendation[]): SupplierGroup[] {
     .sort((a, b) => b.suggestedValue - a.suggestedValue || a.supplier.localeCompare(b.supplier));
 }
 
+export function includeEmptySupplierGroups(groups: SupplierGroup[], supplierNames: string[]): SupplierGroup[] {
+  const seen = new Set(groups.map((group) => group.supplier.trim().toLocaleLowerCase()));
+  const empty = supplierNames.flatMap((name) => {
+    const supplier = name.trim();
+    const key = supplier.toLocaleLowerCase();
+    if (!supplier || seen.has(key)) return [];
+    seen.add(key);
+    return [{ supplier, rows: [], skuCount: 0, urgentCount: 0, freeGoodProgramCount: 0,
+      recommendedBottles: 0, approvedBottles: 0, suggestedValue: 0, approvedValue: 0 } satisfies SupplierGroup];
+  });
+  return [...groups, ...empty].sort((a, b) => b.suggestedValue - a.suggestedValue || a.supplier.localeCompare(b.supplier));
+}
+
 export function sortSupplierGroups(groups: SupplierGroup[], sortMode: SupplierGroupSortMode): SupplierGroup[] {
   const sorted = [...groups];
 

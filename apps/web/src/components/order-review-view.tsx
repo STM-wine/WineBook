@@ -57,6 +57,7 @@ export function OrderReviewView({
   suggestedOnly,
   supplier,
   supplierGroups,
+  workbenchSupplierTdm,
   supplierSort,
   supplierOptions,
   supplierCatalogWines,
@@ -99,6 +100,7 @@ export function OrderReviewView({
   suggestedOnly: boolean;
   supplier: string;
   supplierGroups: SupplierGroup[];
+  workbenchSupplierTdm?: string;
   supplierSort: SupplierGroupSortMode;
   supplierOptions: string[];
   supplierCatalogWines: SupplierCatalogWine[];
@@ -263,6 +265,7 @@ export function OrderReviewView({
           <SupplierSection
             key={group.supplier}
             group={group}
+            fallbackTdm={workbenchSupplierTdm}
             inline={workbenchOnly}
             expandAll={expandAll || supplier !== "All"}
             onSaveApproval={onSaveApproval}
@@ -324,6 +327,7 @@ export function OrderReviewView({
 function SupplierSection({
   inline = false,
   group,
+  fallbackTdm,
   expandAll,
   onSaveApproval,
   onSaveOrderPath,
@@ -344,6 +348,7 @@ function SupplierSection({
   salesReferenceDate
 }: {
   group: SupplierGroup;
+  fallbackTdm?: string;
   inline?: boolean;
   expandAll: boolean;
   onSaveApproval: (row: Recommendation, approved: boolean, qtyOverride?: number) => void;
@@ -370,7 +375,7 @@ function SupplierSection({
   const [showInactive, setShowInactive] = useState(false);
   const [inactiveSearch, setInactiveSearch] = useState("");
   const tdmNames = Array.from(new Set(group.rows.map((row) => row.brand_manager?.trim() || "").filter(Boolean)));
-  const tdmLabel = tdmNames.length === 0 ? "Unassigned" : tdmNames.length === 1 ? tdmNames[0] : "Multiple";
+  const tdmLabel = tdmNames.length === 0 ? fallbackTdm || "Unassigned" : tdmNames.length === 1 ? tdmNames[0] : "Multiple";
   const hasApprovedOrders = group.approvedBottles !== 0;
   const approvedPercent = group.suggestedValue > 0 ? Math.round((group.approvedValue / group.suggestedValue) * 100) : 0;
   const freeGoodsRows = group.rows
@@ -470,6 +475,7 @@ function SupplierSection({
             onRestore={onRestoreInactiveWine}
             isPending={isPending}
           />
+          {group.skuCount === 0 ? <p className="empty-inline">No wines yet. Use Add Wine to create the first product.</p> : null}
           <WorkbenchGrid
             rows={group.rows}
             showForecast={showForecast}
