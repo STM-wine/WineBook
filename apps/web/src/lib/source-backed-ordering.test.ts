@@ -4,12 +4,14 @@ import { MANUAL_RECOMMENDATION_PAUSE_REASON } from "./replenishment-policy";
 import {
   applyCurrentOrderingPolicies,
   applyCurrentVintageSafeguards,
+  aggregateVintageFamilySales,
   buildSourceBackedOrderingRows,
   calculateSourceRecommendation,
   carryForwardBuyerState,
   quickBooksPackSize,
   recommendationAllowsSourceAssignmentRefresh,
   refreshSourceBackedRecommendation,
+  salesForCurrentVintage,
   type SourceOrderingMarker,
   type SourceQuickBooksItem,
   type SourceSalesWindows
@@ -186,6 +188,9 @@ describe("source-backed ordering rows", () => {
     expect(older).toMatchObject({ replenishment_policy: "Core", recommended_qty_rounded: 0 });
     expect(older.diagnostics).toMatchObject({ older_vintage_suppressed: true, latest_active_vintage: 2025 });
     expect(newest.replenishment_policy).toBe("Core");
+    expect(newest.last_30_day_sales).toBe(200);
+    expect(newest.weekly_velocity).toBeCloseTo(200 / 4.345);
+    expect(older.last_30_day_sales).toBe(100);
     expect(newest.recommended_qty_rounded).toBeGreaterThan(0);
     expect(newest.diagnostics).toMatchObject({ policy_source: "family_inherited", is_latest_active_vintage: true });
 
@@ -197,6 +202,7 @@ describe("source-backed ordering rows", () => {
     });
     expect(manual.rows.find((row) => row.product_code === "PAV000029")!).toMatchObject({
       replenishment_policy: "Limited Core",
+      last_30_day_sales: 200,
       diagnostics: expect.objectContaining({ policy_source: "item_manual_override" })
     });
 
@@ -207,6 +213,62 @@ describe("source-backed ordering rows", () => {
     expect(inactiveNewest.rows).toHaveLength(1);
     expect(inactiveNewest.rows[0].recommended_qty_rounded).toBeGreaterThan(0);
     expect(inactiveNewest.rows[0].diagnostics).toMatchObject({ is_latest_active_vintage: true, latest_active_vintage: 2024 });
+  });
+
+  it("rolls matching vintages into Core and Select run rates only, with exact wine and pack identity", () => {
+    const salesByCode = new Map([
+      ["IBG000001", sales({ last30: 93, last60: 120, prior30: 27 })],
+      ["IBG000020", sales({ last30: 60, last60: 60, prior30: 0 })],
+      ["IBG000021", sales({ last30: 40 })],
+      ["OTHER001", sales({ last30: 500 })]
+    ]);
+    const familySales = aggregateVintageFamilySales([
+      { code: "IBG000001", familyKey: "rascal pinot noir|12/750ml", vintage: 2023 },
+      { code: "IBG000020", familyKey: "rascal pinot noir|12/750ml", vintage: 2024 },
+      { code: "IBG000021", familyKey: "rascal pinot noir|6/750ml", vintage: 2024 },
+      { code: "OTHER001", familyKey: "other pinot noir|12/750ml", vintage: 2023 },
+      { code: "IBG000001", familyKey: "rascal pinot noir|12/750ml", vintage: 2023 }
+    ], salesByCode);
+    const current = (policy: "Core" | "Limited Core" | "Limited") => salesForCurrentVintage(
+      "IBG000020", "rascal pinot noir|12/750ml", 2024, policy, true, familySales, salesByCode
+    );
+    expect(current("Core")).toMatchObject({ last30: 153, last60: 180, prior30: 27 });
+    expect(current("Limited Core").last30).toBe(153);
+    expect(current("Limited").last30).toBe(60);
+    expect(salesForCurrentVintage("IBG000001", "rascal pinot noir|12/750ml", 2023, "Core", false, familySales, salesByCode).last30).toBe(93);
+    expect(salesForCurrentVintage("IBG000021", "rascal pinot noir|6/750ml", 2024, "Core", true, familySales, salesByCode).last30).toBe(40);
+    expect(salesForCurrentVintage("IBG000020", "rascal pinot noir|12/750ml", null, "Core", true, familySales, salesByCode).last30).toBe(60);
+  });
+
+  it("keeps sales from an inactive prior vintage when the Vinosmith name spelling changed", () => {
+    const older = qb({
+      list_id: "old", name: "GI000853", full_name: "GI000853", is_active: false,
+      sales_desc: "Rose Fiore Moscato d'Asti 2024 12/750ml",
+      custom_fields: { Vintage: "2024", "PACK SIZE": "12" }
+    });
+    const newer = qb({
+      list_id: "new", name: "GI001013", full_name: "GI001013",
+      sales_desc: "Rose Fiore Moscato d'Asti 2025 12/750ml",
+      custom_fields: { Vintage: "2025", "PACK SIZE": "12" }
+    });
+    const result = build({
+      quickBooksItems: [older, newer],
+      vinosmithWines: [
+        { wine_id: "old-wine", code: "GI000853", name: "Rosa Fiore Moscato d'Asti 2024 12/750ml", vintage: "2024", importer_name: "Fallback Supplier" },
+        { wine_id: "new-wine", code: "GI001013", name: "Rose Fiore Moscato d'Asti 2025 12/750ml", vintage: "2025", importer_name: "Fallback Supplier" }
+      ],
+      markers: [{ item_code: "GI001013", quickbooks_item_list_id: "new", is_btg: false, is_core: true,
+        replenishment_policy: "Limited Core", policy_family_key: "rose fiore moscato d'asti", family_default_policy: "Limited Core" }],
+      salesByCode: new Map([
+        ["GI000853", sales({ last30: 0, next30Ly: 2532 })],
+        ["GI001013", sales({ last30: 2424, next30Ly: 0 })]
+      ])
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      product_code: "GI001013", replenishment_policy: "Limited Core",
+      last_30_day_sales: 2424, next_30_day_forecast: 2532
+    });
   });
 
   it("recomputes current policy and vintage safeguards for saved Truchard rows", () => {
@@ -222,7 +284,7 @@ describe("source-backed ordering rows", () => {
         replenishment_policy: "Core",
         policy_family_key: "truchard vineyards pinot noir",
         recommended_qty_rounded: 204,
-        diagnostics: { ...base.diagnostics, automatic_recommendation: true }
+        diagnostics: { ...base.diagnostics, vintage: 2023, automatic_recommendation: true }
       },
       {
         ...base,
@@ -234,7 +296,7 @@ describe("source-backed ordering rows", () => {
         replenishment_policy: "Special Order",
         policy_family_key: "truchard vineyards pinot noir",
         recommended_qty_rounded: 0,
-        diagnostics: { ...base.diagnostics, automatic_recommendation: false }
+        diagnostics: { ...base.diagnostics, vintage: 2024, automatic_recommendation: false }
       }
     ] as Recommendation[];
     const markers = [
@@ -444,6 +506,8 @@ describe("recommendation math and buyer state", () => {
       last_30_day_sales: 50,
       last_60_day_sales: 70,
       last_90_day_sales: 90,
+      prior_30_day_sales: 20,
+      next_60_days_ly_sales: currentSales.next60Ly,
       true_available: 18,
       on_order: 6,
       recommended_qty_rounded: expected.recommended_qty_rounded

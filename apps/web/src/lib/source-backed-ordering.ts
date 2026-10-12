@@ -4,13 +4,14 @@ import type { Recommendation } from "./types";
 import {
   recommendationIsAutomatic,
   recommendationsAreSuppressed,
+  policySupportsAutomaticRecommendations,
   replenishmentPolicy,
   replenishmentPolicyFamilyKey,
   type ReplenishmentPolicy
 } from "./replenishment-policy";
 
 export const ORDERING_SOURCE = "quickbooks_vinosmith_stem";
-export const ORDERING_BUILDER_VERSION = 8;
+export const ORDERING_BUILDER_VERSION = 9;
 
 export type SourceQuickBooksItem = {
   list_id: string;
@@ -262,6 +263,10 @@ export function buildSourceBackedOrderingRows(input: {
     const code = normalizeOrderingItemCode(quickBooksItemCode(item));
     return item.is_active !== false && item.item_type?.toLowerCase() === "inventory" && isLikelyOrderingItemCode(code);
   });
+  const vintageSalesByFamily = aggregateVintageFamilySales(input.quickBooksItems.map((item) => ({
+    code: quickBooksItemCode(item),
+    ...orderingVintageIdentity(item, winesByCode.get(normalizeOrderingItemCode(quickBooksItemCode(item))) || null)
+  })), input.salesByCode);
   const latestActiveVintageByFamily = new Map<string, number>();
   for (const item of activeItems) {
     const productCode = normalizeOrderingItemCode(quickBooksItemCode(item));
@@ -320,7 +325,10 @@ export function buildSourceBackedOrderingRows(input: {
       : vintageIdentity.vintage === latestActiveVintage;
     const olderVintageSuppressed = !isLatestActiveVintage;
     const automaticRecommendation = recommendationIsAutomatic(policy, recommendationsSuppressed) && isLatestActiveVintage;
-    const sales = input.salesByCode.get(productCode) || emptySalesWindows();
+    const sales = salesForCurrentVintage(
+      productCode, vintageIdentity.familyKey, vintageIdentity.vintage, policy, isLatestActiveVintage,
+      vintageSalesByFamily, input.salesByCode
+    );
     const pack = quickBooksPackSize(item, input.settings.default_pack_size);
     const purchaseCost = nullableNumber(item.purchase_cost);
     const averageCost = nullableNumber(item.average_cost);
@@ -465,9 +473,12 @@ export function buildSourceBackedOrderingRows(input: {
   };
 }
 
-function orderingVintageIdentity(item: SourceQuickBooksItem, wine: SourceVinosmithWine | null) {
-  const name = wine?.name?.trim()
-    || item.sales_desc?.trim()
+export function orderingVintageIdentity(
+  item: Pick<SourceQuickBooksItem, "name" | "full_name" | "sales_desc" | "purchase_desc" | "custom_fields">,
+  wine: SourceVinosmithWine | null
+) {
+  const name = item.sales_desc?.trim()
+    || wine?.name?.trim()
     || item.purchase_desc?.trim()
     || item.full_name?.trim()
     || item.name?.trim()
@@ -596,7 +607,7 @@ export function applyCurrentVintageSafeguards(rows: Recommendation[]): Recommend
   });
 }
 
-function recommendationVintageIdentity(row: Recommendation) {
+export function recommendationVintageIdentity(row: Recommendation) {
   const name = row.product_name?.trim() || row.planning_sku?.trim() || "";
   const diagnosticVintage = String(row.diagnostics?.vintage || "").trim();
   const vintageText = /^(?:19|20)\d{2}$/.test(diagnosticVintage)
@@ -611,6 +622,45 @@ function recommendationVintageIdentity(row: Recommendation) {
     vintage,
     familyKey: policyFamilyKey ? `${policyFamilyKey}|${format}` : ""
   };
+}
+
+export function aggregateVintageFamilySales(
+  identities: Array<{ code: string | null | undefined; familyKey: string; vintage: number | null }>,
+  salesByCode: ReadonlyMap<string, SourceSalesWindows>
+) {
+  const families = new Map<string, { sales: SourceSalesWindows; vintages: Set<number>; codes: Set<string> }>();
+  for (const identity of identities) {
+    const code = normalizeOrderingItemCode(identity.code);
+    if (!code || !identity.familyKey || identity.vintage === null) continue;
+    const family = families.get(identity.familyKey) || {
+      sales: emptySalesWindows(), vintages: new Set<number>(), codes: new Set<string>()
+    };
+    if (family.codes.has(code)) continue;
+    family.codes.add(code);
+    family.vintages.add(identity.vintage);
+    const itemSales = salesByCode.get(code) || emptySalesWindows();
+    for (const window of ["last30", "last60", "last90", "prior30", "next30Ly", "next60Ly", "next90Ly"] as const) {
+      family.sales[window] += itemSales[window];
+    }
+    families.set(identity.familyKey, family);
+  }
+  return families;
+}
+
+export function salesForCurrentVintage(
+  code: string,
+  familyKey: string,
+  vintage: number | null,
+  policy: ReplenishmentPolicy,
+  isLatestActiveVintage: boolean,
+  familySales: ReturnType<typeof aggregateVintageFamilySales>,
+  salesByCode: ReadonlyMap<string, SourceSalesWindows>
+) {
+  const rollup = familySales.get(familyKey);
+  return vintage !== null && policySupportsAutomaticRecommendations(policy) && isLatestActiveVintage
+    && rollup && rollup.vintages.size > 1
+    ? rollup.sales
+    : salesByCode.get(normalizeOrderingItemCode(code)) || emptySalesWindows();
 }
 
 export function calculateSourceRecommendation(input: {
@@ -678,9 +728,11 @@ export function refreshSourceBackedRecommendation(
     last_30_day_sales: facts.sales.last30,
     last_60_day_sales: facts.sales.last60,
     last_90_day_sales: facts.sales.last90,
+    prior_30_day_sales: facts.sales.prior30,
     next_30_day_forecast: facts.sales.next30Ly,
     next_60_day_forecast: facts.sales.next60Ly,
     next_90_day_forecast: facts.sales.next90Ly,
+    next_60_days_ly_sales: facts.sales.next60Ly,
     weekly_velocity: weeklyVelocity,
     velocity_trend_pct: velocityTrendPct,
     velocity_trend_label: velocityTrendLabel(velocityTrendPct, facts.sales.last30, facts.sales.prior30),

@@ -5,9 +5,13 @@ import { DEFAULT_ORDERING_LOGIC_SETTINGS, normalizeOrderingLogicSettings, type O
 import {
   applyCurrentOrderingPolicies,
   applyCurrentVintageSafeguards,
+  aggregateVintageFamilySales,
   buildSourceBackedOrderingRows,
   emptySalesWindows,
   normalizeOrderingItemCode,
+  orderingVintageIdentity,
+  recommendationVintageIdentity,
+  salesForCurrentVintage,
   recommendationAllowsSourceAssignmentRefresh,
   refreshSourceBackedRecommendation,
   type SourceBackedOrderingData,
@@ -21,6 +25,7 @@ import {
 } from "./source-backed-ordering";
 import type { Recommendation } from "./types";
 import { applyVinosmithAvailability } from "./order-data";
+import { replenishmentPolicy } from "./replenishment-policy";
 import { fetchQuickBooksItemSalesWindows } from "./supabase/quickbooks-item-sales-windows";
 import { fetchLiveVinosmithAvailability, type LatestVinosmithAvailability } from "./supabase/vinosmith-availability";
 import { fetchAllExact } from "./supabase/fetch-all-exact";
@@ -180,14 +185,14 @@ export async function fetchCurrentOrderingOverlay(
   const [configuration, onOrderSnapshot, activeItems, vendorMappings, suppliers, markers, commitments, salesRows] = await Promise.all([
     fetchPublishedOrderingConfiguration(supabase),
     fetchLatestCompletedQuickBooksOnOrderSnapshot(supabase),
-    fetchAllExact<{ list_id: string; raw_data: Record<string, unknown> | null }>("active QuickBooks inventory identities", (from, to) => supabase
+    fetchAllExact<HistoricalSalesItem & { raw_data: Record<string, unknown> | null }>("active QuickBooks inventory identities", (from, to) => supabase
       .from("quickbooks_items")
-      .select("list_id,raw_data", { count: "exact" })
+      .select("list_id,name,full_name,sales_desc,purchase_desc,custom_fields,raw_data", { count: "exact" })
       .eq("is_active", true)
       .eq("item_type", "Inventory")
       .order("list_id", { ascending: true })
       .range(from, to)
-      .returns<Array<{ list_id: string; raw_data: Record<string, unknown> | null }>>() as never),
+      .returns<Array<HistoricalSalesItem & { raw_data: Record<string, unknown> | null }>>() as never),
     fetchAll<SourceVendorMapping>(supabase, "quickbooks_vendor_mappings", "quickbooks_vendor_list_id,supplier_id,vendor_classification", "quickbooks_vendor_list_id"),
     fetchAll<SourceSupplier>(supabase, "suppliers", "id,name,eta_days,pick_up_location,freight_forwarder,order_frequency,tdm,trucking_cost_per_bottle,active", "name"),
     fetchOrderingMarkers(supabase),
@@ -213,8 +218,29 @@ export async function fetchCurrentOrderingOverlay(
     const code = normalizeOrderingItemCode(row.product_code);
     if (listId && code) itemCodeByListId.set(listId, code);
   }
+  // Sales windows include older and inactive QB vintages absent from the
+  // saved ordering run. Resolve only those item identities so Core/Select
+  // family demand remains complete without rereading the entire QB table.
+  const missingSalesItemIds = Array.from(new Set(salesRows
+    .map((row) => row.item_list_id || "")
+    .filter((id) => id && !itemCodeByListId.has(id))));
+  type HistoricalSalesItem = Pick<SourceQuickBooksItem,
+    "list_id" | "name" | "full_name" | "sales_desc" | "purchase_desc" | "custom_fields">;
+  const historicalSalesItems: HistoricalSalesItem[] = [];
+  for (let start = 0; start < missingSalesItemIds.length; start += 200) {
+    const { data, error } = await supabase.from("quickbooks_items")
+      .select("list_id,name,full_name,sales_desc,purchase_desc,custom_fields")
+      .in("list_id", missingSalesItemIds.slice(start, start + 200))
+      .returns<HistoricalSalesItem[]>();
+    if (error) throw new Error(error.message);
+    historicalSalesItems.push(...(data || []));
+  }
+  for (const item of historicalSalesItems) {
+    itemCodeByListId.set(item.list_id, normalizeOrderingItemCode(itemCode({ ...item, list_id: item.list_id })));
+  }
   const onOrderByListId = new Map(onOrderSnapshot.map((row) => [row.item_list_id, numeric(row.quantity_on_order)]));
   const activeItemListIds = new Set(activeItems.map((item) => item.list_id));
+  const activeItemById = new Map(activeItems.map((item) => [item.list_id, item]));
   const preferredVendorByItemListId = new Map(activeItems.flatMap((item) => {
     const reference = preferredVendorReference(item.raw_data);
     return reference ? [[item.list_id, reference] as const] : [];
@@ -250,9 +276,31 @@ export async function fetchCurrentOrderingOverlay(
   const currentRecommendations = applyCurrentVintageSafeguards(
     applyCurrentOrderingPolicies(activeRecommendations, markers, businessDate)
   );
+  const vintageSalesByFamily = aggregateVintageFamilySales([
+    ...recommendations.map((row) => {
+      const listId = String(row.diagnostics?.quickbooks_item_list_id || "").trim();
+      const item = activeItemById.get(listId);
+      return {
+        code: row.product_code,
+        ...(item ? orderingVintageIdentity(item, null) : recommendationVintageIdentity(row))
+      };
+    }),
+    ...historicalSalesItems.map((item) => ({
+      code: itemCode({ ...item, list_id: item.list_id }),
+      ...orderingVintageIdentity(item, null)
+    }))
+  ], salesByCode);
   const rows = currentRecommendations.map((row) => {
     const code = normalizeOrderingItemCode(row.product_code);
     const listId = String(row.diagnostics?.quickbooks_item_list_id || "").trim();
+    const currentItem = activeItemById.get(listId);
+    const vintageIdentity = currentItem
+      ? orderingVintageIdentity(currentItem, null)
+      : recommendationVintageIdentity(row);
+    const sales = salesForCurrentVintage(
+      code, vintageIdentity.familyKey, vintageIdentity.vintage, replenishmentPolicy(row.replenishment_policy),
+      row.diagnostics?.is_latest_active_vintage !== false, vintageSalesByFamily, salesByCode
+    );
     const preferredVendor = preferredVendorByItemListId.get(listId) || null;
     const currentSupplier = preferredVendor ? supplierByVendorId.get(preferredVendor.id) || null : null;
     const refreshSupplier = currentSupplier && preferredVendor && recommendationAllowsSourceAssignmentRefresh(
@@ -273,7 +321,7 @@ export async function fetchCurrentOrderingOverlay(
         }
       : undefined;
     return refreshSourceBackedRecommendation(row, {
-      sales: salesByCode.get(code) || emptySalesWindows(),
+      sales,
       trueAvailable: numeric(availability.byProductCode.get(code)),
       onOrder: Math.max(0, onOrderByListId.get(listId) || 0),
       quickBooksItemAsOf: quickBooksAsOf,

@@ -39,11 +39,13 @@ export type Recommendation = {
   last_30_day_sales: number | string | null;
   last_60_day_sales: number | string | null;
   last_90_day_sales: number | string | null;
+  prior_30_day_sales?: number | string | null;
   last_365_day_sales?: number | string | null;
   last_12_month_sales?: number | string | null;
   next_30_day_forecast: number | string | null;
   next_60_day_forecast: number | string | null;
   next_90_day_forecast: number | string | null;
+  next_60_days_ly_sales?: number | string | null;
   weekly_velocity: number | string | null;
   velocity_trend_pct: number | string | null;
   velocity_trend_label: string | null;
