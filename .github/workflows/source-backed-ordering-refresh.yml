@@ -10,16 +10,21 @@ concurrency:
 jobs:
   refresh-ordering-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      VINOSMITH_API_TOKEN: ${{ secrets.VINOSMITH_API_TOKEN }}
     steps:
-      - name: Generate QuickBooks + Vinosmith Available + Stem ordering run
-        env:
-          ORDERING_REFRESH_URL: https://winebook.onrender.com
-          ORDERING_REFRESH_SECRET: ${{ secrets.ORDERING_REFRESH_SECRET }}
-        run: |
-          test -n "$ORDERING_REFRESH_URL"
-          test -n "$ORDERING_REFRESH_SECRET"
-          curl --fail-with-body --silent --show-error \
-            --request POST \
-            --header "Authorization: Bearer $ORDERING_REFRESH_SECRET" \
-            "$ORDERING_REFRESH_URL/api/ordering-runs/refresh"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --include=dev --ignore-scripts
+      - name: Generate QuickBooks and Vinosmith ordering run
+        run: node scripts/refresh-source-backed-ordering.mjs

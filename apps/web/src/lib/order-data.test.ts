@@ -187,6 +187,23 @@ describe("supplier catalog recommendation merge", () => {
     expect(mergeSupplierCatalogRows([], [linked], "run-1")).toEqual([]);
   });
 
+  it("shows live Vinosmith availability for a linked item carried by the catalog before the next source run", () => {
+    const linked = catalogWine({
+      quickbooks_item_id: "qb-rascal-2024",
+      quickbooks_item_number: "IBG000020",
+      quickbooks_sync_status: "linked",
+      workbench_items: [{
+        id: "workbench-rascal-2024", report_run_id: "run-1", supplier_catalog_wine_id: "catalog-1",
+        recommendation_status: "rejected", recommended_qty: 12, approved_qty: 0, order_path: "stateside",
+        active: true, notes: null, created_by: null, created_at: "2026-10-12T18:52:13Z",
+        updated_at: "2026-10-12T18:52:13Z"
+      }]
+    });
+    const merged = mergeSupplierCatalogRows([], [linked], "run-1");
+    const [current] = applyVinosmithAvailability(merged, new Map([["IBG000020", 168]]));
+    expect(current).toMatchObject({ product_code: "IBG000020", true_available: 168 });
+  });
+
   it("keeps an unlinked New Item visible until an authoritative QuickBooks SKU exists", () => {
     expect(mergeSupplierCatalogRows([], [catalogWine()], "run-1")).toHaveLength(1);
   });

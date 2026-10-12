@@ -11,10 +11,12 @@ const { buildProductWorkspace } = await loadServerModule('src/lib/product-worksp
 const { buildMarginSnapshot, MARGIN_SNAPSHOT_FORMULA, warmMarginRanges } = await loadServerModule('src/lib/company-dashboard-data.ts');
 const { PRODUCT_FORMULA_VERSION } = await loadServerModule('src/lib/product-workspace-reader.ts');
 const { buildOrderingSnapshot, ORDERING_READ_FORMULA, orderingReadKey } = await loadServerModule('src/lib/ordering-snapshot.ts');
+const { refreshOrderingRunAfterSourceSync } = await loadServerModule('src/lib/ordering-source-refresh.ts');
 // A worker restart must not immediately launch the expensive retention query,
 // especially while Postgres is recovering from an outage.
 let lastPrunedAt = Date.now();
 let consecutiveCycleFailures = 0;
+let lastOrderingSourceSignature = null;
 const loop = process.argv.includes('--watch');
 async function request(kind, key, formula, request) {
   const { error } = await supabase.rpc('request_read_model', { p_kind: kind, p_key: key, p_formula: formula, p_request: request }).select("id");
@@ -47,6 +49,9 @@ async function drain() {
         continue;
       }
       if (job.kind === 'ordering') {
+        const sourceRefresh = await refreshOrderingRunAfterSourceSync(supabase, lastOrderingSourceSignature);
+        lastOrderingSourceSignature = sourceRefresh.signature;
+        if (sourceRefresh.refreshed) console.log(JSON.stringify({ event: 'ordering_source_refresh', ...sourceRefresh }));
         const snapshot = await buildOrderingSnapshot(supabase);
         const published = await publishOrderingSnapshot(supabase, job, snapshot);
         console.log(JSON.stringify({ kind: job.kind, published, durationMs: Math.round(performance.now() - start) }));

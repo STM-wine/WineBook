@@ -288,11 +288,16 @@ export async function loadOrderingPageData(view: ActiveView, serviceRoleSupabase
     supplierCatalogWines || [],
     latestRun.id
   );
+  // Linked catalog rows can exist before the next source run includes their
+  // QuickBooks item. Give those rows the same live Vinosmith availability.
+  const currentRecommendations = vinosmithAvailabilityResult.data
+    ? applyVinosmithAvailability(mergedRecommendations, vinosmithAvailabilityResult.data.byProductCode)
+    : mergedRecommendations;
   const recommendations = (sourceBackedRun && !currentSourceOverlayResult.rows
     ? []
     : sourceBackedRun
-      ? mergedRecommendations
-      : applyQuickBooksOnOrderToRecommendations(mergedRecommendations, quickBooksOnOrderItems)
+      ? currentRecommendations
+      : applyQuickBooksOnOrderToRecommendations(currentRecommendations, quickBooksOnOrderItems)
   ).sort((a, b) => Number(b.last_30_day_sales || 0) - Number(a.last_30_day_sales || 0));
   const orderingWarnings = [
     configuredOrderingSourceMode === "legacy"
