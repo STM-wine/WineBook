@@ -6,6 +6,7 @@ import {
   DEFAULT_SUPPLIER_TARGET_WEEKS,
   filterRecommendations,
   formatVelocityTrend,
+  includeCatalogApprovalSources,
   mergeSupplierCatalogRows,
   removeSupplierCatalogWineFromWorkbench,
   upsertSupplierCatalogWineInWorkbench,
@@ -90,6 +91,43 @@ function catalogWine(overrides: Partial<SupplierCatalogWine> = {}): SupplierCata
 }
 
 describe("supplier catalog recommendation merge", () => {
+  it("keeps a saved catalog approval in the PO manifest after QuickBooks becomes authoritative", () => {
+    const wine = catalogWine({
+      quickbooks_item_number: "VC25001",
+      quickbooks_sync_status: "linked",
+      workbench_items: [{
+        id: "workbench-1", report_run_id: "run-1", supplier_catalog_wine_id: "catalog-1",
+        recommendation_status: "edited", recommended_qty: 6, approved_qty: 12,
+        order_path: "stateside", active: true, notes: null, created_by: null,
+        created_at: "2026-10-13T00:00:00Z", updated_at: "2026-10-13T00:00:00Z", lock_version: 3
+      }]
+    });
+    const visibleRows = mergeSupplierCatalogRows([recommendation()], [wine], "run-1");
+    expect(visibleRows).toHaveLength(1);
+    const approvalRows = includeCatalogApprovalSources(visibleRows, [wine], "run-1", new Set());
+    expect(approvalRows).toHaveLength(2);
+    expect(approvalRows[1]).toMatchObject({
+      supplier_catalog_workbench_item_id: "workbench-1",
+      recommendation_status: "edited", approved_qty: 12, lock_version: 3
+    });
+    expect(includeCatalogApprovalSources(approvalRows, [wine], "run-1", new Set())).toEqual(approvalRows);
+  });
+
+  it("keeps an already entered catalog source in the PO manifest without reapproving it", () => {
+    const wine = catalogWine({
+      quickbooks_item_number: "VC25001", quickbooks_sync_status: "linked",
+      workbench_items: [{
+        id: "workbench-1", report_run_id: "run-1", supplier_catalog_wine_id: "catalog-1",
+        recommendation_status: "rejected", recommended_qty: 6, approved_qty: 0,
+        order_path: "stateside", active: true, notes: null, created_by: null,
+        created_at: "2026-10-13T00:00:00Z", updated_at: "2026-10-13T00:00:00Z", lock_version: 4
+      }]
+    });
+    const visibleRows = mergeSupplierCatalogRows([recommendation()], [wine], "run-1");
+    expect(includeCatalogApprovalSources(visibleRows, [wine], "run-1", new Set())).toEqual(visibleRows);
+    expect(includeCatalogApprovalSources(visibleRows, [wine], "run-1", new Set(["catalog_workbench:workbench-1"])))
+      .toHaveLength(2);
+  });
   it("recognizes the real item by exact supplier, display name, and pack even when SKUs differ", () => {
     expect(recommendationMatchesCatalogWine(recommendation(), catalogWine())).toBe(true);
     expect(mergeSupplierCatalogRows([recommendation()], [catalogWine()], "run-1")).toHaveLength(1);

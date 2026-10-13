@@ -434,6 +434,28 @@ export function mergeSupplierCatalogRows(recommendations: Recommendation[], cata
   return [...recommendations, ...manualRows];
 }
 
+// PO validation counts saved catalog approvals and commitments even after a
+// matching QuickBooks item replaces the catalog row in the visible workbench.
+// Keep those original sources in the draft manifest so the atomic approval
+// check can verify them and subtract quantities already entered on a PO.
+export function includeCatalogApprovalSources(
+  rows: Recommendation[],
+  catalogWines: SupplierCatalogWine[],
+  reportRunId: string,
+  committedSources: ReadonlySet<string>
+): Recommendation[] {
+  const presentWorkbenchIds = new Set(rows.map((row) => row.supplier_catalog_workbench_item_id).filter(Boolean));
+  const missingRows = catalogWines.flatMap((wine) => {
+    const workbenchItem = workbenchItemForRun(wine, reportRunId);
+    if (!workbenchItem || presentWorkbenchIds.has(workbenchItem.id)) return [];
+    const approved = ["approved", "edited"].includes(workbenchItem.recommendation_status) && asNumber(workbenchItem.approved_qty) > 0;
+    if (!approved && !committedSources.has(`catalog_workbench:${workbenchItem.id}`)) return [];
+    presentWorkbenchIds.add(workbenchItem.id);
+    return [supplierCatalogWineToRecommendation(wine, reportRunId)];
+  });
+  return [...rows, ...missingRows];
+}
+
 function hasAuthoritativeQuickBooksIdentity(wine: SupplierCatalogWine): boolean {
   if (!["linked", "created"].includes(wine.quickbooks_sync_status || "")) return false;
   return Boolean(wine.quickbooks_item_number?.trim() || wine.quickbooks_item_id?.trim());

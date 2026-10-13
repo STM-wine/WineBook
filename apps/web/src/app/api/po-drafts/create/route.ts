@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { applyDiContainerRecommendations, diCapacityViolations, orderPath } from "@/lib/di-planning";
 import { CACHE_TAGS } from "@/lib/cache-tags";
-import { applyVinosmithAvailability, asNumber, formatInteger, mergeSupplierCatalogRows } from "@/lib/order-data";
+import { applyVinosmithAvailability, asNumber, formatInteger, includeCatalogApprovalSources, mergeSupplierCatalogRows } from "@/lib/order-data";
 import { fetchAllRecommendationsForRun, fetchQuickBooksOnOrderItems } from "@/lib/supabase/recommendations";
 import { fetchAllExact } from "@/lib/supabase/fetch-all-exact";
 import { applyQuickBooksOnOrderToRecommendations } from "@/lib/quickbooks-on-order";
@@ -135,7 +135,8 @@ export async function POST(request: Request) {
     .returns<Array<{ source_type: string; source_id: string }>>();
   if (commitmentError) return NextResponse.json({ error: commitmentError.message }, { status: 500 });
   const committedSources = new Set((commitmentRows || []).map((row) => `${row.source_type}:${row.source_id}`));
-  const poRows = applyDiContainerRecommendations(recommendations).filter((row) => {
+  const approvalRows = includeCatalogApprovalSources(recommendations, supplierCatalogWines, reportRunId, committedSources);
+  const poRows = applyDiContainerRecommendations(approvalRows).filter((row) => {
     let source;
     try {
       source = approvalSource(row);
