@@ -49,6 +49,30 @@ const GP_WARNING_PERSISTED = "Gross profit margin is below 28%.";
 const GP_WARNING_THRESHOLD = MINIMUM_GP_MARGIN;
 const PACK_RE = /^\s*(\d+)\s*[/xX]\s*([0-9.]+)\s*(ml|mL|ML|l|L)\s*$/;
 
+export function belowStandardMarginLevels<T extends {
+  active?: boolean | null;
+  bottle_price?: number | null;
+  calculated_gp_margin?: number | null;
+  is_frontline?: boolean | null;
+}>(wine: {
+  pricing_model?: string | null;
+  frontline_bottle_price?: number | null;
+  gross_profit_margin?: number | null;
+  price_levels?: T[] | null;
+}): T[] {
+  if (wine.pricing_model === "grw_broker") return [];
+  const levels = wine.price_levels || [];
+  const below = levels.filter((level) =>
+    level.active !== false && Number(level.bottle_price || 0) > 0 && Number(level.calculated_gp_margin || 0) < MINIMUM_GP_MARGIN
+  );
+  const frontline = levels.find((level) => level.active !== false && level.is_frontline);
+  if (frontline && Number(wine.frontline_bottle_price || 0) > 0 &&
+    Number(wine.gross_profit_margin || 0) < MINIMUM_GP_MARGIN && !below.includes(frontline)) {
+    below.push(frontline);
+  }
+  return below;
+}
+
 export type AvailabilityStatus = (typeof AVAILABILITY_STATUSES)[number];
 export type ConversionStatus = (typeof CONVERSION_STATUSES)[number];
 export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   balancePriceLevel,
+  belowStandardMarginLevels,
   bestPriceFromFrontline,
   buildSupplierCatalogWine,
   calculateBestPrice,
@@ -16,6 +17,31 @@ import {
 import type { SupplierCatalogWine } from "./types";
 
 describe("production Supplier Hub pricing", () => {
+  it("identifies only active controllable prices below the standard margin", () => {
+    const wine = buildSupplierCatalogWine({
+      supplierName: "Test Supplier",
+      producer: "Test Producer",
+      wineName: "Pinot Noir",
+      vintage: "2026",
+      packSize: 12,
+      bottleSize: "750ml",
+      fobBottle: 10.3,
+      laidInPerBottle: 0,
+      availabilityStatus: "available",
+      conversionStatus: "net_new_product"
+    });
+    expect(belowStandardMarginLevels(wine).map((level) => level.name)).toEqual(["Best"]);
+    expect(belowStandardMarginLevels({ ...wine, pricing_model: "grw_broker" })).toEqual([]);
+    expect(belowStandardMarginLevels({
+      ...wine,
+      price_levels: wine.price_levels.map((level) => level.is_best ? { ...level, active: false } : level)
+    })).toEqual([]);
+    expect(belowStandardMarginLevels({
+      ...wine,
+      gross_profit_margin: 0.2,
+      price_levels: wine.price_levels.map((level) => level.is_frontline ? { ...level, calculated_gp_margin: 0.3 } : level)
+    }).map((level) => level.name)).toEqual(["Best", "Frontline"]);
+  });
   it("does not treat legacy NEW placeholders as official QuickBooks products", () => {
     expect(hasOfficialQuickBooksProduct({
       product_lifecycle_status: "pending_product_creation",

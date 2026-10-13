@@ -17,8 +17,8 @@ import {
   buildPlanningSku,
   buildOrderingWorkflowPayload,
   buildSupplierCatalogWine,
+  belowStandardMarginLevels,
   decisionToRequestStatus,
-  MINIMUM_GP_MARGIN,
   type ApprovalDecision,
   type AvailabilityStatus,
   type ConversionStatus
@@ -622,6 +622,7 @@ export async function saveSupplierCatalogWine(input: {
   priorPricingCostFingerprint?: string | null;
   pricingCalculatedAt?: string | null;
   frontlineOnly?: boolean;
+  belowStandardMarginConfirmed?: boolean;
   expectedLockVersion?: number | null;
   idempotencyKey?: string | null;
 }) {
@@ -682,7 +683,7 @@ export async function saveSupplierCatalogWine(input: {
     throw new Error("Free goods quantities cannot be negative.");
   }
 
-  const { supabase } = await requireWriteAccess();
+  const { supabase, user } = await requireWriteAccess();
   let canonicalSupplierName = input.supplierName;
   if (input.supplierId) {
     const { data: supplier, error: supplierError } = await supabase
@@ -726,9 +727,7 @@ export async function saveSupplierCatalogWine(input: {
     frontlineOnly: Boolean(input.frontlineOnly),
     expectedLockVersion: input.expectedLockVersion
   });
-  const lowGpLevels = (payload.price_levels || []).filter(
-    (level) => level.active !== false && Number(level.bottle_price || 0) > 0 && Number(level.calculated_gp_margin || 0) < MINIMUM_GP_MARGIN
-  );
+  const belowMarginLevels = belowStandardMarginLevels(payload);
   const frontlineLevel = (payload.price_levels || []).find((level) => level.is_frontline);
   const bestLevel = input.frontlineOnly
     ? null
@@ -736,15 +735,11 @@ export async function saveSupplierCatalogWine(input: {
   if (frontlineLevel && bestLevel && Number(frontlineLevel.bottle_price || 0) <= Number(bestLevel.bottle_price || 0)) {
     throw new Error("Frontline must be higher than Best. Reset either level to the suggestion or enter a valid manual ladder.");
   }
-  const requiredOverrides = [
-    ...lowGpLevels,
-    ...(Number(payload.gross_profit_margin || 0) < MINIMUM_GP_MARGIN && frontlineLevel && !lowGpLevels.includes(frontlineLevel) ? [frontlineLevel] : [])
-  ];
-  if (input.pricingModel !== "grw_broker" && requiredOverrides.some((level) =>
-    level.approval_decision !== "approve_price" || !level.override_reason || !level.approval_owner || !VALID_APPROVERS.has(level.approval_owner)
-  )) {
-      throw new Error("Any controllable price below 28% requires Approve price, an override reason, and an owner/approver.");
+  if (input.pricingModel !== "grw_broker" && belowMarginLevels.length > 0 && input.belowStandardMarginConfirmed !== true) {
+    throw new Error("Confirm the below-standard margin before saving this wine.");
   }
+  const confirmedAt = new Date().toISOString();
+  const confirmedBy = user.email || user.id;
   const { data: latestRun, error: latestRunError } = await supabase
     .from("report_runs")
     .select("id")
@@ -763,31 +758,34 @@ export async function saveSupplierCatalogWine(input: {
     price_change_reason: input.priceChangeReason || "Manual catalog update",
     ...(input.existingCatalogWineId ? { id: input.existingCatalogWineId } : {})
   };
-  const priceLevels = (payloadPriceLevels || []).map((level) => ({
-    name: level.name,
-    bottle_price: level.bottle_price,
-    depletion_allowance: level.depletion_allowance,
-    target_gp_margin: level.target_gp_margin,
-    calculated_gp_margin: level.calculated_gp_margin,
-    is_frontline: level.is_frontline,
-    is_best: level.is_best,
-    display_order: level.display_order,
-    active: level.active,
-    source_system: level.source_system,
-    source_id: level.source_id,
-    solve_for: level.solve_for || "gp",
-    approval_decision: level.approval_decision,
-    suggested_price: level.suggested_price,
-    suggested_gp_margin: level.suggested_gp_margin,
-    da_alternative: level.da_alternative,
-    final_approved_price: level.final_approved_price,
-    final_approved_da: level.final_approved_da,
-    final_gp_margin: level.final_gp_margin,
-    is_manual_override: Boolean(level.is_manual_override),
-    override_reason: level.override_reason,
-    approval_owner: level.approval_owner,
-    decision_timestamp: level.approval_decision ? (level.decision_timestamp || new Date().toISOString()) : null
-  }));
+  const priceLevels = (payloadPriceLevels || []).map((level) => {
+    const buyerConfirmed = input.pricingModel !== "grw_broker" && belowMarginLevels.includes(level);
+    return {
+      name: level.name,
+      bottle_price: level.bottle_price,
+      depletion_allowance: level.depletion_allowance,
+      target_gp_margin: level.target_gp_margin,
+      calculated_gp_margin: level.calculated_gp_margin,
+      is_frontline: level.is_frontline,
+      is_best: level.is_best,
+      display_order: level.display_order,
+      active: level.active,
+      source_system: level.source_system,
+      source_id: level.source_id,
+      solve_for: level.solve_for || "gp",
+      approval_decision: buyerConfirmed ? "approve_price" : level.approval_decision,
+      suggested_price: level.suggested_price,
+      suggested_gp_margin: level.suggested_gp_margin,
+      da_alternative: level.da_alternative,
+      final_approved_price: buyerConfirmed ? level.bottle_price : level.final_approved_price,
+      final_approved_da: buyerConfirmed ? level.depletion_allowance : level.final_approved_da,
+      final_gp_margin: buyerConfirmed ? level.calculated_gp_margin : level.final_gp_margin,
+      is_manual_override: Boolean(level.is_manual_override),
+      override_reason: buyerConfirmed ? "Buyer confirmed saving below the standard 28% margin in Add Wine." : level.override_reason,
+      approval_owner: buyerConfirmed ? confirmedBy : level.approval_owner,
+      decision_timestamp: buyerConfirmed ? confirmedAt : level.approval_decision ? (level.decision_timestamp || confirmedAt) : null
+    };
+  });
   const freeGoods = (payloadFreeGoods || []).map((freeGood) => ({
     buy_quantity: freeGood.buy_quantity,
     free_quantity: freeGood.free_quantity,
@@ -801,7 +799,13 @@ export async function saveSupplierCatalogWine(input: {
   }));
 
   const requestHash = createHash("sha256")
-    .update(JSON.stringify({ catalog: rpcPayload, priceLevels, freeGoods, reportRunId: latestRun?.id || null }))
+    .update(JSON.stringify({
+      catalog: rpcPayload,
+      priceLevels: priceLevels.map(({ decision_timestamp, ...level }) => level),
+      freeGoods,
+      reportRunId: latestRun?.id || null,
+      belowStandardMarginConfirmed: input.belowStandardMarginConfirmed === true
+    }))
     .digest("hex");
   const { data: saveResult, error: saveError } = await supabase.rpc("save_supplier_catalog_sku_atomic", {
     p_catalog: rpcPayload,

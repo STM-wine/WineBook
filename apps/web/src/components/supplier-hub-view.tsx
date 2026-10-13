@@ -18,6 +18,7 @@ import {
   systemTagLabel,
   balancePriceLevel,
   buildSupplierCatalogWine,
+  belowStandardMarginLevels,
   calculateGpMargin,
   calculatePricing,
   bestPriceFromFrontline,
@@ -34,6 +35,7 @@ type HubArea = "search" | "add" | "requests" | "pending" | "price-changes" | "lo
 type SaveCatalogWineInput = Parameters<typeof buildSupplierCatalogWine>[0] & {
   existingCatalogWineId?: string | null;
   priceChangeReason?: string;
+  belowStandardMarginConfirmed?: boolean;
 };
 type DeleteCatalogWineInput = {
   id: string;
@@ -629,11 +631,7 @@ function AddWinePanel({
   const warnings = Array.isArray(previewDiagnostics.warnings) ? (previewDiagnostics.warnings as string[]) : [];
   const hasDraftIdentity = Boolean(producer.trim() && wineName.trim());
   const visibleWarnings = hasDraftIdentity ? warnings : [];
-  const isBelowMinimumGp = warnings.some((warning) => warning.includes("below 28%"));
-  const lowGpOverridesComplete = draftPriceLevels
-    .filter((level) => level.active && level.bottlePrice > 0 && level.calculatedGpMargin < 0.28)
-    .every((level) => level.approvalDecision === "approve_price" && Boolean(level.overrideReason) && Boolean(level.approvalOwner));
-  const lowGpBlocksSave = pricingModel !== "grw_broker" && isBelowMinimumGp && !lowGpOverridesComplete;
+  const isBelowMinimumGp = belowStandardMarginLevels(preview).length > 0;
   const incompleteSolveBlocksSave = priceLevels.some((level) =>
     (level.solveFor === "price" && !level.targetGpMargin.trim()) ||
     (level.solveFor === "da" && (!level.targetGpMargin.trim() || !level.bottlePrice.trim()))
@@ -679,10 +677,12 @@ function AddWinePanel({
     : [];
 
   function saveWine() {
-    if (lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder) return;
+    if (incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder) return;
+    if (isBelowMinimumGp && !window.confirm("This wine has a price below the standard 28% margin. Are you sure you want to save it?")) return;
     onSaveCatalogWine(
       {
         ...draftInput,
+        belowStandardMarginConfirmed: isBelowMinimumGp,
         existingCatalogWineId: pendingEditId,
         expectedLockVersion: asNumber((pendingEditId ? editWine : existing)?.lock_version),
         priceChangeReason,
@@ -1129,10 +1129,13 @@ function AddWinePanel({
           {warning}
         </div>
       ))}
-      {lowGpBlocksSave ? (
+      {isBelowMinimumGp ? (
         <div className="inline-warning">
-          A price below 28% requires “Approve price,” an override reason, and an owner/approver.
+          A price is below the standard 28% margin. Saving will ask for your confirmation and record your approval.
         </div>
+      ) : null}
+      {hasDraftIdentity && !computedPricing.suggestionsReady ? (
+        <div className="inline-warning">Enter a positive FOB and laid-in cost per bottle to enable Save Wine. Enter 0 for laid-in if no freight applies.</div>
       ) : null}
       {duplicatePriceLevels.length > 0 ? (
         <div className="inline-warning">Possible duplicate active price level: {duplicatePriceLevels.join(", ")}. Deactivate it or document why both should remain active.</div>
@@ -1168,7 +1171,7 @@ function AddWinePanel({
         <button
           aria-busy={isSaving}
           className="button"
-          disabled={isPending || isSaving || lowGpBlocksSave || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder || !producer.trim() || !wineName.trim() || !hasValidPack || !computedPricing.suggestionsReady}
+          disabled={isPending || isSaving || incompleteSolveBlocksSave || invalidTargetGpBlocksSave || invalidPricingLadder || !producer.trim() || !wineName.trim() || !hasValidPack || !computedPricing.suggestionsReady}
           onClick={saveWine}
           type="button"
         >

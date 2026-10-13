@@ -33,7 +33,7 @@ Supplier, FOB and pack size enable automatic pricing once the supplier's laid-in
 8. Buyer may explicitly choose Frontline-only below $50. A Frontline of $50 or more enforces it automatically for standard pricing.
 9. Automatic prices update with costs. Manual values below the cutoff remain buyer overrides until reset; an automatic Best follows the effective Frontline, including a manual Frontline. At $50+, even an existing manual Best is inactive. Frontline must exceed an active Best.
 10. Base suggestions exclude DA. Actual GP = (price - landed cost) / price. Price-level DA can separately reduce effective cost for displayed GP; it does not change the base suggestion.
-11. The fixed spread can yield less than 30%, or even 28%, GP. There is no separate 30% Best warning. Prices below 28% still require Approve price, a reason and an authorized owner/approver before saving.
+11. The fixed spread can yield less than 30%, or even 28%, GP. There is no separate 30% Best warning. Saving a standard-model wine with any active price below 28% requires a buyer confirmation. The save records the signed-in buyer, decision time, and reason on each affected price level. Canceling the confirmation leaves the draft unsaved. GRW Broker pricing remains informational and skips this confirmation.
 12. Standard pricing rules do not impose this ladder on GRW Broker pricing. No existing catalog records are bulk repriced by this release; rules apply in the Add Wine preview and save workflow.
 
 All prices are per bottle. If Frontline is $1 or less, no positive Best is generated; do not create a zero or negative selling price.

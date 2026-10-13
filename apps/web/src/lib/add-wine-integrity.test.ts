@@ -76,6 +76,20 @@ describe("Add Wine database safety contract", () => {
 });
 
 describe("Add Wine search and price-level UI", () => {
+  it("confirms below-margin saves and attributes the approval to the signed-in buyer", async () => {
+    const [view, action] = await Promise.all([
+      readFile(addWineViewPath, "utf8"),
+      readFile(actionPath, "utf8")
+    ]);
+
+    expect(view).toContain('window.confirm("This wine has a price below the standard 28% margin.');
+    expect(view).toContain("belowStandardMarginConfirmed: isBelowMinimumGp");
+    expect(view).not.toContain("lowGpBlocksSave");
+    expect(action).toContain('input.belowStandardMarginConfirmed !== true');
+    expect(action).toContain("const confirmedBy = user.email || user.id");
+    expect(action).toContain('approval_decision: buyerConfirmed ? "approve_price"');
+    expect(action).toContain("approval_owner: buyerConfirmed ? confirmedBy");
+  });
   it("searches active source rows first and exposes an inactive opt-in", async () => {
     const [view, route] = await Promise.all([
       readFile(addWineViewPath, "utf8"),
