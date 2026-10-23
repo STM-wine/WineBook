@@ -5,7 +5,7 @@ services:
     rootDir: apps/web
     plan: starter
     buildCommand: npm ci && python3 -m pip install -r requirements-grw.txt && npm run build
-    startCommand: npm run start
+    startCommand: node --max-old-space-size=384 ./node_modules/next/dist/bin/next start
     autoDeploy: false
     envVars:
       - key: NODE_VERSION
