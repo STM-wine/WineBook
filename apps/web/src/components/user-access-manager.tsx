@@ -75,6 +75,7 @@ export function UserAccessManager({ canManage, currentUserId, profiles }: Props)
                   <option value="viewer">Viewer</option>
                   <option value="buyer">Buyer</option>
                   <option value="admin">Admin</option>
+                  <option value="visit_sales">Winery visits only</option>
                 </select>
               </label>
               <button className="button button-small user-access-submit" disabled={isPending} type="submit">
@@ -133,6 +134,7 @@ export function UserAccessManager({ canManage, currentUserId, profiles }: Props)
                           <option value="viewer">Viewer</option>
                           <option value="buyer">Buyer</option>
                           <option value="admin">Admin</option>
+                          <option value="visit_sales">Winery visits only</option>
                         </select>
                         {profile.id === currentUserId ? <input name="role" type="hidden" value={profile.role} /> : null}
                         <button className="button button-tiny" disabled={isPending} type="submit">Save</button>

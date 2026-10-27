@@ -10,7 +10,9 @@ export const APP_PERMISSIONS = [
   "publish_logic_changes",
   "manage_user_access",
   "manage_supplier_settings",
-  "view_settings_history"
+  "view_settings_history",
+  "visit_access",
+  "visit_manage_assigned"
 ] as const;
 
 export type AppPermission = (typeof APP_PERMISSIONS)[number];
@@ -33,12 +35,15 @@ const ADMIN_DEFAULT_PERMISSIONS: AppPermission[] = [
   ...BUYER_DEFAULT_PERMISSIONS,
   "draft_logic_changes",
   "manage_user_access",
-  "manage_supplier_settings"
+  "manage_supplier_settings",
+  "visit_access",
+  "visit_manage_assigned"
 ];
 
 export function roleDefaultPermissions(role: AppProfile["role"]): AppPermission[] {
   if (role === "admin") return ADMIN_DEFAULT_PERMISSIONS;
   if (role === "buyer") return BUYER_DEFAULT_PERMISSIONS;
+  if (role === "visit_sales") return ["visit_access"];
   return [];
 }
 

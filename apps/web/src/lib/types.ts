@@ -3,7 +3,7 @@ export type AppProfile = {
   email: string;
   full_name: string | null;
   position: string | null;
-  role: "viewer" | "buyer" | "admin";
+  role: "viewer" | "buyer" | "admin" | "visit_sales";
 };
 
 export type ReportRun = {

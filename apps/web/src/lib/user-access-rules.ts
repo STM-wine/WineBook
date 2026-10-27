@@ -1,7 +1,7 @@
 import type { AppPermission } from "@/lib/auth";
 import type { AppProfile } from "@/lib/types";
 
-export const APP_ROLES = ["viewer", "buyer", "admin"] as const;
+export const APP_ROLES = ["viewer", "buyer", "admin", "visit_sales"] as const;
 export type AppRole = (typeof APP_ROLES)[number];
 
 export function isAppRole(value: string): value is AppRole {

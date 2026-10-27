@@ -3,6 +3,7 @@ import { OrderingSnapshotHome } from "@/components/ordering-snapshot-home";
 import { fetchLastCompletedQuickBooksUpload } from "@/lib/supabase/quickbooks-upload";
 import { OrderDashboard } from "@/components/order-dashboard";
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import { AppTopbar } from "@/components/app-topbar";
 import { CompanyDashboardView } from "@/components/company-dashboard-view";
 import { SectionLoading } from "@/components/section-loading";
@@ -27,6 +28,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   if ("pendingEmail" in context) {
     return <AccountPending email={context.pendingEmail} />;
   }
+  if (context.profile.role === "visit_sales") redirect("/visits");
   const { permissions } = context;
   const canManageMarkers = canManageOrderingMarkers(context.profile.role, permissions.map((permission) => ({ permission })));
   const params = await searchParams;

@@ -279,6 +279,9 @@ export async function inviteAppUser(formData: FormData): Promise<UserAccessActio
     const role = getString(formData, "role");
     const validationError = validateInviteInput({ email, fullName, position, role });
     if (validationError) return { ok: false, message: validationError };
+    if (role === "visit_sales" && process.env.VISIT_SALES_ROLE_READY !== "true") {
+      return { ok: false, message: "Visit-only invitations are disabled until the isolated database role and Auth hook are verified." };
+    }
 
     const supabase = serviceSettingsClient();
     const { data: existingProfile, error: profileLookupError } = await supabase
@@ -290,6 +293,9 @@ export async function inviteAppUser(formData: FormData): Promise<UserAccessActio
     if (existingProfile) return { ok: false, message: "That email already has Stem Intelligence access." };
 
     const existingAuthUser = await findAuthUserByEmail(supabase, email);
+    if (role === "visit_sales" && existingAuthUser) {
+      return { ok: false, message: "An existing login cannot be converted to visit-only access while earlier sessions may still be valid." };
+    }
     let userId = existingAuthUser?.id || null;
     let invited = false;
 
@@ -346,6 +352,17 @@ export async function updateAppUser(formData: FormData): Promise<UserAccessActio
     const role = getString(formData, "role");
     const validationError = validateProfileUpdate({ profileId, fullName, position, role });
     if (validationError) return { ok: false, message: validationError };
+    if (role === "visit_sales" && process.env.VISIT_SALES_ROLE_READY !== "true") {
+      return { ok: false, message: "Visit-only access is disabled until the isolated database role and Auth hook are verified." };
+    }
+    if (role === "visit_sales") {
+      const { data: currentProfile, error: currentProfileError } = await serviceSettingsClient()
+        .from("app_profiles").select("role").eq("id", profileId).maybeSingle();
+      if (currentProfileError) throw currentProfileError;
+      if (currentProfile?.role !== "visit_sales") {
+        return { ok: false, message: "An existing login cannot be converted to visit-only access while earlier sessions may still be valid." };
+      }
+    }
     if (!canChangeProfileRole({
       actorId: context.user.id,
       actorRole: context.profile.role,
