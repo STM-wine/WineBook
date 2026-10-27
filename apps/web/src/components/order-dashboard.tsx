@@ -711,15 +711,9 @@ export function OrderDashboard({
   }
 
   function setSupplierTargetWeeksValue(supplierName: string, value: string) {
-    setSupplierTargetWeeks((current) => {
-      const next = { ...current };
-      if (!value.trim()) {
-        delete next[supplierName];
-      } else {
-        next[supplierName] = value;
-      }
-      return next;
-    });
+    // Keep an empty edit value so deleting the default does not put it back
+    // before the user can enter a replacement. Calculations ignore blanks.
+    setSupplierTargetWeeks((current) => ({ ...current, [supplierName]: value }));
   }
 
   function restoreInactiveWine(listId: string) {
