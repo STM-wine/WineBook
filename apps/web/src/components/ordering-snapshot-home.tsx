@@ -1,11 +1,12 @@
 "use client";
+import { groupByPickup, pickupLocationLabel, type WorkbenchGrouping } from "@/lib/pickup-grouping";
 import { ClearApprovalsDialog } from "./clear-approvals-dialog";
 import type { ApprovalClearScope } from "@/lib/clear-order-approvals";
 import { flushAllApprovals } from "@/lib/approval-navigation";
 import { quickBooksUploadLabel, vinosmithUpdateLabel } from "@/lib/ordering-freshness";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { OrderingSnapshotSummary } from "@/lib/ordering-snapshot";
 import type { OrderingPageData } from "@/lib/ordering-page-data";
 import { formatCurrency, formatInteger } from "@/lib/order-data";
@@ -28,6 +29,8 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
   const [creatingDrafts, setCreatingDrafts] = useState(false);
   const [clearScope, setClearScope] = useState<ApprovalClearScope | null>(null);
   const [approvalRefresh, setApprovalRefresh] = useState(0);
+  const [grouping, setGrouping] = useState<WorkbenchGrouping>("none");
+  const groups = data ? (grouping === "pickup" ? groupByPickup(data.groups, group => group.pickupLocation) : data.groups) : [];
   const [notice, setNotice] = useState("");
   const overviewRequestPending = useRef(false);
   const automaticRefresh = useRef(false);
@@ -131,14 +134,15 @@ export function OrderingSnapshotHome({ view, canViewSettings, canManageMarkers, 
             <label>TDM<select value={filters.brandManager} onChange={(event) => setFilters({ ...filters, brandManager: event.target.value })}>
               <option>All</option>{data.filterOptions?.tdms.map((tdm) => <option key={tdm}>{tdm}</option>)}
             </select></label>
+            <label>Group by<select value={grouping} onChange={event => setGrouping(event.target.value as WorkbenchGrouping)}><option value="none">Default order</option><option value="pickup">Pickup location</option></select></label>
             <label className="search-field">Search<input value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} placeholder="Wine, supplier, item #" /></label>
             <label className="check-control"><input type="checkbox" checked={filters.suggestedOnly} onChange={(event) => setFilters({ ...filters, suggestedOnly: event.target.checked })} />Suggested only</label>
           </div>
-          <SummaryTable groups={data.groups} />
+          <SummaryTable groups={groups} groupByPickup={grouping === "pickup"} />
           {!data.groups.length ? <p className="empty-inline">No wines match these filters.</p> : null}
         </section>
         <section className="supplier-stack" aria-label="Supplier workbenches">
-          {data.groups.map((group) => <SupplierExpansion approvalRefresh={approvalRefresh} onClear={canClearApprovals ? () => { setNotice(""); setClearScope({ reportRunId: data.reportRun.id, supplier: group.supplier }); } : undefined} clearDisabled={creatingDrafts || Boolean(clearScope)} canManageMarkers={canManageMarkers} filters={data.filters || defaultOrderingFilters} snapshotId={data.snapshotId} key={group.supplier} group={group} />)}
+          {groups.map((group, index) => <Fragment key={group.supplier}>{grouping === "pickup" && (index === 0 || pickupLocationLabel(groups[index - 1].pickupLocation) !== pickupLocationLabel(group.pickupLocation)) ? <h2>{pickupLocationLabel(group.pickupLocation)}</h2> : null}<SupplierExpansion approvalRefresh={approvalRefresh} onClear={canClearApprovals ? () => { setNotice(""); setClearScope({ reportRunId: data.reportRun.id, supplier: group.supplier }); } : undefined} clearDisabled={creatingDrafts || Boolean(clearScope)} canManageMarkers={canManageMarkers} filters={data.filters || defaultOrderingFilters} snapshotId={data.snapshotId} key={group.supplier} group={group} /></Fragment>)}
         </section>
       </>}
     </> : null}

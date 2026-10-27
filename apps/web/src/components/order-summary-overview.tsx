@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { DashboardMetrics, SupplierGroup } from "@/lib/types";
 import { formatCurrency, formatInteger } from "@/lib/order-data";
+import { pickupLocationLabel } from "@/lib/pickup-grouping";
 import { MetricCard } from "./metric-card";
 
 export function OrderSummaryMetrics({ metrics }: { metrics: DashboardMetrics }) {
@@ -17,7 +18,7 @@ export function OrderSummaryMetrics({ metrics }: { metrics: DashboardMetrics }) 
   );
 }
 
-export function SummaryTable({ groups }: { groups: Omit<SupplierGroup, "rows">[] }) {
+export function SummaryTable({ groups, groupByPickup = false }: { groups: Omit<SupplierGroup, "rows">[]; groupByPickup?: boolean }) {
   const [showAll, setShowAll] = useState(false);
   const visibleGroups = showAll ? groups : groups.slice(0, 7);
 
@@ -51,7 +52,9 @@ export function SummaryTable({ groups }: { groups: Omit<SupplierGroup, "rows">[]
             </tr>
           </thead>
           <tbody>
-            {visibleGroups.map((group) => (
+            {visibleGroups.map((group, index) => (
+              <Fragment key={group.supplier}>
+              {groupByPickup && (index === 0 || pickupLocationLabel(visibleGroups[index - 1].pickupLocation) !== pickupLocationLabel(group.pickupLocation)) ? <tr><th colSpan={8} scope="rowgroup">{pickupLocationLabel(group.pickupLocation)}</th></tr> : null}
               <tr key={group.supplier}>
                 <td>{group.supplier}</td>
                 <td>{formatInteger(group.skuCount)}</td>
@@ -69,6 +72,7 @@ export function SummaryTable({ groups }: { groups: Omit<SupplierGroup, "rows">[]
                   </span>
                 </td>
               </tr>
+              </Fragment>
             ))}
           </tbody>
         </table>

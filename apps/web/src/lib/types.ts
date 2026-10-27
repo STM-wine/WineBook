@@ -103,6 +103,7 @@ export type ApprovalCommitment = {
 };
 
 export type SupplierGroup = {
+  pickupLocation?: string | null;
   supplier: string;
   rows: Recommendation[];
   skuCount: number;

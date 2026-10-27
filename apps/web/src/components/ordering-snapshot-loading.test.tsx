@@ -174,3 +174,18 @@ describe("approval clearing controls", () => {
     expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 });
+
+it("groups summary rows and supplier workbenches by pickup without a new fetch", async () => {
+  const group = summary.groups[0];
+  await respond(0, 200, { ...summary, isStale: false, groups: [
+    { ...group, supplier: "East", pickupLocation: "New Jersey" },
+    { ...group, supplier: "West", pickupLocation: "California" },
+    { ...group, supplier: "East 2", pickupLocation: "NY" }
+  ] });
+  const select = [...host.querySelectorAll('select')].find(s => s.parentElement?.textContent?.startsWith('Group by'))!;
+  await act(async () => { select.value = "pickup"; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect([...host.querySelectorAll('.supplier-stack h2')].map(h => h.textContent)).toEqual(["California", "NY/NJ"]);
+  expect([...host.querySelectorAll('.supplier-stack .supplier-chip')].map(h => h.textContent)).toEqual(["West", "East", "East 2"]);
+  expect([...host.querySelectorAll('tbody th')].map(h => h.textContent)).toEqual(["California", "NY/NJ"]);
+  expect(requests).toHaveLength(1);
+});

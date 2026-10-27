@@ -1,4 +1,5 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { groupByPickup, pickupLocationLabel, type WorkbenchGrouping } from "@/lib/pickup-grouping";
+import { Fragment, type FormEvent, useEffect, useMemo, useState } from "react";
 import { WineLoadingProgress } from "./wine-loading-progress";
 import type { PurchaseOrderDraftWithLines, PurchaseOrderLine, PurchaseOrderLineNote, SupplierLogistics } from "@/lib/types";
 import { auditActorName, formatAuditTimestamp, poDraftAuditTrail } from "@/lib/audit-trail";
@@ -48,6 +49,7 @@ export function PoDraftsView({
   useEffect(() => {
     for (const draft of drafts) if (expandedIds.has(draft.id) && draft.detailLoaded === false && !detailErrors[draft.id]) loadDetail(draft.id);
   }, [drafts, expandedIds]);
+  const [grouping, setGrouping] = useState<WorkbenchGrouping>("none");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
@@ -94,6 +96,8 @@ export function PoDraftsView({
         .includes(needle);
     });
   }, [draftSummaries, search, statusFilter]);
+  const pickupForDraft = (draft: PurchaseOrderDraftWithLines) => supplierMetadata.get((draft.supplier_name || "").trim().toLowerCase())?.pick_up_location;
+  const displayedSummaries = grouping === "pickup" ? groupByPickup(filteredSummaries, ({ draft }) => pickupForDraft(draft)) : filteredSummaries;
   const totalLines = filteredSummaries.reduce((sum, summary) => sum + summary.lineCount, 0);
   const totalBottles = filteredSummaries.reduce((sum, summary) => sum + summary.approvedQty, 0);
   const totalWineCost = filteredSummaries.reduce((sum, summary) => sum + summary.wineCost, 0);
@@ -276,6 +280,7 @@ export function PoDraftsView({
         </div>
       </div>
       <div className="po-filter-bar">
+        <label>Group by<select value={grouping} onChange={event => setGrouping(event.target.value as WorkbenchGrouping)}><option value="none">Default order</option><option value="pickup">Pickup location</option></select></label>
         <label className="check-control po-select-all-control">
           <input
             checked={allFilteredSelected}
@@ -310,11 +315,13 @@ export function PoDraftsView({
         <div className="empty-inline">No PO drafts exist for this report run yet.</div>
       ) : (
         <div className="po-draft-stack">
-          {filteredSummaries.map(({ draft, lineCount, approvedQty, wineCost, laidInCost, estimatedCost }) => {
+          {displayedSummaries.map(({ draft, lineCount, approvedQty, wineCost, laidInCost, estimatedCost }, index) => {
             const isExportable = isActivePoStatus(draft.status);
             const activity = poDraftAuditTrail(draft, auditActorNames);
 
             return (
+            <Fragment key={draft.id}>
+            {grouping === "pickup" && (index === 0 || pickupLocationLabel(pickupForDraft(displayedSummaries[index - 1].draft)) !== pickupLocationLabel(pickupForDraft(draft))) ? <h2>{pickupLocationLabel(pickupForDraft(draft))}</h2> : null}
             <details className="po-draft-card" key={draft.id} onToggle={(event) => {
               const open = event.currentTarget.open;
               setExpandedIds((current) => { const next = new Set(current); if (open) next.add(draft.id); else next.delete(draft.id); return next; });
@@ -385,6 +392,7 @@ export function PoDraftsView({
                 onOpenNotes={(line) => setNoteTarget({ draftId: draft.id, lineKey: poLineCollaborationKey(line) })}
               /> : null}
             </details>
+            </Fragment>
             );
           })}
           {filteredSummaries.length === 0 ? <div className="empty-inline">No PO drafts match the current filters.</div> : null}
