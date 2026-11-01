@@ -626,9 +626,7 @@ function buildRequestForJob(job: QuickBooksRecoveryJob): QuickBooksDesktopQbxmlR
   }
   return client.buildTxnDeletedQuery({
     requestId: job.checkpointKey,
-    maxReturned: transactionMaxReturned,
-    iterator,
-    ...(iterator?.mode === "Continue" ? {} : { deletedDateRange: txnDateRange }),
+    deletedDateRange: txnDateRange,
     txnDeletedTypes: ["Invoice", "CreditMemo", "ReceivePayment", "PurchaseOrder", "Bill", "VendorCredit"]
   });
 }

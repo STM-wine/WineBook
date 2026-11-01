@@ -79,7 +79,7 @@ export type QuickBooksInvoiceQueryOptions = QuickBooksTransactionQueryOptions & 
   paidStatus?: QuickBooksPaidStatus;
 };
 
-export type QuickBooksTxnDeletedQueryOptions = QuickBooksQueryOptions & {
+export type QuickBooksTxnDeletedQueryOptions = Pick<QuickBooksQueryOptions, "requestId"> & {
   txnDeletedTypes: QuickBooksTxnDeletedType[];
   deletedDateRange?: QuickBooksDateRange;
 };
@@ -281,8 +281,6 @@ export function buildQuickBooksOperationalRefreshRequests(
   if (options.deletedDateRange) {
     requests.unshift(client.buildTxnDeletedQuery({
       requestId: "operational-deletions",
-      maxReturned: Math.min(options.maxReturned, MAX_QUICKBOOKS_TRANSACTION_PAGE_SIZE),
-      iterator: { mode: "Start" },
       deletedDateRange: options.deletedDateRange,
       txnDeletedTypes: ["Invoice", "CreditMemo", "ReceivePayment", "PurchaseOrder", "Bill", "VendorCredit"]
     }));
@@ -509,7 +507,6 @@ function buildTransactionQueryBody(
 
 function buildTxnDeletedQueryBody(params: QuickBooksTxnDeletedQueryOptions) {
   const body: string[] = [];
-  pushCommonQueryParts(body, params);
   for (const txnDeletedType of params.txnDeletedTypes) {
     body.push(xmlElement("TxnDelType", txnDeletedType));
   }
@@ -519,7 +516,7 @@ function buildTxnDeletedQueryBody(params: QuickBooksTxnDeletedQueryOptions) {
     if (params.deletedDateRange.to) range.push(xmlElement("ToDeletedDate", params.deletedDateRange.to));
     body.push(xmlAggregate("DeletedDateRangeFilter", range));
   }
-  return { requestId: params.requestId, iterator: params.iterator, maxReturned: params.maxReturned, body };
+  return { requestId: params.requestId, body };
 }
 
 function pushCommonQueryParts(body: string[], params: QuickBooksQueryOptions) {

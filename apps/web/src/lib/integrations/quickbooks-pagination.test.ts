@@ -123,8 +123,9 @@ describe("QuickBooks pagination completeness", () => {
     });
     const deletion = requests.find((request) => request.requestType === "TxnDeletedQueryRq");
     expect(deletion?.requestId).toBe("operational-deletions");
+    expect(deletion?.qbxml).not.toMatch(/<MaxReturned>|\biterator=/);
+    expect(deletion?.pagination).toBeUndefined();
     expect(deletion?.qbxml).toContain("<FromDeletedDate>2026-10-01</FromDeletedDate>");
     expect(deletion?.qbxml).toContain("<ToDeletedDate>2026-11-01</ToDeletedDate>");
-    expect(deletion?.pagination?.iteratorMode).toBe("Start");
   });
 });
