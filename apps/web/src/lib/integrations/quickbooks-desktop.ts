@@ -111,6 +111,7 @@ export type QuickBooksOperationalRefreshOptions = {
   modifiedDateRange: QuickBooksDateRange;
   txnDateWindows: QuickBooksDateRange[];
   deletedDateRange?: QuickBooksDateRange;
+  fullItemScan?: boolean;
 };
 
 type QuickBooksRequestBuildParts = {
@@ -240,10 +241,11 @@ export function buildQuickBooksOperationalRefreshRequests(
       modifiedDateRange: options.modifiedDateRange
     }),
     client.buildItemQuery({
-      requestId: "operational-items",
+      requestId: options.fullItemScan ? "operational-items-full" : "operational-items",
       maxReturned: Math.min(options.listMaxReturned, MAX_QUICKBOOKS_ITEM_PAGE_SIZE),
       iterator: { mode: "Start" },
-      activeStatus: "All"
+      activeStatus: "All",
+      ...(options.fullItemScan ? {} : { modifiedDateRange: options.modifiedDateRange })
     })
   ];
 

@@ -85,7 +85,7 @@ describe("QuickBooks pagination completeness", () => {
     }], 0)).toThrow("Iterator failed");
   });
 
-  it("makes every capped operational resource iterable and performs a complete item scan", () => {
+  it("makes every capped operational resource iterable and limits routine item scans to modified rows", () => {
     const requests = buildQuickBooksOperationalRefreshRequests({
       maxReturned: 1000,
       listMaxReturned: 1000,
@@ -100,8 +100,8 @@ describe("QuickBooks pagination completeness", () => {
     expect(itemRequest?.pagination?.maxReturned).toBe(200);
     expect(itemRequest?.qbxml).toContain("<MaxReturned>200</MaxReturned>");
     expect(itemRequest?.qbxml).toContain("<ActiveStatus>All</ActiveStatus>");
-    expect(itemRequest?.qbxml).not.toContain("FromModifiedDate");
-    expect(itemRequest?.qbxml).not.toContain("ToModifiedDate");
+    expect(itemRequest?.qbxml).toContain("<FromModifiedDate>2026-08-08T00:00:00</FromModifiedDate>");
+    expect(itemRequest?.qbxml).toContain("<ToModifiedDate>2026-09-22T23:59:59</ToModifiedDate>");
     const customerRequest = requests.find((request) => request.requestId === "operational-customers");
     expect(customerRequest?.pagination?.maxReturned).toBe(100);
     expect(customerRequest?.qbxml).toContain("<MaxReturned>100</MaxReturned>");
@@ -111,6 +111,20 @@ describe("QuickBooks pagination completeness", () => {
       expect(request.pagination?.maxReturned).toBe(100);
       expect(request.qbxml).toContain("<MaxReturned>100</MaxReturned>");
     }
+  });
+
+  it("keeps periodic item scans complete", () => {
+    const requests = buildQuickBooksOperationalRefreshRequests({
+      maxReturned: 1000,
+      listMaxReturned: 1000,
+      modifiedDateRange: { from: "2026-08-08T00:00:00", to: "2026-09-22T23:59:59" },
+      txnDateWindows: [],
+      fullItemScan: true
+    });
+    const itemRequest = requests.find((request) => request.requestId === "operational-items-full");
+    expect(itemRequest?.qbxml).toContain("<ActiveStatus>All</ActiveStatus>");
+    expect(itemRequest?.qbxml).not.toContain("FromModifiedDate");
+    expect(itemRequest?.pagination?.iteratorMode).toBe("Start");
   });
 
   it("includes a read-only deletion query without unsupported pagination fields", () => {

@@ -137,7 +137,7 @@ export async function handleQuickBooksWebConnectorSoapRequest(soapRequest: strin
 
 export async function buildQuickBooksWebConnectorStatus() {
   const recoveryQueue = await buildQuickBooksRecoveryQueueStatus();
-  const operationalRequests = buildOperationalRefreshRequests();
+  const operationalRequests = await buildOperationalRefreshRequests();
   const requestTypes = [
     ...operationalRequests.map((request) => request.requestType),
     ...recoveryQueue.nextJobs.slice(0, 1).map((job) => requestTypeForRecoveryResource(job.resourceName))
@@ -286,6 +286,9 @@ async function receiveResponseXML(soapRequest: string) {
         });
       } else {
         if (request.snapshotWindow) await queueSnapshotVerifications(session, request);
+        if (request.requestId === "operational-items-full") {
+          await completeOperationalItemFullScan(session, receivedAt);
+        }
         if (request.requestId === "operational-deletions") {
           await completeOperationalDeletionCheckpoint(session, receivedAt);
         }
@@ -499,7 +502,7 @@ function requestTypeForRecoveryResource(resourceName: string) {
 }
 
 async function buildQuickBooksSessionRequests() {
-  const operationalRequests = buildOperationalRefreshRequests(await getOperationalDeletionDateRange());
+  const operationalRequests = await buildOperationalRefreshRequests(await getOperationalDeletionDateRange());
   try {
     const recoveryRequests = await buildNextQuickBooksRecoveryRequests({ fallbackToDiscovery: false });
     return mergeSessionRequests(operationalRequests, recoveryRequests);
@@ -516,21 +519,50 @@ function buildSalesDashboardRequests() {
   });
 }
 
-function buildOperationalRefreshRequests(deletedDateRange?: QuickBooksDateRange) {
+async function buildOperationalRefreshRequests(deletedDateRange?: QuickBooksDateRange) {
   const maxReturned = getDiscoveryMaxReturned();
   const listMaxReturned = getListRefreshMaxReturned(maxReturned);
   const txnDateWindows = getOperationalTxnDateWindows();
   const modifiedDateRange = getOperationalModifiedDateRange();
+  const fullItemScan = await shouldRunFullItemScan();
   return buildQuickBooksOperationalRefreshRequests({
     maxReturned,
     listMaxReturned,
     txnDateWindows,
     modifiedDateRange,
+    fullItemScan,
     deletedDateRange: deletedDateRange || { from: subtractDays(currentDateString(), 90), to: currentDateString() }
   }).map((request): QuickBooksRecoveryRequest => {
     const match = /^operational-(invoices|credit-memos):(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/.exec(request.requestId || "");
     return match ? { ...request, snapshotWindow: { from: match[2], to: match[3] } } : request;
   });
+}
+
+async function shouldRunFullItemScan() {
+  const { data, error } = await createServiceRoleClient()
+    .from("source_sync_checkpoints")
+    .select("status,last_synced_at")
+    .eq("source_system", "quickbooks_desktop")
+    .eq("resource_name", "quickbooks_items")
+    .eq("checkpoint_key", "all")
+    .maybeSingle<{ status: string; last_synced_at: string | null }>();
+  if (error) throw new Error(`Could not read QuickBooks item full-scan checkpoint: ${error.message}`);
+  const lastFullScan = data?.status === "completed" ? Date.parse(data.last_synced_at || "") : NaN;
+  return !Number.isFinite(lastFullScan) || Date.now() - lastFullScan >= 30 * 24 * 60 * 60 * 1000;
+}
+
+async function completeOperationalItemFullScan(session: QuickBooksWebConnectorSession, receivedAt: string) {
+  const { error } = await createServiceRoleClient().from("source_sync_checkpoints").upsert({
+    source_system: "quickbooks_desktop",
+    resource_name: "quickbooks_items",
+    checkpoint_key: "all",
+    status: "completed",
+    last_synced_at: receivedAt,
+    last_source_sync_run_id: session.sourceSyncRunId,
+    diagnostics: { mode: "operational_full_scan", completedAt: receivedAt },
+    updated_at: receivedAt
+  }, { onConflict: "source_system,resource_name,checkpoint_key" });
+  if (error) throw new Error(`Could not advance QuickBooks item full-scan checkpoint: ${error.message}`);
 }
 
 async function getOperationalDeletionDateRange(): Promise<QuickBooksDateRange> {
