@@ -129,3 +129,36 @@ describe("other QuickBooks table writes", () => {
     expect(sizes).toEqual([200, 200, 50]);
   });
 });
+
+describe("QuickBooks deletion response persistence", () => {
+  it("applies deleted transaction IDs to the mirror and keeps the source response", async () => {
+    const rpc = vi.fn(async () => ({ error: null }));
+    createServiceRoleClient.mockReturnValue({
+      from: () => ({ insert: () => ({ select: () => ({ single: async () => ({ data: { id: "raw-delete-1" }, error: null }) }) }) }),
+      rpc
+    });
+
+    await persistQuickBooksResponse({
+      ...input(0),
+      request: { requestType: "TxnDeletedQueryRq", qbxmlVersion: "16.0", qbxml: "<TxnDeletedQueryRq/>" } as never,
+      response: "<QBXMLMsgsRs><TxnDeletedQueryRs><TxnDeletedRet><TxnDelType>Invoice</TxnDelType><TxnID>invoice-1</TxnID><TimeDeleted>2026-10-23T13:08:14Z</TimeDeleted></TxnDeletedRet></TxnDeletedQueryRs></QBXMLMsgsRs>",
+      status: [{ requestType: "TxnDeletedQueryRq", responseType: "TxnDeletedQueryRs", statusCode: 0, statusSeverity: "Info", statusMessage: "Status OK", iteratorId: null, iteratorRemainingCount: 0 }]
+    });
+
+    expect(rpc).toHaveBeenCalledWith("apply_quickbooks_deletions", {
+      p_events: [{ txn_type: "Invoice", txn_id: "invoice-1", time_deleted: "2026-10-23T13:08:14.000Z", source: "quickbooks_event" }],
+      p_response_id: "raw-delete-1"
+    });
+  });
+
+  it("rejects an error response before touching mirror data", async () => {
+    const from = vi.fn();
+    createServiceRoleClient.mockReturnValue({ from });
+    await expect(persistQuickBooksResponse({
+      ...input(0),
+      request: { requestType: "TxnDeletedQueryRq", qbxmlVersion: "16.0", qbxml: "<TxnDeletedQueryRq/>" } as never,
+      status: [{ requestType: "TxnDeletedQueryRq", responseType: "TxnDeletedQueryRs", statusCode: 500, statusSeverity: "Error", statusMessage: "Failed", iteratorId: null, iteratorRemainingCount: null }]
+    })).rejects.toThrow("mirror was not updated");
+    expect(from).not.toHaveBeenCalled();
+  });
+});

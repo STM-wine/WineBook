@@ -64,6 +64,8 @@ export type QuickBooksRecoveryJob = {
 
 export type QuickBooksRecoveryRequest = QuickBooksDesktopQbxmlRequest & {
   recoveryJob?: QuickBooksRecoveryJob;
+  snapshotWindow?: QuickBooksDateRange;
+  verification?: { txnType: "Invoice" | "CreditMemo"; txnId: string };
 };
 
 export type QuickBooksRecoveryCompletion = {

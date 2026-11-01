@@ -112,4 +112,19 @@ describe("QuickBooks pagination completeness", () => {
       expect(request.qbxml).toContain("<MaxReturned>100</MaxReturned>");
     }
   });
+
+  it("includes a paginated read-only deletion query on operational refresh", () => {
+    const requests = buildQuickBooksOperationalRefreshRequests({
+      maxReturned: 1000,
+      listMaxReturned: 1000,
+      modifiedDateRange: { from: "2026-10-01T00:00:00", to: "2026-11-01T23:59:59" },
+      txnDateWindows: [],
+      deletedDateRange: { from: "2026-10-01", to: "2026-11-01" }
+    });
+    const deletion = requests.find((request) => request.requestType === "TxnDeletedQueryRq");
+    expect(deletion?.requestId).toBe("operational-deletions");
+    expect(deletion?.qbxml).toContain("<FromDeletedDate>2026-10-01</FromDeletedDate>");
+    expect(deletion?.qbxml).toContain("<ToDeletedDate>2026-11-01</ToDeletedDate>");
+    expect(deletion?.pagination?.iteratorMode).toBe("Start");
+  });
 });

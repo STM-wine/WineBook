@@ -3,7 +3,7 @@ import "server-only";
 import { createHash, randomUUID } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
-import { persistQuickBooksResponse } from "@/lib/integrations/quickbooks-response-persistence";
+import { markQuickBooksVerifiedMissing, persistQuickBooksResponse } from "@/lib/integrations/quickbooks-response-persistence";
 import {
   buildNextQuickBooksRecoveryRequests,
   buildQuickBooksRecoveryQueueStatus,
@@ -16,6 +16,7 @@ import {
   assertQuickBooksReadOnlyQbxml,
   buildQuickBooksOperationalRefreshRequests,
   buildQuickBooksSalesDashboardDiscoveryRequests,
+  createQuickBooksDesktopReadOnlyClient,
   parseQbxmlResponseStatuses,
   type QuickBooksDateRange,
   type QuickBooksQbxmlResponseStatus
@@ -63,6 +64,7 @@ type QuickBooksWebConnectorSession = {
     receivedAt: string;
     recordCount: number | null;
   }>;
+  snapshotSeenIds: Map<string, Set<string>>;
 };
 
 type QuickBooksWebConnectorSessionSummary = {
@@ -185,7 +187,8 @@ async function authenticate(soapRequest: string) {
     requests,
     sourceSyncRunId,
     lastError: "",
-    responses: []
+    responses: [],
+    snapshotSeenIds: new Map()
   });
 
   return [ticket, ""];
@@ -251,7 +254,11 @@ async function receiveResponseXML(soapRequest: string) {
   }
 
   try {
-    await persistQuickBooksResponse({
+    const errorStatus = status.find(isQuickBooksErrorStatus);
+    if (errorStatus) {
+      throw new Error(errorStatus.statusMessage || `QuickBooks ${request.requestType} returned an error.`);
+    }
+    const rawResponseId = await persistQuickBooksResponse({
       request,
       response,
       status,
@@ -259,17 +266,29 @@ async function receiveResponseXML(soapRequest: string) {
       receivedAt,
       sourceSyncRunId: session.sourceSyncRunId
     });
-    const errorStatus = status.find(isQuickBooksErrorStatus);
-    if (errorStatus) {
-      throw new Error(errorStatus.statusMessage || `QuickBooks ${request.requestType} returned an error.`);
+    if (request.verification) {
+      if (status[0]?.statusCode === 1 && recordCount === 0 && rawResponseId) {
+        await markQuickBooksVerifiedMissing(request.verification.txnType, request.verification.txnId, rawResponseId);
+      } else if (recordCount !== 1) {
+        throw new Error(`QuickBooks did not give a conclusive result for ${request.verification.txnType} ${request.verification.txnId}.`);
+      }
     }
+    if (request.snapshotWindow) recordSnapshotIds(session, request, response);
     if (request.recoveryJob) {
       const completion = await completeQuickBooksRecoveryJob(request.recoveryJob, status, recordCount, responseChecksum, receivedAt);
       queueContinuationRequest(session, completion);
     } else {
       const continuationRequest = nextQuickBooksPage(request, status, recordCount);
       if (continuationRequest) {
-        session.requests.splice(session.requestIndex + 1, 0, continuationRequest);
+        session.requests.splice(session.requestIndex + 1, 0, {
+          ...continuationRequest,
+          snapshotWindow: request.snapshotWindow
+        });
+      } else {
+        if (request.snapshotWindow) await queueSnapshotVerifications(session, request);
+        if (request.requestId === "operational-deletions") {
+          await completeOperationalDeletionCheckpoint(session, receivedAt);
+        }
       }
     }
     await recordQuickBooksSyncActivity(session, receivedAt);
@@ -480,7 +499,7 @@ function requestTypeForRecoveryResource(resourceName: string) {
 }
 
 async function buildQuickBooksSessionRequests() {
-  const operationalRequests = buildOperationalRefreshRequests();
+  const operationalRequests = buildOperationalRefreshRequests(await getOperationalDeletionDateRange());
   try {
     const recoveryRequests = await buildNextQuickBooksRecoveryRequests({ fallbackToDiscovery: false });
     return mergeSessionRequests(operationalRequests, recoveryRequests);
@@ -497,7 +516,7 @@ function buildSalesDashboardRequests() {
   });
 }
 
-function buildOperationalRefreshRequests() {
+function buildOperationalRefreshRequests(deletedDateRange?: QuickBooksDateRange) {
   const maxReturned = getDiscoveryMaxReturned();
   const listMaxReturned = getListRefreshMaxReturned(maxReturned);
   const txnDateWindows = getOperationalTxnDateWindows();
@@ -506,8 +525,86 @@ function buildOperationalRefreshRequests() {
     maxReturned,
     listMaxReturned,
     txnDateWindows,
-    modifiedDateRange
+    modifiedDateRange,
+    deletedDateRange: deletedDateRange || { from: subtractDays(currentDateString(), 90), to: currentDateString() }
+  }).map((request): QuickBooksRecoveryRequest => {
+    const match = /^operational-(invoices|credit-memos):(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})$/.exec(request.requestId || "");
+    return match ? { ...request, snapshotWindow: { from: match[2], to: match[3] } } : request;
   });
+}
+
+async function getOperationalDeletionDateRange(): Promise<QuickBooksDateRange> {
+  const { data, error } = await createServiceRoleClient()
+    .from("source_sync_checkpoints")
+    .select("last_synced_at")
+    .eq("source_system", "quickbooks_desktop")
+    .eq("resource_name", "quickbooks_txn_deleted")
+    .eq("checkpoint_key", "operational")
+    .maybeSingle<{ last_synced_at: string | null }>();
+  if (error) throw new Error(`Could not read QuickBooks deletion watermark: ${error.message}`);
+  const today = currentDateString();
+  const lastCompleted = data?.last_synced_at?.slice(0, 10);
+  return { from: lastCompleted ? subtractDays(lastCompleted, 3) : subtractDays(today, 90), to: today };
+}
+
+async function completeOperationalDeletionCheckpoint(session: QuickBooksWebConnectorSession, receivedAt: string) {
+  const { error } = await createServiceRoleClient().from("source_sync_checkpoints").upsert({
+    source_system: "quickbooks_desktop",
+    resource_name: "quickbooks_txn_deleted",
+    checkpoint_key: "operational",
+    status: "completed",
+    last_synced_at: receivedAt,
+    last_source_sync_run_id: session.sourceSyncRunId,
+    diagnostics: { mode: "operational", completedAt: receivedAt },
+    updated_at: receivedAt
+  }, { onConflict: "source_system,resource_name,checkpoint_key" });
+  if (error) throw new Error(`Could not advance QuickBooks deletion watermark: ${error.message}`);
+}
+
+function recordSnapshotIds(session: QuickBooksWebConnectorSession, request: QuickBooksRecoveryRequest, response: string) {
+  const tag = request.requestType === "InvoiceQueryRq" ? "InvoiceRet" : "CreditMemoRet";
+  const ids = [...response.matchAll(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "gi"))].map((match) => {
+    const id = /<TxnID>([^<]+)<\/TxnID>/i.exec(match[1])?.[1]?.trim();
+    if (!id) throw new Error(`QuickBooks ${tag} omitted TxnID during snapshot reconciliation.`);
+    return id;
+  });
+  if (ids.length !== countReturnedRecords(request.requestType, response)) {
+    throw new Error(`QuickBooks ${tag} snapshot IDs did not match its record count.`);
+  }
+  const key = request.requestId || "";
+  const seen = session.snapshotSeenIds.get(key) || new Set<string>();
+  ids.forEach((id) => seen.add(id));
+  session.snapshotSeenIds.set(key, seen);
+}
+
+async function queueSnapshotVerifications(session: QuickBooksWebConnectorSession, request: QuickBooksRecoveryRequest) {
+  const window = request.snapshotWindow;
+  if (!window?.from || !window.to) throw new Error("QuickBooks snapshot window is incomplete.");
+  const table = request.requestType === "InvoiceQueryRq" ? "quickbooks_invoices" : "quickbooks_credit_memos";
+  const txnType = request.requestType === "InvoiceQueryRq" ? "Invoice" : "CreditMemo";
+  const seen = session.snapshotSeenIds.get(request.requestId || "") || new Set<string>();
+  session.snapshotSeenIds.delete(request.requestId || "");
+  const missing: string[] = [];
+  const supabase = createServiceRoleClient();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from(table).select("txn_id")
+      .is("deleted_at", null).gte("txn_date", window.from).lte("txn_date", window.to)
+      .order("txn_id", { ascending: true }).range(from, from + 999);
+    if (error) throw new Error(`Could not reconcile ${table}: ${error.message}`);
+    for (const row of data || []) if (!seen.has(row.txn_id)) missing.push(row.txn_id);
+    if ((data || []).length < 1000) break;
+  }
+  if (missing.length > 50) {
+    throw new Error(`QuickBooks ${txnType} snapshot ${window.from} to ${window.to} has ${missing.length} missing mirror IDs; manual review required before verification.`);
+  }
+  const client = createQuickBooksDesktopReadOnlyClient();
+  const requests: QuickBooksRecoveryRequest[] = missing.map((txnId) => ({
+    ...(txnType === "Invoice"
+      ? client.buildInvoiceQuery({ requestId: `verify-missing:Invoice:${txnId}`, txnIds: [txnId], maxReturned: 2, iterator: { mode: "Start" } })
+      : client.buildCreditMemoQuery({ requestId: `verify-missing:CreditMemo:${txnId}`, txnIds: [txnId], maxReturned: 2, iterator: { mode: "Start" } })),
+    verification: { txnType, txnId }
+  }));
+  session.requests.splice(session.requestIndex + 1, 0, ...requests);
 }
 
 function mergeSessionRequests(

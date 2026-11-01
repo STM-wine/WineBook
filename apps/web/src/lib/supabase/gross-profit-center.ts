@@ -560,6 +560,7 @@ async function fetchQuickBooksInvoices(supabase: GrossProfitClient, dateFrom: st
     supabase
       .from("quickbooks_invoices")
       .select("txn_id,ref_number,txn_date,ship_date,customer_list_id,customer_full_name,sales_rep_ref,subtotal,total_amount")
+      .is("deleted_at", null)
       .gte("txn_date", dateFrom)
       .lte("txn_date", dateTo)
       .order("txn_date", { ascending: true })
@@ -577,6 +578,7 @@ async function fetchQuickBooksInvoicesByTxnIds(supabase: GrossProfitClient, txnI
         supabase
           .from("quickbooks_invoices")
           .select("txn_id,ref_number,txn_date,ship_date,customer_list_id,customer_full_name,sales_rep_ref,subtotal,total_amount")
+          .is("deleted_at", null)
           .in("txn_id", chunk)
           .order("txn_date", { ascending: true })
           .order("txn_id", { ascending: true })
@@ -593,6 +595,7 @@ async function fetchQuickBooksCreditMemos(supabase: GrossProfitClient, dateFrom:
     supabase
       .from("quickbooks_credit_memos")
       .select("txn_id,ref_number,txn_date,customer_list_id,customer_full_name,subtotal,total_amount,linked_txns,raw_data")
+      .is("deleted_at", null)
       .gte("txn_date", dateFrom)
       .lte("txn_date", dateTo)
       .order("txn_date", { ascending: true })

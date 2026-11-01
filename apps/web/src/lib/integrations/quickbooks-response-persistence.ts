@@ -54,6 +54,9 @@ type ParsedPurchaseOrderLine = ParsedLine & {
 
 export async function persistQuickBooksResponse(input: PersistQuickBooksResponseInput) {
   if (!shouldPersistRequest(input.request.requestType)) return;
+  if (input.status.some((entry) => entry.statusSeverity === "Error" || Number(entry.statusCode) >= 3000)) {
+    throw new Error(`QuickBooks ${input.request.requestType} returned an error; mirror was not updated.`);
+  }
 
   const supabase: SupabaseClient = createServiceRoleClient();
 
@@ -74,7 +77,38 @@ export async function persistQuickBooksResponse(input: PersistQuickBooksResponse
     await persistReceivePayments(supabase, input.response, rawResponse.id);
   } else if (input.request.requestType === "PurchaseOrderQueryRq") {
     await persistPurchaseOrders(supabase, input.response, rawResponse.id);
+  } else if (input.request.requestType === "TxnDeletedQueryRq") {
+    await persistTxnDeletions(supabase, input.response, rawResponse.id);
   }
+  return rawResponse.id;
+}
+
+async function persistTxnDeletions(supabase: SupabaseClient, response: string, rawResponseId: string) {
+  const events = extractBlocks(response, "TxnDeletedRet").map((block) => {
+    const txn_type = text(block, "TxnDelType");
+    const txn_id = text(block, "TxnID");
+    if (!txn_type || !txn_id) throw new Error("QuickBooks deletion response omitted transaction type or ID.");
+    return {
+      txn_type,
+      txn_id,
+      time_deleted: dateTimeText(block, "TimeDeleted"),
+      source: "quickbooks_event"
+    };
+  });
+  if (events.length === 0) return;
+  const { error } = await supabase.rpc("apply_quickbooks_deletions", {
+    p_events: events,
+    p_response_id: rawResponseId
+  });
+  if (error) throw new Error(`Could not apply QuickBooks deletion events: ${error.message}`);
+}
+
+export async function markQuickBooksVerifiedMissing(txnType: "Invoice" | "CreditMemo", txnId: string, rawResponseId: string) {
+  const { error } = await createServiceRoleClient().rpc("apply_quickbooks_deletions", {
+    p_events: [{ txn_type: txnType, txn_id: txnId, time_deleted: null, source: "verified_missing" }],
+    p_response_id: rawResponseId
+  });
+  if (error) throw new Error(`Could not mark verified missing QuickBooks ${txnType} ${txnId}: ${error.message}`);
 }
 
 function shouldPersistRequest(requestType: string) {
@@ -343,6 +377,7 @@ async function persistInvoices(supabase: SupabaseClient, response: string, rawRe
   const changed = await changedTransactions(supabase, "quickbooks_invoices", documents);
   await upsertRows(supabase, "quickbooks_invoices", changed.map((document) => document.header), "txn_id");
   await replaceLinesForTransactions(supabase, "quickbooks_invoice_lines", changed);
+  await resolveVerifiedMissing(supabase, "Invoice", documents.map((document) => document.txnId));
 }
 
 async function persistCreditMemos(supabase: SupabaseClient, response: string, rawResponseId: string) {
@@ -389,6 +424,17 @@ async function persistCreditMemos(supabase: SupabaseClient, response: string, ra
   const changed = await changedTransactions(supabase, "quickbooks_credit_memos", documents);
   await upsertRows(supabase, "quickbooks_credit_memos", changed.map((document) => document.header), "txn_id");
   await replaceLinesForTransactions(supabase, "quickbooks_credit_memo_lines", changed);
+  await resolveVerifiedMissing(supabase, "CreditMemo", documents.map((document) => document.txnId));
+}
+
+async function resolveVerifiedMissing(supabase: SupabaseClient, txnType: "Invoice" | "CreditMemo", txnIds: string[]) {
+  for (let start = 0; start < txnIds.length; start += DEFAULT_WRITE_BATCH_SIZE) {
+    const { error } = await supabase.rpc("resolve_quickbooks_verified_missing", {
+      p_type: txnType,
+      p_ids: txnIds.slice(start, start + DEFAULT_WRITE_BATCH_SIZE)
+    });
+    if (error) throw new Error(`Could not resolve QuickBooks ${txnType} observations: ${error.message}`);
+  }
 }
 
 async function persistReceivePayments(supabase: SupabaseClient, response: string, rawResponseId: string) {

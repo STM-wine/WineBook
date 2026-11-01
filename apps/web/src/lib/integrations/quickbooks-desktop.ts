@@ -110,6 +110,7 @@ export type QuickBooksOperationalRefreshOptions = {
   listMaxReturned: number;
   modifiedDateRange: QuickBooksDateRange;
   txnDateWindows: QuickBooksDateRange[];
+  deletedDateRange?: QuickBooksDateRange;
 };
 
 type QuickBooksRequestBuildParts = {
@@ -275,6 +276,16 @@ export function buildQuickBooksOperationalRefreshRequests(
         includeLinkedTxns: true
       })
     );
+  }
+
+  if (options.deletedDateRange) {
+    requests.unshift(client.buildTxnDeletedQuery({
+      requestId: "operational-deletions",
+      maxReturned: Math.min(options.maxReturned, MAX_QUICKBOOKS_TRANSACTION_PAGE_SIZE),
+      iterator: { mode: "Start" },
+      deletedDateRange: options.deletedDateRange,
+      txnDeletedTypes: ["Invoice", "CreditMemo", "ReceivePayment", "PurchaseOrder", "Bill", "VendorCredit"]
+    }));
   }
 
   return requests;
