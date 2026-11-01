@@ -478,7 +478,8 @@ function buildTransactionQueryBody(
   params: QuickBooksInvoiceQueryOptions | QuickBooksTransactionQueryOptions
 ) {
   const body: string[] = [];
-  pushCommonQueryParts(body, params);
+  const directLookup = Boolean(params.txnIds?.length || params.refNumbers?.length);
+  if (!directLookup) pushCommonQueryParts(body, params);
 
   if (params.txnIds?.length) {
     body.push(...params.txnIds.map((value) => xmlElement("TxnID", value)));
@@ -501,7 +502,12 @@ function buildTransactionQueryBody(
   }
   pushIncludeRetElements(body, params.includeRetElements);
   pushOwnerIds(body, params.ownerIds);
-  return { requestId: params.requestId, iterator: params.iterator, maxReturned: params.maxReturned, body };
+  return {
+    requestId: params.requestId,
+    iterator: directLookup ? undefined : params.iterator,
+    maxReturned: directLookup ? undefined : params.maxReturned,
+    body
+  };
 }
 
 

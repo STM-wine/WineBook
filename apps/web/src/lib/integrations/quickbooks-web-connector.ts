@@ -600,8 +600,8 @@ async function queueSnapshotVerifications(session: QuickBooksWebConnectorSession
   const client = createQuickBooksDesktopReadOnlyClient();
   const requests: QuickBooksRecoveryRequest[] = missing.map((txnId) => ({
     ...(txnType === "Invoice"
-      ? client.buildInvoiceQuery({ requestId: `verify-missing:Invoice:${txnId}`, txnIds: [txnId], maxReturned: 2, iterator: { mode: "Start" } })
-      : client.buildCreditMemoQuery({ requestId: `verify-missing:CreditMemo:${txnId}`, txnIds: [txnId], maxReturned: 2, iterator: { mode: "Start" } })),
+      ? client.buildInvoiceQuery({ requestId: `verify-missing:Invoice:${txnId}`, txnIds: [txnId] })
+      : client.buildCreditMemoQuery({ requestId: `verify-missing:CreditMemo:${txnId}`, txnIds: [txnId] })),
     verification: { txnType, txnId }
   }));
   session.requests.splice(session.requestIndex + 1, 0, ...requests);

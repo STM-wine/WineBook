@@ -113,7 +113,7 @@ describe("QuickBooks pagination completeness", () => {
     }
   });
 
-  it("includes a paginated read-only deletion query on operational refresh", () => {
+  it("includes a read-only deletion query without unsupported pagination fields", () => {
     const requests = buildQuickBooksOperationalRefreshRequests({
       maxReturned: 1000,
       listMaxReturned: 1000,
@@ -127,5 +127,16 @@ describe("QuickBooks pagination completeness", () => {
     expect(deletion?.pagination).toBeUndefined();
     expect(deletion?.qbxml).toContain("<FromDeletedDate>2026-10-01</FromDeletedDate>");
     expect(deletion?.qbxml).toContain("<ToDeletedDate>2026-11-01</ToDeletedDate>");
+  });
+
+  it("omits filter-only pagination fields from a transaction ID lookup", () => {
+    for (const request of [
+      client.buildInvoiceQuery({ txnIds: ["invoice-1"], maxReturned: 2, iterator: { mode: "Start" } }),
+      client.buildCreditMemoQuery({ txnIds: ["memo-1"], maxReturned: 2, iterator: { mode: "Start" } })
+    ]) {
+      expect(request.qbxml).toContain("<TxnID>");
+      expect(request.qbxml).not.toMatch(/<MaxReturned>|\biterator=/);
+      expect(request.pagination).toBeUndefined();
+    }
   });
 });
