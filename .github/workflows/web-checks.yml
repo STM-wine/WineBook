@@ -32,3 +32,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run typecheck
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key

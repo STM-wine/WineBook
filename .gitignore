@@ -109,3 +109,9 @@ dmypy.json
 
 # Local TypeScript read-model runner
 apps/web/.read-model-build/
+
+# Local generated reports and artifact tooling
+/.artifact-runtime/
+/.chart-data-*/
+/output/
+/outputs/
