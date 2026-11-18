@@ -1,5 +1,6 @@
 import { quickBooksProducer, type QuickBooksItemIdentityRow } from "./quickbooks-item-fields";
 import { hydratePoLineProducers, poLinePriceKey, type PoExportPriceLookup } from "./po-utils";
+import { vinosmithPriceForRole } from "./vinosmith-price-roles";
 import type { PurchaseOrderDraftWithLines } from "./types";
 import type { createServiceRoleClient } from "./supabase/server";
 
@@ -73,7 +74,7 @@ export async function loadPoExportPrices(supabase: ServiceClient, drafts: Purcha
 
   const wineIds = (winesResult.data || []).map((wine) => wine.wine_id as string);
   const pricesResult = wineIds.length
-    ? await supabase.from("vinosmith_prices").select("wine_id,label,price_cents,is_default,active,disabled")
+    ? await supabase.from("vinosmith_prices").select("wine_id,label,price_cents")
         .in("wine_id", wineIds).eq("active", true).or("disabled.is.null,disabled.eq.false")
     : { data: [], error: null };
   if (pricesResult.error) throw new Error(pricesResult.error.message);
@@ -83,10 +84,10 @@ export async function loadPoExportPrices(supabase: ServiceClient, drafts: Purcha
     best: positivePrice(wine.best_price as number | string | null)
   }]));
   const wineIdByCode = new Map((winesResult.data || []).map((wine) => [normalize(wine.code as string | null), wine.wine_id as string]));
-  const levelsByWine = new Map<string, Array<{ label: string | null; price_cents: number | null; is_default: boolean | null }>>();
+  const levelsByWine = new Map<string, Array<{ label: string | null; price_cents: number | null }>>();
   for (const price of pricesResult.data || []) {
     const list = levelsByWine.get(price.wine_id as string) || [];
-    list.push(price as { label: string | null; price_cents: number | null; is_default: boolean | null });
+    list.push(price as { label: string | null; price_cents: number | null });
     levelsByWine.set(price.wine_id as string, list);
   }
   const qbByCode = new Map<string, number | null>();
@@ -101,16 +102,18 @@ export async function loadPoExportPrices(supabase: ServiceClient, drafts: Purcha
     const code = normalize(line.product_code);
     const catalog = line.supplier_catalog_wine_id ? catalogById.get(line.supplier_catalog_wine_id) : undefined;
     const levels = levelsByWine.get(wineIdByCode.get(code) || "") || [];
-    const frontlineLevel = levels.find((level) => level.is_default && positivePrice((level.price_cents || 0) / 100) !== null)
-      || levels.find((level) => normalize(level.label).includes("front"));
-    const bestLevel = levels.find((level) => normalize(level.label).includes("best"));
+    const needsVinosmithFrontline = !line.is_new_item || catalog?.frontline === null || catalog === undefined;
+    const needsVinosmithBest = !line.is_new_item || catalog?.best === null || catalog === undefined;
     const vinosmith = {
-      frontline: positivePrice(frontlineLevel?.price_cents ? frontlineLevel.price_cents / 100 : null),
-      best: positivePrice(bestLevel?.price_cents ? bestLevel.price_cents / 100 : null)
+      frontline: needsVinosmithFrontline ? vinosmithPriceForRole(levels, "frontline", line.product_code || line.id) : null,
+      best: needsVinosmithBest ? vinosmithPriceForRole(levels, "best", line.product_code || line.id) : null
     };
     const price = line.is_new_item
       ? { frontline: catalog?.frontline ?? vinosmith.frontline, best: catalog?.best ?? vinosmith.best }
       : { frontline: vinosmith.frontline ?? catalog?.frontline ?? qbByCode.get(code) ?? null, best: vinosmith.best ?? catalog?.best ?? null };
+    if (price.frontline !== null && price.best !== null && price.best > price.frontline) {
+      throw new Error(`PO ${line.product_code || line.id}: Best price exceeds Frontline. Correct the source prices before exporting.`);
+    }
     return [poLinePriceKey(line), price];
   }));
 }

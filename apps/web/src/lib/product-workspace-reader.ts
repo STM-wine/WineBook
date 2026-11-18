@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export const PRODUCT_FORMULA_VERSION = "product-workspace-v1";
+export const PRODUCT_FORMULA_VERSION = "product-workspace-v2";
 export const PRODUCT_PAGE_SIZE = 75;
 
 export function productFilters(params: URLSearchParams) {

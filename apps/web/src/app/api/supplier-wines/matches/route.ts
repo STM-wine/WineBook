@@ -14,6 +14,7 @@ import {
   type ProductIdentityCandidate
 } from "@/lib/product-identity-search";
 import { calculatePricing } from "@/lib/supplier-catalog";
+import { vinosmithPriceRole } from "@/lib/vinosmith-price-roles";
 
 const RECENT_REPORT_RUN_COUNT = 8;
 
@@ -274,7 +275,7 @@ async function attachCurrentPriceLevels(
       : Promise.resolve({ data: [], error: null }),
     wineIds.length
       ? supabase.from("vinosmith_prices")
-          .select("price_id,wine_id,label,price_cents,bill_back_price_cents,is_default,active,disabled,premise,effective_start_at,effective_end_at,last_seen_at")
+          .select("price_id,wine_id,label,price_cents,bill_back_price_cents,active,disabled,premise,effective_start_at,effective_end_at,last_seen_at")
           .in("wine_id", wineIds)
           .eq("active", true)
           .or("disabled.is.null,disabled.eq.false")
@@ -306,14 +307,14 @@ async function attachCurrentPriceLevels(
         .filter((level) => level.wine_id === candidate.sourceId)
         .map((level) => {
           const label = String(level.label || "Price level");
-          const normalized = label.toLowerCase();
+          const role = vinosmithPriceRole(label);
           return {
             id: level.price_id,
             name: level.premise ? `${label} · ${level.premise}` : label,
             bottlePrice: Number(level.price_cents || 0) / 100,
             depletionAllowance: Number(level.bill_back_price_cents || 0) / 100,
-            isFrontline: Boolean(level.is_default) || normalized.includes("front"),
-            isBest: normalized.includes("best"),
+            isFrontline: role === "frontline",
+            isBest: role === "best",
             active: level.active !== false && level.disabled !== true,
             sourceSystem: "vinosmith",
             updatedAt: level.last_seen_at || candidate.updatedAt

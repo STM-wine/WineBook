@@ -9,6 +9,7 @@ import type {
   ProductWorkspaceStatusKey
 } from "@/lib/product-workspace-types";
 import { recommendationsAreSuppressed, replenishmentPolicy } from "@/lib/replenishment-policy";
+import { vinosmithPriceRole } from "@/lib/vinosmith-price-roles";
 
 type ProductWorkspaceClient = SupabaseClient<any, "public", any>;
 
@@ -49,7 +50,6 @@ type VinosmithPriceRow = {
   bill_back_price_cents: number | null;
   active: boolean | null;
   disabled: boolean | null;
-  is_default: boolean | null;
 };
 
 type VinosmithSupplierHintRow = {
@@ -486,7 +486,7 @@ async function fetchVinosmithPrices(supabase: ProductWorkspaceClient, wineIds: s
   const pages = await Promise.all(batches.map(async (batch) => {
     return fetchAllExact<VinosmithPriceRow> ("fetchVinosmithPrices", (from, to) => supabase
       .from("vinosmith_prices")
-      .select("price_id,wine_id,label,price_cents,bill_back_price_cents,active,disabled,is_default", { count: "exact" })
+      .select("price_id,wine_id,label,price_cents,bill_back_price_cents,active,disabled", { count: "exact" })
       .in("wine_id", batch)
       .eq("active", true)
       .or("disabled.is.null,disabled.eq.false")
@@ -806,8 +806,8 @@ function priceLevelsFromVinosmith(rows: VinosmithPriceRow[], landedCost: number 
         bottlePrice,
         depletionAllowance,
         calculatedGpPercent: calculateGpPercent(bottlePrice, landedCost, depletionAllowance),
-        isFrontline: Boolean(row.is_default) || normalizeKey(row.label).includes("front"),
-        isBest: normalizeKey(row.label).includes("best"),
+        isFrontline: vinosmithPriceRole(row.label) === "frontline",
+        isBest: vinosmithPriceRole(row.label) === "best",
         source: "Vinosmith"
       };
     });
