@@ -381,6 +381,39 @@ class SupabaseRepository:
         payloads = [vinosmith_price_payload(record, raw_response_id=raw_response_id) for record in price_records]
         return self._upsert_many("vinosmith_prices", payloads, on_conflict="price_id")
 
+    def disable_unseen_vinosmith_prices(self, fetched_at: datetime, seen_count: int) -> int:
+        """Retire prices omitted from a complete Vinosmith price snapshot."""
+        if fetched_at.tzinfo is None or seen_count <= 0:
+            raise ValueError("A dated, nonempty Vinosmith price snapshot is required")
+
+        current = (
+            self.client.table("vinosmith_prices")
+            .select("price_id", count="exact")
+            .eq("active", True)
+            .or_("disabled.is.null,disabled.eq.false")
+            .limit(1)
+            .execute()
+        )
+        active_count = current.count
+        if active_count is None:
+            raise RuntimeError("Could not count active mirrored Vinosmith prices")
+        # A truncated 200 response must never disable a large part of the catalog.
+        if active_count and seen_count * 100 < active_count * 99:
+            raise RuntimeError(
+                f"Vinosmith price snapshot has {seen_count} rows versus {active_count} active mirrored rows; "
+                "refusing to disable unseen prices"
+            )
+
+        result = execute_with_transient_retries(lambda: (
+            self.client.table("vinosmith_prices")
+            .update({"disabled": True})
+            .eq("active", True)
+            .or_("disabled.is.null,disabled.eq.false")
+            .lt("last_seen_at", fetched_at.isoformat())
+            .execute()
+        ))
+        return len(result.data or [])
+
     def insert_vinosmith_inventory_snapshots(
         self,
         inventory_records: list[dict[str, Any]],
@@ -1249,6 +1282,9 @@ def vinosmith_price_payload(record: dict[str, Any], raw_response_id: str | None 
     price_id = clean_value(price.get("id"))
     if not price_id:
         return {}
+    disabled = nullable_bool_value(price.get("disabled"))
+    if price.get("disabled_at"):
+        disabled = True
     return {
         "price_id": str(price_id),
         "wine_id": clean_value(wine.get("id") or price.get("wine_id")),
@@ -1260,7 +1296,7 @@ def vinosmith_price_payload(record: dict[str, Any], raw_response_id: str | None 
         "effective_start_at": datetime_value(price.get("effective_start_at")),
         "effective_end_at": datetime_value(price.get("effective_end_at")),
         "active": nullable_bool_value(price.get("active")),
-        "disabled": nullable_bool_value(price.get("disabled")),
+        "disabled": disabled,
         "is_default": nullable_bool_value(price.get("default")),
         "premise": clean_value(price.get("premise")),
         "marketplace": clean_value(price.get("marketplace")),

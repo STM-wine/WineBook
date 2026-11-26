@@ -4,9 +4,19 @@ from datetime import date
 import unittest
 
 from scripts.report_vinosmith_rescue_status import build_report, format_cents
+from scripts.sync_vinosmith_rescue import full_price_snapshot_ids
 
 
 class VinosmithRescueStatusTests(unittest.TestCase):
+    def test_price_snapshot_reconciliation_requires_complete_unique_ids(self):
+        self.assertEqual(
+            full_price_snapshot_ids([{"price": {"id": 1}}, {"price": {"id": 2}}]),
+            {"1", "2"},
+        )
+        for rows in ([], [{"price": {}}], [{"price": {"id": 1}}, {"price": {"id": 1}}]):
+            with self.assertRaises(RuntimeError):
+                full_price_snapshot_ids(rows)
+
     def test_build_report_summarizes_orders_lines_and_missing_links(self):
         report = build_report(
             order_rows=[

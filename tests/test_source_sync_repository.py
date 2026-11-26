@@ -27,8 +27,9 @@ from stem_order.supabase_repository import (
 
 
 class FakeResult:
-    def __init__(self, data):
+    def __init__(self, data, count=None):
         self.data = data
+        self.count = count
 
 
 class FakeQuery:
@@ -39,6 +40,12 @@ class FakeQuery:
         self.payload = None
         self.on_conflict = None
         self.filters = []
+        self.select_options = {}
+
+    def select(self, *columns, **options):
+        self.operation = "select"
+        self.select_options = options
+        return self
 
     def insert(self, payload):
         self.operation = "insert"
@@ -60,6 +67,18 @@ class FakeQuery:
         self.filters.append((column, value))
         return self
 
+    def lt(self, column, value):
+        self.filters.append((f"{column}.lt", value))
+        return self
+
+    def or_(self, filters):
+        self.filters.append(("or", filters))
+        return self
+
+    def limit(self, count):
+        self.filters.append(("limit", count))
+        return self
+
     def execute(self):
         self.client.calls.append(
             {
@@ -68,8 +87,11 @@ class FakeQuery:
                 "payload": self.payload,
                 "on_conflict": self.on_conflict,
                 "filters": self.filters,
+                "select_options": self.select_options,
             }
         )
+        if self.operation == "select":
+            return FakeResult([], count=self.client.price_count)
         if isinstance(self.payload, list):
             rows = []
             for index, payload in enumerate(self.payload):
@@ -83,14 +105,39 @@ class FakeQuery:
 
 
 class FakeClient:
-    def __init__(self):
+    def __init__(self, price_count=0):
         self.calls = []
+        self.price_count = price_count
 
     def table(self, table_name):
         return FakeQuery(self, table_name)
 
 
 class SourceSyncRepositoryTests(unittest.TestCase):
+    def test_full_price_snapshot_disables_only_unseen_active_rows(self):
+        client = FakeClient(price_count=18202)
+        cutoff = datetime(2026, 11, 26, 0, 38, tzinfo=timezone.utc)
+
+        SupabaseRepository(client).disable_unseen_vinosmith_prices(cutoff, seen_count=18144)
+
+        self.assertEqual(client.calls[0]["select_options"], {"count": "exact"})
+        self.assertIn(("limit", 1), client.calls[0]["filters"])
+        self.assertEqual(client.calls[1]["operation"], "update")
+        self.assertEqual(client.calls[1]["payload"], {"disabled": True})
+        self.assertIn(("active", True), client.calls[1]["filters"])
+        self.assertIn(("or", "disabled.is.null,disabled.eq.false"), client.calls[1]["filters"])
+        self.assertIn(("last_seen_at.lt", cutoff.isoformat()), client.calls[1]["filters"])
+
+    def test_truncated_price_snapshot_cannot_disable_existing_prices(self):
+        client = FakeClient(price_count=18202)
+
+        with self.assertRaisesRegex(RuntimeError, "refusing to disable unseen prices"):
+            SupabaseRepository(client).disable_unseen_vinosmith_prices(
+                datetime(2026, 11, 26, tzinfo=timezone.utc), seen_count=17000
+            )
+
+        self.assertEqual([call["operation"] for call in client.calls], ["select"])
+
     def test_load_dotenv_can_override_existing_values(self):
         previous = os.environ.get("STEM_TEST_DOTENV_VALUE")
         try:
@@ -285,6 +332,8 @@ class SourceSyncRepositoryTests(unittest.TestCase):
         self.assertEqual(price_payload["is_default"], True)
         self.assertEqual(price_payload["bill_back_price_cents"], 250)
         self.assertIsNotNone(price_payload["bill_back_at"])
+        disabled_price = {"wine": wine, "price": {**price_record["price"], "disabled_at": "2026-11-25T12:00:00Z"}}
+        self.assertTrue(vinosmith_price_payload(disabled_price)["disabled"])
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["available"], 10.5)
         self.assertEqual(vinosmith_inventory_snapshot_payload(inventory_record)["end_of_stock"], False)
         self.assertEqual(vinosmith_order_header_payload(order)["supplier_order_id"], "supplier-order-1")

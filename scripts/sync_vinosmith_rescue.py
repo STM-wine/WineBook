@@ -450,8 +450,13 @@ def sync_resource(
         print_progress(f"{label}: recording source response")
         response_id = record_api_response(repo, source_sync_run_id, result, payload, raw_file, len(records))
         if result.ok and write_normalized and resource in NORMALIZED_WRITE_RESOURCES:
+            price_ids = full_price_snapshot_ids(accepted_records) if resource == "prices" and not requested_params else None
             print_progress(f"{label}: writing {len(accepted_records)} normalized rows")
             write_resource_records(repo, source_sync_run_id, response_id, resource, accepted_records, result.fetched_at)
+            if price_ids is not None:
+                disabled_count = repo.disable_unseen_vinosmith_prices(result.fetched_at, len(price_ids))
+                resource_diagnostics["unseen_prices_disabled"] = disabled_count
+                print_progress(f"{label}: disabled {disabled_count} prices absent from the full snapshot")
         if result.ok:
             print_progress(f"{label}: updating checkpoint")
             checkpoint_key = upsert_checkpoint(
@@ -541,6 +546,21 @@ def sync_account_detail(
         diagnostics=resource_diagnostics,
         error=result.error,
     )
+
+
+def full_price_snapshot_ids(records: list[dict[str, Any]]) -> set[str]:
+    ids: set[str] = set()
+    if not records:
+        raise RuntimeError("Empty Vinosmith price snapshot; refusing to reconcile missing prices")
+    for record in records:
+        price = record.get("price") if isinstance(record, dict) else None
+        if not isinstance(price, dict) or price.get("id") is None:
+            raise RuntimeError("Malformed Vinosmith price snapshot; refusing to reconcile missing prices")
+        price_id = str(price["id"])
+        if price_id in ids:
+            raise RuntimeError(f"Duplicate Vinosmith price ID {price_id} in full snapshot")
+        ids.add(price_id)
+    return ids
 
 
 def accepted_resource_records(
