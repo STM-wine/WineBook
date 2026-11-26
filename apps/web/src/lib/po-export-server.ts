@@ -1,5 +1,5 @@
 import { quickBooksProducer, type QuickBooksItemIdentityRow } from "./quickbooks-item-fields";
-import { hydratePoLineProducers, poLinePriceKey, type PoExportPriceLookup } from "./po-utils";
+import { hydratePoLineProducers, poLinePriceKey, type PoExportPrice, type PoExportPriceLookup } from "./po-utils";
 import { vinosmithPriceForRole } from "./vinosmith-price-roles";
 import type { PurchaseOrderDraftWithLines } from "./types";
 import type { createServiceRoleClient } from "./supabase/server";
@@ -102,15 +102,24 @@ export async function loadPoExportPrices(supabase: ServiceClient, drafts: Purcha
     const code = normalize(line.product_code);
     const catalog = line.supplier_catalog_wine_id ? catalogById.get(line.supplier_catalog_wine_id) : undefined;
     const levels = levelsByWine.get(wineIdByCode.get(code) || "") || [];
-    const needsVinosmithFrontline = !line.is_new_item || catalog?.frontline === null || catalog === undefined;
-    const needsVinosmithBest = !line.is_new_item || catalog?.best === null || catalog === undefined;
+    const hasCatalogPrice = catalog?.frontline != null || catalog?.best != null;
+    const useCatalogForNewItem = line.is_new_item && hasCatalogPrice;
     const vinosmith = {
-      frontline: needsVinosmithFrontline ? vinosmithPriceForRole(levels, "frontline", line.product_code || line.id) : null,
-      best: needsVinosmithBest ? vinosmithPriceForRole(levels, "best", line.product_code || line.id) : null
+      frontline: useCatalogForNewItem ? null : vinosmithPriceForRole(levels, "frontline", line.product_code || line.id),
+      best: useCatalogForNewItem ? null : vinosmithPriceForRole(levels, "best", line.product_code || line.id)
     };
-    const price = line.is_new_item
-      ? { frontline: catalog?.frontline ?? vinosmith.frontline, best: catalog?.best ?? vinosmith.best }
-      : { frontline: vinosmith.frontline ?? catalog?.frontline ?? qbByCode.get(code) ?? null, best: vinosmith.best ?? catalog?.best ?? null };
+    const hasVinosmithPrice = vinosmith.frontline !== null || vinosmith.best !== null;
+    let price: PoExportPrice;
+    if (useCatalogForNewItem) {
+      price = { frontline: catalog?.frontline ?? null, best: catalog?.best ?? null };
+    } else if (hasVinosmithPrice) {
+      // A missing Vinosmith tier must stay blank rather than inherit a catalog proposal.
+      price = { frontline: vinosmith.frontline ?? (line.is_new_item ? null : qbByCode.get(code) ?? null), best: vinosmith.best };
+    } else if (hasCatalogPrice) {
+      price = { frontline: catalog?.frontline ?? null, best: catalog?.best ?? null };
+    } else {
+      price = { frontline: line.is_new_item ? null : qbByCode.get(code) ?? null, best: null };
+    }
     if (price.frontline !== null && price.best !== null && price.best > price.frontline) {
       throw new Error(`PO ${line.product_code || line.id}: Best price exceeds Frontline. Correct the source prices before exporting.`);
     }

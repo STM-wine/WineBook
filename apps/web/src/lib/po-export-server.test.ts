@@ -81,6 +81,32 @@ describe("PO export price selection", () => {
     });
   });
 
+  it("keeps an existing item's missing Vinosmith Best blank instead of mixing in catalog pricing", async () => {
+    const tables = sourceRows(["GG96978"], [[["Frontline", 14, false]]]);
+    tables.quickbooks_items[0].sales_price = 14;
+    const prices = await loadPoExportPrices(client({
+      ...tables,
+      supplier_catalog_wines: [{ id: "catalog-1", frontline_bottle_price: 16.25, best_price: 15.25 }]
+    }), drafts(["GG96978"], "catalog-1"));
+    expect(prices).toEqual({ "line-0": { frontline: 14, best: null } });
+  });
+
+  it("uses the catalog price pair when an existing item has no named Vinosmith prices", async () => {
+    const tables = sourceRows(["ITEM1"], [[["On 1-Case", 10, true]]]);
+    expect(await loadPoExportPrices(client({
+      ...tables,
+      supplier_catalog_wines: [{ id: "catalog-1", frontline_bottle_price: 20, best_price: 18 }]
+    }), drafts(["ITEM1"], "catalog-1"))).toEqual({ "line-0": { frontline: 20, best: 18 } });
+  });
+
+  it("keeps a new item's catalog pair together when one catalog tier is blank", async () => {
+    const tables = sourceRows(["NEW1"], [[["Frontline", 12, false], ["Best", 11, false]]]);
+    expect(await loadPoExportPrices(client({
+      ...tables,
+      supplier_catalog_wines: [{ id: "catalog-1", frontline_bottle_price: 20, best_price: null }]
+    }), drafts(["NEW1"], "catalog-1", true))).toEqual({ "line-0": { frontline: 20, best: null } });
+  });
+
   it("rejects conflicting active prices for a named tier, but accepts duplicate records at one price", async () => {
     const tiers: Array<Array<[string, number, boolean]>> = [[
       ["Frontline", 15, false], ["Frontline", 16, false], ["Best", 14, true]
